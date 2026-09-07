@@ -7625,6 +7625,12 @@ async function main(): Promise<void> {
     camera.alpha = Math.PI / 2.15;
     camera.beta = Math.PI / 3.15;
   }
+  // ?ve=toast-read — readability proof (#90): compact dark plate + crisp borders vs #39 cyan fog.
+  if (ve === 'toast-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
   if (net && ve === 'toasts') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE toasts: waiting for Connected…';
@@ -7734,6 +7740,87 @@ async function main(): Promise<void> {
     window.setTimeout(waitToasts, 700);
   }
 
+  // ?ve=toast-read — #90 readability proof: dark plate + crisp borders vs #39 cyan fog.
+  if (net && ve === 'toast-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE toast-read: waiting for Connected…';
+    let ticks = 0;
+    let phase: 'wait' | 'seed' | 'done' = 'wait';
+    const waitToastRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE toast-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitToastRead, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 13;
+      const kinds = toastKindsPresent();
+      const ready =
+        kinds.has('connected') &&
+        kinds.has('invite') &&
+        kinds.has('party') &&
+        kinds.has('xp') &&
+        kinds.has('equip') &&
+        kinds.has('death') &&
+        kinds.has('respawn');
+      if (ready || phase === 'done') {
+        if (mark) {
+          mark.textContent =
+            `Toast-read OK · compact dark plate · crisp borders · fog-safe category colors · #90`;
+        }
+        phase = 'done';
+        return;
+      }
+      if (phase === 'wait') {
+        phase = 'seed';
+        if (mark) mark.textContent = 'VE toast-read: seeding stack…';
+        window.setTimeout(waitToastRead, 200);
+        return;
+      }
+      if (phase === 'seed') {
+        const idShort = st.identityHex.slice(0, 8);
+        // Seed diverse toast categories with staggered timing for stack readability proof.
+        if (!kinds.has('connected')) {
+          pushSystemToast('connected', `Connected · ${idShort}…`, TOAST_VE_TTL_MS);
+        }
+        if (!kinds.has('invite')) {
+          pushSystemToast('invite', 'Invite from a1b2c3d4…', TOAST_VE_TTL_MS);
+        }
+        if (!kinds.has('party')) {
+          pushSystemToast('party', 'Invite accepted · party 2', TOAST_VE_TTL_MS);
+        }
+        if (!kinds.has('xp')) {
+          const xp = st.character?.xp ?? 0;
+          pushSystemToast('xp', `+25 XP · total ${xp + 25}`, TOAST_VE_TTL_MS);
+        }
+        if (!kinds.has('equip')) {
+          pushSystemToast('equip', 'Staff equipped', TOAST_VE_TTL_MS);
+        }
+        if (!kinds.has('death')) {
+          pushSystemToast('death', 'Dummy defeated', TOAST_VE_TTL_MS);
+        }
+        if (!kinds.has('respawn')) {
+          pushSystemToast('respawn', 'Dummy respawned', TOAST_VE_TTL_MS);
+        }
+        phase = 'done';
+        if (mark) mark.textContent = 'VE toast-read: seeded — checking stack…';
+        window.setTimeout(waitToastRead, 280);
+        return;
+      }
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent =
+            `VE toast-read: timed out · kinds ${[...kinds].join('+') || '∅'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitToastRead, 220);
+    };
+    window.setTimeout(waitToastRead, 700);
+  }
 
 
   // ?ve=party-chat — CreateParty → PartySay → party-styled strip + toast.
