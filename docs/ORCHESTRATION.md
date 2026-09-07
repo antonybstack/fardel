@@ -166,7 +166,7 @@ A PR is merge-ready when **all** of:
 
 1. Reviewer has reviewed (approve or feedback addressed)
 2. Relevant headless smokes green on the seat (or Lead/QA Bugs verification)
-3. VE present (committed + embedded) when UI/feel changed
+3. VE present (GitHub `user-attachments` embed in PR) when UI/feel changed — **no** new `ve/*.png` commits
 4. `Fixes #N` present
 5. No open schema collision with another in-flight server PR
 
@@ -238,7 +238,7 @@ flowchart LR
 1. **Lead** scans open Issues (priority, `lane:*`, open PRs, who is idle).
 2. **Assign** one non-colliding ticket per idle Dev; serialize `lane:server` schema work.
 3. **Seat** fetches latest `develop`, branches, implements, runs seat-local smokes + Vite `?ve=…`.
-4. **Open PR** → `develop` with `Fixes #N` + force-added VE + embedded screenshot.
+4. **Open PR** → `develop` with `Fixes #N` + VE screenshot embedded via GitHub `user-attachments` (paste PNG into PR body/comment — **no** force-add `ve/*.png`).
 5. **Reviewer** reviews; author pushes fixes.
 6. **Lead** merges, closes Issue, broadcasts tip SHA, asks open branches to rebase.
 7. **QA Feel / QA Bugs** pick follow-on Issues (`feel`, `flake`) as assigned — not invent.
@@ -398,7 +398,7 @@ Branch: <seat>/<slug> off develop @ <sha>
 Seat: <slug> (ports/DB per TEAM_SEATS)
 Done-when:
   - headless: <Smoke> green
-  - VE: ?ve=<name> → ve/babylon-<name>.png (git add -f) + embed in PR
+  - VE: ?ve=<name> → paste PNG into PR as GitHub `user-attachments` embed (do **not** `git add -f` ve/*.png)
   - PR → develop with Fixes #<N>
 No invent past this Issue. Rebase if tip moves.
 ```
