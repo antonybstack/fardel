@@ -50,8 +50,11 @@ import { buildForestClearing } from './world/forest';
 import {
   createPlayerHumanoid,
   partyRobeColor,
+  playHumanoidCast,
+  preloadPlayerHumanoid,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
+  setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
 import { createTrainingDummy } from './world/dummy';
@@ -862,7 +865,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange';
+  | 'outOfRange' | 'bandage';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -963,7 +966,7 @@ type SystemToastKind =
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange';
+  | 'outOfRange' | 'bandage';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1616,7 +1619,8 @@ async function createScene(engine: Engine): Promise<{
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
   await buildForestClearing(scene);
 
-  // Local player: procedural humanoid + staff (crowd proxies stay capsules).
+  // Local player: Quaternius CC0 wizard (crowd proxies stay capsules).
+  await preloadPlayerHumanoid(scene);
   const humanoid = createPlayerHumanoid(scene);
   const player = humanoid.root;
   let localGhostOn = false;
@@ -2917,12 +2921,13 @@ async function main(): Promise<void> {
       }
 
       // Local cast VFX (Art #46): Spark cyan flash+bolt; Emberbolt staff charge + thin aim beam.
-      const playerMat = player.material as StandardMaterial;
+      const playerMat = humanoid.mat;
       flashMesh(
         playerMat,
         spellId === SPELL_SPARK ? SPARK_COLOR : EMBER_COLOR,
         spellId === SPELL_SPARK ? 160 : 400,
       );
+      playHumanoidCast(humanoid);
       const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
       const mesh = npcMeshes.get(tid.toString());
       const from = casterMuzzle(player.position);
@@ -3772,11 +3777,14 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz);
           }
         }
+        setHumanoidMoving(humanoid, true);
       } else {
         moveAccumulator = 0;
+        setHumanoidMoving(humanoid, false);
       }
     } else {
       moveAccumulator = 0;
+      setHumanoidMoving(humanoid, false);
     }
 
     // Refresh tonic buff timer on self-frame each frame.
@@ -4931,6 +4939,50 @@ async function main(): Promise<void> {
       window.setTimeout(waitDummy, 200);
     };
     window.setTimeout(waitDummy, 700);
+  }
+
+  // ?ve=quaternius-char — Quaternius wizard silhouette at 8–15m under #39 forest lights.
+  if (ve === 'quaternius-char') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'quaternius-char') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE quaternius-char: waiting for Connected…';
+    let ticks = 0;
+    const waitQ = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE quaternius-char: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitQ, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitQ, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitQ, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
+      camera.radius = 12;
+      camera.alpha = Math.PI / 2.45;
+      camera.beta = Math.PI / 2.7;
+      if (mark) {
+        mark.textContent =
+          'Quaternius char OK · wizard+staff · 8–15m · canonical forest lights';
+      }
+    };
+    window.setTimeout(waitQ, 600);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
@@ -6114,7 +6166,6 @@ async function main(): Promise<void> {
           castingMs: seedCastLeft,
           castingTotal: EMBERBOLT_CAST_MS,
         };
-        const ch = net.getCharacter();
         updateSpellHotbar({
           gcdMs: seedGcd,
           castingMs: seedCastLeft,
