@@ -136,9 +136,10 @@
           <span class="klChip"><kbd>Y</kbd> cancel trade</span>
           <span class="klChip"><kbd>Enter</kbd> say</span>
           <span class="klChip"><kbd>H</kbd> this legend</span>
+          <span class="klChip"><kbd>F3</kbd> debug HUD</span>
         </div>
       </div>
-      <div class="bagFoot">/p party · /w hex whisper · combat log right · FPS overlay · system toasts top</div>
+      <div class="bagFoot">/p party · /w hex whisper · combat log right · F3 debug HUD · system toasts top</div>
     </div>
     <div id="vendorPanel" class="hidden" aria-label="Vendor">
       <div class="bagHead">
@@ -153,7 +154,7 @@
       <div class="clHead">Combat log</div>
       <div id="combatLogLines" class="clLines"></div>
     </div>
-    <div id="fpsHud" aria-label="FPS performance overlay">
+    <div id="fpsHud" class="hidden" aria-label="FPS performance overlay">
       <div class="fpsRow">
         <span class="fpsLabel">FPS</span>
         <span id="fpsValue" class="fpsValue">—</span>
@@ -186,7 +187,7 @@
     </div>
     <div id="toastStack" aria-live="polite" aria-label="System toasts"></div>
     <div id="hud">
-      <div id="status">Booting…</div>
+      <div id="status" class="hidden">Booting…</div>
       <div id="persistMark" class="persistMark"></div>
       <div id="partyFrames" class="hidden" aria-label="Party member frames"></div>
       <div id="targetFrame" class="hidden" aria-label="Selected target">
