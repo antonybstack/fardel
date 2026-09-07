@@ -101,6 +101,10 @@ Validate early:
 ## Status
 
 - [x] Deploy policy documented
-- [ ] `dev-db.sparkify.dev` cloudflared tunnel live on Mac Studio
+- [x] `dev-db.sparkify.dev` on existing Mac `sparkify` tunnel → `127.0.0.1:3000` (HTTP 404 from SpacetimeDB root is healthy)
 - [ ] Pages project + `play.sparkify.dev`
 - [ ] Prod SpacetimeDB (`db.sparkify.dev` or MainCloud URI)
+
+### Tunnel ops note (this machine)
+
+Reuses the existing **`sparkify`** cloudflared LaunchDaemon (`com.cloudflare.sparkify`), config in `/etc/cloudflared/config.yml` (mirror: `~/.cloudflared/config.fardel.yml`). Apex `sparkify.dev` / `sparkify.com` still → `:80`. SpacetimeDB must be **2.10+** if the local data dir was created by 2.10.
