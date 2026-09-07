@@ -28,12 +28,20 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 | Sky / light | Simple sky + directional + ambient | Mood > volumetric soup on web |
 | VFX | Spark / Emberbolt readable telegraphs | Particles OK if pooled; no AAA spell cinema |
 
+## Current POC (Babylon)
+
+Until a credited pack lands, the Babylon client uses **procedural kitbash** in
+`web/src/world/forest.ts`: cylinder/cone hero trees, GPU-instanced mid trees,
+distant mountain cones with snow caps, sky dome + fog + hemi/sun mood. No
+third-party mesh packs are vendored yet — replace with licensed kits when
+credits are chosen (see ledger below).
+
 ## How we source (v1)
 
-- **Buy or pull a small coherent pack** (Unity Asset Store / itch / CC0) for: stylized forest, mountain/sky backdrop, basic RPG humanoid.
+- **Buy or pull a small coherent pack** (itch / CC0 / store) for: stylized forest, mountain/sky backdrop, basic RPG humanoid.
 - Prefer **one environment pack + one character pack** over five mismatched freebies.
-- Keep sources under something like `client/Assets/ThirdParty/<pack>/` with a `LICENSE` or root `docs/asset-credits.md` entry.
-- **Do not** commit huge binary packs until the Unity project exists; this doc locks *intent*. When the project lands, add credits in the same PR as the import.
+- Keep sources under something like `web/public/third-party/<pack>/` (or former Unity `client/Assets/ThirdParty/`) with a `LICENSE` or root `docs/asset-credits.md` entry.
+- **Do not** commit huge binary packs until chosen; this doc locks *intent*. Add credits in the same PR as the import.
 
 ## Pipeline (POC-simple)
 
@@ -65,4 +73,5 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 
 | Pack / asset | License | Used for | URL |
 |---|---|---|---|
-| _TBD_ | | | |
+| Procedural kitbash (`web/src/world/forest.ts`) | original (Fardel) | POC forest clearing, mountains, sky | — |
+| _credited pack TBD_ | | replace procedural trees/mountains + humanoid | |

@@ -2,9 +2,7 @@ import {
   ArcRotateCamera,
   ArcRotateCameraPointersInput,
   Color3,
-  Color4,
   Engine,
-  HemisphericLight,
   InstancedMesh,
   Mesh,
   MeshBuilder,
@@ -25,6 +23,7 @@ import {
   type GameNet,
   type NpcView,
 } from './net/connection';
+import { buildForestClearing } from './world/forest';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -140,20 +139,19 @@ function createScene(engine: Engine): {
   proxySource: Mesh;
 } {
   const scene = new Scene(engine);
-  scene.clearColor = new Color4(0.05, 0.07, 0.12, 1);
 
   const camera = new ArcRotateCamera(
     'camera',
-    Math.PI / 3,
-    Math.PI / 3.2,
-    14,
+    Math.PI / 2.6,
+    Math.PI / 3.4,
+    22,
     new Vector3(0, 1, 0),
     scene,
   );
   const canvas = engine.getRenderingCanvas();
   camera.attachControl(canvas, true);
   camera.lowerRadiusLimit = 4;
-  camera.upperRadiusLimit = 40;
+  camera.upperRadiusLimit = 80;
   camera.wheelPrecision = 30;
   camera.panningSensibility = 0;
 
@@ -169,15 +167,8 @@ function createScene(engine: Engine): {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  const light = new HemisphericLight('hemi', new Vector3(0.2, 1, 0.3), scene);
-  light.intensity = 0.95;
-  light.groundColor = new Color3(0.15, 0.18, 0.22);
-
-  const ground = MeshBuilder.CreateGround('ground', { width: 64, height: 64 }, scene);
-  const groundMat = new StandardMaterial('groundMat', scene);
-  groundMat.diffuseColor = new Color3(0.18, 0.28, 0.2);
-  groundMat.specularColor = new Color3(0.05, 0.05, 0.05);
-  ground.material = groundMat;
+  // North-star yard: forest clearing + huge trees + distant mountains.
+  buildForestClearing(scene);
 
   const player = MeshBuilder.CreateCapsule(
     'player',
@@ -655,10 +646,6 @@ async function main(): Promise<void> {
   if (net && ve === 'aoi') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE AOI: seeding crowd proxies…';
-    // Pull camera back so amber instances + blue local player are visible.
-    camera.radius = 22;
-    camera.alpha = Math.PI / 2.4;
-    camera.beta = Math.PI / 3.4;
     const tryAoi = () => {
       if (!net) return;
       net.seedCrowdProxies();
@@ -677,6 +664,35 @@ async function main(): Promise<void> {
       window.setTimeout(tryAoi, 300);
     };
     window.setTimeout(tryAoi, 700);
+  }
+
+  // ?ve=forest — pull camera back so hero trees + mountains + HUD are visible.
+  if (ve === 'forest' || ve === 'aoi') {
+    camera.radius = ve === 'forest' ? 36 : 22;
+    camera.alpha = Math.PI / 2.5;
+    camera.beta = Math.PI / 3.55;
+  }
+
+  if (net && ve === 'forest') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE forest: waiting for Connected…';
+    const waitForest = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        net.seedCrowdProxies();
+        syncProxyMeshes(net.getProxies());
+        if (mark) {
+          const aoi = net.getAoi();
+          mark.textContent = aoi
+            ? `Forest OK · trees+mountains · Connected · AOI near ${aoi.nearCount}`
+            : 'Forest OK · trees+mountains · Connected';
+        }
+        return;
+      }
+      window.setTimeout(waitForest, 300);
+    };
+    window.setTimeout(waitForest, 600);
   }
 
   void lastCastSpell;

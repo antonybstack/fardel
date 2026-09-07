@@ -56,6 +56,7 @@ Do **not** rewrite reducers for the client swap. Reuse:
 3. **Combat** — tab-target dummy; cast Spark/Emberbolt; GCD UI; cast telegraphs.
 4. **Persist** — token in localStorage; refresh restores character.
 5. **AOI presentation** — subscribe chunk neighborhood; crowd proxies as instanced meshes.
+6. **Forest kitbash** — procedural/huge trees + mountain backdrop + mood sky (web-cheap).
 
 bitECS optional later; start with Maps / typed arrays until AOI load demands it.
 
@@ -127,4 +128,9 @@ See `web/README.md` for exact commands.
   `player_pose` + `crowd_proxy`; `SeedCrowdProxies`; amber instanced capsules
   distinct from local blue player; HUD interest chunk + near/far proxy counts
   (`ve/babylon-aoi.png`); `tools/AoiSmoke` green
-- Next (north-star): forest kitbash / Pages deploy of Vite `dist` / second-client proof
+- **Forest kitbash (presentation):** procedural clearing — huge hero trunks +
+  instanced mid trees, distant snow-capped mountain silhouette, dusk sky/fog +
+  hemi/sun mood lighting (`web/src/world/forest.ts`); player/NPC/AOI/combat
+  unchanged (`ve/babylon-forest.png`)
+- Next (north-star): Pages deploy of Vite `dist` / second-client shared-yard proof /
+  humanoid+staff pack when credits land

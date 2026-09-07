@@ -113,8 +113,8 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 4 (AOI) presentation green** — headless `tools/AoiSmoke` + Babylon neighborhood subscribe / CrowdProxy instances (`ve/babylon-aoi.png`)
+- **Phase:** **post-slice-4 invent** — AOI presentation green; forest kitbash in Babylon yard
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
-- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green (chunk neighborhood SQL + amber crowd proxies; far proxies excluded)
-- **POC north-star:** closer — remaining invent: forest kitbash + mountains, Pages deploy of Vite `dist`, second-client shared-yard proof
+- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (hero trees + instanced mid trees + mountain silhouette) (`ve/babylon-forest.png`)
+- **POC north-star:** closer — remaining invent: Pages deploy of Vite `dist`, second-client shared-yard proof, credited art packs for humanoid
