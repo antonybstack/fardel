@@ -2496,13 +2496,31 @@ async function main(): Promise<void> {
       }
 
       // Seed once so dummy is full HP, then do NOT keep resetting (Ensure heals).
+      // Prior VEs may leave staff unequipped — Cast is server-gated on staff.
       if (!seeded) {
+        const ch0 = net.getCharacter();
+        if (ch0 && !ch0.staffEquipped) {
+          net.equipStaff();
+          if (mark) mark.textContent = 'VE death: re-equipping staff…';
+          window.setTimeout(waitDeath, 280);
+          return;
+        }
         net.ensureTrainingDummy();
         seeded = true;
         phase = 'seed';
         if (mark) mark.textContent = 'VE death: seeding training dummy…';
         window.setTimeout(waitDeath, 350);
         return;
+      }
+
+      {
+        const ch = net.getCharacter();
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          if (mark) mark.textContent = 'VE death: staff missing — equipping…';
+          window.setTimeout(waitDeath, 280);
+          return;
+        }
       }
 
       const cycle = net.getTargetCycle();
@@ -2564,7 +2582,7 @@ async function main(): Promise<void> {
         dummy &&
         dummy.hp > 0 &&
         gcd <= 0 &&
-        now - lastCastAt > 200
+        now - lastCastAt > 1100
       ) {
         lastCastSpell = SPELL_SPARK;
         net.cast(SPELL_SPARK);

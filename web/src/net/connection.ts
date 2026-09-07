@@ -728,6 +728,10 @@ export async function connectToSpacetime(
             }
           };
 
+          // EnsureTrainingDummy resets HP to max — call once on first subscribe so
+          // AOI / party resubscribes do not revive a mid-fight or dead dummy.
+          let ensuredTrainingDummyOnce = false;
+
           const applySubscription = (
             ix: number,
             iz: number,
@@ -743,10 +747,13 @@ export async function connectToSpacetime(
               .subscriptionBuilder()
               .onApplied(() => {
                 syncCachesFromDb();
-                try {
-                  void conn.reducers.ensureTrainingDummy({});
-                } catch {
-                  /* ignore */
+                if (!ensuredTrainingDummyOnce) {
+                  ensuredTrainingDummyOnce = true;
+                  try {
+                    void conn.reducers.ensureTrainingDummy({});
+                  } catch {
+                    /* ignore */
+                  }
                 }
                 try {
                   void conn.reducers.seedCrowdProxies({});
