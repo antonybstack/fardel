@@ -21,6 +21,12 @@ public static partial class Module
         /// <summary>Hysteresis-stable AOI center (ADR 0001).</summary>
         public int InterestChunkX;
         public int InterestChunkZ;
+        /// <summary>Vertical velocity (meters/second upward). Gravity applied each Move.</summary>
+        [SpacetimeDB.Default(0f)]
+        public float VelY;
+        /// <summary>Server Timestamp when player was last grounded (for coyote time).</summary>
+        [SpacetimeDB.Default(0)]
+        public long LastGroundedMicros;
     }
 
     /// <summary>Slice-4 crowd proxies for AOI / alloc scaffold (not real players).</summary>
@@ -301,7 +307,7 @@ public static partial class Module
     }
 
     [SpacetimeDB.Reducer]
-    public static void Move(ReducerContext ctx, float dx, float dz)
+    public static void Move(ReducerContext ctx, float dx, float dz, bool jump = false)
     {
         var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
@@ -324,9 +330,42 @@ public static partial class Module
         Movement.ClampWishStep(ref dx, ref dz, maxStep);
         var x = pose.X + dx;
         var z = pose.Z + dz;
+
+        // Vertical physics: gravity + jump intent
+        var nowMicros = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        var dtSeconds = 0.05f; // Approximate time step between Move calls (~20Hz client sends)
+        var velY = pose.VelY;
+        var y = pose.Y;
+        var lastGroundedMicros = pose.LastGroundedMicros;
+
+        // Apply gravity
+        velY += Movement.Gravity * dtSeconds;
+
+        // Jump intent: only if grounded or within coyote time
+        var grounded = y <= Movement.GroundY + 0.01f;
+        var coyoteAllowed = (nowMicros - lastGroundedMicros) <= Movement.CoyoteTimeMicros;
+        if (jump && (grounded || coyoteAllowed) && velY <= 0.01f)
+        {
+            velY = Movement.JumpVelocity;
+        }
+
+        // Update Y position
+        y += velY * dtSeconds;
+
+        // Ground clamp
+        if (y <= Movement.GroundY)
+        {
+            y = Movement.GroundY;
+            velY = 0f;
+            lastGroundedMicros = nowMicros;
+        }
+
         Movement.ChunkCoords(x, z, out var cx, out var cz);
         pose.X = x;
+        pose.Y = y;
         pose.Z = z;
+        pose.VelY = velY;
+        pose.LastGroundedMicros = lastGroundedMicros;
         pose.ChunkX = cx;
         pose.ChunkZ = cz;
         var ix = pose.InterestChunkX;
@@ -1108,6 +1147,8 @@ public static partial class Module
                 ChunkZ = cz,
                 InterestChunkX = cx,
                 InterestChunkZ = cz,
+                VelY = 0f,
+                LastGroundedMicros = ctx.Timestamp.MicrosecondsSinceUnixEpoch,
             });
         }
 
@@ -1244,6 +1285,8 @@ public static partial class Module
             pose.X = Movement.SpawnX;
             pose.Y = Movement.SpawnY;
             pose.Z = Movement.SpawnZ;
+            pose.VelY = 0f;
+            pose.LastGroundedMicros = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
             pose.ChunkX = cx;
             pose.ChunkZ = cz;
             var ix = pose.InterestChunkX;

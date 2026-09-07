@@ -48,6 +48,9 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 
 ## Visual eval hooks
 
+**VE policy (Lead):** capture proof with `?ve=…`, then **paste the PNG into the GitHub PR** (user-attachments embed). Do **not** commit routine `ve/*.png` for new work. Historical `ve/` paths in the table below are legacy references only.
+
+
 | Query | Proof |
 |---|---|
 | `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
