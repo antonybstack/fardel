@@ -1574,7 +1574,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: H legend · WASD · RMB · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
+      'keys: H legend · WASD · Space jump · RMB · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -2030,18 +2030,24 @@ function bindInput(opts: {
   };
 }
 
-/** Camera-relative XZ wish from WASD. */
+/** Camera-relative XZ wish from WASD + jump from Space. */
 function wishFromKeys(
   keys: Set<string>,
   camera: ArcRotateCamera,
-): { dx: number; dz: number } {
+): { dx: number; dz: number; jump: boolean } {
   let x = 0;
   let z = 0;
   if (keys.has('w')) z += 1;
   if (keys.has('s')) z -= 1;
   if (keys.has('a')) x -= 1;
   if (keys.has('d')) x += 1;
-  if (x === 0 && z === 0) return { dx: 0, dz: 0 };
+
+  // Jump on Space, but not when chat input is focused
+  const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+  const chatFocused = chatInput && document.activeElement === chatInput;
+  const jump = keys.has(' ') && !chatFocused;
+
+  if (x === 0 && z === 0) return { dx: 0, dz: 0, jump };
 
   const camPos = camera.position;
   const target = camera.getTarget();
@@ -2055,9 +2061,9 @@ function wishFromKeys(
   const right = Vector3.Cross(Vector3.Up(), fwd).normalize();
 
   const wish = fwd.scale(z).add(right.scale(x));
-  if (wish.lengthSquared() < 1e-8) return { dx: 0, dz: 0 };
+  if (wish.lengthSquared() < 1e-8) return { dx: 0, dz: 0, jump };
   wish.normalize();
-  return { dx: wish.x, dz: wish.z };
+  return { dx: wish.x, dz: wish.z, jump };
 }
 
 
@@ -3772,7 +3778,7 @@ async function main(): Promise<void> {
 
     if (net && keys.size > 0) {
       const wish = wishFromKeys(keys, camera);
-      if (wish.dx !== 0 || wish.dz !== 0) {
+      if (wish.dx !== 0 || wish.dz !== 0 || wish.jump) {
         moveAccumulator += dt;
         const interval = 1 / MOVE_SEND_HZ;
         const tonicOn = tonicRemainingMs(net.getCharacter()) > 0;
@@ -3788,8 +3794,8 @@ async function main(): Promise<void> {
             dx *= s;
             dz *= s;
           }
-          if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6) {
-            net.sendMove(dx, dz);
+          if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump) {
+            net.sendMove(dx, dz, wish.jump);
           }
         }
         setHumanoidMoving(humanoid, true);
@@ -4907,10 +4913,10 @@ async function main(): Promise<void> {
         // Stand ~5.5–7m out so scarecrow fills play-cam (reads as TARGET / hit-me).
         if (dist > 7.2) {
           const step = Math.min(MAX_STEP_METERS, dist - 5.8);
-          net.sendMove((dx / dist) * step, (dz / dist) * step);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         } else if (dist < 4.8) {
           const step = Math.min(MAX_STEP_METERS, 5.8 - dist);
-          net.sendMove((-dx / dist) * step, (-dz / dist) * step);
+          net.sendMove((-dx / dist) * step, (-dz / dist) * step, false);
         }
         // Bias toward dummy so wood post + X-pad + sack head dominate the shot.
         camera.setTarget(
@@ -5018,7 +5024,7 @@ async function main(): Promise<void> {
       // Nudge local off spawn so stacked leftover remotes don't hide the blue local.
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0);
+        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
       }
       const remotes = net.getRemotes();
       // Prefer a remote that is spatially separated from local for the OK banner.
@@ -5071,7 +5077,7 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0);
+        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
       }
       const remotes = net.getRemotes();
       const combats = net.getRemoteCombats();
@@ -5956,7 +5962,7 @@ async function main(): Promise<void> {
         const dist = Math.hypot(dx, dz);
         if (dist > 4.5) {
           const step = Math.min(MAX_STEP_METERS, dist - 3.2);
-          net.sendMove((dx / dist) * step, (dz / dist) * step);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         }
         const mid = new Vector3(
           (player.position.x + dummy.x) * 0.5,
@@ -6024,9 +6030,9 @@ async function main(): Promise<void> {
           const targetDist = 14;
           const step = Math.min(MAX_STEP_METERS, Math.abs(dist - targetDist));
           if (dist < targetDist) {
-            net.sendMove(-(dx / dist) * step, -(dz / dist) * step);
+            net.sendMove(-(dx / dist) * step, -(dz / dist) * step, false);
           } else {
-            net.sendMove((dx / dist) * step, (dz / dist) * step);
+            net.sendMove((dx / dist) * step, (dz / dist) * step, false);
           }
         }
         const mid = new Vector3(
@@ -6094,7 +6100,7 @@ async function main(): Promise<void> {
         const dist = Math.hypot(dx, dz);
         if (dist > 5.5) {
           const step = Math.min(MAX_STEP_METERS, dist - 3.5);
-          net.sendMove((dx / dist) * step, (dz / dist) * step);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         }
         camera.setTarget(
           new Vector3(
@@ -6211,7 +6217,7 @@ async function main(): Promise<void> {
         const dist = Math.hypot(dx, dz);
         if (dist > 5.5) {
           const step = Math.min(MAX_STEP_METERS, dist - 3.5);
-          net.sendMove((dx / dist) * step, (dz / dist) * step);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         }
         camera.setTarget(
           new Vector3(
@@ -6316,7 +6322,7 @@ async function main(): Promise<void> {
         // Close the gap so player + Dummy share the frame with the ring readable.
         if (dist > 4.2) {
           const step = Math.min(MAX_STEP_METERS, dist - 2.8);
-          net.sendMove((dx / dist) * step, (dz / dist) * step);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         }
         // Bias target toward Dummy so gold ring + overhead marker dominate the shot.
         camera.setTarget(
@@ -6390,7 +6396,7 @@ async function main(): Promise<void> {
         const dist = Math.hypot(dx, dz);
         if (dist > 4.2) {
           const step = Math.min(MAX_STEP_METERS, dist - 2.8);
-          net.sendMove((dx / dist) * step, (dz / dist) * step);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         }
         // Frame Dummy + HUD target chrome; play-cam distance so fog wash is visible.
         camera.setTarget(
@@ -6503,7 +6509,7 @@ async function main(): Promise<void> {
     const chips = panel ? panel.querySelectorAll('.klChip').length : 0;
     if (mark) {
       mark.textContent =
-        `Keys legend OK · H toggles · ${chips} binds · WASD/RMB/Tab/1-2/Esc · B/U/I/J/K · P/O/T/Y · E/F/V/R · Enter`;
+        `Keys legend OK · H toggles · ${chips} binds · WASD/Space/RMB/Tab/1-2/Esc · B/U/I/J/K · P/O/T/Y · E/F/V/R · Enter`;
     }
   }
 
@@ -7875,7 +7881,7 @@ async function main(): Promise<void> {
       }
       if (!nudged) {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0);
+        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
       }
       camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
       camera.radius = 13;
@@ -8317,7 +8323,7 @@ async function main(): Promise<void> {
         }
         // Nudge toward mate so range check passes.
         for (let i = 0; i < 6; i++) {
-          net.sendMove(target.x - (net.getLocalPose()?.x ?? 0), target.z - (net.getLocalPose()?.z ?? 0));
+          net.sendMove(target.x - (net.getLocalPose()?.x ?? 0), target.z - (net.getLocalPose()?.z ?? 0), false);
         }
         void net
           .offerTrade(partner, true, 0)
@@ -8448,7 +8454,7 @@ async function main(): Promise<void> {
         if (pose) {
           for (let i = 0; i < 10; i++) {
             const p = net.getLocalPose() ?? pose;
-            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z);
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z, false);
           }
         }
         approached = true;
@@ -8459,7 +8465,7 @@ async function main(): Promise<void> {
       const near = net.nearestVendor(4.5);
       if (!near) {
         const pose = net.getLocalPose();
-        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z, false);
         if (mark) mark.textContent = 'VE vendor: out of range, nudging…';
         if (ticks < 280) window.setTimeout(waitVendor, 220);
         return;
@@ -8487,7 +8493,7 @@ async function main(): Promise<void> {
           const dx = lootX - pose.x;
           const dz = lootZ - pose.z;
           if (dx * dx + dz * dz > 4) {
-            net.sendMove(dx, dz);
+            net.sendMove(dx, dz, false);
             window.setTimeout(waitVendor, 280);
             return;
           }
@@ -8497,7 +8503,7 @@ async function main(): Promise<void> {
           .pickup()
           .then(() => {
             const p2 = net.getLocalPose();
-            if (p2) net.sendMove(v0.x - p2.x, v0.z - p2.z);
+            if (p2) net.sendMove(v0.x - p2.x, v0.z - p2.z, false);
           })
           .catch(() => undefined);
         window.setTimeout(waitVendor, 550);
@@ -8607,7 +8613,7 @@ async function main(): Promise<void> {
         if (pose) {
           for (let i = 0; i < 10; i++) {
             const p = net.getLocalPose() ?? pose;
-            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z);
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z, false);
           }
         }
         approached = true;
@@ -8618,7 +8624,7 @@ async function main(): Promise<void> {
       const near = net.nearestVendor(4.5);
       if (!near) {
         const pose = net.getLocalPose();
-        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z, false);
         if (mark) mark.textContent = 'VE tonic: out of range, nudging…';
         if (ticks < 280) window.setTimeout(waitTonic, 220);
         return;
@@ -8645,7 +8651,7 @@ async function main(): Promise<void> {
         const lootX = 1.5;
         const lootZ = 1.2;
         if (pose) {
-          net.sendMove(lootX - pose.x, lootZ - pose.z);
+          net.sendMove(lootX - pose.x, lootZ - pose.z, false);
         }
         net.seedLoot();
         void net.pickup().then(() => {
@@ -8705,7 +8711,7 @@ async function main(): Promise<void> {
       const buffVisible = !!buffEl && !buffEl.classList.contains('hidden');
       if (used && toastOk && buffLeft > 0 && buffVisible) {
         // Nudge move so speed buff is "alive" in shot
-        net.sendMove(MAX_STEP_METERS * TONIC_MOVE_MULT * 0.6, 0);
+        net.sendMove(MAX_STEP_METERS * TONIC_MOVE_MULT * 0.6, 0, false);
         if (ch) {
           updateSelfFrame(ch);
           updateBagPanel(ch);
@@ -8778,7 +8784,7 @@ async function main(): Promise<void> {
         if (pose) {
           for (let i = 0; i < 10; i++) {
             const p = net.getLocalPose() ?? pose;
-            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z);
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z, false);
           }
         }
         approached = true;
@@ -8789,7 +8795,7 @@ async function main(): Promise<void> {
       const near = net.nearestVendor(4.5);
       if (!near && !bought) {
         const pose = net.getLocalPose();
-        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z, false);
         if (mark) mark.textContent = 'VE bandage: out of range, nudging…';
         if (ticks < 280) window.setTimeout(waitBandage, 220);
         return;
@@ -8815,7 +8821,7 @@ async function main(): Promise<void> {
         const lootX = 1.5;
         const lootZ = 1.2;
         if (pose) {
-          net.sendMove(lootX - pose.x, lootZ - pose.z);
+          net.sendMove(lootX - pose.x, lootZ - pose.z, false);
         }
         net.seedLoot();
         void net.pickup().then(() => {}).catch(() => {});
@@ -10151,7 +10157,7 @@ async function main(): Promise<void> {
       if (phase === 'interrupt') {
         if (!moved) {
           // Break windup with WASD-equivalent Move.
-          net.sendMove(0.55, 0);
+          net.sendMove(0.55, 0, false);
           moved = true;
           if (mark) mark.textContent = 'VE cast-cancel: Move interrupt…';
           window.setTimeout(waitCancel, 220);
@@ -11335,7 +11341,7 @@ async function main(): Promise<void> {
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist <= CAST_RANGE_METERS + 0.5) {
           for (let i = 0; i < 6; i++) {
-            net.sendMove(-0.75, 0);
+            net.sendMove(-0.75, 0, false);
           }
           phase = 'far';
           if (mark) {
@@ -11520,7 +11526,7 @@ async function main(): Promise<void> {
       if (phase === 'seed' || phase === 'far') {
         if (dist <= CAST_RANGE_METERS + 0.5) {
           for (let i = 0; i < 6; i++) {
-            net.sendMove(-0.75, 0);
+            net.sendMove(-0.75, 0, false);
           }
           phase = 'far';
           if (mark) {
@@ -11612,7 +11618,7 @@ async function main(): Promise<void> {
       ticks += 1;
       const st = latestStatus;
       if (st.state !== 'connected') { if (ticks < 240) window.setTimeout(waitKick, 200); return; }
-      if (!nudged) { nudged = true; for (let i = 0; i < 5; i++) net.sendMove(0.8, 0.4); }
+      if (!nudged) { nudged = true; for (let i = 0; i < 5; i++) net.sendMove(0.8, 0.4, false); }
       const remotes = net.getRemotes();
       const combats = net.getRemoteCombats();
       syncRemoteMeshes(remotes); syncRemoteCastFx(combats); syncNpcMeshes(net.getNpcs());
@@ -11623,7 +11629,7 @@ async function main(): Promise<void> {
         const local = net.getLocalPose();
         if (local) {
           const dist = Math.hypot(preferred.x - local.x, preferred.z - local.z);
-          if (dist > KICK_RANGE_METERS - 1.5) net.sendMove(preferred.x - local.x, preferred.z - local.z);
+          if (dist > KICK_RANGE_METERS - 1.5) net.sendMove(preferred.x - local.x, preferred.z - local.z, false);
         }
       }
       if (toastKindsPresent().has('kick') && kicked) {
@@ -11673,7 +11679,7 @@ async function main(): Promise<void> {
       ticks += 1;
       const st = latestStatus;
       if (st.state !== 'connected') { if (ticks < 240) window.setTimeout(waitStun, 200); return; }
-      if (!nudged) { nudged = true; for (let i = 0; i < 5; i++) net.sendMove(0.8, 0.4); }
+      if (!nudged) { nudged = true; for (let i = 0; i < 5; i++) net.sendMove(0.8, 0.4, false); }
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes); syncRemoteCastFx(net.getRemoteCombats()); syncNpcMeshes(net.getNpcs());
       const preferred = remotes[0];
@@ -11682,7 +11688,7 @@ async function main(): Promise<void> {
         const local = net.getLocalPose();
         if (local) {
           const dist = Math.hypot(preferred.x - local.x, preferred.z - local.z);
-          if (dist > STUN_RANGE_METERS - 1.0) net.sendMove(preferred.x - local.x, preferred.z - local.z);
+          if (dist > STUN_RANGE_METERS - 1.0) net.sendMove(preferred.x - local.x, preferred.z - local.z, false);
         }
       }
       if (toastKindsPresent().has('stun') && stunned) {
@@ -11753,7 +11759,7 @@ async function main(): Promise<void> {
       const wish = wishFromKeys(new Set(['w']), camera);
       if (wish.dx !== 0 || wish.dz !== 0) {
         const step = Math.min(MAX_STEP_METERS, MOVE_SPEED / 20);
-        net.sendMove(wish.dx * step, wish.dz * step);
+        net.sendMove(wish.dx * step, wish.dz * step, wish.jump);
       }
       const elapsed = Date.now() - walkStartedMs;
       const r = camera.radius;

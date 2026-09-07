@@ -226,7 +226,7 @@ export type GroundListener = (items: GroundItemView[]) => void;
 export type GameNet = {
   identityHex: string;
   identity: Identity;
-  sendMove: (dx: number, dz: number) => void;
+  sendMove: (dx: number, dz: number, jump?: boolean) => void;
   ensureTrainingDummy: () => void;
   seedCrowdProxies: () => void;
   setTarget: (npcId: bigint) => void;
@@ -1437,7 +1437,7 @@ export async function connectToSpacetime(
             resolve({
               identityHex,
               identity,
-              sendMove: (dx: number, dz: number) => {
+              sendMove: (dx: number, dz: number, jump = false) => {
                 if (
                   latestCombat &&
                   Number(latestCombat.stunnedUntilMicros / 1000n) > Date.now()
@@ -1446,7 +1446,7 @@ export async function connectToSpacetime(
                   emitStatus(identityHex);
                   return;
                 }
-                void conn.reducers.move({ dx, dz });
+                void conn.reducers.move({ dx, dz, jump });
               },
               ensureTrainingDummy: () => {
                 void conn.reducers.ensureTrainingDummy({});

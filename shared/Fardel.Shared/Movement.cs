@@ -9,6 +9,15 @@ public static class Movement
     public const float SpawnY = 0f;
     public const float SpawnZ = 0f;
 
+    /// <summary>Gravity acceleration (meters per second squared, downward).</summary>
+    public const float Gravity = -20f;
+    /// <summary>Initial upward velocity when jump intent is true (meters per second).</summary>
+    public const float JumpVelocity = 6f;
+    /// <summary>Ground Y level (clamped when grounded).</summary>
+    public const float GroundY = 0f;
+    /// <summary>Coyote time: grace period for jump after leaving ground (microseconds).</summary>
+    public const long CoyoteTimeMicros = 50_000L;
+
     /// <summary>Clamp a wish displacement to MaxStepMeters (XZ). Y ignored for slice 1.</summary>
     public static void ClampWishStep(ref float dx, ref float dz)
     {
