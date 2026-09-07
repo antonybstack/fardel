@@ -106,8 +106,10 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
 
 Until a credited **free** pack lands, the Babylon client uses **procedural kitbash**:
 
-- `web/src/world/forest.ts` — cylinder/cone hero trees, GPU-instanced mid trees,
-  distant mountain cones with snow caps, sky dome + fog + hemi/sun mood.
+- `web/src/world/forest.ts` — gnarled landmark/sentinel heroes, ThinInstanced mid-tree
+  variants (classic/tall/stubby) + far LOD + understory clusters, cyan fog that eats
+  edges, muted foliage (no neon emissive), lime moss patches, cool lighting. Shared
+  materials; procedural until packs land.
 - `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
   silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy stays cylinder.
 

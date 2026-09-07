@@ -47,6 +47,7 @@ What Fardel keeps from prior work — and what it leaves behind.
 - IL2CPP / AOT for web
 - Zero-allocation hot loops, `Span<T>`, pooling
 - GPU instancing / VAT direction for density
+- Forest density pass: ThinInstances + shared mats + far LOD stand-ins beat naive mesh spam (procedural OK until packs)
 
 **Temper**
 - “120 FPS + thousands of players in one browser tab” → hundreds on-screen, thousands in-shard via AOI

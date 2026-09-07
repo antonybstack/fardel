@@ -128,9 +128,10 @@ See `web/README.md` for exact commands.
   `player_pose` + `crowd_proxy`; `SeedCrowdProxies`; amber instanced capsules
   distinct from local blue player; HUD interest chunk + near/far proxy counts
   (`ve/babylon-aoi.png`); `tools/AoiSmoke` green
-- **Forest kitbash (presentation):** procedural clearing — huge hero trunks +
-  instanced mid trees, distant snow-capped mountain silhouette, dusk sky/fog +
-  hemi/sun mood lighting (`web/src/world/forest.ts`); (`ve/babylon-forest.png`)
+- **Forest kitbash (presentation):** procedural clearing — landmark hero trunks +
+  ThinInstanced mid-tree variety + far LOD ring, distant snow-capped mountain
+  silhouette, dusk sky/fog + hemi/sun mood (`web/src/world/forest.ts`);
+  (`ve/babylon-forest.png`, `?ve=forest`)
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
   staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
   (`ve/babylon-humanoid.png`); readability polish #33 (`?ve=humanoid-polish`,
