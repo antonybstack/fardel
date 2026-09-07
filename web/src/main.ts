@@ -1301,11 +1301,16 @@ function drawMinimap(opts: {
   ctx.arc(cx, cy, MINIMAP_RANGE_M * scale, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Compass N
-  ctx.fillStyle = '#c8d6f0';
+  // Compass N with shadow for readability
   ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  // Dark outline
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+  ctx.lineWidth = 3.0;
+  ctx.strokeText('N', cx, 12);
+  // Bright fill
+  ctx.fillStyle = '#f0f4fc';
   ctx.fillText('N', cx, 12);
 
   const originX = opts.local?.x ?? 0;
@@ -1328,9 +1333,16 @@ function drawMinimap(opts: {
     return { px, py, clamped, dist };
   };
 
-  const plot = (wx: number, wz: number, color: string, r: number, alpha = 1) => {
+  const plot = (wx: number, wz: number, color: string, r: number, alpha = 1, outline = true) => {
     const { px, py, clamped } = project(wx, wz);
     ctx.globalAlpha = alpha;
+    // Dark outline for contrast
+    if (outline) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.beginPath();
+      ctx.arc(px, py, r + 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
@@ -1358,6 +1370,13 @@ function drawMinimap(opts: {
     if (!r.party) continue;
     partyCount += 1;
     const { px, py, clamped } = plot(r.x, r.z, '#5ed68a', 4.6);
+    // Dark outline ring for contrast
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(px, py, 6.4, 0, Math.PI * 2);
+    ctx.stroke();
+    // Bright green ring
     ctx.strokeStyle = 'rgba(94, 214, 138, 0.95)';
     ctx.lineWidth = 1.6;
     ctx.beginPath();
@@ -1366,6 +1385,21 @@ function drawMinimap(opts: {
     if (clamped) {
       const ang = Math.atan2(py - cy, px - cx);
       const tip = 9.5;
+      // Dark outline for chevron
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.beginPath();
+      ctx.moveTo(px + Math.cos(ang) * (tip + 1.5), py + Math.sin(ang) * (tip + 1.5));
+      ctx.lineTo(
+        px + Math.cos(ang + 2.2) * 6.0,
+        py + Math.sin(ang + 2.2) * 6.0,
+      );
+      ctx.lineTo(
+        px + Math.cos(ang - 2.2) * 6.0,
+        py + Math.sin(ang - 2.2) * 6.0,
+      );
+      ctx.closePath();
+      ctx.fill();
+      // Bright green chevron
       ctx.fillStyle = '#5ed68a';
       ctx.beginPath();
       ctx.moveTo(px + Math.cos(ang) * tip, py + Math.sin(ang) * tip);
@@ -1383,6 +1417,13 @@ function drawMinimap(opts: {
   }
   // Local on top
   plot(originX, originZ, '#6aa2ff', 4.2);
+  // Dark outline ring for contrast
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+  ctx.stroke();
+  // Bright white ring
   ctx.strokeStyle = 'rgba(232,238,252,0.85)';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
@@ -5731,6 +5772,72 @@ async function main(): Promise<void> {
       window.setTimeout(waitMinimapParty, 200);
     };
     window.setTimeout(waitMinimapParty, 800);
+  }
+
+  // ?ve=minimap-read — Readability test: party + self blips + compass vs grass/fog (cyan #39 palette).
+  if (ve === 'minimap-read') {
+    camera.radius = 28;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'minimap-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE minimap-read: waiting for party + blips vs grass/fog…';
+    let ticks = 0;
+    let invited = false;
+    const waitMinimapRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE minimap-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitMinimapRead, 200);
+        return;
+      }
+      const party = net.getPartyState();
+      const local = net.getLocalPose();
+      const remotes = net.getRemotes();
+      if (!local) {
+        if (mark) mark.textContent = 'VE minimap-read: waiting for local pose…';
+        window.setTimeout(waitMinimapRead, 250);
+        return;
+      }
+      if (!invited && !party?.pendingInviteFrom && remotes.length >= 1 && (party?.size ?? 0) < 2) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) mark.textContent = `VE minimap-read: invited ${hex.slice(0, 12)}… waiting accept…`;
+        }
+      }
+      syncRemoteMeshes(remotes);
+      drawMinimap({
+        local: { x: local.x, z: local.z },
+        remotes,
+        npcs: net.getNpcs(),
+        proxies: net.getProxies(),
+      });
+      const partyMate = remotes.find((r) => r.party);
+      if ((party?.size ?? 0) >= 2 && partyMate && document.getElementById('minimap')) {
+        camera.setTarget(new Vector3(local.x, 1.1, local.z));
+        if (mark) {
+          mark.textContent =
+            `Minimap read OK · blips + compass vs grass/cyan fog · party ${party?.size} · ` +
+            `remotes ${remotes.length} · contrast readable`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE minimap-read: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · ` +
+          `invited=${invited} · pending=${party?.pendingInviteFrom?.slice(0, 8) ?? '—'} (waiting party…)`;
+      }
+      if (ticks > 220) {
+        if (mark) mark.textContent = 'VE minimap-read: timed out waiting for party mate';
+        return;
+      }
+      window.setTimeout(waitMinimapRead, 200);
+    };
+    window.setTimeout(waitMinimapRead, 800);
   }
 
   // ?ve=nameplates — You + Dummy (+ remotes) billboard labels; dummy HP pip.
