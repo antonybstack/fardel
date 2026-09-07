@@ -2020,18 +2020,56 @@ function disposeNameplate(np: Nameplate | null | undefined): void {
   np.tex.dispose();
 }
 
+/** Vertical gap between stacked floaters near the same anchor. */
+const FLOATER_STACK_DY = 0.5;
+/** XZ radius (m) for counting live floaters toward a stack slot. */
+const FLOATER_NEAR_XZ = 2.8;
+
+/** Count still-visible floaters near `at` across one or more live lists. */
+function countNearbyLiveFloaters(
+  lists: DamageFloater[][] | undefined,
+  at: Vector3,
+  now = Date.now(),
+): number {
+  if (!lists) return 0;
+  const r2 = FLOATER_NEAR_XZ * FLOATER_NEAR_XZ;
+  let n = 0;
+  for (const list of lists) {
+    for (const f of list) {
+      if (now - f.bornMs >= f.lifeMs * 0.9) continue;
+      const dx = f.mesh.position.x - at.x;
+      const dz = f.mesh.position.z - at.z;
+      if (dx * dx + dz * dz <= r2) n += 1;
+    }
+  }
+  return n;
+}
+
+type FloaterSpawnOpts = {
+  lifeMs?: number;
+  yLift?: number;
+  planeW?: number;
+  planeH?: number;
+  /** Deterministic horizontal lane (replaces random drift). */
+  laneX?: number;
+  /** Live floater lists used to assign a stack slot near `at`. */
+  stackWith?: DamageFloater[][];
+};
+
 /** Rising world billboard text — damage numbers, XP floaters, etc. */
 function spawnWorldFloater(
   scene: Scene,
   at: Vector3,
   label: string,
   tint: Color3,
-  opts?: { lifeMs?: number; yLift?: number; planeW?: number; planeH?: number },
+  opts?: FloaterSpawnOpts,
 ): DamageFloater {
-  const lifeMs = opts?.lifeMs ?? 1100;
-  const yLift = opts?.yLift ?? 1.85;
+  const slot = countNearbyLiveFloaters(opts?.stackWith, at);
+  const lifeMs = opts?.lifeMs ?? 1250;
+  const yLift = (opts?.yLift ?? 1.85) + slot * FLOATER_STACK_DY;
   const planeW = opts?.planeW ?? 1.7;
   const planeH = opts?.planeH ?? 0.85;
+  const laneX = opts?.laneX ?? 0;
   const tex = new DynamicTexture(
     `fltTex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     { width: 256, height: 128 },
@@ -2070,6 +2108,8 @@ function spawnWorldFloater(
   mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
   mesh.position = at.clone();
   mesh.position.y += yLift;
+  // Deterministic lane + tiny per-slot zigzag (no random horizontal wander).
+  mesh.position.x += laneX + (slot % 2 === 0 ? -1 : 1) * 0.04 * Math.min(slot, 3);
   mesh.isPickable = false;
 
   return {
@@ -2078,7 +2118,7 @@ function spawnWorldFloater(
     bornMs: Date.now(),
     lifeMs,
     startY: mesh.position.y,
-    driftX: (Math.random() - 0.5) * 0.55,
+    driftX: 0,
   };
 }
 
@@ -2088,8 +2128,13 @@ function spawnDamageFloater(
   at: Vector3,
   amount: number,
   tint: Color3,
+  stackWith?: DamageFloater[][],
 ): DamageFloater {
-  return spawnWorldFloater(scene, at, `-${amount}`, tint);
+  return spawnWorldFloater(scene, at, `-${amount}`, tint, {
+    lifeMs: 1250,
+    laneX: -0.22,
+    stackWith,
+  });
 }
 
 /** Rising "+N XP" near local player — client-only Cosmetic over Character.Xp. */
@@ -2097,13 +2142,21 @@ function spawnXpFloater(
   scene: Scene,
   at: Vector3,
   gained: number,
+  stackWith?: DamageFloater[][],
 ): DamageFloater {
   return spawnWorldFloater(
     scene,
     at,
     `+${gained} XP`,
     new Color3(1, 0.82, 0.28),
-    { lifeMs: 1400, yLift: 2.15, planeW: 2.2, planeH: 0.95 },
+    {
+      lifeMs: 1500,
+      yLift: 2.15,
+      planeW: 2.2,
+      planeH: 0.95,
+      laneX: 0.34,
+      stackWith,
+    },
   );
 }
 
@@ -2112,13 +2165,21 @@ function spawnLevelFloater(
   scene: Scene,
   at: Vector3,
   level: number,
+  stackWith?: DamageFloater[][],
 ): DamageFloater {
   return spawnWorldFloater(
     scene,
     at,
     `Level ${level}!`,
     new Color3(0.55, 0.95, 1),
-    { lifeMs: 1800, yLift: 2.45, planeW: 2.6, planeH: 1.05 },
+    {
+      lifeMs: 1900,
+      yLift: 2.45,
+      planeW: 2.6,
+      planeH: 1.05,
+      laneX: 0.06,
+      stackWith,
+    },
   );
 }
 
@@ -3112,6 +3173,7 @@ async function main(): Promise<void> {
               mesh.root.position,
               delta,
               tint,
+              [damageFloaters, xpFloaters],
             ),
           );
           latestDamageAmount = delta;
@@ -3625,7 +3687,9 @@ async function main(): Promise<void> {
         } else if (ch.xp > prevXp) {
           const gained = ch.xp - prevXp;
           pushSystemToast('xp', `+${gained} XP · total ${ch.xp}`);
-          xpFloaters.push(spawnXpFloater(scene, player.position, gained));
+          xpFloaters.push(
+            spawnXpFloater(scene, player.position, gained, [damageFloaters, xpFloaters]),
+          );
           latestXpGain = gained;
           _latestXpAtMs = Date.now();
           prevXp = ch.xp;
@@ -3640,7 +3704,9 @@ async function main(): Promise<void> {
         } else if (lv > prevLevel) {
           pushSystemToast('level', `Level up! · Lv ${lv}`, TOAST_VE_TTL_MS);
           pushCombatLog('equip', `Level up · Lv ${lv}`);
-          xpFloaters.push(spawnLevelFloater(scene, player.position, lv));
+          xpFloaters.push(
+            spawnLevelFloater(scene, player.position, lv, [damageFloaters, xpFloaters]),
+          );
           latestLevelUp = lv;
           prevLevel = lv;
         } else if (lv !== prevLevel) {
@@ -3681,6 +3747,7 @@ async function main(): Promise<void> {
                   player.position,
                   dmg,
                   new Color3(1.0, 0.35, 0.45),
+                  [damageFloaters, xpFloaters],
                 ),
               );
               flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
@@ -3693,7 +3760,14 @@ async function main(): Promise<void> {
                   player.position,
                   `+${healed}`,
                   new Color3(0.35, 1.0, 0.55),
-                  { lifeMs: 1200, yLift: 2.0, planeW: 1.55, planeH: 0.8 },
+                  {
+                    lifeMs: 1350,
+                    yLift: 2.0,
+                    planeW: 1.55,
+                    planeH: 0.8,
+                    laneX: 0.16,
+                    stackWith: [damageFloaters, xpFloaters],
+                  },
                 ),
               );
             }
@@ -3945,6 +4019,89 @@ async function main(): Promise<void> {
       });
     }
   };
+
+
+  // ?ve=floaters — seed before connect so the shot does not wait on WS.
+  {
+    const earlyVe = new URLSearchParams(window.location.search).get('ve');
+    if (earlyVe === 'floaters') {
+      camera.radius = 9.2;
+      camera.alpha = Math.PI / 2.25;
+      camera.beta = Math.PI / 3.05;
+      camera.setTarget(player.position.clone().add(new Vector3(0, 1.35, 0)));
+      const mark = document.getElementById('persistMark');
+      if (mark) mark.textContent = 'VE floaters: seeding stack…';
+      let ticks = 0;
+      const pulse = () => {
+        ticks += 1;
+        camera.setTarget(player.position.clone().add(new Vector3(0, 1.35, 0)));
+        const lists = [damageFloaters, xpFloaters] as DamageFloater[][];
+        const liveNow =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (liveNow < 4) {
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-12',
+              new Color3(1, 0.35, 0.4),
+              { lifeMs: 2400, laneX: -0.28, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-8',
+              new Color3(1, 0.9, 0.4),
+              { lifeMs: 2400, laneX: -0.28, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+25',
+              new Color3(0.35, 1.0, 0.55),
+              {
+                lifeMs: 2400,
+                yLift: 2.0,
+                planeW: 1.55,
+                planeH: 0.8,
+                laneX: 0.18,
+                stackWith: lists,
+              },
+            ),
+          );
+          xpFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+10 XP',
+              new Color3(1, 0.82, 0.28),
+              {
+                lifeMs: 2400,
+                yLift: 2.15,
+                planeW: 2.2,
+                planeH: 0.95,
+                laneX: 0.42,
+                stackWith: lists,
+              },
+            ),
+          );
+        }
+        const live =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (mark) {
+          mark.textContent = `Floaters OK · stacked · damage/heal/XP · live ${live}`;
+        }
+        if (ticks < 50) window.setTimeout(pulse, 320);
+      };
+      window.setTimeout(pulse, 250);
+    }
+  }
 
   net = await connectToSpacetime(
     onStatus,
@@ -5782,7 +5939,7 @@ async function main(): Promise<void> {
       ) {
         // Prefer share amount; accept any positive gain from mate kill path.
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain, [damageFloaters, xpFloaters]));
         }
         pushSystemToast(
           'xp',
@@ -5810,7 +5967,7 @@ async function main(): Promise<void> {
         // Fallback: seed share floater/toast so VE still proves presentation.
         const seed = PARTY_XP_SHARE;
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnXpFloater(scene, player.position, seed));
+          xpFloaters.push(spawnXpFloater(scene, player.position, seed, [damageFloaters, xpFloaters]));
         }
         pushSystemToast('xp', `+${seed} XP · party share · seeded`, TOAST_VE_TTL_MS);
         if (mark) {
@@ -7626,7 +7783,7 @@ async function main(): Promise<void> {
       ) {
         // Keep floater on-screen: if it already faded, re-spawn for the shot.
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain, [damageFloaters, xpFloaters]));
         }
         if (mark) {
           mark.textContent =
@@ -7659,7 +7816,7 @@ async function main(): Promise<void> {
         // Fallback seed floater so VE still proves presentation if kill stalls.
         if (xpFloaters.length === 0) {
           latestXpGain = latestXpGain || 10;
-          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain, [damageFloaters, xpFloaters]));
           pushSystemToast('xp', `+${latestXpGain} XP · seeded`, TOAST_VE_TTL_MS);
         }
         if (mark) {
@@ -7765,7 +7922,7 @@ async function main(): Promise<void> {
           pushSystemToast('level', `Level up! · Lv ${ch.level}`, TOAST_VE_TTL_MS);
         }
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnLevelFloater(scene, player.position, ch.level ?? latestLevelUp));
+          xpFloaters.push(spawnLevelFloater(scene, player.position, ch.level ?? latestLevelUp, [damageFloaters, xpFloaters]));
         }
         paintNameplate(
           localNameplate,
@@ -7806,7 +7963,7 @@ async function main(): Promise<void> {
         const lv = ch?.level ?? startLevel ?? 1;
         const showLv = Math.max(lv, (startLevel ?? 1) + 1);
         pushSystemToast('level', `Level up! · Lv ${showLv}`, TOAST_VE_TTL_MS);
-        xpFloaters.push(spawnLevelFloater(scene, player.position, showLv));
+        xpFloaters.push(spawnLevelFloater(scene, player.position, showLv, [damageFloaters, xpFloaters]));
         const sf = document.getElementById('sfLevel');
         if (sf) sf.textContent = `Lv ${showLv}`;
         paintNameplate(localNameplate, `You · Lv ${showLv}`, '#b8d4ff', -1);
@@ -7994,7 +8151,12 @@ async function main(): Promise<void> {
               player.position,
               `+${REST_HEAL_AMOUNT}`,
               new Color3(0.35, 1.0, 0.55),
-              { lifeMs: 1400, yLift: 2.05 },
+              {
+                lifeMs: 1400,
+                yLift: 2.05,
+                laneX: 0.16,
+                stackWith: [damageFloaters, xpFloaters],
+              },
             ),
           );
           const fillEl = document.getElementById('sfHpFill');
@@ -8020,6 +8182,14 @@ async function main(): Promise<void> {
     window.setTimeout(waitRest, 700);
   }
 
+
+
+  // ?ve=floaters post-connect: early pre-connect seed owns the mark/stack.
+  if (ve === 'floaters') {
+    camera.radius = 9.2;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
 
   // ?ve=mana — drain Spark until low mana; show self-frame mana bar + dim hotbar + toast.
   if (ve === 'mana') {

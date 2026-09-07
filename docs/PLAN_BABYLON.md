@@ -146,6 +146,9 @@ See `web/README.md` for exact commands.
   rising billboard numbers above the target (Spark yellow / Emberbolt orange);
   cosmetic only — authority HP remains source of truth; `?ve=damage-text`
   (`ve/babylon-damage-text.png`)
+- **Combat floater stacking clarity (presentation):** nearby live floaters get
+  stack-slot Y offsets + deterministic damage/heal/XP lanes (no random X drift);
+  `?ve=floaters` (`ve/babylon-floaters.png`)
 - **Party / always-relevant (presentation):** `PartyMember` + `PartyInvite` tables;
   CreateParty / InviteToParty / AcceptPartyInvite / LeaveParty; neighborhood SQL
   also wholesale-subscribes `party_member` + per-identity `player_pose` for party

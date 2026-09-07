@@ -95,6 +95,7 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 
 - Say rate-limit is module-side over existing `ChatMessage.SentAt` (no new table): reject if last row from same identity is within `Chat.SayMinIntervalMs`. Client catches reducer `SenderError` and toasts kind `rate` — keeps ChatSmoke / wholesale chat path unchanged aside from the reject proof.
 - XP floater reuses the damage-number billboard path (`spawnWorldFloater`) on `Character.Xp` deltas near the local player — Cosmetics only; no XP-event table.
+- Combat floater stacking: assign nearby live-count stack slots (+~0.5 Y) and deterministic laneX (damage left / heal mid / XP right) instead of random drift — keeps multi-hit readable; `?ve=floaters`.
 
 - Browser `PartySay` adds a **local self-echo** after reducer commit when the RLS row has not yet appeared in `party_chat_message` (JS + AOI resubscribe can miss sender inserts). Headless `ChatSmoke` still proves true RLS: mate sees, outsider does not. Prefer fixing delivery later over trusting echo for authority.
 - `PartySay` + `PartyChatMessage` uses SpacetimeDB RLS (`ClientVisibilityFilter` join on `party_member.party_id`) so `SubscribeToAllTables` still hides party rows from outsiders — prove with a third client in ChatSmoke, not client-side filtering alone. Join columns need `[Index.BTree]` (`PartyId` on both tables). RLS is STDB_UNSTABLE — keep the pragma on the module.
