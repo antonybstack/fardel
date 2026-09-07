@@ -15,12 +15,30 @@
         <div class="slotCast" id="castSpark"></div>
         <span class="slotKey">1</span>
         <span class="slotName">Spark</span>
+        <span class="slotBadge" aria-hidden="true"></span>
       </div>
       <div class="spellSlot" id="slotEmberbolt" data-spell="emberbolt">
         <div class="slotSweep" id="sweepEmberbolt"></div>
         <div class="slotCast" id="castEmberbolt"></div>
         <span class="slotKey">2</span>
         <span class="slotName">Emberbolt</span>
+        <span class="slotBadge" aria-hidden="true"></span>
+      </div>
+      <div class="spellSlot empty" id="slotEmpty3" data-spell="" aria-label="Empty hotbar slot 3">
+        <span class="slotKey">3</span>
+        <span class="slotEmptyMark" aria-hidden="true">+</span>
+      </div>
+      <div class="spellSlot empty" id="slotEmpty4" data-spell="" aria-label="Empty hotbar slot 4">
+        <span class="slotKey">4</span>
+        <span class="slotEmptyMark" aria-hidden="true">+</span>
+      </div>
+      <div class="spellSlot empty" id="slotEmpty5" data-spell="" aria-label="Empty hotbar slot 5">
+        <span class="slotKey">5</span>
+        <span class="slotEmptyMark" aria-hidden="true">+</span>
+      </div>
+      <div class="spellSlot empty" id="slotEmpty6" data-spell="" aria-label="Empty hotbar slot 6">
+        <span class="slotKey">6</span>
+        <span class="slotEmptyMark" aria-hidden="true">+</span>
       </div>
     </div>
     <div id="selfFrame" class="hidden" aria-label="Player self frame">
@@ -88,6 +106,40 @@
       <div class="bagRow"><span>Yard tonic</span><span id="bagTonic">—</span></div>
       <div class="bagFoot">Casts need staff + known spell · U/I staff · J/K robes · E vendor · V use tonic</div>
     </div>
+    <div id="keysLegend" class="hidden" aria-label="Keybind legend">
+      <div class="bagHead">
+        <span class="bagTitle">Keybinds</span>
+        <span class="bagKey">H</span>
+      </div>
+      <div class="klRows">
+        <div class="klRow">
+          <span class="klChip"><kbd>WASD</kbd> move</span>
+          <span class="klChip"><kbd>RMB</kbd> look</span>
+          <span class="klChip"><kbd>Tab</kbd> target</span>
+          <span class="klChip"><kbd>1</kbd> Spark</span>
+          <span class="klChip"><kbd>2</kbd> Emberbolt</span>
+          <span class="klChip"><kbd>Esc</kbd> cancel cast</span>
+        </div>
+        <div class="klRow">
+          <span class="klChip"><kbd>B</kbd> bag</span>
+          <span class="klChip"><kbd>U</kbd>/<kbd>I</kbd> staff</span>
+          <span class="klChip"><kbd>J</kbd>/<kbd>K</kbd> robes</span>
+          <span class="klChip"><kbd>E</kbd> vendor</span>
+          <span class="klChip"><kbd>F</kbd> pickup</span>
+          <span class="klChip"><kbd>V</kbd> tonic</span>
+          <span class="klChip"><kbd>R</kbd> rest</span>
+        </div>
+        <div class="klRow">
+          <span class="klChip"><kbd>P</kbd> invite/accept</span>
+          <span class="klChip"><kbd>O</kbd> leave party</span>
+          <span class="klChip"><kbd>T</kbd> trade</span>
+          <span class="klChip"><kbd>Y</kbd> cancel trade</span>
+          <span class="klChip"><kbd>Enter</kbd> say</span>
+          <span class="klChip"><kbd>H</kbd> this legend</span>
+        </div>
+      </div>
+      <div class="bagFoot">/p party · /w hex whisper · combat log right · FPS overlay · system toasts top</div>
+    </div>
     <div id="vendorPanel" class="hidden" aria-label="Vendor">
       <div class="bagHead">
         <span class="bagTitle">Vendor</span>
@@ -128,6 +180,7 @@
     <div id="deathGreyout" class="hidden" aria-hidden="true">
       <div class="deathGreyInner">
         <div class="deathTitle">You died</div>
+        <div class="deathCountdown" id="deathCountdown" aria-hidden="true"></div>
         <div class="deathSub" id="deathSub">Respawning…</div>
       </div>
     </div>

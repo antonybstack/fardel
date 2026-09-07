@@ -3,8 +3,8 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // After hard interrupt, CastLockedUntil gates Cast with "silenced" until expiry.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
 
 DbConnection? conn = null;

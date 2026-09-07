@@ -2,8 +2,8 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 30000;
 
 var tokenDir = Path.Combine(Path.GetTempPath(), "fardel-persist-smoke-" + Guid.NewGuid().ToString("N"));

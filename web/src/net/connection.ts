@@ -28,6 +28,10 @@ export const CAST_RANGE_METERS = 8;
 /** Match Combat.KickManaCost / KickRangeMeters. */
 export const KICK_MANA_COST = 10;
 export const KICK_RANGE_METERS = 8;
+/** Match Combat.StunManaCost / StunRangeMeters / StunDurationMs. */
+export const STUN_MANA_COST = 15;
+export const STUN_RANGE_METERS = 5;
+export const STUN_DURATION_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
@@ -103,6 +107,8 @@ export type CombatView = {
   castPushbackCount: number;
   /** Micros since Unix epoch — Cast rejects while now < this (hard-interrupt silence). */
   castLockedUntilMicros: bigint;
+  /** Micros since Unix epoch — Move/Cast reject while now < this (Stun/Bash; distinct from silence). */
+  stunnedUntilMicros: bigint;
   /** Last spell that actually fired (instant or resolve) — remotes flash on change. */
   lastSpellId: number;
   lastCastAtMicros: bigint;
@@ -229,6 +235,8 @@ export type GameNet = {
   dummyStrike: () => Promise<void>;
   kick: (target: Identity) => Promise<void>;
   kickNearestCastingRemote: () => Promise<string | null>;
+  stun: (target: Identity) => Promise<void>;
+  stunNearestRemote: () => Promise<string | null>;
   unequipStaff: () => void;
   equipStaff: () => void;
   unequipRobes: () => void;
@@ -406,6 +414,7 @@ type CombatRow = {
   lastCastAt: Timestamp;
   castPushbackCount?: number;
   castLockedUntil: Timestamp;
+  stunnedUntilMicros?: bigint | number;
 };
 
 type NpcRow = {
@@ -536,6 +545,7 @@ function combatView(row: CombatRow): CombatView {
     castEndsAtMicros: row.castEndsAt.microsSinceUnixEpoch,
     castPushbackCount: row.castPushbackCount ?? 0,
     castLockedUntilMicros: row.castLockedUntil?.microsSinceUnixEpoch ?? 0n,
+    stunnedUntilMicros: BigInt(row.stunnedUntilMicros ?? 0),
     lastSpellId: row.lastSpellId,
     lastCastAtMicros: row.lastCastAt.microsSinceUnixEpoch,
   };
@@ -1420,6 +1430,14 @@ export async function connectToSpacetime(
               identityHex,
               identity,
               sendMove: (dx: number, dz: number) => {
+                if (
+                  latestCombat &&
+                  Number(latestCombat.stunnedUntilMicros / 1000n) > Date.now()
+                ) {
+                  castFeedback = 'stunned';
+                  emitStatus(identityHex);
+                  return;
+                }
                 void conn.reducers.move({ dx, dz });
               },
               ensureTrainingDummy: () => {
@@ -1570,6 +1588,30 @@ export async function connectToSpacetime(
                 await conn.reducers.kick({ target });
                 return bestHex;
               },
+              stun: (target: Identity) => conn.reducers.stun({ target }),
+              stunNearestRemote: async () => {
+                const local = latestPose;
+                if (!local) return null;
+                let bestHex: string | null = null;
+                let bestDist = Number.POSITIVE_INFINITY;
+                for (const [hex, remote] of remotePoseMap) {
+                  if (hex === identityHex) continue;
+                  const dist = Math.hypot(remote.x - local.x, remote.z - local.z);
+                  if (dist > STUN_RANGE_METERS) continue;
+                  if (dist < bestDist) { bestDist = dist; bestHex = hex; }
+                }
+                if (!bestHex) { castFeedback = 'No remote in Stun range'; emitStatus(identityHex); return null; }
+                let target: Identity | null = null;
+                for (const row of conn.db.playerPose.iter()) {
+                  const hex = (row as PoseRow).identity.toHexString();
+                  if (hex === bestHex) { target = (row as PoseRow).identity; break; }
+                }
+                if (!target) { castFeedback = 'Stun target pose missing'; emitStatus(identityHex); return null; }
+                castFeedback = `Stun → ${bestHex.slice(0, 8)}…`;
+                emitStatus(identityHex);
+                await conn.reducers.stun({ target });
+                return bestHex;
+              },
               cast: (spellId: number) => {
                 const name =
                   spellId === SPELL_SPARK
@@ -1590,6 +1632,14 @@ export async function connectToSpacetime(
                       : 0;
                 if (latestCharacter && cost > 0 && latestCharacter.mana < cost) {
                   castFeedback = 'Insufficient mana';
+                  emitStatus(identityHex);
+                  return;
+                }
+                if (
+                  latestCombat &&
+                  Number(latestCombat.stunnedUntilMicros / 1000n) > Date.now()
+                ) {
+                  castFeedback = 'stunned';
                   emitStatus(identityHex);
                   return;
                 }
@@ -1844,5 +1894,15 @@ export function castSilenceRemainingMs(
 ): number {
   if (!combat) return 0;
   const untilMs = Number(combat.castLockedUntilMicros / 1000n);
+  return Math.max(0, untilMs - nowMs);
+}
+
+/** Ms remaining on Stun/Bash hard-CC (0 if unlocked). Distinct from silence. */
+export function stunRemainingMs(
+  combat: CombatView | null | undefined,
+  nowMs = Date.now(),
+): number {
+  if (!combat) return 0;
+  const untilMs = Number(combat.stunnedUntilMicros / 1000n);
   return Math.max(0, untilMs - nowMs);
 }

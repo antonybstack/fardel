@@ -227,19 +227,81 @@ body {
   gap: 2px;
 }
 
+/* Empty placeholder slots (keys 3–6) — dashed/muted, not disabled/OOM. */
+.spellSlot.empty {
+  opacity: 0.72;
+  background: rgba(8, 12, 24, 0.38);
+  border: 1.5px dashed rgba(140, 160, 200, 0.32);
+  box-shadow: none;
+  filter: none;
+}
+.spellSlot.empty .slotName,
+.spellSlot.empty .slotSweep,
+.spellSlot.empty .slotCast,
+.spellSlot.empty .slotBadge {
+  display: none;
+}
+.slotEmptyMark {
+  position: relative;
+  z-index: 2;
+  font-size: 18px;
+  font-weight: 500;
+  color: rgba(160, 180, 210, 0.38);
+  line-height: 1;
+  user-select: none;
+}
+.spellSlot.empty .slotKey {
+  color: rgba(158, 192, 255, 0.45);
+}
+
+/* Filled spell unknown / locked-empty (knowsSpark/Emberbolt false). */
+.spellSlot.unknown {
+  opacity: 0.72;
+  background: rgba(8, 12, 24, 0.38);
+  border: 1.5px dashed rgba(140, 160, 200, 0.32);
+  box-shadow: none;
+  filter: grayscale(0.35);
+}
+.spellSlot.unknown .slotName {
+  display: none;
+}
+.spellSlot.unknown .slotBadge {
+  display: none;
+}
+
+/* Staff unequipped — lock/STAFF, grayscale; distinct from OOM. */
 .spellSlot.disabled {
-  opacity: 0.42;
-  filter: grayscale(0.55);
-  border-color: rgba(255, 255, 255, 0.12);
+  opacity: 0.62;
+  filter: grayscale(0.9) brightness(0.72);
+  border-color: rgba(196, 168, 110, 0.65);
+  background: rgba(22, 18, 12, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.spellSlot.disabled .slotBadge {
+  display: inline-flex;
+  background: rgba(40, 32, 18, 0.92);
+  border: 1px solid rgba(196, 168, 110, 0.55);
+  color: #e6c98a;
+}
+.spellSlot.disabled .slotBadge::before {
+  content: "STAFF";
+}
+.spellSlot.disabled .slotName {
+  color: rgba(200, 190, 170, 0.7);
 }
 
 .spellSlot.onGcd {
-  border-color: rgba(106, 162, 255, 0.22);
+  border-color: rgba(120, 175, 255, 0.58);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(106, 162, 255, 0.22);
 }
 
 .spellSlot.casting {
-  border-color: rgba(255, 179, 71, 0.75);
-  box-shadow: 0 0 14px rgba(255, 140, 40, 0.35);
+  border-color: rgba(255, 186, 90, 0.92);
+  box-shadow:
+    0 0 16px rgba(255, 140, 40, 0.48),
+    inset 0 0 0 1px rgba(255, 210, 130, 0.4);
 }
 
 .slotKey {
@@ -262,6 +324,25 @@ body {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
+.slotBadge {
+  display: none;
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  z-index: 3;
+  min-width: 28px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 12px;
+  text-align: center;
+  pointer-events: none;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.7);
+}
+
+/* GCD scrub — thicker remaining-cooldown veil with bright top edge. */
 .slotSweep {
   position: absolute;
   left: 0;
@@ -269,11 +350,20 @@ body {
   bottom: 0;
   height: 0%;
   z-index: 1;
-  background: rgba(4, 8, 18, 0.72);
+  background: linear-gradient(
+    0deg,
+    rgba(2, 6, 16, 0.9) 0%,
+    rgba(6, 12, 26, 0.82) 72%,
+    rgba(28, 70, 150, 0.42) 100%
+  );
+  box-shadow:
+    inset 0 3px 0 0 rgba(150, 200, 255, 0.92),
+    inset 0 6px 10px rgba(70, 130, 230, 0.28);
   pointer-events: none;
   transition: height 40ms linear;
 }
 
+/* Cast fill — thicker amber progress with lit leading edge. */
 .slotCast {
   position: absolute;
   left: 0;
@@ -281,7 +371,15 @@ body {
   bottom: 0;
   height: 0%;
   z-index: 1;
-  background: linear-gradient(0deg, rgba(196, 90, 18, 0.55), rgba(255, 179, 71, 0.35));
+  background: linear-gradient(
+    0deg,
+    rgba(170, 55, 8, 0.82) 0%,
+    rgba(255, 130, 28, 0.7) 55%,
+    rgba(255, 210, 120, 0.62) 100%
+  );
+  box-shadow:
+    inset 0 3px 0 0 rgba(255, 236, 175, 0.98),
+    inset 0 0 14px rgba(255, 120, 30, 0.4);
   pointer-events: none;
   transition: height 40ms linear;
 }
@@ -522,6 +620,67 @@ body {
   line-height: 1.35;
 }
 
+
+
+
+/* Keybind legend overlay — toggle H / ?ve=keys (client-only). */
+#keysLegend {
+  position: absolute;
+  left: 50%;
+  top: 14%;
+  transform: translateX(-50%);
+  z-index: 14;
+  pointer-events: none;
+  width: min(580px, 94vw);
+  padding: 10px 12px 9px;
+  background: rgba(8, 12, 24, 0.88);
+  border: 1px solid rgba(196, 160, 106, 0.4);
+  border-radius: 10px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#keysLegend.hidden {
+  display: none;
+}
+
+#keysLegend .klRows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#keysLegend .klRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+#keysLegend .klChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #c8d6f0;
+  font-size: 12px;
+  line-height: 1.3;
+  padding: 2px 4px 2px 2px;
+}
+
+#keysLegend .klChip kbd {
+  display: inline-block;
+  color: #9ec0ff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid rgba(106, 162, 255, 0.35);
+  border-radius: 4px;
+  padding: 1px 6px;
+  background: rgba(20, 32, 56, 0.65);
+  min-width: 1.1em;
+  text-align: center;
+}
 
 /* Party member frames — compact roster under status (name/hex + HP + dist/pose). */
 #partyFrames {
@@ -1215,7 +1374,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Player death greyout overlay. */
+/* Player death greyout overlay — strong desaturation + dark vignette. */
 #deathGreyout {
   position: absolute;
   inset: 0;
@@ -1224,32 +1383,47 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(6, 8, 14, 0.55);
-  backdrop-filter: grayscale(0.85) brightness(0.55);
-  -webkit-backdrop-filter: grayscale(0.85) brightness(0.55);
+  background:
+    radial-gradient(ellipse at center, rgba(8, 6, 10, 0.42) 0%, rgba(2, 2, 6, 0.88) 72%, rgba(0, 0, 0, 0.94) 100%),
+    rgba(4, 5, 10, 0.72);
+  backdrop-filter: grayscale(1) brightness(0.32) contrast(1.05);
+  -webkit-backdrop-filter: grayscale(1) brightness(0.32) contrast(1.05);
 }
 #deathGreyout.hidden {
   display: none;
 }
 .deathGreyInner {
   text-align: center;
-  padding: 18px 28px;
-  border-radius: 10px;
-  background: rgba(10, 12, 20, 0.72);
-  border: 1px solid rgba(220, 120, 120, 0.45);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  padding: 22px 34px;
+  border-radius: 12px;
+  background: rgba(8, 8, 14, 0.88);
+  border: 1px solid rgba(255, 110, 110, 0.55);
+  box-shadow: 0 6px 36px rgba(0, 0, 0, 0.7), inset 0 0 24px rgba(80, 0, 0, 0.18);
 }
 .deathTitle {
-  color: #ffb0a8;
-  font-size: 22px;
+  color: #ffc2ba;
+  font-size: 28px;
   font-weight: 800;
-  letter-spacing: 0.04em;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.06em;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85), 0 0 18px rgba(255, 60, 60, 0.35);
 }
 .deathSub {
-  margin-top: 6px;
-  color: #c8d0e4;
-  font-size: 13px;
+  margin-top: 10px;
+  color: #e4eaf8;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.deathCountdown {
+  margin-top: 8px;
+  color: #fff6f0;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9), 0 0 20px rgba(255, 90, 70, 0.4);
 }
 
 
@@ -1290,12 +1464,41 @@ body {
   text-align: center;
 }
 
+/* OOM / low mana — blue mana tint + OOM badge; distinct from disabled. */
 .spellSlot.lowMana {
-  opacity: 0.42;
-  filter: saturate(0.45) brightness(0.75);
+  opacity: 0.88;
+  filter: none;
+  border-color: rgba(80, 140, 255, 0.78);
+  background: rgba(8, 18, 48, 0.9);
+  box-shadow: 0 0 12px rgba(50, 100, 255, 0.28);
 }
 .spellSlot.lowMana .slotName {
-  color: #9ab0ff;
+  color: #9ab4ff;
+}
+.spellSlot.lowMana .slotBadge {
+  display: inline-flex;
+  background: rgba(16, 36, 90, 0.95);
+  border: 1px solid rgba(100, 160, 255, 0.65);
+  color: #b8d0ff;
+}
+.spellSlot.lowMana .slotBadge::before {
+  content: "OOM";
+}
+/* Disabled (no staff) wins over lowMana if both classes present. */
+.spellSlot.disabled.lowMana {
+  opacity: 0.62;
+  filter: grayscale(0.9) brightness(0.72);
+  border-color: rgba(196, 168, 110, 0.65);
+  background: rgba(22, 18, 12, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+.spellSlot.disabled.lowMana .slotBadge {
+  background: rgba(40, 32, 18, 0.92);
+  border: 1px solid rgba(196, 168, 110, 0.55);
+  color: #e6c98a;
+}
+.spellSlot.disabled.lowMana .slotBadge::before {
+  content: "STAFF";
 }
 
 .sysToast.mana {
@@ -1349,3 +1552,6 @@ body {
 .sysToast.kick { border-color: rgba(255, 160, 60, 0.7); }
 .sysToast.kick .toastTag { color: #ffb03c; }
 .clLine.kick .clTag { color: #ffb03c; }
+.sysToast.stun { border-color: rgba(120, 200, 255, 0.75); }
+.sysToast.stun .toastTag { color: #7ec8ff; }
+.clLine.stun .clTag { color: #7ec8ff; }

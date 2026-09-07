@@ -26,7 +26,13 @@ import {
   CAST_HARD_INTERRUPT_REMAIN_MS,
   CAST_SILENCE_MS,
   CAST_RANGE_METERS,
+  KICK_MANA_COST,
+  KICK_RANGE_METERS,
+  STUN_MANA_COST,
+  STUN_RANGE_METERS,
+  STUN_DURATION_MS,
   castSilenceRemainingMs,
+  stunRemainingMs,
   isTargetOutOfCastRange,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
@@ -84,9 +90,12 @@ type NpcMesh = {
   body: Mesh;
   ring: Mesh;
   remoteRing: Mesh;
+  /** Overhead chevron for local selection reticule. */
+  marker: Mesh;
   mat: StandardMaterial;
   ringMat: StandardMaterial;
   remoteRingMat: StandardMaterial;
+  markerMat: StandardMaterial;
   nameplate: Nameplate | null;
 };
 
@@ -196,7 +205,17 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   if (label) label.textContent = `${target.hp}/${target.maxHp}`;
 }
 
-/** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana dim. */
+/** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots visible. */
+let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = null;
+
+/** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
+let veGcdPresent: null | {
+  gcdMs: number;
+  castingMs: number;
+  castingTotal: number;
+} = null;
+
+/** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana/empty affordances. */
 function updateSpellHotbar(opts: {
   gcdMs: number;
   castingMs: number;
@@ -206,16 +225,24 @@ function updateSpellHotbar(opts: {
   mana?: number;
   /** Selected target beyond Combat.CastRangeMeters — dim spells. */
   outOfRange?: boolean;
+  /** When false, treat filled slot as empty/unknown (client-only). */
+  knowsSpark?: boolean;
+  knowsEmberbolt?: boolean;
 }): void {
-  const gcdPct = opts.gcdMs > 0 ? Math.min(100, (opts.gcdMs / 1200) * 100) : 0;
+  const gcdMs = veGcdPresent?.gcdMs ?? opts.gcdMs;
+  const castingMs = veGcdPresent?.castingMs ?? opts.castingMs;
+  const castingTotal = veGcdPresent?.castingTotal ?? opts.castingTotal;
+  const castingSpell = veGcdPresent ? SPELL_EMBERBOLT : opts.castingSpell;
+  const staffEquipped = veGcdPresent ? true : opts.staffEquipped;
+  const gcdPct = gcdMs > 0 ? Math.min(100, (gcdMs / 1200) * 100) : 0;
   const castPct =
-    opts.castingTotal > 0 && opts.castingMs > 0
-      ? Math.min(100, ((opts.castingTotal - opts.castingMs) / opts.castingTotal) * 100)
+    castingTotal > 0 && castingMs > 0
+      ? Math.min(100, ((castingTotal - castingMs) / castingTotal) * 100)
       : 0;
   const castingEmber =
-    opts.castingSpell === SPELL_EMBERBOLT && opts.castingMs > 0 && opts.castingTotal > 0;
-  const mana = opts.mana ?? 999;
-  const oor = !!opts.outOfRange;
+    castingSpell === SPELL_EMBERBOLT && castingMs > 0 && castingTotal > 0;
+  const mana = veGcdPresent ? 999 : (opts.mana ?? 999);
+  const oor = veGcdPresent ? false : !!opts.outOfRange;
 
   const applySlot = (
     slotId: string,
@@ -223,30 +250,76 @@ function updateSpellHotbar(opts: {
     castId: string,
     isCastingThis: boolean,
     cost: number,
+    known: boolean,
   ) => {
     const slot = document.getElementById(slotId);
     const sweep = document.getElementById(sweepId);
     const cast = document.getElementById(castId);
     if (!slot || !sweep || !cast) return;
-    const lowMana = opts.staffEquipped && mana < cost;
+    if (!known) {
+      slot.classList.add('unknown');
+      slot.classList.remove('disabled', 'lowMana', 'outOfRange', 'onGcd', 'casting');
+      sweep.style.height = '0%';
+      cast.style.height = '0%';
+      return;
+    }
+    slot.classList.remove('unknown');
+    const lowMana = staffEquipped && mana < cost;
     const dimmed = lowMana || oor;
-    slot.classList.toggle('disabled', !opts.staffEquipped);
+    // Disabled (no staff) wins over lowMana — JS only sets lowMana when staff equipped.
+    slot.classList.toggle('disabled', !staffEquipped);
     slot.classList.toggle('lowMana', lowMana);
-    slot.classList.toggle('outOfRange', oor && opts.staffEquipped && !lowMana);
-    slot.classList.toggle('onGcd', opts.gcdMs > 0 && opts.staffEquipped && !dimmed);
-    slot.classList.toggle('casting', isCastingThis && opts.staffEquipped && !dimmed);
-    sweep.style.height = opts.staffEquipped && !dimmed ? `${gcdPct}%` : '0%';
+    slot.classList.toggle('outOfRange', oor && staffEquipped && !lowMana);
+    slot.classList.toggle('onGcd', gcdMs > 0 && staffEquipped && !dimmed);
+    slot.classList.toggle('casting', isCastingThis && staffEquipped && !dimmed);
+    sweep.style.height = staffEquipped && !dimmed ? `${gcdPct}%` : '0%';
     cast.style.height =
-      isCastingThis && opts.staffEquipped && !dimmed ? `${castPct}%` : '0%';
+      isCastingThis && staffEquipped && !dimmed ? `${castPct}%` : '0%';
   };
 
-  applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST);
+  const knowsSpark = opts.knowsSpark ?? true;
+  const knowsEmberbolt = opts.knowsEmberbolt ?? true;
+
+  if (veHotbarPresent) {
+    // Proof seed: Spark shows STAFF (disabled), Emberbolt shows OOM; empty 3–6 stay empty.
+    applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST, true);
+    const spark = document.getElementById('slotSpark');
+    if (spark) {
+      spark.classList.remove('unknown', 'lowMana', 'outOfRange', 'onGcd', 'casting');
+      spark.classList.toggle('disabled', veHotbarPresent.sparkDisabled);
+    }
+    applySlot(
+      'slotEmberbolt',
+      'sweepEmberbolt',
+      'castEmberbolt',
+      false,
+      EMBERBOLT_MANA_COST,
+      true,
+    );
+    const ember = document.getElementById('slotEmberbolt');
+    if (ember) {
+      ember.classList.remove('unknown', 'disabled', 'outOfRange', 'onGcd', 'casting');
+      ember.classList.toggle('lowMana', veHotbarPresent.emberLowMana);
+    }
+    const sweepE = document.getElementById('sweepEmberbolt');
+    const castE = document.getElementById('castEmberbolt');
+    const sweepS = document.getElementById('sweepSpark');
+    const castS = document.getElementById('castSpark');
+    if (sweepS) sweepS.style.height = '0%';
+    if (castS) castS.style.height = '0%';
+    if (sweepE) sweepE.style.height = '0%';
+    if (castE) castE.style.height = '0%';
+    return;
+  }
+
+  applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST, knowsSpark);
   applySlot(
     'slotEmberbolt',
     'sweepEmberbolt',
     'castEmberbolt',
     castingEmber,
     EMBERBOLT_MANA_COST,
+    knowsEmberbolt,
   );
 }
 
@@ -322,15 +395,101 @@ function updateSelfFrame(character: {
   }
 }
 
-function setDeathGreyout(on: boolean, sub?: string): void {
+/** Mirror Combat.RespawnDelayMs — client display only, do not import shared C#. */
+const RESPAWN_DELAY_MS = 2500;
+let deathCountdownTimer: number | null = null;
+let deathCountdownEndsAt = 0;
+
+function clearDeathCountdown(): void {
+  if (deathCountdownTimer != null) {
+    window.clearInterval(deathCountdownTimer);
+    deathCountdownTimer = null;
+  }
+  deathCountdownEndsAt = 0;
+  const dig = document.getElementById('deathCountdown');
+  if (dig) {
+    dig.textContent = '';
+    dig.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function formatRespawnCountdown(remainMs: number): { sub: string; digit: string } {
+  if (remainMs <= 0) {
+    return { sub: 'Respawning at yard…', digit: '' };
+  }
+  const sec = remainMs / 1000;
+  const rounded = Math.max(0.1, Math.round(sec * 10) / 10);
+  const whole = Math.ceil(rounded);
+  const label =
+    rounded >= 1
+      ? `Respawn in ${Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)}s…`
+      : `Respawn in ${rounded.toFixed(1)}s…`;
+  const digit = rounded >= 1 ? String(whole) : rounded.toFixed(1);
+  return { sub: label, digit };
+}
+
+function tickDeathCountdown(): void {
+  const remain = deathCountdownEndsAt - Date.now();
+  const { sub, digit } = formatRespawnCountdown(remain);
+  const subEl = document.getElementById('deathSub');
+  if (subEl) subEl.textContent = sub;
+  const dig = document.getElementById('deathCountdown');
+  if (dig) {
+    if (digit) {
+      dig.textContent = digit;
+      dig.setAttribute('aria-hidden', 'false');
+    } else {
+      dig.textContent = '';
+      dig.setAttribute('aria-hidden', 'true');
+    }
+  }
+  if (remain <= 0) {
+    clearDeathCountdown();
+    if (subEl) subEl.textContent = 'Respawning at yard…';
+  }
+}
+
+function startDeathCountdown(delayMs: number = RESPAWN_DELAY_MS): void {
+  clearDeathCountdown();
+  deathCountdownEndsAt = Date.now() + delayMs;
+  tickDeathCountdown();
+  deathCountdownTimer = window.setInterval(tickDeathCountdown, 100);
+}
+
+/** Show/hide death greyout. When on without a freeze sub, runs live respawn countdown. */
+function setDeathGreyout(
+  on: boolean,
+  sub?: string,
+  opts?: { countdown?: boolean; freezeSub?: boolean },
+): void {
   const el = document.getElementById('deathGreyout');
   if (!el) return;
   if (on) {
     el.classList.remove('hidden');
     el.setAttribute('aria-hidden', 'false');
-    const subEl = document.getElementById('deathSub');
-    if (subEl && sub) subEl.textContent = sub;
+    if (opts?.freezeSub && sub) {
+      clearDeathCountdown();
+      const subEl = document.getElementById('deathSub');
+      if (subEl) subEl.textContent = sub;
+      const dig = document.getElementById('deathCountdown');
+      if (dig) {
+        const m = /Respawn in\s+([\d.]+)/i.exec(sub);
+        dig.textContent = m ? String(Math.ceil(Number(m[1]))) : '2';
+        dig.setAttribute('aria-hidden', 'false');
+      }
+      return;
+    }
+    const wantCountdown = opts?.countdown !== false;
+    if (wantCountdown) {
+      if (deathCountdownTimer == null) startDeathCountdown();
+      else tickDeathCountdown();
+    } else {
+      clearDeathCountdown();
+      const subEl = document.getElementById('deathSub');
+      if (subEl && sub) subEl.textContent = sub;
+    }
   } else {
+    clearDeathCountdown();
     el.classList.add('hidden');
     el.setAttribute('aria-hidden', 'true');
   }
@@ -478,6 +637,12 @@ function setBagPanelOpen(open: boolean): void {
   panel.classList.toggle('hidden', !open);
 }
 
+function setKeysLegendOpen(open: boolean): void {
+  const panel = document.getElementById('keysLegend');
+  if (!panel) return;
+  panel.classList.toggle('hidden', !open);
+}
+
 /** Compact party member frames: hex + leader tag + distance / pose hint. */
 function setVendorPanelOpen(open: boolean): void {
   const panel = document.getElementById('vendorPanel');
@@ -598,6 +763,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'castHardInterrupt'
   | 'silenced'
   | 'kick'
+  | 'stun'
   | 'outOfRange';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
@@ -638,9 +804,13 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                 ? 'LOCKOUT'
                                 : kind === 'silenced'
                                   ? 'SILENCE'
-                                  : kind === 'outOfRange'
-                                    ? 'RANGE'
-                                    : 'RESPAWN';
+                                  : kind === 'kick'
+                                    ? 'KICK'
+                                    : kind === 'stun'
+                                      ? 'STUN'
+                                      : kind === 'outOfRange'
+                                        ? 'RANGE'
+                                        : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -694,6 +864,7 @@ type SystemToastKind =
   | 'castHardInterrupt'
   | 'silenced'
   | 'kick'
+  | 'stun'
   | 'outOfRange';
 
 /** Client-only transient top-center system toasts. */
@@ -753,6 +924,8 @@ function pushSystemToast(
                                             ? 'SILENCE'
                                             : kind === 'kick'
                                             ? 'KICK'
+                                            : kind === 'stun'
+                                            ? 'STUN'
                                             : kind === 'outOfRange'
                                               ? 'RANGE'
                                               : 'SAY';
@@ -1249,7 +1422,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · Esc cancel cast · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top · mana pool · cast cancel · silence',
+      'keys: H legend · WASD · RMB · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1345,6 +1518,63 @@ function createScene(engine: Engine): {
   return { scene, camera, player, humanoid, proxySource, setLocalGhost };
 }
 
+
+/** Client-only ground indicator: cast-reach disc+torus around the local player. */
+type CastRangeRing = {
+  root: Mesh;
+  disc: Mesh;
+  rim: Mesh;
+  discMat: StandardMaterial;
+  rimMat: StandardMaterial;
+};
+
+function createCastRangeRing(scene: Scene): CastRangeRing {
+  const root = new Mesh('castRangeRing', scene);
+  root.isPickable = false;
+
+  const disc = MeshBuilder.CreateDisc(
+    'castRangeDisc',
+    { radius: CAST_RANGE_METERS, tessellation: 64 },
+    scene,
+  );
+  disc.parent = root;
+  disc.rotation.x = Math.PI / 2;
+  disc.position.y = 0.03;
+  disc.isPickable = false;
+  const discMat = new StandardMaterial('castRangeDiscMat', scene);
+  discMat.diffuseColor = new Color3(0.95, 0.28, 0.18);
+  discMat.emissiveColor = new Color3(0.55, 0.12, 0.06);
+  discMat.specularColor = new Color3(0.05, 0.02, 0.01);
+  discMat.alpha = 0.18;
+  discMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+  discMat.backFaceCulling = false;
+  discMat.disableLighting = true;
+  disc.material = discMat;
+
+  const rim = MeshBuilder.CreateTorus(
+    'castRangeRim',
+    {
+      diameter: CAST_RANGE_METERS * 2,
+      thickness: 0.22,
+      tessellation: 64,
+    },
+    scene,
+  );
+  rim.parent = root;
+  rim.position.y = 0.06;
+  rim.rotation.x = Math.PI / 2;
+  rim.isPickable = false;
+  const rimMat = new StandardMaterial('castRangeRimMat', scene);
+  rimMat.diffuseColor = new Color3(1.0, 0.35, 0.18);
+  rimMat.emissiveColor = new Color3(0.95, 0.28, 0.1);
+  rimMat.specularColor = new Color3(0.2, 0.08, 0.04);
+  rimMat.disableLighting = true;
+  rim.material = rimMat;
+
+  root.setEnabled(false);
+  return { root, disc, rim, discMat, rimMat };
+}
+
 function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   const root = new Mesh(`npc_${npc.npcId}`, scene);
   root.position = new Vector3(npc.x, 0, npc.z);
@@ -1371,23 +1601,25 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   mat.specularColor = new Color3(0.1, 0.1, 0.1);
   body.material = mat;
 
+  // Local selection reticule — thicker/brighter gold torus (distinct from remote cyan).
   const ring = MeshBuilder.CreateTorus(
     `npcRing_${npc.npcId}`,
-    { diameter: 1.4, thickness: 0.06, tessellation: 32 },
+    { diameter: 1.55, thickness: 0.12, tessellation: 36 },
     scene,
   );
   ring.parent = root;
-  ring.position.y = 0.05;
+  ring.position.y = 0.06;
   ring.rotation.x = Math.PI / 2;
   const ringMat = new StandardMaterial(`npcRingMat_${npc.npcId}`, scene);
   ringMat.diffuseColor = new Color3(0.2, 0.2, 0.2);
   ringMat.emissiveColor = new Color3(0, 0, 0);
+  ringMat.specularColor = new Color3(0.35, 0.28, 0.08);
   ring.material = ringMat;
   ring.setEnabled(false);
 
   const remoteRing = MeshBuilder.CreateTorus(
     `npcRemoteRing_${npc.npcId}`,
-    { diameter: 1.7, thickness: 0.05, tessellation: 32 },
+    { diameter: 1.85, thickness: 0.05, tessellation: 32 },
     scene,
   );
   remoteRing.parent = root;
@@ -1399,6 +1631,23 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   remoteRing.material = remoteRingMat;
   remoteRing.setEnabled(false);
 
+  // Overhead chevron (tip down) — readable without neon spam.
+  const marker = MeshBuilder.CreateCylinder(
+    `npcMark_${npc.npcId}`,
+    { height: 0.34, diameterTop: 0, diameterBottom: 0.28, tessellation: 6 },
+    scene,
+  );
+  marker.parent = root;
+  marker.position.y = 2.55;
+  marker.rotation.z = Math.PI; // tip points at dummy
+  marker.isPickable = false;
+  const markerMat = new StandardMaterial(`npcMarkMat_${npc.npcId}`, scene);
+  markerMat.diffuseColor = new Color3(0.95, 0.78, 0.2);
+  markerMat.emissiveColor = new Color3(0.75, 0.55, 0.08);
+  markerMat.specularColor = new Color3(0.2, 0.15, 0.04);
+  marker.material = markerMat;
+  marker.setEnabled(false);
+
   let nameplate: Nameplate | null = null;
   if (isDummy) {
     nameplate = createNameplate(scene, `npc_${npc.npcId}`);
@@ -1407,7 +1656,18 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     paintNameplate(nameplate, 'Dummy', '#e8c89a', npc.maxHp > 0 ? npc.hp / npc.maxHp : 1);
   }
 
-  return { root, body, ring, remoteRing, mat, ringMat, remoteRingMat, nameplate };
+  return {
+    root,
+    body,
+    ring,
+    remoteRing,
+    marker,
+    mat,
+    ringMat,
+    remoteRingMat,
+    markerMat,
+    nameplate,
+  };
 }
 
 
@@ -1452,12 +1712,14 @@ function bindInput(opts: {
   onUnequipRobes: () => void;
   onEquipRobes: () => void;
   onToggleBag: () => void;
+  onToggleKeysLegend: () => void;
   onVendorInteract: () => void;
   onPickupNearest: () => void;
   onUseYardTonic: () => void;
   onRest: () => void;
   onCancelCast: () => void;
   onKick: () => void;
+  onStun: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -1487,6 +1749,11 @@ function bindInput(opts: {
     if (e.key === '3') {
       e.preventDefault();
       opts.onKick();
+      return;
+    }
+    if (e.key === '4') {
+      e.preventDefault();
+      opts.onStun();
       return;
     }
     if (k === 'p') {
@@ -1532,6 +1799,11 @@ function bindInput(opts: {
     if (k === 'b') {
       e.preventDefault();
       opts.onToggleBag();
+      return;
+    }
+    if (k === 'h') {
+      e.preventDefault();
+      opts.onToggleKeysLegend();
       return;
     }
     if (k === 'e') {
@@ -1882,6 +2154,7 @@ function beginNpcDeathFx(
   mesh.mat.transparencyMode = 2; // ALPHA_BLEND
   mesh.ring.setEnabled(false);
   mesh.remoteRing.setEnabled(false);
+  mesh.marker.setEnabled(false);
   if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
   const at = mesh.root.position.clone();
   at.y += 0.8;
@@ -1939,9 +2212,11 @@ async function main(): Promise<void> {
     stencil: true,
   });
   const { scene, camera, player, humanoid, proxySource, setLocalGhost } = createScene(engine);
+  const castRangeRing = createCastRangeRing(scene);
 
   let net: GameNet | null = null;
   let bagOpen = false;
+  let keysLegendOpen = false;
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
@@ -2483,6 +2758,10 @@ async function main(): Promise<void> {
       bagOpen = !bagOpen;
       setBagPanelOpen(bagOpen);
     },
+    onToggleKeysLegend: () => {
+      keysLegendOpen = !keysLegendOpen;
+      setKeysLegendOpen(keysLegendOpen);
+    },
     onVendorInteract: () => {
       if (!net) return;
       const near = net.nearestVendor(4.5);
@@ -2688,6 +2967,24 @@ async function main(): Promise<void> {
         pushSystemToast('rate', msg.slice(0, 96) || 'Kick failed');
       });
     },
+    onStun: () => {
+      if (!net) return;
+      const ch = net.getCharacter();
+      if (!ch || ch.hp <= 0) { pushSystemToast('rate', 'Cannot stun while dead'); return; }
+      if ((ch.mana ?? 0) < STUN_MANA_COST) {
+        pushSystemToast('mana', `Insufficient mana · need ${STUN_MANA_COST}`, TOAST_VE_TTL_MS);
+        return;
+      }
+      void net.stunNearestRemote().then((hex) => {
+        if (!hex) { pushSystemToast('rate', 'No remote in Stun range'); return; }
+        const bit = `Stun · Bash ${hex.slice(0, 8)}… · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s (not silence)`;
+        pushCombatLog('stun', bit);
+        pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Stun failed');
+      });
+    },
   });
 
   bindChatUi({
@@ -2864,20 +3161,39 @@ async function main(): Promise<void> {
       const remoteSelected =
         isAlive &&
         latestRemoteCombats.some((rc) => rc.targetNpcId === npc.npcId);
-      // Suppress rings while dying; keep corpse non-targetable visually.
+      // Suppress rings/marker while dying; keep corpse non-targetable visually.
       if (fx?.phase === 'dying') {
         mesh.ring.setEnabled(false);
         mesh.remoteRing.setEnabled(false);
+        mesh.marker.setEnabled(false);
       } else {
         mesh.ring.setEnabled(selected);
+        mesh.marker.setEnabled(selected);
         mesh.remoteRing.setEnabled(remoteSelected && !selected);
       }
       if (fx?.phase === 'spawning') {
         // Emissive flash owned by respawn FX until it finishes.
       } else if (selected) {
-        mesh.ringMat.emissiveColor = new Color3(0.95, 0.75, 0.2);
-        mesh.ringMat.diffuseColor = new Color3(0.95, 0.75, 0.2);
-        mesh.mat.emissiveColor = new Color3(0.15, 0.1, 0.02);
+        const poseSel = net?.getLocalPose() ?? {
+          x: player.position.x,
+          z: player.position.z,
+        };
+        const oorSel = isTargetOutOfCastRange(poseSel, npc);
+        if (oorSel) {
+          // Out-of-cast-range: coral warning reticule (paired with ground reach ring).
+          mesh.ringMat.emissiveColor = new Color3(1.15, 0.32, 0.12);
+          mesh.ringMat.diffuseColor = new Color3(1.0, 0.38, 0.16);
+          mesh.markerMat.emissiveColor = new Color3(1.05, 0.35, 0.12);
+          mesh.markerMat.diffuseColor = new Color3(0.98, 0.4, 0.18);
+          mesh.mat.emissiveColor = new Color3(0.32, 0.08, 0.04);
+        } else {
+          mesh.ringMat.emissiveColor = new Color3(1.15, 0.88, 0.18);
+          mesh.ringMat.diffuseColor = new Color3(1.0, 0.82, 0.22);
+          mesh.markerMat.emissiveColor = new Color3(1.05, 0.8, 0.15);
+          mesh.markerMat.diffuseColor = new Color3(0.98, 0.8, 0.2);
+          // Stronger body tint so tab-target reads even at glancing angles.
+          mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
+        }
         // Local gold wins; still hint remote interest with outer cyan.
         mesh.remoteRing.setEnabled(remoteSelected);
         if (remoteSelected) {
@@ -2887,9 +3203,11 @@ async function main(): Promise<void> {
         mesh.remoteRingMat.emissiveColor = new Color3(0.15, 0.7, 0.85);
         mesh.remoteRingMat.diffuseColor = new Color3(0.2, 0.85, 0.95);
         mesh.mat.emissiveColor = new Color3(0.02, 0.08, 0.12);
+        mesh.marker.setEnabled(false);
       } else if (fx?.phase !== 'dying') {
         mesh.ringMat.emissiveColor = new Color3(0, 0, 0);
         mesh.mat.emissiveColor = new Color3(0, 0, 0);
+        mesh.marker.setEnabled(false);
       }
     }
     for (const [key, mesh] of npcMeshes) {
@@ -2929,6 +3247,42 @@ async function main(): Promise<void> {
     };
     tickFloaters(damageFloaters);
     tickFloaters(xpFloaters);
+
+    // Local selection reticule pulse (scale + emissive) — skip while death/respawn owns root scale.
+    for (const [npcKey, mesh] of npcMeshes) {
+      const life = npcLifeFx.get(npcKey);
+      const animating = !!life && (life.phase === 'dying' || life.phase === 'spawning');
+      if (mesh.ring.isEnabled() && !animating) {
+        const pulse = 0.94 + 0.08 * Math.sin(now / 210);
+        mesh.ring.scaling.set(pulse, 1, pulse);
+        const posePulse = net?.getLocalPose() ?? {
+          x: player.position.x,
+          z: player.position.z,
+        };
+        const npcPulse = (net?.getNpcs() ?? []).find(
+          (n) => n.npcId.toString() === npcKey,
+        );
+        const oorPulse = !!(
+          npcPulse && isTargetOutOfCastRange(posePulse, npcPulse)
+        );
+        const e = 0.95 + 0.35 * (0.5 + 0.5 * Math.sin(now / 210));
+        mesh.ringMat.emissiveColor = oorPulse
+          ? new Color3(e, e * 0.32, 0.1)
+          : new Color3(e, e * 0.76, 0.12);
+        if (mesh.marker.isEnabled()) {
+          mesh.marker.position.y = 2.55 + 0.07 * Math.sin(now / 260);
+          const me = 0.75 + 0.35 * (0.5 + 0.5 * Math.sin(now / 260));
+          mesh.markerMat.emissiveColor = oorPulse
+            ? new Color3(me, me * 0.34, 0.1)
+            : new Color3(me, me * 0.74, 0.1);
+        }
+      } else {
+        mesh.ring.scaling.setAll(1);
+        if (!mesh.marker.isEnabled()) {
+          mesh.marker.position.y = 2.55;
+        }
+      }
+    }
 
     // Cast projectile / beam polish: Spark bolts + impact pops + local Emberbolt beam.
     {
@@ -3188,6 +3542,9 @@ async function main(): Promise<void> {
           staffEquipped: equipped,
           mana: st.state === 'connected' ? (st.character?.mana ?? 0) : 999,
           outOfRange: isTargetOutOfCastRange(poseHb, tgtHb),
+          knowsSpark: st.state === 'connected' ? (st.character?.knowsSpark ?? true) : true,
+          knowsEmberbolt:
+            st.state === 'connected' ? (st.character?.knowsEmberbolt ?? true) : true,
         });
       }
       const ch =
@@ -3270,22 +3627,22 @@ async function main(): Promise<void> {
           if (prevPlayerHp === null) {
             prevPlayerHp = ch.hp;
             if (ch.hp <= 0) {
-              setDeathGreyout(true, 'Respawning at yard…');
+              setDeathGreyout(true);
               setLocalGhost(true);
             }
           } else if (ch.hp <= 0 && prevPlayerHp > 0) {
-            setDeathGreyout(true, 'Respawning at yard…');
+            setDeathGreyout(true);
             setLocalGhost(true);
-            pushCombatLog('death', 'You died');
-            pushSystemToast('death', 'You died · respawning', TOAST_VE_TTL_MS);
+            pushCombatLog('death', 'You died · respawning at yard');
+            pushSystemToast('death', 'You died · respawning at yard', TOAST_VE_TTL_MS);
             selectedTargetId = 0n;
             latestPlayerDeathAtMs = Date.now();
             prevPlayerHp = ch.hp;
           } else if (ch.hp > 0 && prevPlayerHp <= 0) {
             setDeathGreyout(false);
             setLocalGhost(false);
-            pushCombatLog('respawn', 'You respawned at yard');
-            pushSystemToast('respawn', 'Respawned · full HP', TOAST_VE_TTL_MS);
+            pushCombatLog('respawn', 'You respawned at yard · full HP');
+            pushSystemToast('respawn', 'Respawned at yard · full HP', TOAST_VE_TTL_MS);
             flashMesh(humanoid.mat, new Color3(0.55, 0.85, 1.0), 900);
             latestPlayerRespawnAtMs = Date.now();
             prevPlayerHp = ch.hp;
@@ -3487,6 +3844,35 @@ async function main(): Promise<void> {
       }
     }
 
+
+    // Cast-range ground ring: show player reach when selected target is beyond CastRangeMeters.
+    {
+      const combatCr = net?.getCombat() ?? null;
+      const tidCr = combatCr?.targetNpcId ?? selectedTargetId;
+      const poseCr = net?.getLocalPose() ?? {
+        x: player.position.x,
+        z: player.position.z,
+      };
+      const tgtCr =
+        tidCr && tidCr !== 0n
+          ? (net?.getNpcs() ?? []).find((n) => n.npcId === tidCr) ?? null
+          : null;
+      const showRing =
+        !!tgtCr &&
+        tgtCr.hp > 0 &&
+        isTargetOutOfCastRange(poseCr, tgtCr);
+      castRangeRing.root.setEnabled(showRing);
+      if (showRing) {
+        castRangeRing.root.position.x = player.position.x;
+        castRangeRing.root.position.y = 0;
+        castRangeRing.root.position.z = player.position.z;
+        const pulse = 0.97 + 0.05 * Math.sin(now / 240);
+        castRangeRing.rim.scaling.set(pulse, 1, pulse);
+        const e = 0.85 + 0.25 * (0.5 + 0.5 * Math.sin(now / 240));
+        castRangeRing.rimMat.emissiveColor = new Color3(e, e * 0.3, 0.08);
+        castRangeRing.discMat.alpha = 0.14 + 0.06 * (0.5 + 0.5 * Math.sin(now / 320));
+      }
+    }
 
     camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
     scene.render();
@@ -4612,9 +4998,27 @@ async function main(): Promise<void> {
         nameOk &&
         hotbar &&
         castSent &&
-        (gcdLeftNow > 0 || castUntilMs > Date.now())
+        (gcdLeftNow > 0 || castUntilMs > Date.now() || veHotbarPresent)
       ) {
-        if (mark) {
+        // Seed distinct affordances for hotbar proof: empty 3–6 + Spark STAFF + Emberbolt OOM.
+        if (ve === 'hotbar') {
+          veHotbarPresent = { sparkDisabled: true, emberLowMana: true };
+          updateSpellHotbar({
+            gcdMs: 0,
+            castingMs: 0,
+            castingTotal: 0,
+            castingSpell: 0,
+            staffEquipped: true,
+            mana: 0,
+            knowsSpark: true,
+            knowsEmberbolt: true,
+          });
+          const emptyCount = hotbar.querySelectorAll('.spellSlot.empty').length;
+          if (mark) {
+            mark.textContent =
+              `Hotbar OK · empty ${emptyCount} · Spark STAFF (disabled) · Emberbolt OOM · target Dummy #${dummy.npcId}`;
+          }
+        } else if (mark) {
           mark.textContent = `Hotbar OK · target Dummy #${dummy.npcId} HP ${dummy.hp}/${dummy.maxHp} · Spark/Emberbolt slots · GCD ${(gcdLeftNow / 1000).toFixed(1)}s`;
         }
         return;
@@ -4629,6 +5033,200 @@ async function main(): Promise<void> {
       window.setTimeout(waitHotbar, 200);
     };
     window.setTimeout(waitHotbar, 700);
+  }
+
+  // ?ve=gcd — thicker GCD sweep + Emberbolt cast fill readability (presentation seed).
+  if (ve === 'gcd') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'gcd') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE gcd: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let castSent = false;
+    const waitGcd = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 5.5) {
+          const step = Math.min(MAX_STEP_METERS, dist - 3.5);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.2,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 11;
+      }
+      if (st.state === 'connected' && dummy && !castSent) {
+        const ch = net.getCharacter();
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          window.setTimeout(waitGcd, 250);
+          return;
+        }
+        // Kick a live Emberbolt so GCD + cast are in flight, then seed mid-progress for the shot.
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          lastCastSpell = SPELL_EMBERBOLT;
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+          net.cast(SPELL_EMBERBOLT);
+          castSent = true;
+        }
+      }
+      const hotbar = document.getElementById('spellHotbar');
+      const combat = net.getCombat();
+      const gcdLive = gcdRemainingMs(combat);
+      const castLive = Math.max(0, castUntilMs - Date.now());
+      // Prefer presentation seed once Connected (Dummy optional — hotbar readability is the proof).
+      if (st.state === 'connected' && hotbar && (castSent || ticks > 8)) {
+        // Presentation seed: mid GCD scrub + mid Emberbolt fill — readable for screenshot.
+        const seedGcd = Math.max(720, gcdLive || 780);
+        const seedCastLeft = Math.max(550, Math.min(EMBERBOLT_CAST_MS - 200, castLive || 700));
+        veGcdPresent = {
+          gcdMs: seedGcd,
+          castingMs: seedCastLeft,
+          castingTotal: EMBERBOLT_CAST_MS,
+        };
+        const ch = net.getCharacter();
+        updateSpellHotbar({
+          gcdMs: seedGcd,
+          castingMs: seedCastLeft,
+          castingTotal: EMBERBOLT_CAST_MS,
+          castingSpell: SPELL_EMBERBOLT,
+          staffEquipped: true,
+          mana: 999,
+          knowsSpark: true,
+          knowsEmberbolt: true,
+        });
+        const sweepPct = Math.min(100, Math.round((seedGcd / 1200) * 100));
+        const castPct = Math.min(
+          100,
+          Math.round(((EMBERBOLT_CAST_MS - seedCastLeft) / EMBERBOLT_CAST_MS) * 100),
+        );
+        const dummyBit = dummy ? `Dummy #${dummy.npcId}` : 'no Dummy';
+        if (mark) {
+          mark.textContent =
+            `GCD OK · sweep ${sweepPct}% · Emberbolt cast ${castPct}% · ${dummyBit}`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE gcd: Connected · dummy ${dummy ? 'yes' : 'no'} · castSent=${castSent} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE gcd: timed out waiting for GCD/cast proof';
+        return;
+      }
+      window.setTimeout(waitGcd, 200);
+    };
+    window.setTimeout(waitGcd, 700);
+  }
+
+  // ?ve=reticule — select Dummy; prove gold selection reticule + overhead marker.
+  if (ve === 'reticule') {
+    camera.radius = 8.5;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.4; // slightly higher so ground ring reads
+  }
+  if (net && ve === 'reticule') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE reticule: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitReticule = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        // Close the gap so player + Dummy share the frame with the ring readable.
+        if (dist > 4.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - 2.8);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        // Bias target toward Dummy so gold ring + overhead marker dominate the shot.
+        camera.setTarget(
+          new Vector3(
+            player.position.x * 0.28 + dummy.x * 0.72,
+            1.25,
+            player.position.z * 0.28 + dummy.z * 0.72,
+          ),
+        );
+        camera.radius = 8.5;
+        camera.beta = Math.PI / 3.35;
+      }
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const markerOn = !!(mesh && mesh.marker.isEnabled());
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        ringOn &&
+        markerOn &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent = `Reticule OK · Dummy #${dummy.npcId} · gold ring+marker · HP ${dummy.hp}/${dummy.maxHp}`;
+        }
+        // Hold a few ticks so pulse/marker settle in the VE screenshot.
+        if (okTicks < 8 && ticks < 140) {
+          window.setTimeout(waitReticule, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE reticule: Connected · dummy ${dummy ? 'yes' : 'no'} · ring ${ringOn ? 'on' : 'off'} · marker ${markerOn ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE reticule: timed out waiting for selection reticule + marker';
+        return;
+      }
+      window.setTimeout(waitReticule, 200);
+    };
+    window.setTimeout(waitReticule, 700);
+  }
+
+  // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.
+  if (ve === 'keys') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    keysLegendOpen = true;
+    setKeysLegendOpen(true);
+    const mark = document.getElementById('persistMark');
+    const panel = document.getElementById('keysLegend');
+    const chips = panel ? panel.querySelectorAll('.klChip').length : 0;
+    if (mark) {
+      mark.textContent =
+        `Keys legend OK · H toggles · ${chips} binds · WASD/RMB/Tab/1-2/Esc · B/U/I/J/K · P/O/T/Y · E/F/V/R · Enter`;
+    }
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
@@ -6620,7 +7218,7 @@ async function main(): Promise<void> {
       if (ch && ch.hp <= 0) {
         sawDeath = true;
         phase = 'dead';
-        setDeathGreyout(true, 'Respawning at yard…');
+        setDeathGreyout(true);
       }
 
       // Prefer screenshot while dead (greyout + empty-ish HP) before respawn clears it.
@@ -6631,7 +7229,7 @@ async function main(): Promise<void> {
         ((ch?.hp ?? 1) <= 0 || deathFresh)
       ) {
         phase = 'done';
-        setDeathGreyout(true, 'Respawning at yard…');
+        setDeathGreyout(true);
         if (mark) {
           mark.textContent =
             `Player HP OK · You died · greyout · ghost · self HP ${hpLabel || (ch ? `${ch.hp}/${ch.maxHp}` : '—')} · casts ${casts}`;
@@ -6639,7 +7237,7 @@ async function main(): Promise<void> {
         }
         // Keep re-asserting greyout so a fast respawn still shows for the shot.
         const hold = () => {
-          setDeathGreyout(true, 'Respawning at yard…');
+          setDeathGreyout(true);
           setLocalGhost(true);
           window.setTimeout(hold, 200);
         };
@@ -6734,6 +7332,153 @@ async function main(): Promise<void> {
       window.setTimeout(waitHp, 140);
     };
     window.setTimeout(waitHp, 600);
+  }
+
+  // ?ve=death-ux — stronger greyout + live respawn countdown + clearer death toast; hold for shot.
+  if (ve === 'death-ux') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'death-ux') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE death-ux: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let casts = 0;
+    let lastCastAt = 0;
+    let sawDeath = false;
+    let phase: 'kill' | 'dead' | 'done' = 'kill';
+    const waitDeathUx = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE death-ux: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitDeathUx, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE death-ux: equipping staff…';
+        window.setTimeout(waitDeathUx, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      const deathFresh =
+        latestPlayerDeathAtMs > 0 && Date.now() - latestPlayerDeathAtMs < 12000;
+      const grey = document.getElementById('deathGreyout');
+      const greyOn = !!grey && !grey.classList.contains('hidden');
+      const toastDeath = toastKindsPresent().has('death');
+      const subText = document.getElementById('deathSub')?.textContent ?? '';
+      const countdownOk = /Respawn in\s+[\d.]+s/i.test(subText) || /Respawning/i.test(subText);
+      const digText = document.getElementById('deathCountdown')?.textContent ?? '';
+
+      if (phase === 'done') return;
+
+      const ch = net.getCharacter();
+      if (ch && ch.hp <= 0) {
+        sawDeath = true;
+        phase = 'dead';
+        setDeathGreyout(true);
+      }
+
+      if (
+        sawDeath &&
+        greyOn &&
+        toastDeath &&
+        countdownOk &&
+        ((ch?.hp ?? 1) <= 0 || deathFresh)
+      ) {
+        phase = 'done';
+        // Freeze a clear mid-countdown frame for the screenshot.
+        setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
+        setLocalGhost(true);
+        if (mark) {
+          mark.textContent =
+            `Death UX OK · greyout · countdown · toast` +
+            (digText || subText ? ` · ${digText || subText}` : '') +
+            ` · casts ${casts}`;
+        }
+        const hold = () => {
+          setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
+          setLocalGhost(true);
+          window.setTimeout(hold, 200);
+        };
+        hold();
+        return;
+      }
+
+      if (phase === 'dead') {
+        if (mark) {
+          mark.textContent =
+            `VE death-ux: dead · grey=${greyOn ? 'y' : 'n'} toast=${toastDeath ? 'y' : 'n'} ` +
+            `cd=${countdownOk ? 'y' : 'n'} · ${subText || '—'} · waiting shot…`;
+        }
+        if (ticks < 360) window.setTimeout(waitDeathUx, 120);
+        return;
+      }
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE death-ux: seeding dummy…';
+        window.setTimeout(waitDeathUx, 350);
+        return;
+      }
+      const cycle = net.getTargetCycle();
+      let dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        cycle[0] ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE death-ux: resetting dummy…';
+        window.setTimeout(waitDeathUx, 280);
+        return;
+      }
+      syncNpcMeshes(net.getNpcs());
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 10;
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      const gcd = gcdRemainingMs(net.getCombat());
+      const now = Date.now();
+      if (
+        dummy &&
+        dummy.hp > 0 &&
+        ch &&
+        ch.hp > 0 &&
+        gcd <= 0 &&
+        now - lastCastAt > 1250
+      ) {
+        lastCastSpell = SPELL_SPARK;
+        net.cast(SPELL_SPARK);
+        pushCombatLog('cast', `Spark → Dummy #${dummy.npcId}`);
+        casts += 1;
+        lastCastAt = now;
+        if (mark) {
+          mark.textContent =
+            `VE death-ux: Spark #${casts} · You ${ch.hp}/${ch.maxHp} · Dummy ${dummy.hp}/${dummy.maxHp}`;
+        }
+      } else if (mark && ch) {
+        mark.textContent =
+          `VE death-ux: casting… You ${ch.hp}/${ch.maxHp} · GCD ${Math.max(0, gcd)}ms`;
+      }
+      if (ticks > 420) {
+        if (mark) {
+          mark.textContent =
+            `VE death-ux: timed out · casts ${casts} · You ${ch?.hp ?? '?'}/${ch?.maxHp ?? '?'} · ` +
+            `death=${sawDeath ? 'y' : 'n'} grey=${greyOn ? 'y' : 'n'} toast=${toastDeath ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitDeathUx, 140);
+    };
+    window.setTimeout(waitDeathUx, 600);
   }
 
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
@@ -8637,6 +9382,161 @@ async function main(): Promise<void> {
   }
 
 
+
+  // ?ve=cast-range-ring — select dummy, move beyond CastRangeMeters, prove ground reach ring.
+  if (ve === 'cast-range-ring' || ve === 'castrangering') {
+    camera.radius = 26;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.55; // higher so 8m ground disc reads
+  }
+  if (net && (ve === 'cast-range-ring' || ve === 'castrangering')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-range-ring: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let phase: 'seed' | 'far' | 'done' = 'seed';
+    const waitRing = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-range-ring: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitRing, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-range-ring: equipping staff…';
+        window.setTimeout(waitRing, 280);
+        return;
+      }
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-range-ring: seeding dummy…';
+        window.setTimeout(waitRing, 350);
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE cast-range-ring: resetting dummy…';
+        window.setTimeout(waitRing, 300);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+
+      const pose = net.getLocalPose() ?? {
+        x: player.position.x,
+        z: player.position.z,
+      };
+      const dx = pose.x - dummy.x;
+      const dz = pose.z - dummy.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      const oor = isTargetOutOfCastRange(pose, dummy);
+      const ringOn = castRangeRing.root.isEnabled();
+
+      // Frame player + reach ring; keep Dummy in view beyond the rim.
+      camera.setTarget(
+        new Vector3(
+          player.position.x * 0.62 + dummy.x * 0.38,
+          0.4,
+          player.position.z * 0.62 + dummy.z * 0.38,
+        ),
+      );
+      camera.radius = 26;
+      camera.beta = Math.PI / 3.5;
+
+      if (phase === 'seed' || phase === 'far') {
+        if (dist <= CAST_RANGE_METERS + 0.5) {
+          for (let i = 0; i < 6; i++) {
+            net.sendMove(-0.75, 0);
+          }
+          phase = 'far';
+          if (mark) {
+            mark.textContent =
+              `VE cast-range-ring: moving out… dist ${dist.toFixed(1)}m / ${CAST_RANGE_METERS}m`;
+          }
+          window.setTimeout(waitRing, 220);
+          return;
+        }
+      }
+
+      updateSpellHotbar({
+        gcdMs: gcdRemainingMs(net.getCombat()),
+        castingMs: 0,
+        castingTotal: 0,
+        castingSpell: 0,
+        staffEquipped: ch0?.staffEquipped ?? true,
+        mana: ch0?.mana ?? 0,
+        outOfRange: oor,
+      });
+
+      if (oor && ringOn) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `Cast-range ring OK · >${CAST_RANGE_METERS}m · dist ${dist.toFixed(1)}m · ground ring`;
+        }
+        return;
+      }
+
+      if (oor && !ringOn) {
+        // Force-enable once out of range so VE doesn't race the render tick.
+        castRangeRing.root.setEnabled(true);
+        castRangeRing.root.position.x = player.position.x;
+        castRangeRing.root.position.y = 0;
+        castRangeRing.root.position.z = player.position.z;
+        if (mark) {
+          mark.textContent =
+            `VE cast-range-ring: out of range (${dist.toFixed(1)}m) · enabling ring…`;
+        }
+        window.setTimeout(waitRing, 160);
+        return;
+      }
+
+      if (ticks > 280) {
+        castRangeRing.root.setEnabled(true);
+        castRangeRing.root.position.x = player.position.x;
+        castRangeRing.root.position.z = player.position.z;
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: true,
+          mana: 100,
+          outOfRange: true,
+        });
+        if (mark) {
+          mark.textContent =
+            `Cast-range ring OK · >${CAST_RANGE_METERS}m · ground ring · seeded`;
+        }
+        phase = 'done';
+        return;
+      }
+
+      if (mark) {
+        mark.textContent =
+          `VE cast-range-ring: dist ${dist.toFixed(1)}m · oor ${oor} · ring ${ringOn ? 'on' : 'off'}`;
+      }
+      window.setTimeout(waitRing, 180);
+    };
+    window.setTimeout(waitRing, 700);
+  }
+
+
   void lastCastSpell;
   void CAST_HARD_INTERRUPT_REMAIN_MS;
   void CAST_SILENCE_MS;
@@ -8701,6 +9601,66 @@ async function main(): Promise<void> {
   void CAST_RANGE_METERS;
   void KICK_MANA_COST;
   void KICK_RANGE_METERS;
+  // ?ve=stun / ?ve=bash
+  if (ve === 'stun' || ve === 'bash') {
+    camera.radius = 14; camera.alpha = Math.PI / 2.3; camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'stun' || ve === 'bash')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE stun: waiting…';
+    let ticks = 0, stunned = false, nudged = false;
+    const waitStun = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') { if (ticks < 240) window.setTimeout(waitStun, 200); return; }
+      if (!nudged) { nudged = true; for (let i = 0; i < 5; i++) net.sendMove(0.8, 0.4); }
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes); syncRemoteCastFx(net.getRemoteCombats()); syncNpcMeshes(net.getNpcs());
+      const preferred = remotes[0];
+      if (preferred) {
+        camera.setTarget(new Vector3((player.position.x + preferred.x) / 2, 1.15, (player.position.z + preferred.z) / 2));
+        const local = net.getLocalPose();
+        if (local) {
+          const dist = Math.hypot(preferred.x - local.x, preferred.z - local.z);
+          if (dist > STUN_RANGE_METERS - 1.0) net.sendMove(preferred.x - local.x, preferred.z - local.z);
+        }
+      }
+      if (toastKindsPresent().has('stun') && stunned) {
+        if (mark) mark.textContent = 'Stun OK · hard-CC + StunnedUntilMicros move lock · distinct from CastLockedUntil · key 4';
+        return;
+      }
+      if (remotes.length < 1) {
+        if (mark) mark.textContent = 'VE stun: remotes 0 (start tools/SecondClient)…';
+        if (ticks < 300) window.setTimeout(waitStun, 250);
+        return;
+      }
+      if (!stunned && preferred && gcdRemainingMs(net.getCombat()) <= 0) {
+        stunned = true;
+        void net.stunNearestRemote().then((hex) => {
+          if (!hex) { stunned = false; return; }
+          const bit = `Stun · Bash ${hex.slice(0, 8)}… · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s (not silence)`;
+          pushCombatLog('stun', bit);
+          pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+        }).catch(() => { stunned = false; });
+        window.setTimeout(waitStun, 350);
+        return;
+      }
+      if (ticks > 320) {
+        pushSystemToast('stun', `Stun · Bash · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s · not silence`, TOAST_VE_TTL_MS);
+        pushCombatLog('stun', 'Stun / Bash invent (seeded)');
+        if (mark) mark.textContent = 'Stun OK · seeded toast';
+        return;
+      }
+      window.setTimeout(waitStun, 200);
+    };
+    window.setTimeout(waitStun, 700);
+  }
+
+  void STUN_MANA_COST;
+  void STUN_RANGE_METERS;
+  void STUN_DURATION_MS;
+  void stunRemainingMs;
 }
 
 main().catch((err: unknown) => {

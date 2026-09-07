@@ -3,8 +3,8 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // TradeOffer Offer/Accept/Cancel + range + HasEmberShard / XP transfer.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 45000;
 
 DbConnection? connA = null;

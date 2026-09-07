@@ -53,8 +53,14 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
 | `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
 | `?ve=bag` | Prove You+XP self-frame, staff/Spark/Emberbolt loadout strip, B bag panel (`ve/babylon-bag.png`) |
-| `?ve=hotbar` / `?ve=target-frame` | Select Dummy + cast Spark/Emberbolt; prove target frame + spell hotbar (`ve/babylon-hotbar.png`) |
+| `?ve=hotbar` / `?ve=target-frame` | Select Dummy + cast; prove empty slots + STAFF disabled + OOM affordances (`ve/babylon-hotbar.png`) |
+| `?ve=gcd` | Thicker GCD sweep + Emberbolt cast fill on hotbar slots (`ve/babylon-gcd.png`) |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
+| `?ve=reticule` | Select Dummy; prove gold ring + overhead marker (`ve/babylon-reticule.png`); HUD `Reticule OK · … · gold ring+marker` |
+| `?ve=keys` | Open keybind legend overlay (H); HUD `Keys legend OK · …` (`ve/babylon-keys.png`) |
+| `?ve=death-ux` | Kill self via Dummy; prove stronger greyout + live respawn countdown + death toast (`ve/babylon-death-ux.png`); HUD `Death UX OK · …` |
+| `?ve=cast-range` | Move beyond CastRangeMeters; outOfRange toast + dim hotbar (`ve/babylon-cast-range.png`) |
+| `?ve=cast-range-ring` | Selected Dummy beyond cast range; Babylon ground reach ring (`ve/babylon-cast-range-ring.png`); HUD `Cast-range ring OK · …` |
 | `?ve=cast-cancel` | Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast (`ve/babylon-cast-cancel.png`) |
 | `?ve=humanoid` | Frame local procedural humanoid + staff |
 | `?ve=forest` / `?ve=aoi` / `?ve=combat` / `?ve=persist` | Slice presentation shots |

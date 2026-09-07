@@ -3,8 +3,8 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Long-lived second identity for shared-yard VE proof (pose + remote cast telegraphs).
-const string uri = "http://127.0.0.1:3000";
-const string db = "fardel";
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const float targetX = 4.0f;
 const float targetZ = 2.5f;
 const int timeoutMs = 30000;

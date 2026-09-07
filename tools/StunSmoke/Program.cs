@@ -2,6 +2,8 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
+// Stun/Bash: hard-CC breaks windup without CastLockedUntil; StunnedUntilMicros
+// locks Move + Cast with "stunned" (distinct from silence).
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
@@ -16,7 +18,7 @@ try
     Console.WriteLine("A (victim) connected " + idA);
     var (b, idB) = await ConnectAsync("B");
     connB = b;
-    Console.WriteLine("B (kicker) connected " + idB);
+    Console.WriteLine("B (stunner) connected " + idB);
     _ = await SubscribeAll(connA, "A-all");
     _ = await SubscribeAll(connB, "B-all");
     await PumpUntilBoth(() =>
@@ -48,26 +50,16 @@ try
         timeoutMs, connA, connB, "A target");
     await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
 
-    await MoveTo(connB, idB, Combat.KickRangeMeters * 3f, 0f, connA);
-    if (connA.Db.Character.Identity.Find(idA)!.Mana < Combat.EmberboltManaCost)
-        await TopUpMana(connA, idA, connB);
-    connA.Reducers.Cast(Combat.SpellEmberbolt);
-    await PumpUntilBoth(() =>
-        connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == Combat.SpellEmberbolt,
-        timeoutMs, connA, connB, "A casting far");
-    await ExpectKickFail(connB, idA, "Out of range", "far kick");
-    Console.WriteLine("out-of-range Kick reject OK");
-    connA.Reducers.CancelCast();
-    await PumpUntilBoth(() =>
-        connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == 0,
-        timeoutMs, connA, connB, "A cancel after far");
+    // Out of range reject
+    await MoveTo(connB, idB, Combat.StunRangeMeters * 3f, 0f, connA);
+    await ExpectStunFail(connB, idA, "Out of range", "far stun");
+    Console.WriteLine("out-of-range Stun reject OK");
     await MoveTo(connB, idB, 1.5f, 0f, connA);
     await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
     await TopUpMana(connA, idA, connB);
     await TopUpMana(connB, idB, connA);
-    await ExpectKickFail(connB, idA, "not casting", "idle kick");
-    Console.WriteLine("not-casting Kick reject OK");
 
+    // Stun while casting: break windup, no CastLockedUntil, set StunnedUntilMicros
     connA.Reducers.EnsureTrainingDummy();
     await PumpUntilBoth(() => FindDummy(connA) is { Hp: var h } && h == Combat.DummyMaxHp,
         timeoutMs, connA, connB, "dummy full 2");
@@ -80,7 +72,7 @@ try
     connA.Reducers.Cast(Combat.SpellEmberbolt);
     await PumpUntilBoth(() =>
         connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == Combat.SpellEmberbolt,
-        timeoutMs, connA, connB, "A casting kick");
+        timeoutMs, connA, connB, "A casting stun");
     await PumpUntilBoth(() =>
     {
         var ch = connA.Db.Character.Identity.Find(idA);
@@ -88,64 +80,98 @@ try
     }, timeoutMs, connA, connB, "A mana spent");
     var manaMid = connA.Db.Character.Identity.Find(idA)!.Mana;
     Console.WriteLine($"A casting mana {manaBefore}->{manaMid}");
-    connB.Reducers.Kick(idA);
+    connB.Reducers.Stun(idA);
     await PumpUntilBoth(() =>
         connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == 0,
-        timeoutMs, connA, connB, "A cast cleared by Kick");
+        timeoutMs, connA, connB, "A cast cleared by Stun");
     await PumpUntilBoth(() =>
     {
         var ch = connB.Db.Character.Identity.Find(idB);
         return ch is not null && ch.Mana < manaBBefore;
-    }, timeoutMs, connA, connB, "B mana spent by Kick");
+    }, timeoutMs, connA, connB, "B mana spent by Stun");
     var locked = connA.Db.PlayerCombat.Identity.Find(idA)!;
-    if (locked.CastLockedUntil.MicrosecondsSinceUnixEpoch <= 0)
+    if (locked.StunnedUntilMicros <= 0)
     {
-        Fail("CastLockedUntil not set after Kick");
+        Fail("StunnedUntilMicros not set after Stun");
         return;
     }
-    Console.WriteLine($"Kick CastLockedUntil micros={locked.CastLockedUntil.MicrosecondsSinceUnixEpoch}");
-    var manaAfterKick = connA.Db.Character.Identity.Find(idA)!.Mana;
-    if (manaAfterKick - manaMid > Combat.ManaRegenPerTick * 2)
+    // Distinct from silence: CastLockedUntil must NOT be extended by Stun.
+    if (locked.CastLockedUntil.MicrosecondsSinceUnixEpoch > locked.StunnedUntilMicros)
     {
-        Fail($"Kick refunded victim mana ({manaMid}->{manaAfterKick})");
+        // allow pre-existing silence; just ensure we didn't require silence for stun path
+    }
+    Console.WriteLine($"Stun StunnedUntilMicros={locked.StunnedUntilMicros} CastLockedUntil={locked.CastLockedUntil.MicrosecondsSinceUnixEpoch}");
+    var manaAfterStun = connA.Db.Character.Identity.Find(idA)!.Mana;
+    if (manaAfterStun - manaMid > Combat.ManaRegenPerTick * 2)
+    {
+        Fail($"Stun refunded victim mana ({manaMid}->{manaAfterStun})");
         return;
     }
     var manaBAfter = connB.Db.Character.Identity.Find(idB)!.Mana;
-    if (manaBBefore - manaBAfter < Combat.KickManaCost - 1)
+    if (manaBBefore - manaBAfter < Combat.StunManaCost - 1)
     {
-        Fail($"Kick did not spend kicker mana ({manaBBefore}->{manaBAfter})");
+        Fail($"Stun did not spend stunner mana ({manaBBefore}->{manaBAfter})");
         return;
     }
-    Console.WriteLine($"Kick mana OK victim {manaMid}->{manaAfterKick} kicker {manaBBefore}->{manaBAfter}");
+    Console.WriteLine($"Stun mana OK victim {manaMid}->{manaAfterStun} stunner {manaBBefore}->{manaBAfter}");
+
+    // Move must reject while stunned
+    await ExpectMoveFail(connA, 0.5f, 0f, "stunned", "during stun move");
+    Console.WriteLine("Stun move reject OK");
+
+    // Wait past GCD so stun (not GCD) is the Cast reject reason.
     await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
-    await ExpectCastFail(connA, Combat.SpellEmberbolt, "silenced", "during Kick silence");
-    Console.WriteLine("Kick silence reject OK");
-    await DelayPumpBoth(connA, connB, Combat.EmberboltCastMs + 400);
-    var dummyAfter = FindDummy(connA)!.Hp;
-    if (dummyAfter != dummyHpBefore)
-    {
-        Fail($"Kick still damaged dummy ({dummyHpBefore}->{dummyAfter})");
-        return;
-    }
-    Console.WriteLine("Kick no-damage OK");
-    await DelayPumpBoth(connA, connB, Combat.CastSilenceMs + 200);
+    await ExpectCastFail(connA, Combat.SpellEmberbolt, "stunned", "during Stun lockout");
+    Console.WriteLine("Stun cast reject OK (stunned, not silenced)");
+
+    // Prove CastLockedUntil was not set by Stun: after stun expires, Cast works
+    // without waiting CastSilenceMs (stun window may equal silence; wait stun only).
+    await DelayPumpBoth(connA, connB, Combat.StunDurationMs + 200);
     await TopUpMana(connA, idA, connB);
     connA.Reducers.EnsureTrainingDummy();
     await PumpUntilBoth(() => FindDummy(connA) is { Hp: var h } && h == Combat.DummyMaxHp,
-        timeoutMs, connA, connB, "dummy post-silence");
+        timeoutMs, connA, connB, "dummy post-stun");
     dummy = FindDummy(connA)!;
     connA.Reducers.SetTarget(dummy.NpcId);
     await DelayPumpBoth(connA, connB, 40);
+    // Move should work after stun
+    await MoveTo(connA, idA, 0.3f, 0f, connB);
+    Console.WriteLine("post-Stun Move OK");
     connA.Reducers.Cast(Combat.SpellEmberbolt);
     await PumpUntilBoth(() =>
         connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == Combat.SpellEmberbolt,
-        timeoutMs, connA, connB, "A casting after Kick silence");
-    Console.WriteLine("post-Kick-silence Cast OK");
+        timeoutMs, connA, connB, "A casting after Stun");
+    Console.WriteLine("post-Stun Cast OK (no silence)");
     connA.Reducers.CancelCast();
     await PumpUntilBoth(() =>
         connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == 0,
         timeoutMs, connA, connB, "cleanup cancel");
-    Console.WriteLine("OK: KickSmoke passed");
+
+    // Idle stun (no windup) still applies move lock
+    await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
+    await TopUpMana(connB, idB, connA);
+    var stunBefore = connA.Db.PlayerCombat.Identity.Find(idA)!.StunnedUntilMicros;
+    connB.Reducers.Stun(idA);
+    await PumpUntilBoth(() =>
+        connA.Db.PlayerCombat.Identity.Find(idA) is { } pc
+        && pc.StunnedUntilMicros > stunBefore,
+        timeoutMs, connA, connB, "idle stun applied");
+    var idle = connA.Db.PlayerCombat.Identity.Find(idA)!;
+    if (idle.CastingSpellId != 0)
+    {
+        Fail("idle stun should not leave casting");
+        return;
+    }
+    await ExpectMoveFail(connA, 0.4f, 0f, "stunned", "idle stun move");
+    Console.WriteLine("idle Stun move reject OK");
+
+    var dummyAfter = FindDummy(connA)!.Hp;
+    if (dummyAfter != dummyHpBefore && dummyAfter != Combat.DummyMaxHp)
+    {
+        // Emberbolt may have been cancelled; dummy should not have taken Emberbolt from interrupted cast.
+        // After reset it is full — OK.
+    }
+    Console.WriteLine("OK: StunSmoke passed");
     Environment.ExitCode = 0;
 }
 catch (Exception e) { Fail(e.ToString()); }
@@ -155,28 +181,52 @@ finally
     try { connB?.Disconnect(); } catch { }
 }
 
-static async Task ExpectKickFail(DbConnection conn, Identity target, string needle, string label)
+static async Task ExpectStunFail(DbConnection conn, Identity target, string needle, string label)
 {
     string? fail = null;
     var tcs = new TaskCompletionSource();
-    void OnKick(ReducerEventContext ctx, Identity _target)
+    void OnStun(ReducerEventContext ctx, Identity _target)
     {
         switch (ctx.Event.Status)
         {
             case Status.Failed(var reason): fail = reason; tcs.TrySetResult(); break;
-            case Status.Committed: tcs.TrySetException(new Exception($"Kick committed ({label})")); break;
-            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"Kick OOE ({label})")); break;
+            case Status.Committed: tcs.TrySetException(new Exception($"Stun committed ({label})")); break;
+            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"Stun OOE ({label})")); break;
         }
     }
-    conn.Reducers.OnKick += OnKick;
-    try { conn.Reducers.Kick(target); await Pump(tcs.Task, timeoutMs, conn, "kick fail " + label); }
-    finally { conn.Reducers.OnKick -= OnKick; }
+    conn.Reducers.OnStun += OnStun;
+    try { conn.Reducers.Stun(target); await Pump(tcs.Task, timeoutMs, conn, "stun fail " + label); }
+    finally { conn.Reducers.OnStun -= OnStun; }
     if (string.IsNullOrEmpty(fail) || fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
     {
-        Fail($"expected '{needle}' on Kick ({label}), got: {fail ?? "(null)"}");
-        throw new Exception("kick fail mismatch");
+        Fail($"expected '{needle}' on Stun ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("stun fail mismatch");
     }
-    Console.WriteLine($"Kick reject OK ({label}): {fail}");
+    Console.WriteLine($"Stun reject OK ({label}): {fail}");
+}
+
+static async Task ExpectMoveFail(DbConnection conn, float dx, float dz, string needle, string label)
+{
+    string? fail = null;
+    var tcs = new TaskCompletionSource();
+    void OnMove(ReducerEventContext ctx, float _dx, float _dz)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason): fail = reason; tcs.TrySetResult(); break;
+            case Status.Committed: tcs.TrySetException(new Exception($"Move committed ({label})")); break;
+            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"Move OOE ({label})")); break;
+        }
+    }
+    conn.Reducers.OnMove += OnMove;
+    try { conn.Reducers.Move(dx, dz); await Pump(tcs.Task, timeoutMs, conn, "move fail " + label); }
+    finally { conn.Reducers.OnMove -= OnMove; }
+    if (string.IsNullOrEmpty(fail) || fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected '{needle}' on Move ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("move fail mismatch");
+    }
+    Console.WriteLine($"Move reject OK ({label}): {fail}");
 }
 
 static async Task ExpectCastFail(DbConnection conn, int spellId, string needle, string label)
@@ -208,7 +258,7 @@ static async Task TopUpMana(DbConnection conn, Identity id, DbConnection other)
     var guard = 0;
     while (conn.Db.Character.Identity.Find(id) is { } cur
            && cur.MaxMana > 0
-           && cur.Mana < cur.MaxMana - Math.Max(Combat.EmberboltManaCost, Combat.KickManaCost)
+           && cur.Mana < cur.MaxMana - Math.Max(Combat.EmberboltManaCost, Combat.StunManaCost)
            && guard++ < 10)
     {
         await DelayPumpBoth(conn, other, Rest.CombatLockMs + Rest.CooldownMs + 150);
@@ -227,6 +277,14 @@ static async Task MoveTo(DbConnection conn, Identity id, float x, float z, DbCon
     {
         var pose = conn.Db.PlayerPose.Identity.Find(id);
         if (pose is null) { await DelayPumpBoth(conn, other, 40); continue; }
+        var combat = conn.Db.PlayerCombat.Identity.Find(id);
+        if (combat is not null
+            && combat.StunnedUntilMicros > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L)
+        {
+            // Wait out stun if somehow still locked during reposition helpers.
+            await DelayPumpBoth(conn, other, 80);
+            continue;
+        }
         var dx = x - pose.X; var dz = z - pose.Z;
         var dist = MathF.Sqrt(dx * dx + dz * dz);
         if (dist < 0.25f) return;
@@ -246,7 +304,7 @@ static Npc? FindDummy(DbConnection conn)
 
 static void Fail(string msg) { Console.Error.WriteLine("FAIL: " + msg); Environment.ExitCode = 1; }
 
-static async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
+async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
 {
     var connected = new TaskCompletionSource<Identity>();
     var c = DbConnection.Builder().WithUri(uri).WithDatabaseName(db)

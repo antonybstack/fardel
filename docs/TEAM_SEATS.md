@@ -36,8 +36,21 @@ Per-seat Spacetime data: `$HOME/.local/share/fardel-wt/<slug>`.
 
 2. Ensure SpacetimeDB for that seat: run `tools/scripts/ensure-seat-spacetime.sh` with the same slug. It sources `wt-env.sh`, starts a detached instance listening on `127.0.0.1:$FARDEL_SPACETIME_PORT` with `--data-dir $FARDEL_DATA_DIR` and `--non-interactive`, then polls `$FARDEL_SPACETIME_URI/v1/ping` until ready.
 
-3. Publish module (env loaded): from `$FARDEL_WT/server`, publish database name `$FARDEL_DB` to server `$FARDEL_SPACETIME_URI` (local env, non-interactive yes).
+3. Publish module (env loaded): from `$FARDEL_WT/server`:
+
+```bash
+spacetime publish "$FARDEL_DB" -y --env local -s "$FARDEL_SPACETIME_URI"
+```
+
+The Spacetime CLI takes the server as `-s` / `--server` (nickname, domain, or URL). Prefer `$FARDEL_SPACETIME_URI` from `wt-env.sh` over the `local` nickname so each seat publishes to its own port.
 
 4. Vite client: from `$FARDEL_WT/web`, start the Vite dev server on port `$FARDEL_VITE_PORT` bound to `127.0.0.1`.
+
+5. Smoke / mate harnesses (`tools/*Smoke`, `PartyMate`, `TradeMate`, `PartyFramesMate`, `SecondClient`): after sourcing `wt-env.sh`, they honor `FARDEL_SPACETIME_URI` and `FARDEL_DB` via `GameConstants.ResolveLocalUri()` / `ResolveDatabaseName()` (fallback: lead defaults `http://127.0.0.1:3000` / `fardel`). Example:
+
+```bash
+source tools/scripts/wt-env.sh qa-bugs
+dotnet run --project tools/ConnectSmoke
+```
 
 Lead seat (`lead` / ports 3000 + 5173) matches the historical single-instance defaults documented in [DEV_BOX.md](DEV_BOX.md).

@@ -59,6 +59,7 @@ import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
 import SeedLootReducer from "./seed_loot_reducer";
 import SellToVendorReducer from "./sell_to_vendor_reducer";
 import SetTargetReducer from "./set_target_reducer";
+import StunReducer from "./stun_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
 import UseYardTonicReducer from "./use_yard_tonic_reducer";
@@ -269,6 +270,7 @@ const reducersSchema = __reducers(
   __reducerSchema("seed_loot", SeedLootReducer),
   __reducerSchema("sell_to_vendor", SellToVendorReducer),
   __reducerSchema("set_target", SetTargetReducer),
+  __reducerSchema("stun", StunReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
   __reducerSchema("use_yard_tonic", UseYardTonicReducer),

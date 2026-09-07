@@ -4,8 +4,8 @@ using SpacetimeDB.Types;
 
 // After CastPushbackHardAfter pushbacks (or remain < CastHardInterruptRemainMs),
 // next DummyStrike hard-cancels windup with no mana refund.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
 
 DbConnection? conn = null;
