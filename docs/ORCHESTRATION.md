@@ -13,7 +13,7 @@ Related docs: [TEAM_SEATS.md](TEAM_SEATS.md) · [BACKLOG.md](BACKLOG.md) · [DEV
 - SpacetimeDB **C#** module as authority
 - **Babylon.js + TypeScript / Vite** client (`web/`)
 - Headless C# smokes as the first proof of Done-when
-- Visual evidence (`ve/*.png`) on every user-facing PR
+- Visual evidence via GitHub `user-attachments` embeds on every user-facing PR (no routine `ve/*.png` commits)
 
 **Unbound Team Lead** (parent) coordinates Devs, QA, Reviewer, Release, and **Art**. The Lead:
 
@@ -76,7 +76,7 @@ Grok Bot / Grok CLI agents talk through channels and 1:1 messages. Hard constrai
 2. Branch name (`dev1/bandage`)
 3. Base tip SHA of `develop` at assign time
 4. Done-when (smokes + `?ve=…` name)
-5. VE path expectation (`ve/babylon-….png`, force-add if gitignored)
+5. VE expectation (GitHub `user-attachments` embed in PR body/comment; **no** new `ve/*.png` commits)
 6. Explicit “do not invent past this Issue”
 
 Prefer **GitHub Issues as source of truth** over maintaining parallel markdown backlogs ([BACKLOG.md](BACKLOG.md)).
@@ -99,12 +99,12 @@ Do not re-ping Reviewer or Lead about a PR that is already merged — check `gh 
 
 - Target **`develop`**, never `main` (except Release’s promote PR).
 - Body includes `Fixes #N` (or `Closes #N`) so merge closes the Issue.
-- **VE required** for user-visible changes: commit a **real** PNG under repo-root `ve/` **and** embed it in the PR body.
-- `ve/` is often gitignored → use `git add -f ve/<file>.png`. Never commit text placeholders as `.png`.
-- **PR embeds MUST be absolute raw URLs** so GitHub renders them:
-  `![label](https://raw.githubusercontent.com/antonybstack/fardel/<branch>/ve/<file>.png)`
-  Relative `![...](ve/foo.png)` resolves under `/pull/` and **breaks** (shows as `…/pull/ve/…`).
-- Optional: paste extra shots into a PR comment (GitHub `user-attachments` hosting). That is fine as supplemental evidence, **not** a substitute for committed `ve/` + absolute raw embed (Reviewer standing bar).
+- **VE required** for user-visible changes: embed a real screenshot in the PR body (or a sticky PR comment) hosted on **GitHub `user-attachments`**.
+  Example: `<img … src="https://github.com/user-attachments/assets/<uuid>" />` or markdown pointing at that URL.
+- **Do not** commit routine `ve/*.png` into the repo (bloat). Existing historical `ve/` files may remain; new work must not add more.
+- How to upload: paste/drop the PNG into the GitHub PR description or a PR comment in the browser (GitHub stores it under `user-attachments`). Agents may drive the PR page paste flow; do not force-add binary VE into git.
+- Reviewer bar: image URL must be `https://github.com/user-attachments/assets/…` (or equivalent GitHub-hosted attachment) and render in the PR UI. Reject relative `ve/` links, `raw.githubusercontent.com` VE embeds for new work, and text placeholders pretending to be PNGs.
+- Optional Cursor/local paths are never enough alone — the GitHub PR must show the image.
 - Serialize **schema / reducer / Spacetime module** edits to **one Dev at a time**. Client-only Cosmetics can parallel.
 - After merge: Lead broadcasts new `develop` tip SHA; open branches rebase onto it before next push.
 
