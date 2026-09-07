@@ -557,7 +557,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U unequip staff · I equip staff · P invite/accept · O leave',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
