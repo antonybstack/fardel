@@ -102,9 +102,19 @@ Validate early:
 
 - [x] Deploy policy documented
 - [x] `dev-db.sparkify.dev` on existing Mac `sparkify` tunnel → `127.0.0.1:3000` (HTTP 404 from SpacetimeDB root is healthy)
-- [ ] Pages project + `play.sparkify.dev`
+- [x] `play.sparkify.dev` live (placeholder via Mac tunnel → `:8787`; Pages migration pending wrangler auth)
 - [ ] Prod SpacetimeDB (`db.sparkify.dev` or MainCloud URI)
 
 ### Tunnel ops note (this machine)
 
 Reuses the existing **`sparkify`** cloudflared LaunchDaemon (`com.cloudflare.sparkify`), config in `/etc/cloudflared/config.yml` (mirror: `~/.cloudflared/config.fardel.yml`). Apex `sparkify.dev` / `sparkify.com` still → `:80`. SpacetimeDB must be **2.10+** if the local data dir was created by 2.10.
+
+### Play placeholder (interim)
+
+Until Cloudflare Pages + wrangler auth are set up, `play.sparkify.dev` is served from the Mac Studio:
+
+- Static files: `/Users/antbly/dev/fardel-play-placeholder`
+- LaunchAgent: `dev.sparkify.fardel-play-placeholder` → `python3 -m http.server 8787`
+- Tunnel ingress: `play.sparkify.dev` → `http://127.0.0.1:8787`
+
+Replace with Pages when an API token / `wrangler login` is available; keep the same hostname.

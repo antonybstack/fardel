@@ -8,6 +8,8 @@ Browser-first, classless MMORPG: **your pack is your build**.
 **Stack:** C# everywhere that matters — SpacetimeDB C# modules + Unity 6.6+ (WebGPU) client.  
 **Status:** docs-first. Implementation not started.
 
+**Live hosts:** [play.sparkify.dev](https://play.sparkify.dev) (placeholder) · [dev-db.sparkify.dev](https://dev-db.sparkify.dev) (SpacetimeDB preview)
+
 ## Docs
 
 | Doc | What it covers |
