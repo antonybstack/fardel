@@ -8070,6 +8070,64 @@ async function main(): Promise<void> {
     window.setTimeout(waitRate, 700);
   }
 
+  // ?ve=chat-read — #88: Seed say/party/whisper channels for readability proof vs #39 cyan fog.
+  if (ve === 'chat-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'chat-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE chat-read: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitChatRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE chat-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitChatRead, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 13;
+      if (!seeded) {
+        seeded = true;
+        if (mark) mark.textContent = 'VE chat-read: seeding channels…';
+        void net.say('Hello yard — say channel test').catch(() => undefined);
+        void net.partySay('Party channel readability').catch(() => undefined);
+        window.setTimeout(waitChatRead, 300);
+        return;
+      }
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      const linesText = document.getElementById('chatLines')?.textContent ?? '';
+      const hasSay = linesText.includes('say channel');
+      const hasParty = linesText.includes('Party channel');
+      if (lineCount >= 1 && (hasSay || hasParty)) {
+        setChatComposing(true);
+        const input = document.getElementById('chatInput') as HTMLInputElement | null;
+        if (input) input.value = '/w abc Whisper test…';
+        if (mark) {
+          mark.textContent =
+            `Chat readability OK · #88 chrome: dark plate + cool silver border + muted channel tints vs #39 fog`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE chat-read: lines ${lineCount} · waiting channels…`;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          mark.textContent = `VE chat-read: timed out · lines ${lineCount}`;
+        }
+        return;
+      }
+      window.setTimeout(waitChatRead, 220);
+    };
+    window.setTimeout(waitChatRead, 700);
+  }
+
   // ?ve=loot-sparkle — ground loot sparkle readability at play-cam 8–20m under locked #39 fog (yard bags / #56).
   if (ve === 'loot-sparkle') {
     camera.radius = 14;
