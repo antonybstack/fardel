@@ -43,4 +43,5 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 ## URI overrides
 
 - Default: `http://127.0.0.1:3000`, database `fardel`
-- Query: `?db=https://dev-db.sparkify.dev` (also accepts `?database=`)
+- Default URI: `http://127.0.0.1:3000` on localhost; `https://dev-db.sparkify.dev` when hosted (e.g. play.sparkify.dev)
+- Query override: `?db=https://dev-db.sparkify.dev` (also accepts `?database=`)

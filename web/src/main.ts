@@ -24,6 +24,7 @@ import {
   type NpcView,
 } from './net/connection';
 import { buildForestClearing } from './world/forest';
+import { createPlayerHumanoid } from './world/humanoid';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -170,15 +171,10 @@ function createScene(engine: Engine): {
   // North-star yard: forest clearing + huge trees + distant mountains.
   buildForestClearing(scene);
 
-  const player = MeshBuilder.CreateCapsule(
-    'player',
-    { height: 1.8, radius: 0.35 },
-    scene,
-  );
-  player.position = new Vector3(0, 0.9, 0);
-  const playerMat = new StandardMaterial('playerMat', scene);
-  playerMat.diffuseColor = new Color3(0.55, 0.7, 0.95);
-  player.material = playerMat;
+  // Local player: procedural humanoid + staff (crowd proxies stay capsules).
+  const humanoid = createPlayerHumanoid(scene);
+  const player = humanoid.root;
+  player.position = new Vector3(0, 0, 0);
 
   // CrowdProxy source mesh (hidden) — instances are amber, distinct from local blue player.
   const proxySource = MeshBuilder.CreateCapsule(
@@ -517,7 +513,7 @@ async function main(): Promise<void> {
       setStatus(formatStatus(latestStatus, now));
     }
 
-    camera.setTarget(player.position.add(new Vector3(0, 0.6, 0)));
+    camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
     scene.render();
   });
   window.addEventListener('resize', () => engine.resize());
@@ -535,7 +531,7 @@ async function main(): Promise<void> {
     onStatus,
     (pose) => {
       player.position.x = pose.x;
-      player.position.y = pose.y + 0.9;
+      player.position.y = pose.y;
       player.position.z = pose.z;
       player.rotation.y = pose.yaw;
     },
@@ -693,6 +689,31 @@ async function main(): Promise<void> {
       window.setTimeout(waitForest, 300);
     };
     window.setTimeout(waitForest, 600);
+  }
+
+  // ?ve=humanoid — frame local player (humanoid+staff) clearly for VE shot.
+  if (ve === 'humanoid') {
+    camera.radius = 8;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.1;
+  }
+
+  if (net && ve === 'humanoid') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE humanoid: waiting for Connected…';
+    const waitHumanoid = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        if (mark) {
+          mark.textContent =
+            'Humanoid OK · body+head+limbs+staff · Connected · crowd capsules OK';
+        }
+        return;
+      }
+      window.setTimeout(waitHumanoid, 300);
+    };
+    window.setTimeout(waitHumanoid, 600);
   }
 
   void lastCastSpell;

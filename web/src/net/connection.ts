@@ -124,12 +124,26 @@ export type GameNet = {
   disconnect: () => void;
 };
 
-const DEFAULT_URI = 'http://127.0.0.1:3000';
+const DEFAULT_URI_LOCAL = 'http://127.0.0.1:3000';
+/** Pages / non-localhost default — Mac cloudflared → local SpacetimeDB. */
+const DEFAULT_URI_REMOTE = 'https://dev-db.sparkify.dev';
 const DEFAULT_DATABASE = 'fardel';
 
+function isLocalHost(): boolean {
+  const h = window.location.hostname;
+  return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1';
+}
+
+/**
+ * Mirror Unity ResolveEndpoint: ?db= / ?database= override always wins;
+ * localhost → 127.0.0.1:3000; production Pages host → https://dev-db.sparkify.dev.
+ * Live Connected on play.sparkify.dev still needs the Mac tunnel for dev-db.
+ */
 function resolveUri(): string {
   const params = new URLSearchParams(window.location.search);
-  return params.get('db') ?? params.get('database') ?? DEFAULT_URI;
+  const override = params.get('db') ?? params.get('database');
+  if (override) return override;
+  return isLocalHost() ? DEFAULT_URI_LOCAL : DEFAULT_URI_REMOTE;
 }
 
 function resolveDatabaseName(): string {

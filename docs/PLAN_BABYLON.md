@@ -116,7 +116,7 @@ See `web/README.md` for exact commands.
 - Scaffold: `web/` Vite + Babylon 9 + generated TS bindings
 - **Connect (presentation):** green in browser (HUD Connected + identity)
 - **Move (presentation):** WASD → `Move` reducer; RMB ArcRotate look; capsule
-  reconciles to `PlayerPose`; HUD shows Connected + `pos`
+  reconciles to `PlayerPose` (humanoid root); HUD shows Connected + `pos`
 - **Combat (presentation):** Tab cycles NPC targets; hotkeys 1=Spark / 2=Emberbolt
   → `Cast`; `EnsureTrainingDummy` on subscribe; GCD + cast bars in HUD; selected
   target highlight + cast flash (`ve/babylon-combat.png`)
@@ -130,7 +130,12 @@ See `web/README.md` for exact commands.
   (`ve/babylon-aoi.png`); `tools/AoiSmoke` green
 - **Forest kitbash (presentation):** procedural clearing — huge hero trunks +
   instanced mid trees, distant snow-capped mountain silhouette, dusk sky/fog +
-  hemi/sun mood lighting (`web/src/world/forest.ts`); player/NPC/AOI/combat
-  unchanged (`ve/babylon-forest.png`)
-- Next (north-star): Pages deploy of Vite `dist` / second-client shared-yard proof /
-  humanoid+staff pack when credits land
+  hemi/sun mood lighting (`web/src/world/forest.ts`); (`ve/babylon-forest.png`)
+- **Humanoid + staff (presentation):** local player procedural body+head+limbs +
+  staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
+  (`ve/babylon-humanoid.png`)
+- **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
+  (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
+  needs Mac tunnel)
+- Next (north-star): second-client shared-yard proof / credited art packs when
+  licenses land
