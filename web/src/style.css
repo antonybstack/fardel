@@ -1552,3 +1552,6 @@ body {
 .sysToast.kick { border-color: rgba(255, 160, 60, 0.7); }
 .sysToast.kick .toastTag { color: #ffb03c; }
 .clLine.kick .clTag { color: #ffb03c; }
+.sysToast.stun { border-color: rgba(120, 200, 255, 0.75); }
+.sysToast.stun .toastTag { color: #7ec8ff; }
+.clLine.stun .clTag { color: #7ec8ff; }

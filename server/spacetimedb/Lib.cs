@@ -118,6 +118,9 @@ public static partial class Module
         public int CastPushbackCount;
         /// <summary>Cast rejects with "silenced" while Timestamp &lt; this (hard-interrupt lockout).</summary>
         public Timestamp CastLockedUntil;
+        /// <summary>Move/Cast reject with "stunned" while now &lt; this micros (Stun/Bash hard-CC). Distinct from CastLockedUntil.</summary>
+        [SpacetimeDB.Default(0)]
+        public long StunnedUntilMicros;
     }
 
     [SpacetimeDB.Table(Accessor = "Npc", Public = true)]
@@ -303,6 +306,11 @@ public static partial class Module
         {
             throw new Exception("Dead");
         }
+        if (ctx.Db.PlayerCombat.Identity.Find(ctx.Sender) is { } moveCombat
+            && ctx.Timestamp.MicrosecondsSinceUnixEpoch < moveCombat.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
         var maxStep = Movement.MaxStepMeters;
         if (ctx.Timestamp < mover.TonicExpiresAt)
         {
@@ -427,6 +435,10 @@ public static partial class Module
 
         var combatGate = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < combatGate.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
         if (ctx.Timestamp < combatGate.CastLockedUntil)
         {
             throw new Exception("silenced");
@@ -618,6 +630,10 @@ public static partial class Module
         {
             throw new Exception("GCD");
         }
+        if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < selfCombat.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
         if (ctx.Timestamp < selfCombat.CastLockedUntil)
         {
             throw new Exception("silenced");
@@ -655,6 +671,110 @@ public static partial class Module
             $"Kick {ctx.Sender} → {target} spell={targetCombat.CastingSpellId} " +
             $"(hard interrupt + silence {Combat.CastSilenceMs}ms)");
         InterruptWindupCast(ctx, target, refundMana: false);
+    }
+
+    /// <summary>
+    /// Stun / Bash — short hard-CC on a nearby player. Breaks windup without
+    /// CastLockedUntil silence; sets StunnedUntil so Move/Cast reject with
+    /// "stunned" for StunDurationMs. Instant; spends StunManaCost + shared GCD.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void Stun(ReducerContext ctx, Identity target)
+    {
+        if (target.Equals(ctx.Sender))
+        {
+            throw new Exception("Cannot stun self");
+        }
+
+        var selfChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (selfChar.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+
+        if (ctx.Db.Character.Identity.Find(target) is null)
+        {
+            throw new Exception("Target missing");
+        }
+        if (ctx.Db.PlayerPose.Identity.Find(target) is null)
+        {
+            throw new Exception("Target not online");
+        }
+
+        var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        var targetPose = ctx.Db.PlayerPose.Identity.Find(target)
+            ?? throw new Exception("Target not online");
+        {
+            var dx = selfPose.X - targetPose.X;
+            var dz = selfPose.Z - targetPose.Z;
+            var range = Combat.StunRangeMeters;
+            if (dx * dx + dz * dz > range * range)
+            {
+                throw new Exception("Out of range");
+            }
+        }
+
+        var selfCombat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp < selfCombat.GcdReadyAt)
+        {
+            throw new Exception("GCD");
+        }
+        if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < selfCombat.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
+        if (ctx.Timestamp < selfCombat.CastLockedUntil)
+        {
+            throw new Exception("silenced");
+        }
+        if (selfCombat.CastingSpellId != 0)
+        {
+            throw new Exception("Busy casting");
+        }
+
+        var targetCombat = ctx.Db.PlayerCombat.Identity.Find(target)
+            ?? throw new Exception("Target combat missing");
+
+        TickManaRegen(ctx, ref selfChar);
+        if (Combat.StunManaCost > 0 && selfChar.Mana < Combat.StunManaCost)
+        {
+            ctx.Db.Character.Identity.Update(selfChar);
+            throw new Exception("Insufficient mana");
+        }
+        if (Combat.StunManaCost > 0)
+        {
+            selfChar.Mana -= Combat.StunManaCost;
+        }
+        ctx.Db.Character.Identity.Update(selfChar);
+
+        selfCombat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
+        selfCombat.LastSpellId = 0;
+        selfCombat.LastCastAt = ctx.Timestamp;
+        ctx.Db.PlayerCombat.Identity.Update(selfCombat);
+
+        // Break windup if any — no CastLockedUntil silence (distinct lockout).
+        if (targetCombat.CastingSpellId != 0)
+        {
+            Log.Info(
+                $"Stun {ctx.Sender} → {target} spell={targetCombat.CastingSpellId} " +
+                $"(hard-CC windup break, no silence; stun {Combat.StunDurationMs}ms)");
+            InterruptWindupCast(ctx, target, refundMana: false, applySilence: false);
+        }
+        else
+        {
+            Log.Info(
+                $"Stun {ctx.Sender} → {target} (hard-CC; stun {Combat.StunDurationMs}ms)");
+        }
+
+        // Re-fetch after possible interrupt update.
+        targetCombat = ctx.Db.PlayerCombat.Identity.Find(target)
+            ?? throw new Exception("Target combat missing");
+        targetCombat.StunnedUntilMicros = ctx.Timestamp.MicrosecondsSinceUnixEpoch
+            + (long)Combat.StunDurationMs * 1000L;
+        ctx.Db.PlayerCombat.Identity.Update(targetCombat);
     }
 
     /// <summary>Unequip staff — Cast already gates on StaffEquipped (slice 3 nice-to-have).</summary>
@@ -997,6 +1117,7 @@ public static partial class Module
                 LastCastAt = ctx.Timestamp,
                 CastPushbackCount = 0,
                 CastLockedUntil = ctx.Timestamp,
+                StunnedUntilMicros = 0,
             });
         }
     }
@@ -1898,7 +2019,7 @@ public static partial class Module
     /// Break an in-flight windup cast: delete PendingCast, clear CastingSpellId,
     /// optionally refund mana spent at Cast start. GCD stays (already started).
     /// </summary>
-    static void InterruptWindupCast(ReducerContext ctx, Identity caster, bool refundMana)
+    static void InterruptWindupCast(ReducerContext ctx, Identity caster, bool refundMana, bool applySilence = true)
     {
         if (ctx.Db.PlayerCombat.Identity.Find(caster) is not { } combat
             || combat.CastingSpellId == 0)
@@ -1910,7 +2031,7 @@ public static partial class Module
         ClearPendingCastsFor(ctx, caster);
         combat.CastingSpellId = 0;
         combat.CastPushbackCount = 0;
-        if (!refundMana)
+        if (!refundMana && applySilence)
         {
             combat.CastLockedUntil = ctx.Timestamp + Ms(Combat.CastSilenceMs);
         }
@@ -1920,7 +2041,7 @@ public static partial class Module
         {
             Log.Info(
                 $"InterruptWindupCast {caster} spell={spellId} (no refund / hard) " +
-                $"silence={Combat.CastSilenceMs}ms");
+                $"silence={(applySilence ? Combat.CastSilenceMs : 0)}ms");
             return;
         }
 

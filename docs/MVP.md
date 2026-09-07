@@ -71,6 +71,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - Hard interrupt threshold: after `CastPushbackHardAfter` pushbacks (or remain < `CastHardInterruptRemainMs`), next `DummyStrike` cancels windup with **no mana refund** (`HardInterruptSmoke`, `?ve=hard-interrupt`)
 - Post-interrupt silence: hard interrupt sets `CastLockedUntil`; Emberbolt `Cast` rejects with toast `silenced` until expiry (`CastSilenceSmoke`, `?ve=cast-silence`)
 - Kick / Counterspell: `Kick(target)` hard-interrupts nearby windup + same silence without DummyStrike (`KickSmoke`, `?ve=kick`)
+- Stun / Bash: `Stun(target)` hard-CC — break windup without CastLockedUntil; `StunnedUntilMicros` move/cast lock (`StunSmoke`, `?ve=stun`)
 
 **Done when:** both spells can kill the dummy under GCD rules; killing grants XP on the character row.
 
