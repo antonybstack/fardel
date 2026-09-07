@@ -10,23 +10,27 @@ import AcceptPartyInviteReducer from "../accept_party_invite_reducer";
 import CastReducer from "../cast_reducer";
 import CreatePartyReducer from "../create_party_reducer";
 import EnsureTrainingDummyReducer from "../ensure_training_dummy_reducer";
+import EquipRobesReducer from "../equip_robes_reducer";
 import EquipStaffReducer from "../equip_staff_reducer";
 import InviteToPartyReducer from "../invite_to_party_reducer";
 import LeavePartyReducer from "../leave_party_reducer";
 import MoveReducer from "../move_reducer";
 import SeedCrowdProxiesReducer from "../seed_crowd_proxies_reducer";
 import SetTargetReducer from "../set_target_reducer";
+import UnequipRobesReducer from "../unequip_robes_reducer";
 import UnequipStaffReducer from "../unequip_staff_reducer";
 
 export type AcceptPartyInviteParams = __Infer<typeof AcceptPartyInviteReducer>;
 export type CastParams = __Infer<typeof CastReducer>;
 export type CreatePartyParams = __Infer<typeof CreatePartyReducer>;
 export type EnsureTrainingDummyParams = __Infer<typeof EnsureTrainingDummyReducer>;
+export type EquipRobesParams = __Infer<typeof EquipRobesReducer>;
 export type EquipStaffParams = __Infer<typeof EquipStaffReducer>;
 export type InviteToPartyParams = __Infer<typeof InviteToPartyReducer>;
 export type LeavePartyParams = __Infer<typeof LeavePartyReducer>;
 export type MoveParams = __Infer<typeof MoveReducer>;
 export type SeedCrowdProxiesParams = __Infer<typeof SeedCrowdProxiesReducer>;
 export type SetTargetParams = __Infer<typeof SetTargetReducer>;
+export type UnequipRobesParams = __Infer<typeof UnequipRobesReducer>;
 export type UnequipStaffParams = __Infer<typeof UnequipStaffReducer>;
 

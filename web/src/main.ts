@@ -197,9 +197,10 @@ function updateSelfFrame(character: {
   if (xpEl) xpEl.textContent = `XP ${character.xp}`;
 }
 
-/** Compact loadout strip: staff + Spark/Emberbolt known gates. */
+/** Compact loadout strip: staff/robes + Spark/Emberbolt known gates. */
 function updateLoadoutStrip(character: {
   staffEquipped: boolean;
+  robesEquipped: boolean;
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
 } | null | undefined): void {
@@ -231,6 +232,13 @@ function updateLoadoutStrip(character: {
     'loStaff',
     'loStaffState',
     character.staffEquipped,
+    'equipped',
+    'unequipped',
+  );
+  setChip(
+    'loRobes',
+    'loRobesState',
+    character.robesEquipped,
     'equipped',
     'unequipped',
   );
@@ -290,6 +298,71 @@ function setBagPanelOpen(open: boolean): void {
   const panel = document.getElementById('bagPanel');
   if (!panel) return;
   panel.classList.toggle('hidden', !open);
+}
+
+/** Compact party member frames: hex + leader tag + distance / pose hint. */
+function updatePartyFrames(opts: {
+  localHex: string | null;
+  localPose: { x: number; z: number } | null;
+  party: {
+    size: number;
+    isLeader: boolean;
+    members: { identityHex: string; isLeader: boolean }[];
+  } | null | undefined;
+  remotes: RemotePose[];
+}): void {
+  const root = document.getElementById('partyFrames');
+  if (!root) return;
+  const party = opts.party;
+  if (!party || party.size < 1) {
+    root.classList.add('hidden');
+    root.innerHTML = '';
+    return;
+  }
+  root.classList.remove('hidden');
+  const remoteByHex = new Map(opts.remotes.map((r) => [r.identityHex, r]));
+  const rows: string[] = [
+    `<div class="pfHead">Party · ${party.size}</div>`,
+  ];
+  // Self first, then mates sorted by hex.
+  const members = [...party.members].sort((a, b) => {
+    const aSelf = a.identityHex === opts.localHex ? 0 : 1;
+    const bSelf = b.identityHex === opts.localHex ? 0 : 1;
+    if (aSelf !== bSelf) return aSelf - bSelf;
+    return a.identityHex.localeCompare(b.identityHex);
+  });
+  for (const m of members) {
+    const isSelf = m.identityHex === opts.localHex;
+    const remote = remoteByHex.get(m.identityHex);
+    let meta = '—';
+    if (isSelf && opts.localPose) {
+      meta = `you · @(${opts.localPose.x.toFixed(0)},${opts.localPose.z.toFixed(0)})`;
+    } else if (remote) {
+      const dist = opts.localPose
+        ? Math.hypot(remote.x - opts.localPose.x, remote.z - opts.localPose.z)
+        : null;
+      const distTxt = dist != null ? `${dist.toFixed(0)}m` : 'pose';
+      meta = `${distTxt} · @(${remote.x.toFixed(0)},${remote.z.toFixed(0)}) · yaw ${remote.yaw.toFixed(1)}`;
+    } else if (!isSelf) {
+      meta = 'pose pending…';
+    }
+    const cls = [
+      'pfRow',
+      isSelf ? 'self' : '',
+      m.isLeader ? 'leader' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const name = isSelf ? 'You' : `${m.identityHex.slice(0, 8)}…`;
+    const tag = m.isLeader ? '<span class="pfTag">leader</span>' : '';
+    rows.push(
+      `<div class="${cls}" data-hex="${m.identityHex}">` +
+        `<div class="pfNameRow"><span class="pfName">${name}</span>${tag}</div>` +
+        `<div class="pfMeta">${meta}</div>` +
+        `</div>`,
+    );
+  }
+  root.innerHTML = rows.join('');
 }
 
 /** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
@@ -386,13 +459,14 @@ function formatLoadout(ch: NonNullable<Extract<ConnectionStatus, { state: 'conne
     .filter(Boolean)
     .join('+') || '(none)';
   const staffLine = ch.staffEquipped ? 'staff: equipped' : 'staff: UNEQUIPPED (casts blocked)';
+  const robesLine = ch.robesEquipped ? 'robes: equipped' : 'robes: UNEQUIPPED';
   const spells = [
     ch.knowsSpark ? 'Spark' : null,
     ch.knowsEmberbolt ? 'Emberbolt' : null,
   ]
     .filter(Boolean)
     .join('+') || '(none)';
-  return `XP ${ch.xp} · loadout ${gear} · ${staffLine} · spells ${spells}`;
+  return `XP ${ch.xp} · loadout ${gear} · ${staffLine} · ${robesLine} · spells ${spells}`;
 }
 
 function formatStatus(s: ConnectionStatus, nowMs: number): string {
@@ -632,6 +706,8 @@ function bindInput(opts: {
   onPartyLeave: () => void;
   onUnequipStaff: () => void;
   onEquipStaff: () => void;
+  onUnequipRobes: () => void;
+  onEquipRobes: () => void;
   onToggleBag: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
@@ -676,6 +752,16 @@ function bindInput(opts: {
     if (k === 'i') {
       e.preventDefault();
       opts.onEquipStaff();
+      return;
+    }
+    if (k === 'j') {
+      e.preventDefault();
+      opts.onUnequipRobes();
+      return;
+    }
+    if (k === 'k') {
+      e.preventDefault();
+      opts.onEquipRobes();
       return;
     }
     if (k === 'b') {
@@ -737,6 +823,21 @@ function setStaffMeshVisible(staff: Mesh, visible: boolean): void {
     child.setEnabled(visible);
     child.isVisible = visible;
   }
+}
+
+/** Hide hood/skirt/shoulders; tint torso/arms drab when robes unequipped (mirrors staff U/I). */
+function setRobesMeshVisible(parts: HumanoidParts, equipped: boolean): void {
+  const robes = parts.robes;
+  robes.setEnabled(equipped);
+  robes.isVisible = equipped;
+  for (const child of robes.getChildMeshes(true)) {
+    child.setEnabled(equipped);
+    child.isVisible = equipped;
+  }
+  const drab = new Color3(0.42, 0.4, 0.38);
+  const col = equipped ? parts.robeBaseColor : drab;
+  parts.mat.diffuseColor.copyFrom(col);
+  parts.mat.emissiveColor.copyFrom(col.scale(equipped ? 0.08 : 0.04));
 }
 
 function flashMesh(mat: StandardMaterial, color: Color3, ms: number): void {
@@ -1241,6 +1342,14 @@ async function main(): Promise<void> {
       if (!net) return;
       net.equipStaff();
     },
+    onUnequipRobes: () => {
+      if (!net) return;
+      net.unequipRobes();
+    },
+    onEquipRobes: () => {
+      if (!net) return;
+      net.equipRobes();
+    },
     onToggleBag: () => {
       bagOpen = !bagOpen;
       setBagPanelOpen(bagOpen);
@@ -1411,11 +1520,28 @@ async function main(): Promise<void> {
       updateSelfFrame(ch);
       updateLoadoutStrip(ch);
       updateBagPanel(ch);
+      updatePartyFrames({
+        localHex:
+          latestStatus.state === 'connected'
+            ? latestStatus.identityHex
+            : net?.identityHex ?? null,
+        localPose: net?.getLocalPose() ?? {
+          x: player.position.x,
+          z: player.position.z,
+        },
+        party:
+          latestStatus.state === 'connected'
+            ? latestStatus.party ?? null
+            : null,
+        remotes: net?.getRemotes() ?? [],
+      });
     }
     if (latestStatus.state === 'connected') {
       setStatus(formatStatus(latestStatus, now));
       const equipped = latestStatus.character?.staffEquipped ?? true;
       setStaffMeshVisible(humanoid.staff, equipped);
+      const robesOn = latestStatus.character?.robesEquipped ?? true;
+      setRobesMeshVisible(humanoid, robesOn);
     }
 
     drawMinimap({
@@ -1457,9 +1583,11 @@ async function main(): Promise<void> {
       if (combat) selectedTargetId = combat.targetNpcId;
     },
     (character) => {
-      /* HUD refreshed via onStatus; staff mesh follows Character.staffEquipped */
+      /* HUD refreshed via onStatus; staff/robes meshes follow Character */
       const equipped = character?.staffEquipped ?? true;
       setStaffMeshVisible(humanoid.staff, equipped);
+      const robesOn = character?.robesEquipped ?? true;
+      setRobesMeshVisible(humanoid, robesOn);
     },
     (proxies) => {
       syncProxyMeshes(proxies);
@@ -2289,6 +2417,163 @@ async function main(): Promise<void> {
       window.setTimeout(waitParty, 200);
     };
     window.setTimeout(waitParty, 800);
+  }
+
+
+  // ?ve=party-frames — wait for party size>=2; prove compact party frames HUD.
+  if (ve === 'party-frames') {
+    camera.radius = 28;
+    camera.beta = Math.PI / 3.15;
+    camera.alpha = Math.PI / 2.25;
+  }
+  if (net && ve === 'party-frames') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE party-frames: waiting for party invite / remotes…';
+    try {
+      const p0 = net.getParty();
+      if (p0 && p0.size > 0 && p0.size < 2) net.leaveParty();
+    } catch { /* ignore */ }
+    let ticks = 0;
+    let invited = false;
+    const waitFrames = () => {
+      ticks += 1;
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const party = net.getParty();
+      const st = latestStatus;
+      const local = net.getLocalPose();
+      updatePartyFrames({
+        localHex: net.identityHex,
+        localPose: local,
+        party,
+        remotes,
+      });
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE party-frames: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitFrames, 200);
+        return;
+      }
+      if (party?.pendingInviteFrom) {
+        if ((party.size ?? 0) > 0 && (party.size ?? 0) < 2) {
+          net.leaveParty();
+          if (mark) mark.textContent = 'VE party-frames: left solo party to accept inbound invite…';
+          window.setTimeout(waitFrames, 250);
+          return;
+        }
+        if ((party.size ?? 0) === 0) {
+          net.acceptPartyInvite();
+          if (mark) {
+            mark.textContent = `VE party-frames: accepting invite from ${party.pendingInviteFrom.slice(0, 12)}…`;
+          }
+          window.setTimeout(waitFrames, 300);
+          return;
+        }
+      }
+      // Keep inviting while party incomplete — remotes that never accept are
+      // skipped by PartyMate; SecondClient may ignore, PartyMate accepts inbound.
+      if (
+        !party?.pendingInviteFrom &&
+        remotes.length >= 1 &&
+        (party?.size ?? 0) < 2 &&
+        ticks % 4 === 0
+      ) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) {
+            mark.textContent = `VE party-frames: invited ${hex.slice(0, 12)}… waiting accept…`;
+          }
+        }
+      }
+      const frames = document.getElementById('partyFrames');
+      const framesVisible = !!(frames && !frames.classList.contains('hidden'));
+      const rowCount = frames ? frames.querySelectorAll('.pfRow').length : 0;
+      const farOrAnyParty = remotes.find((r) => r.party);
+      if ((party?.size ?? 0) >= 2 && framesVisible && rowCount >= 2) {
+        if (local && farOrAnyParty) {
+          camera.setTarget(
+            new Vector3(
+              (local.x + farOrAnyParty.x) * 0.35,
+              1.2,
+              (local.z + farOrAnyParty.z) * 0.35,
+            ),
+          );
+          camera.radius = 36;
+        }
+        if (mark) {
+          const mate = party!.members.find((m) => m.identityHex !== net.identityHex);
+          mark.textContent = `Party frames OK · size ${party!.size} · rows ${rowCount} · mate ${mate?.identityHex.slice(0, 8) ?? '—'}… · HUD left`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE party-frames: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · frames ${framesVisible ? 'on' : 'off'} rows ${rowCount} · invited=${invited} (waiting…)`;
+      }
+      if (ticks > 220) {
+        if (mark) mark.textContent = 'VE party-frames: timed out waiting for party frames';
+        return;
+      }
+      window.setTimeout(waitFrames, 200);
+    };
+    window.setTimeout(waitFrames, 800);
+  }
+
+  // ?ve=robes-equip — unequip robes → hood/skirt hidden + drab tunic tint.
+  if (ve === 'robes-equip') {
+    camera.radius = 8.5;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'robes-equip') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE robes-equip: waiting for Connected…';
+    let ticks = 0;
+    let unequipped = false;
+    const waitRobes = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE robes-equip: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitRobes, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 8.2;
+      const ch = net.getCharacter();
+      if (!unequipped) {
+        if (ch && !ch.robesEquipped) {
+          net.equipRobes();
+          if (mark) mark.textContent = 'VE robes-equip: re-equipping baseline…';
+          window.setTimeout(waitRobes, 250);
+          return;
+        }
+        // Keep staff on so silhouette contrast is robes-only.
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        net.unequipRobes();
+        unequipped = true;
+        if (mark) mark.textContent = 'VE robes-equip: unequipping…';
+        window.setTimeout(waitRobes, 300);
+        return;
+      }
+      const unequippedOk = ch && !ch.robesEquipped;
+      if (unequippedOk) {
+        setRobesMeshVisible(humanoid, false);
+        updateLoadoutStrip(ch);
+        updateBagPanel(ch);
+        if (mark) {
+          mark.textContent =
+            'Robes-equip OK · robes UNEQUIPPED · hood/skirt/shoulders hidden · drab tunic · J/K toggle';
+        }
+        return;
+      }
+      if (ticks > 120) {
+        if (mark) mark.textContent = 'VE robes-equip: timed out';
+        return;
+      }
+      window.setTimeout(waitRobes, 200);
+    };
+    window.setTimeout(waitRobes, 600);
   }
 
   void lastCastSpell;

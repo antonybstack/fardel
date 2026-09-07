@@ -34,7 +34,7 @@ Until a credited pack lands, the Babylon client uses **procedural kitbash**:
 
 - `web/src/world/forest.ts` — cylinder/cone hero trees, GPU-instanced mid trees,
   distant mountain cones with snow caps, sky dome + fog + hemi/sun mood.
-- `web/src/world/humanoid.ts` — local player **body+head+limbs + staff** (robes
+- `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
   silhouette); CrowdProxies remain amber capsules; training dummy stays cylinder.
 
 No third-party mesh packs are vendored yet — replace with licensed kits when
@@ -78,5 +78,5 @@ credits are chosen (see ledger below).
 | Pack / asset | License | Used for | URL |
 |---|---|---|---|
 | Procedural kitbash (`web/src/world/forest.ts`) | original (Fardel) | POC forest clearing, mountains, sky | — |
-| Procedural humanoid (`web/src/world/humanoid.ts`) | original (Fardel) | local player body+head+limbs + staff | — |
+| Procedural humanoid (`web/src/world/humanoid.ts`) | original (Fardel) | local player body+head+limbs + staff + robes group | — |
 | _credited pack TBD_ | | replace procedural trees/mountains + humanoid | |

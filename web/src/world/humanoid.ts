@@ -10,9 +10,13 @@ import {
 export type HumanoidParts = {
   /** Root at feet; rotate yaw on this. */
   root: Mesh;
-  /** Primary material used for cast flash / tint. */
+  /** Primary material used for cast flash / tint (torso/arms robe cloth). */
   mat: StandardMaterial;
   staff: Mesh;
+  /** Hood + skirt + shoulders group — hide when robes unequipped. */
+  robes: Mesh;
+  /** Base robe diffuse (restore when re-equipped). */
+  robeBaseColor: Color3;
 };
 
 export type HumanoidOptions = {
@@ -47,7 +51,7 @@ export function createPlayerHumanoid(
   const robeDiffuse = opts.robeColor ?? new Color3(0.28, 0.38, 0.72);
   const root = new Mesh(prefix, scene);
 
-  const robeMat = mat(scene, `${prefix}RobeMat`, robeDiffuse, 0.08);
+  const robeMat = mat(scene, `${prefix}RobeMat`, robeDiffuse.clone(), 0.08);
   const skinMat = mat(scene, `${prefix}SkinMat`, new Color3(0.86, 0.68, 0.52), 0.04);
   const bootMat = mat(scene, `${prefix}BootMat`, new Color3(0.22, 0.16, 0.12), 0.03);
   const staffMat = mat(scene, `${prefix}StaffMat`, new Color3(0.45, 0.28, 0.14), 0.05);
@@ -81,6 +85,9 @@ export function createPlayerHumanoid(
   torso.position = new Vector3(0, 1.08, 0);
   torso.material = robeMat;
 
+  const robes = new Mesh(`${prefix}Robes`, scene);
+  robes.parent = root;
+
   const skirt = MeshBuilder.CreateCylinder(
     `${prefix}Skirt`,
     {
@@ -91,7 +98,7 @@ export function createPlayerHumanoid(
     },
     scene,
   );
-  skirt.parent = root;
+  skirt.parent = robes;
   skirt.position = new Vector3(0, 0.72, 0);
   skirt.material = robeMat;
 
@@ -109,7 +116,7 @@ export function createPlayerHumanoid(
     { diameter: 0.38, segments: 8 },
     scene,
   );
-  hood.parent = root;
+  hood.parent = robes;
   hood.position = new Vector3(0, 1.66, -0.02);
   hood.scaling = new Vector3(1.05, 0.7, 1.1);
   hood.material = robeMat;
@@ -184,7 +191,7 @@ export function createPlayerHumanoid(
     { width: 0.22, height: 0.14, depth: 0.28 },
     scene,
   );
-  shoulderL.parent = root;
+  shoulderL.parent = robes;
   shoulderL.position = new Vector3(-0.36, 1.4, 0);
   shoulderL.material = robeMat;
 
@@ -193,14 +200,20 @@ export function createPlayerHumanoid(
     { width: 0.22, height: 0.14, depth: 0.28 },
     scene,
   );
-  shoulderR.parent = root;
+  shoulderR.parent = robes;
   shoulderR.position = new Vector3(0.36, 1.4, 0);
   shoulderR.material = robeMat;
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
 
-  return { root, mat: robeMat, staff };
+  return {
+    root,
+    mat: robeMat,
+    staff,
+    robes,
+    robeBaseColor: robeDiffuse.clone(),
+  };
 }
 
 /** Stable robe tint from identity hex (distinct from local blue). */

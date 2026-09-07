@@ -84,3 +84,6 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
   set changes so far party mates keep arriving after interest moves.
 
 - Self-frame/bag HUD is client-only Cosmetics over Character (XP, staffEquipped, knowsSpark/Emberbolt); no player HP table yet — omit health rather than invent fake HP.
+
+- Party member frames are client-only Cosmetics over `PartyMember` + remote poses (hex, leader, distance); no party HP table yet — omit health rather than invent fake HP.
+- Robes mesh follows `Character.robesEquipped` like staff: hide hood/skirt/shoulders group; tint torso/arms drab when unequipped (casts remain staff-gated).

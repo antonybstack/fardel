@@ -36,6 +36,11 @@
         <span class="loLabel">Staff</span>
         <span class="loState" id="loStaffState">—</span>
       </div>
+      <div class="loChip" id="loRobes" data-kind="robes">
+        <span class="loIcon robes" aria-hidden="true">▣</span>
+        <span class="loLabel">Robes</span>
+        <span class="loState" id="loRobesState">—</span>
+      </div>
       <div class="loChip" id="loSpark" data-kind="spark">
         <span class="loIcon spark" aria-hidden="true">✦</span>
         <span class="loLabel">Spark</span>
@@ -57,11 +62,12 @@
       <div class="bagRow"><span>Spark</span><span id="bagSpark">—</span></div>
       <div class="bagRow"><span>Emberbolt</span><span id="bagEmber">—</span></div>
       <div class="bagRow"><span>XP</span><span id="bagXp">—</span></div>
-      <div class="bagFoot">Casts need staff + known spell · U/I equip</div>
+      <div class="bagFoot">Casts need staff + known spell · U/I staff · J/K robes</div>
     </div>
     <div id="hud">
       <div id="status">Booting…</div>
       <div id="persistMark" class="persistMark"></div>
+      <div id="partyFrames" class="hidden" aria-label="Party member frames"></div>
       <div id="targetFrame" class="hidden" aria-label="Selected target">
         <div class="tfNameRow">
           <span id="tfName">—</span>

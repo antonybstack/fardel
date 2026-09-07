@@ -152,6 +152,8 @@ export type GameNet = {
   cast: (spellId: number) => void;
   unequipStaff: () => void;
   equipStaff: () => void;
+  unequipRobes: () => void;
+  equipRobes: () => void;
   createParty: () => void;
   inviteToParty: (invitee: Identity) => void;
   acceptPartyInvite: () => void;
@@ -966,6 +968,16 @@ export async function connectToSpacetime(
                 castFeedback = 'Equipping staff…';
                 emitStatus(identityHex);
                 void conn.reducers.equipStaff({});
+              },
+              unequipRobes: () => {
+                castFeedback = 'Unequipping robes…';
+                emitStatus(identityHex);
+                void conn.reducers.unequipRobes({});
+              },
+              equipRobes: () => {
+                castFeedback = 'Equipping robes…';
+                emitStatus(identityHex);
+                void conn.reducers.equipRobes({});
               },
               createParty: () => {
                 castFeedback = 'Creating party…';

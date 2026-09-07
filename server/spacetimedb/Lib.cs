@@ -343,6 +343,36 @@ public static partial class Module
         ctx.Db.Character.Identity.Update(character);
     }
 
+    /// <summary>Unequip robes — presentation + Character.RobesEquipped (cosmetic; casts still staff-gated).</summary>
+    [SpacetimeDB.Reducer]
+    public static void UnequipRobes(ReducerContext ctx)
+    {
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (!character.RobesEquipped)
+        {
+            return;
+        }
+
+        character.RobesEquipped = false;
+        ctx.Db.Character.Identity.Update(character);
+    }
+
+    /// <summary>Equip robes — restores wizard-robe silhouette on the client.</summary>
+    [SpacetimeDB.Reducer]
+    public static void EquipRobes(ReducerContext ctx)
+    {
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (character.RobesEquipped)
+        {
+            return;
+        }
+
+        character.RobesEquipped = true;
+        ctx.Db.Character.Identity.Update(character);
+    }
+
     /// <summary>Create a party with sender as sole leader. No-op if already in a party.</summary>
     [SpacetimeDB.Reducer]
     public static void CreateParty(ReducerContext ctx)
