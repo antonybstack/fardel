@@ -166,8 +166,8 @@ export type GameNet = {
   inviteToParty: (invitee: Identity) => void;
   acceptPartyInvite: () => void;
   leaveParty: () => void;
-  /** Public Say reducer — server-authoritative ChatMessage row. */
-  say: (text: string) => void;
+  /** Public Say reducer — server-authoritative ChatMessage row; rejects on rate-limit. */
+  say: (text: string) => Promise<void>;
   getRecentChat: () => ChatMessageView[];
   /** Invite nearest remote (create party if needed); auto-accept path is invitee-side. */
   inviteNearestRemote: () => string | null;
@@ -1079,7 +1079,7 @@ export async function connectToSpacetime(
                 void conn.reducers.leaveParty({});
               },
               say: (text: string) => {
-                void conn.reducers.say({ text });
+                return conn.reducers.say({ text });
               },
               getRecentChat: () => listChat(),
               inviteNearestRemote: () => {

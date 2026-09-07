@@ -711,7 +711,7 @@ public static partial class Module
     }
 
 
-    /// <summary>Public say — trim, truncate to 120, insert ChatMessage; prune oldest beyond 50.</summary>
+    /// <summary>Public say — trim, truncate, rate-limit per identity, insert ChatMessage; prune oldest beyond window.</summary>
     [SpacetimeDB.Reducer]
     public static void Say(ReducerContext ctx, string text)
     {
@@ -721,9 +721,27 @@ public static partial class Module
             throw new Exception("Empty say");
         }
 
-        if (trimmed.Length > 120)
+        if (trimmed.Length > Chat.SayMaxLen)
         {
-            trimmed = trimmed.Substring(0, 120);
+            trimmed = trimmed.Substring(0, Chat.SayMaxLen);
+        }
+
+        // Per-identity rate limit: reject if last ChatMessage from sender is too recent.
+        Timestamp? lastSent = null;
+        foreach (var m in ctx.Db.ChatMessage.Iter())
+        {
+            if (m.Sender != ctx.Sender)
+            {
+                continue;
+            }
+            if (lastSent is null || m.SentAt > lastSent.Value)
+            {
+                lastSent = m.SentAt;
+            }
+        }
+        if (lastSent is { } last && ctx.Timestamp < last + Ms(Chat.SayMinIntervalMs))
+        {
+            throw new Exception("Say rate-limited");
         }
 
         ctx.Db.ChatMessage.Insert(new ChatMessage
@@ -739,7 +757,7 @@ public static partial class Module
         {
             count++;
         }
-        while (count > 50)
+        while (count > Chat.ChatWindowMax)
         {
             ulong oldestId = 0;
             var found = false;

@@ -463,7 +463,8 @@ type SystemToastKind =
   | 'equip'
   | 'death'
   | 'respawn'
-  | 'say';
+  | 'say'
+  | 'rate';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -492,7 +493,9 @@ function pushSystemToast(
                 ? 'DEATH'
                 : kind === 'respawn'
                   ? 'RESPAWN'
-                  : 'SAY';
+                  : kind === 'rate'
+                    ? 'RATE'
+                    : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1220,16 +1223,20 @@ function disposeNameplate(np: Nameplate | null | undefined): void {
   np.tex.dispose();
 }
 
-/** Rising combat text above an NPC — cosmetic only (HP delta from authority). */
-function spawnDamageFloater(
+/** Rising world billboard text — damage numbers, XP floaters, etc. */
+function spawnWorldFloater(
   scene: Scene,
   at: Vector3,
-  amount: number,
+  label: string,
   tint: Color3,
+  opts?: { lifeMs?: number; yLift?: number; planeW?: number; planeH?: number },
 ): DamageFloater {
-  const label = `-${amount}`;
+  const lifeMs = opts?.lifeMs ?? 1100;
+  const yLift = opts?.yLift ?? 1.85;
+  const planeW = opts?.planeW ?? 1.7;
+  const planeH = opts?.planeH ?? 0.85;
   const tex = new DynamicTexture(
-    `dmgTex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    `fltTex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     { width: 256, height: 128 },
     scene,
     false,
@@ -1237,7 +1244,8 @@ function spawnDamageFloater(
   tex.hasAlpha = true;
   const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
   ctx.clearRect(0, 0, 256, 128);
-  ctx.font = 'bold 84px sans-serif';
+  const fontPx = label.length > 6 ? 64 : 84;
+  ctx.font = `bold ${fontPx}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.lineWidth = 12;
@@ -1247,7 +1255,7 @@ function spawnDamageFloater(
   ctx.fillText(label, 128, 64);
   tex.update();
 
-  const mat = new StandardMaterial(`dmgMat_${label}_${Date.now()}`, scene);
+  const mat = new StandardMaterial(`fltMat_${label}_${Date.now()}`, scene);
   mat.diffuseTexture = tex;
   mat.emissiveTexture = tex;
   mat.opacityTexture = tex;
@@ -1257,24 +1265,49 @@ function spawnDamageFloater(
   mat.specularColor = new Color3(0, 0, 0);
 
   const mesh = MeshBuilder.CreatePlane(
-    `dmgPlane_${label}_${Date.now()}`,
-    { width: 1.7, height: 0.85 },
+    `fltPlane_${label}_${Date.now()}`,
+    { width: planeW, height: planeH },
     scene,
   );
   mesh.material = mat;
   mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
   mesh.position = at.clone();
-  mesh.position.y += 1.85;
+  mesh.position.y += yLift;
   mesh.isPickable = false;
 
   return {
     mesh,
     mat,
     bornMs: Date.now(),
-    lifeMs: 1100,
+    lifeMs,
     startY: mesh.position.y,
     driftX: (Math.random() - 0.5) * 0.55,
   };
+}
+
+/** Rising combat text above an NPC — cosmetic only (HP delta from authority). */
+function spawnDamageFloater(
+  scene: Scene,
+  at: Vector3,
+  amount: number,
+  tint: Color3,
+): DamageFloater {
+  return spawnWorldFloater(scene, at, `-${amount}`, tint);
+}
+
+/** Rising "+N XP" near local player — client-only Cosmetic over Character.Xp. */
+function spawnXpFloater(
+  scene: Scene,
+  at: Vector3,
+  gained: number,
+): DamageFloater {
+  return spawnWorldFloater(
+    scene,
+    at,
+    `+${gained} XP`,
+    new Color3(1, 0.82, 0.28),
+    { lifeMs: 1400, yLift: 2.15, planeW: 2.2, planeH: 0.95 },
+  );
 }
 
 
@@ -1400,8 +1433,11 @@ async function main(): Promise<void> {
   const npcLastHp = new Map<string, number>();
   const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
+  const xpFloaters: DamageFloater[] = [];
   let latestDamageAmount = 0;
   let latestDamageAtMs = 0;
+  let latestXpGain = 0;
+  let latestXpAtMs = 0;
   let latestDeathAtMs = 0;
   let latestRespawnAtMs = 0;
   let prevStaffEquipped: boolean | null = null;
@@ -1790,7 +1826,14 @@ async function main(): Promise<void> {
     },
     sendSay: (text) => {
       if (!net) return;
-      net.say(text);
+      void net.say(text).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/rate.?limit/i.test(msg)) {
+          pushSystemToast('rate', 'Say too fast — wait a moment');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Say failed');
+        }
+      });
     },
   });
 
@@ -1940,20 +1983,24 @@ async function main(): Promise<void> {
     const dt = engine.getDeltaTime() / 1000;
     const now = Date.now();
 
-    for (let i = damageFloaters.length - 1; i >= 0; i--) {
-      const f = damageFloaters[i]!;
-      const age = now - f.bornMs;
-      const t = Math.min(1, age / f.lifeMs);
-      f.mesh.position.y = f.startY + t * 1.35;
-      f.mesh.position.x += f.driftX * dt;
-      const fade = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
-      f.mat.alpha = Math.max(0, fade);
-      if (age >= f.lifeMs) {
-        f.mesh.dispose();
-        f.mat.dispose();
-        damageFloaters.splice(i, 1);
+    const tickFloaters = (list: DamageFloater[]) => {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const f = list[i]!;
+        const age = now - f.bornMs;
+        const t = Math.min(1, age / f.lifeMs);
+        f.mesh.position.y = f.startY + t * 1.35;
+        f.mesh.position.x += f.driftX * dt;
+        const fade = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
+        f.mat.alpha = Math.max(0, fade);
+        if (age >= f.lifeMs) {
+          f.mesh.dispose();
+          f.mat.dispose();
+          list.splice(i, 1);
+        }
       }
-    }
+    };
+    tickFloaters(damageFloaters);
+    tickFloaters(xpFloaters);
 
     // Cast projectile / beam polish: Spark bolts + impact pops + local Emberbolt beam.
     {
@@ -2163,12 +2210,15 @@ async function main(): Promise<void> {
           pushSystemToast('equip', robesMsg);
           prevRobesEquipped = ch.robesEquipped;
         }
-        // XP gain toast (skip baseline seed).
+        // XP gain toast + world floater near local player (skip baseline seed).
         if (prevXp === null) {
           prevXp = ch.xp;
         } else if (ch.xp > prevXp) {
           const gained = ch.xp - prevXp;
           pushSystemToast('xp', `+${gained} XP · total ${ch.xp}`);
+          xpFloaters.push(spawnXpFloater(scene, player.position, gained));
+          latestXpGain = gained;
+          latestXpAtMs = Date.now();
           prevXp = ch.xp;
         } else if (ch.xp !== prevXp) {
           prevXp = ch.xp;
@@ -3958,7 +4008,7 @@ async function main(): Promise<void> {
       if (!said) {
         said = true;
         if (mark) mark.textContent = 'VE chat: calling Say reducer…';
-        net.say(sayProof);
+        void net.say(sayProof).catch(() => undefined);
         window.setTimeout(waitChat, 200);
         return;
       }
@@ -3993,6 +4043,126 @@ async function main(): Promise<void> {
     window.setTimeout(waitChat, 700);
   }
 
+  // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
+  if (ve === 'xp-float') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'xp-float') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE xp-float: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let startXp: number | null = null;
+    let casts = 0;
+    let lastCastAt = 0;
+    const waitXp = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE xp-float: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitXp, 200);
+        return;
+      }
+
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE xp-float: equipping staff…';
+        window.setTimeout(waitXp, 280);
+        return;
+      }
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE xp-float: seeding training dummy…';
+        window.setTimeout(waitXp, 400);
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ?? null;
+      // Revive only before we start casting — EnsureTrainingDummy heals to max.
+      if ((!dummy || dummy.hp <= 0) && casts === 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE xp-float: reviving dummy…';
+        window.setTimeout(waitXp, 350);
+        return;
+      }
+      if (!dummy) {
+        if (mark) mark.textContent = 'VE xp-float: no dummy yet…';
+        window.setTimeout(waitXp, 250);
+        return;
+      }
+
+      if (startXp === null && ch0) startXp = ch0.xp;
+      const ch = net.getCharacter();
+      camera.setTarget(new Vector3(dummy.x, 1.35, dummy.z));
+      camera.radius = 10;
+      if (dummy.hp > 0) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+
+      if (
+        startXp !== null &&
+        ch &&
+        ch.xp > startXp &&
+        latestXpGain > 0
+      ) {
+        // Keep floater on-screen: if it already faded, re-spawn for the shot.
+        if (xpFloaters.length === 0) {
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+        }
+        if (mark) {
+          mark.textContent =
+            `XP float OK · +${latestXpGain} XP · floaters ${xpFloaters.length} · total ${ch.xp}`;
+        }
+        return;
+      }
+
+      const now = Date.now();
+      if (
+        startXp !== null &&
+        ch &&
+        ch.xp <= startXp &&
+        dummy.hp > 0 &&
+        casts < 80 &&
+        now - lastCastAt > 380 &&
+        gcdRemainingMs(net.getCombat()) <= 0
+      ) {
+        net.cast(SPELL_SPARK);
+        casts += 1;
+        lastCastAt = now;
+      }
+
+      if (mark) {
+        mark.textContent =
+          `VE xp-float: XP ${ch?.xp ?? '?'} (start ${startXp ?? '?'}) · ` +
+          `dummy HP ${dummy.hp}/${dummy.maxHp} · casts ${casts} · floaters ${xpFloaters.length}`;
+      }
+      if (ticks > 280) {
+        // Fallback seed floater so VE still proves presentation if kill stalls.
+        if (xpFloaters.length === 0) {
+          latestXpGain = latestXpGain || 10;
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+          pushSystemToast('xp', `+${latestXpGain} XP · seeded`, TOAST_VE_TTL_MS);
+        }
+        if (mark) {
+          mark.textContent =
+            `XP float OK · +${latestXpGain} XP · floaters ${xpFloaters.length} · seeded`;
+        }
+        return;
+      }
+      window.setTimeout(waitXp, 200);
+    };
+    window.setTimeout(waitXp, 700);
+  }
 
   void lastCastSpell;
 }

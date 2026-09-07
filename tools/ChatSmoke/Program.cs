@@ -3,10 +3,12 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Multi-client public Say: A inserts ChatMessage; B must observe it.
+// Also proves per-identity Say rate-limit rejects a second immediate Say.
 const string uri = GameConstants.DefaultLocalUri;
 const string db = GameConstants.DefaultDatabaseName;
 const int timeoutMs = 30000;
 const string sayText = "hello yard";
+const string sayText2 = "rate ok";
 
 DbConnection? connA = null;
 DbConnection? connB = null;
@@ -54,7 +56,66 @@ try
         }
     }
 
-    Console.WriteLine($"OK: ChatSmoke — B saw messageId={seen!.MessageId} from A text=\"{seen.Text}\"");
+    Console.WriteLine($"OK: B saw messageId={seen!.MessageId} from A text=\"{seen.Text}\"");
+
+    // Immediate second Say from A must fail rate-limit.
+    string? rateFailReason = null;
+    var rateFailed = new TaskCompletionSource();
+    void OnSay(ReducerEventContext ctx, string text)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                rateFailReason = reason;
+                rateFailed.TrySetResult();
+                break;
+            case Status.Committed:
+                if (text == sayText2)
+                {
+                    break;
+                }
+                rateFailed.TrySetException(new Exception($"Say committed while rate-limited: {text}"));
+                break;
+            case Status.OutOfEnergy(_):
+                rateFailed.TrySetException(new Exception("Say out of energy"));
+                break;
+        }
+    }
+    connA.Reducers.OnSay += OnSay;
+    try
+    {
+        connA.Reducers.Say("too soon");
+        await Pump(rateFailed.Task, timeoutMs, connA, "say rate-limit fail");
+    }
+    finally
+    {
+        connA.Reducers.OnSay -= OnSay;
+    }
+
+    if (string.IsNullOrEmpty(rateFailReason) ||
+        rateFailReason.IndexOf("rate-limited", StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected Say rate-limited failure, got: {rateFailReason ?? "(null)"}");
+        return;
+    }
+    Console.WriteLine($"OK: rate-limit rejected ({rateFailReason})");
+
+    // After interval, Say succeeds again and B sees it.
+    await DelayPumpBoth(connA, connB, Chat.SayMinIntervalMs + 80);
+    connA.Reducers.Say(sayText2);
+    await PumpUntilBoth(() =>
+    {
+        foreach (var m in connB.Db.ChatMessage.Iter())
+        {
+            if (m.Sender == idA && m.Text == sayText2)
+            {
+                return true;
+            }
+        }
+        return false;
+    }, timeoutMs, connA, connB, "B sees A after rate window");
+
+    Console.WriteLine($"OK: ChatSmoke — A→B say + rate-limit {Chat.SayMinIntervalMs}ms");
     Environment.ExitCode = 0;
 }
 catch (Exception e)
@@ -125,4 +186,16 @@ static async Task PumpUntilBoth(
         try { await Task.Delay(16, cts.Token); } catch (OperationCanceledException) { break; }
     }
     if (!pred()) throw new TimeoutException(label);
+}
+
+static async Task DelayPumpBoth(DbConnection a, DbConnection b, int ms)
+{
+    using var cts = new CancellationTokenSource(ms + 5000);
+    var until = DateTime.UtcNow.AddMilliseconds(ms);
+    while (DateTime.UtcNow < until && !cts.IsCancellationRequested)
+    {
+        a.FrameTick();
+        b.FrameTick();
+        try { await Task.Delay(16, cts.Token); } catch (OperationCanceledException) { break; }
+    }
 }

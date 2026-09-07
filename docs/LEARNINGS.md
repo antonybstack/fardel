@@ -93,3 +93,6 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 
 - Public `Say` + `ChatMessage` is the multi-client chat path: Enter compose → reducer → wholesale `chat_message` insert → strip/toast (no optimistic echo). `tools/ChatSmoke` proves A→B.
 
+- Say rate-limit is module-side over existing `ChatMessage.SentAt` (no new table): reject if last row from same identity is within `Chat.SayMinIntervalMs`. Client catches reducer `SenderError` and toasts kind `rate` — keeps ChatSmoke / wholesale chat path unchanged aside from the reject proof.
+- XP floater reuses the damage-number billboard path (`spawnWorldFloater`) on `Character.Xp` deltas near the local player — Cosmetics only; no XP-event table.
+
