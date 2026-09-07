@@ -415,6 +415,57 @@ function combatLogKindsPresent(): Set<string> {
   return kinds;
 }
 
+const TOAST_MAX = 5;
+const TOAST_TTL_MS = 2800;
+const TOAST_VE_TTL_MS = 9000;
+
+type SystemToastKind = 'connected' | 'invite' | 'party' | 'xp' | 'equip';
+
+/** Client-only transient top-center system toasts. */
+function pushSystemToast(
+  kind: SystemToastKind,
+  text: string,
+  ttlMs: number = TOAST_TTL_MS,
+): void {
+  const root = document.getElementById('toastStack');
+  if (!root) return;
+  const el = document.createElement('div');
+  el.className = `sysToast ${kind}`;
+  el.setAttribute('data-kind', kind);
+  el.style.setProperty('--toast-ttl', `${Math.max(400, ttlMs)}ms`);
+  const tag =
+    kind === 'connected'
+      ? 'CONN'
+      : kind === 'invite'
+        ? 'INVITE'
+        : kind === 'party'
+          ? 'PARTY'
+          : kind === 'xp'
+            ? 'XP'
+            : 'EQ';
+  el.innerHTML =
+    `<span class="toastTag">${tag}</span>` +
+    `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
+  root.appendChild(el);
+  while (root.children.length > TOAST_MAX) {
+    root.removeChild(root.firstChild!);
+  }
+  window.setTimeout(() => {
+    if (el.parentElement === root) el.remove();
+  }, ttlMs + 400);
+}
+
+function toastKindsPresent(): Set<string> {
+  const root = document.getElementById('toastStack');
+  const kinds = new Set<string>();
+  if (!root) return kinds;
+  for (const el of Array.from(root.children)) {
+    const k = (el as HTMLElement).getAttribute('data-kind');
+    if (k) kinds.add(k);
+  }
+  return kinds;
+}
+
 /** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
 const MINIMAP_RANGE_M = 48;
 
@@ -607,7 +658,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · combat log right · FPS overlay top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1081,6 +1132,10 @@ async function main(): Promise<void> {
   let prevRobesEquipped: boolean | null = null;
   let prevPartySize = 0;
   let prevPartyMemberKey = '';
+  let prevXp: number | null = null;
+  let prevPendingInvite: string | null = null;
+  let toastedConnected = false;
+  let toastedInviteAcceptKey = '';
   const proxyInstances = new Map<string, InstancedMesh>();
   let fpsHudAccum = 0;
 
@@ -1621,20 +1676,28 @@ async function main(): Promise<void> {
         if (prevStaffEquipped === null) {
           prevStaffEquipped = ch.staffEquipped;
         } else if (ch.staffEquipped !== prevStaffEquipped) {
-          pushCombatLog(
-            'equip',
-            ch.staffEquipped ? 'Staff equipped' : 'Staff unequipped',
-          );
+          const staffMsg = ch.staffEquipped ? 'Staff equipped' : 'Staff unequipped';
+          pushCombatLog('equip', staffMsg);
+          pushSystemToast('equip', staffMsg);
           prevStaffEquipped = ch.staffEquipped;
         }
         if (prevRobesEquipped === null) {
           prevRobesEquipped = ch.robesEquipped;
         } else if (ch.robesEquipped !== prevRobesEquipped) {
-          pushCombatLog(
-            'equip',
-            ch.robesEquipped ? 'Robes equipped' : 'Robes unequipped',
-          );
+          const robesMsg = ch.robesEquipped ? 'Robes equipped' : 'Robes unequipped';
+          pushCombatLog('equip', robesMsg);
+          pushSystemToast('equip', robesMsg);
           prevRobesEquipped = ch.robesEquipped;
+        }
+        // XP gain toast (skip baseline seed).
+        if (prevXp === null) {
+          prevXp = ch.xp;
+        } else if (ch.xp > prevXp) {
+          const gained = ch.xp - prevXp;
+          pushSystemToast('xp', `+${gained} XP · total ${ch.xp}`);
+          prevXp = ch.xp;
+        } else if (ch.xp !== prevXp) {
+          prevXp = ch.xp;
         }
       }
       {
@@ -1647,6 +1710,24 @@ async function main(): Promise<void> {
               .sort()
               .join(',')
           : '';
+        const pending = party?.pendingInviteFrom ?? null;
+        if (pending && pending !== prevPendingInvite) {
+          pushSystemToast(
+            'invite',
+            `Invite from ${pending.slice(0, 8)}…`,
+          );
+        }
+        if (!pending && prevPendingInvite && size > prevPartySize) {
+          const acceptKey = `${prevPendingInvite}:${size}:${memberKey}`;
+          if (acceptKey !== toastedInviteAcceptKey) {
+            pushSystemToast(
+              'party',
+              `Invite accepted · party ${size}`,
+            );
+            toastedInviteAcceptKey = acceptKey;
+          }
+        }
+        prevPendingInvite = pending;
         if (size > prevPartySize && size >= 1) {
           if (prevPartySize === 0) {
             pushCombatLog(
@@ -1744,6 +1825,16 @@ async function main(): Promise<void> {
     latestStatus = s;
     if (s.state === 'connected' && s.combat) {
       selectedTargetId = s.combat.targetNpcId;
+    }
+    if (s.state === 'connected' && !toastedConnected) {
+      toastedConnected = true;
+      const idShort = s.identityHex.slice(0, 8);
+      pushSystemToast(
+        'connected',
+        s.restoredToken
+          ? `Identity restored · ${idShort}…`
+          : `Connected · ${idShort}…`,
+      );
     }
     setStatus(formatStatus(s, Date.now()));
   };
@@ -2952,6 +3043,123 @@ async function main(): Promise<void> {
     };
     window.setTimeout(waitLog, 700);
   }
+
+
+  // ?ve=toasts — seed top-center system toasts (conn/invite/party/xp/equip).
+  if (ve === 'toasts') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'toasts') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE toasts: waiting for Connected…';
+    let ticks = 0;
+    let phase: 'wait' | 'seed' | 'equip' | 'done' = 'wait';
+    let equipStep = 0;
+    const waitToasts = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE toasts: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitToasts, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 13;
+      const kinds = toastKindsPresent();
+      const ready =
+        kinds.has('connected') &&
+        kinds.has('invite') &&
+        kinds.has('party') &&
+        kinds.has('xp') &&
+        kinds.has('equip');
+      if (ready || phase === 'done') {
+        if (mark) {
+          mark.textContent =
+            `System toasts OK · ${[...kinds].sort().join('+')} · top-center`;
+        }
+        phase = 'done';
+        return;
+      }
+      if (phase === 'wait') {
+        phase = 'seed';
+        if (mark) mark.textContent = 'VE toasts: seeding banner stack…';
+        window.setTimeout(waitToasts, 200);
+        return;
+      }
+      if (phase === 'seed') {
+        const idShort = st.identityHex.slice(0, 8);
+        // Re-push / fill missing kinds with long TTL so the shot catches the stack.
+        if (!kinds.has('connected')) {
+          pushSystemToast(
+            'connected',
+            st.restoredToken
+              ? `Identity restored · ${idShort}…`
+              : `Connected · ${idShort}…`,
+            TOAST_VE_TTL_MS,
+          );
+        }
+        if (!kinds.has('invite')) {
+          pushSystemToast(
+            'invite',
+            'Invite from a1b2c3d4…',
+            TOAST_VE_TTL_MS,
+          );
+        }
+        if (!kinds.has('party')) {
+          pushSystemToast(
+            'party',
+            'Invite accepted · party 2',
+            TOAST_VE_TTL_MS,
+          );
+        }
+        if (!kinds.has('xp')) {
+          const xp = st.character?.xp ?? 0;
+          pushSystemToast('xp', `+25 XP · total ${xp + 25}`, TOAST_VE_TTL_MS);
+        }
+        phase = 'equip';
+        equipStep = 0;
+        if (mark) mark.textContent = 'VE toasts: flipping staff for EQ…';
+        window.setTimeout(waitToasts, 280);
+        return;
+      }
+      if (phase === 'equip') {
+        const ch = net.getCharacter();
+        if (equipStep === 0) {
+          if (ch && ch.staffEquipped) net.unequipStaff();
+          else net.equipStaff();
+          equipStep = 1;
+          window.setTimeout(waitToasts, 320);
+          return;
+        }
+        if (equipStep === 1) {
+          // Ensure an equip toast with long TTL if the flip hasn't landed yet.
+          if (!toastKindsPresent().has('equip')) {
+            pushSystemToast('equip', 'Staff equipped', TOAST_VE_TTL_MS);
+          }
+          equipStep = 2;
+          window.setTimeout(waitToasts, 250);
+          return;
+        }
+      }
+      if (mark) {
+        mark.textContent =
+          `VE toasts: kinds ${[...kinds].join('+') || '∅'} · phase ${phase}`;
+      }
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent =
+            `VE toasts: timed out · kinds ${[...kinds].join('+') || '∅'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitToasts, 220);
+    };
+    window.setTimeout(waitToasts, 700);
+  }
+
 
   void lastCastSpell;
 }
