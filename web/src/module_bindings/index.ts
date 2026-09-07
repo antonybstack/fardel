@@ -44,8 +44,10 @@ import InviteToPartyReducer from "./invite_to_party_reducer";
 import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
 import PartySayReducer from "./party_say_reducer";
+import PickupReducer from "./pickup_reducer";
 import SayReducer from "./say_reducer";
 import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
+import SeedLootReducer from "./seed_loot_reducer";
 import SetTargetReducer from "./set_target_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
@@ -64,6 +66,7 @@ import PartyMemberRow from "./party_member_table";
 import PlayerCombatRow from "./player_combat_table";
 import PlayerPoseRow from "./player_pose_table";
 import WhisperMessageRow from "./whisper_message_table";
+import WorldLootRow from "./world_loot_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -191,6 +194,17 @@ const tablesSchema = __schema({
       { name: 'whisper_message_message_id_key', constraint: 'unique', columns: ['messageId'] },
     ],
   }, WhisperMessageRow),
+  worldLoot: __table({
+    name: 'world_loot',
+    indexes: [
+      { accessor: 'LootId', name: 'world_loot_loot_id_idx_btree', algorithm: 'btree', columns: [
+        'lootId',
+      ] },
+    ],
+    constraints: [
+      { name: 'world_loot_loot_id_key', constraint: 'unique', columns: ['lootId'] },
+    ],
+  }, WorldLootRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
@@ -205,8 +219,10 @@ const reducersSchema = __reducers(
   __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
   __reducerSchema("party_say", PartySayReducer),
+  __reducerSchema("pickup", PickupReducer),
   __reducerSchema("say", SayReducer),
   __reducerSchema("seed_crowd_proxies", SeedCrowdProxiesReducer),
+  __reducerSchema("seed_loot", SeedLootReducer),
   __reducerSchema("set_target", SetTargetReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
@@ -239,6 +255,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "PlayerPose": Omit<typeof tablesSchema.schemaType.tables["playerPose"], "accessorName"> & { readonly accessorName: "PlayerPose" };
     /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
     readonly "WhisperMessage": Omit<typeof tablesSchema.schemaType.tables["whisperMessage"], "accessorName"> & { readonly accessorName: "WhisperMessage" };
+    /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
+    readonly "WorldLoot": Omit<typeof tablesSchema.schemaType.tables["worldLoot"], "accessorName"> & { readonly accessorName: "WorldLoot" };
   };
 };
 
@@ -267,6 +285,7 @@ const tableAccessorAliases = {
   "PlayerCombat": "playerCombat",
   "PlayerPose": "playerPose",
   "WhisperMessage": "whisperMessage",
+  "WorldLoot": "worldLoot",
 } as const;
 
 function __withTableAccessorAliases<T extends object>(target: T, freeze = false): T {
@@ -307,6 +326,8 @@ export type DbView = __DbViewBase & {
   readonly "PlayerPose": __DbViewBase["playerPose"];
   /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
   readonly "WhisperMessage": __DbViewBase["whisperMessage"];
+  /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
+  readonly "WorldLoot": __DbViewBase["worldLoot"];
 };
 
 type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
@@ -331,6 +352,8 @@ export type Tables = __TablesBase & {
   readonly "PlayerPose": __TablesBase["playerPose"];
   /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
   readonly "WhisperMessage": __TablesBase["whisperMessage"];
+  /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
+  readonly "WorldLoot": __TablesBase["worldLoot"];
 };
 
 /** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */

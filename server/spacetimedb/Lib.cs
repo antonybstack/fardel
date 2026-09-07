@@ -72,6 +72,8 @@ public static partial class Module
         public bool KnowsEmberbolt;
         public bool StaffEquipped;
         public bool RobesEquipped;
+        /// <summary>Bag flag — set when picking up ember_shard WorldLoot.</summary>
+        public bool HasEmberShard;
     }
 
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
@@ -100,6 +102,19 @@ public static partial class Module
         public float Z;
         public int Hp;
         public int MaxHp;
+    }
+
+    /// <summary>Ground loot in the yard — SeedLoot / dummy death inserts; Pickup despawns.</summary>
+    [SpacetimeDB.Table(Accessor = "WorldLoot", Public = true)]
+    public partial struct WorldLoot
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong LootId;
+        public float X;
+        public float Y;
+        public float Z;
+        /// <summary>Item id string, e.g. ember_shard (Fardel.Shared.Loot).</summary>
+        public string ItemId;
     }
 
     /// <summary>Public yard chat — Say reducer inserts; clients wholesale-subscribe.</summary>
@@ -633,6 +648,7 @@ public static partial class Module
             KnowsEmberbolt = true,
             StaffEquipped = true,
             RobesEquipped = true,
+            HasEmberShard = false,
         });
     }
 
@@ -706,6 +722,7 @@ public static partial class Module
             character.Xp += Combat.XpPerKill;
             ctx.Db.Character.Identity.Update(character);
             Log.Info($"Dummy killed by {caster}, xp={character.Xp}");
+            SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
         }
     }
 
@@ -979,6 +996,86 @@ public static partial class Module
         }
 
         Log.Info($"Whisper {ctx.Sender} -> {recipient}: {trimmed}");
+    }
+
+    /// <summary>Clear + seed one ember_shard near yard spawn (idempotent smoke helper).</summary>
+    [SpacetimeDB.Reducer]
+    public static void SeedLoot(ReducerContext ctx)
+    {
+        ClearWorldLoot(ctx);
+        SpawnEmberShardAt(ctx, Loot.SeedX, Loot.SeedY, Loot.SeedZ);
+        Log.Info($"SeedLoot by {ctx.Sender}");
+    }
+
+    /// <summary>Take nearest WorldLoot in range — grant XP + bag flag for ember_shard, despawn.</summary>
+    [SpacetimeDB.Reducer]
+    public static void Pickup(ReducerContext ctx)
+    {
+        var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+
+        WorldLoot? best = null;
+        var bestDistSq = float.MaxValue;
+        foreach (var row in ctx.Db.WorldLoot.Iter())
+        {
+            var dx = row.X - pose.X;
+            var dz = row.Z - pose.Z;
+            var distSq = dx * dx + dz * dz;
+            if (distSq < bestDistSq)
+            {
+                bestDistSq = distSq;
+                best = row;
+            }
+        }
+
+        if (best is null)
+        {
+            throw new Exception("No loot");
+        }
+
+        var range = Loot.PickupRangeMeters;
+        if (bestDistSq > range * range)
+        {
+            throw new Exception("Out of range");
+        }
+
+        var item = best.Value;
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
+        if (item.ItemId == Loot.EmberShardItemId)
+        {
+            character.Xp += Loot.XpPerEmberShard;
+            character.HasEmberShard = true;
+            ctx.Db.Character.Identity.Update(character);
+        }
+
+        ctx.Db.WorldLoot.LootId.Delete(item.LootId);
+        Log.Info($"Pickup {item.ItemId} id={item.LootId} by {ctx.Sender} xp={character.Xp}");
+    }
+
+    static void ClearWorldLoot(ReducerContext ctx)
+    {
+        var toDelete = new System.Collections.Generic.List<ulong>();
+        foreach (var row in ctx.Db.WorldLoot.Iter())
+        {
+            toDelete.Add(row.LootId);
+        }
+        foreach (var id in toDelete)
+        {
+            ctx.Db.WorldLoot.LootId.Delete(id);
+        }
+    }
+
+    static void SpawnEmberShardAt(ReducerContext ctx, float x, float y, float z)
+    {
+        ctx.Db.WorldLoot.Insert(new WorldLoot
+        {
+            X = x,
+            Y = y,
+            Z = z,
+            ItemId = Loot.EmberShardItemId,
+        });
     }
 
     static ulong PartyIdFrom(Identity leader, Timestamp ts)

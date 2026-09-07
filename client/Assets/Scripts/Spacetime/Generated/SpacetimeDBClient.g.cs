@@ -37,6 +37,7 @@ namespace SpacetimeDB.Types
             AddTable(PlayerCombat = new(conn));
             AddTable(PlayerPose = new(conn));
             AddTable(WhisperMessage = new(conn));
+            AddTable(WorldLoot = new(conn));
         }
     }
 
@@ -543,6 +544,7 @@ namespace SpacetimeDB.Types
             new QueryBuilder().From.PlayerCombat().ToSql(),
             new QueryBuilder().From.PlayerPose().ToSql(),
             new QueryBuilder().From.WhisperMessage().ToSql(),
+            new QueryBuilder().From.WorldLoot().ToSql(),
         }
         ;
     }
@@ -559,6 +561,7 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Table<PlayerCombat, PlayerCombatCols, PlayerCombatIxCols> PlayerCombat() => new("player_combat", new PlayerCombatCols("player_combat"), new PlayerCombatIxCols("player_combat"));
         public global::SpacetimeDB.Table<PlayerPose, PlayerPoseCols, PlayerPoseIxCols> PlayerPose() => new("player_pose", new PlayerPoseCols("player_pose"), new PlayerPoseIxCols("player_pose"));
         public global::SpacetimeDB.Table<WhisperMessage, WhisperMessageCols, WhisperMessageIxCols> WhisperMessage() => new("whisper_message", new WhisperMessageCols("whisper_message"), new WhisperMessageIxCols("whisper_message"));
+        public global::SpacetimeDB.Table<WorldLoot, WorldLootCols, WorldLootIxCols> WorldLoot() => new("world_loot", new WorldLootCols("world_loot"), new WorldLootIxCols("world_loot"));
     }
 
     public sealed class TypedSubscriptionBuilder
@@ -650,8 +653,10 @@ namespace SpacetimeDB.Types
                 Reducer.LeaveParty args => Reducers.InvokeLeaveParty(eventContext, args),
                 Reducer.Move args => Reducers.InvokeMove(eventContext, args),
                 Reducer.PartySay args => Reducers.InvokePartySay(eventContext, args),
+                Reducer.Pickup args => Reducers.InvokePickup(eventContext, args),
                 Reducer.Say args => Reducers.InvokeSay(eventContext, args),
                 Reducer.SeedCrowdProxies args => Reducers.InvokeSeedCrowdProxies(eventContext, args),
+                Reducer.SeedLoot args => Reducers.InvokeSeedLoot(eventContext, args),
                 Reducer.SetTarget args => Reducers.InvokeSetTarget(eventContext, args),
                 Reducer.UnequipRobes args => Reducers.InvokeUnequipRobes(eventContext, args),
                 Reducer.UnequipStaff args => Reducers.InvokeUnequipStaff(eventContext, args),

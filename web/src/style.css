@@ -405,6 +405,10 @@ body {
   color: #ffb347;
 }
 
+.loIcon.shard {
+  color: #ff9a3c;
+}
+
 .loLabel {
   color: #e8eefc;
   font-size: 11px;
@@ -1046,3 +1050,10 @@ body {
   border-color: rgba(201, 166, 255, 0.5);
 }
 .sysToast.whisper .toastTag { color: #c9a6ff; }
+
+.sysToast.loot {
+  border-color: rgba(255, 160, 70, 0.55);
+}
+.sysToast.loot .toastTag { color: #ffb04a; }
+
+.clLine.loot .clTag { color: #ffb04a; }

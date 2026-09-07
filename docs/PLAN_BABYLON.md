@@ -174,4 +174,5 @@ See `web/README.md` for exact commands.
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- Next (north-star): credited art packs when licenses land (still blocked); optional loot/pickup invent; optional trade invent later
+- **World loot / pickup (invent):** `WorldLoot` + `SeedLoot` / dummy-death drop + `Pickup` (nearest in range → XP + `HasEmberShard`); sparkle meshes, **F** pickup, toast/combat-log; `tools/LootSmoke`; `?ve=loot` (`ve/babylon-loot.png`)
+- Next (north-star): credited art packs when licenses land (still blocked); optional trade invent later

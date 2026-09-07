@@ -96,6 +96,7 @@ export type CharacterView = {
   knowsEmberbolt: boolean;
   staffEquipped: boolean;
   robesEquipped: boolean;
+  hasEmberShard: boolean;
 };
 
 export type PartyMemberView = {
@@ -110,6 +111,14 @@ export type PartyView = {
   isLeader: boolean;
   members: PartyMemberView[];
   pendingInviteFrom: string | null;
+};
+
+export type GroundItemView = {
+  lootId: bigint;
+  x: number;
+  y: number;
+  z: number;
+  itemId: string;
 };
 
 export type ChatMessageView = {
@@ -153,6 +162,7 @@ export type ProxiesListener = (proxies: CrowdProxyView[]) => void;
 export type CombatListener = (combat: CombatView | null) => void;
 export type CharacterListener = (character: CharacterView | null) => void;
 export type ChatListener = (messages: ChatMessageView[]) => void;
+export type GroundListener = (items: GroundItemView[]) => void;
 
 export type GameNet = {
   identityHex: string;
@@ -176,6 +186,9 @@ export type GameNet = {
   partySay: (text: string) => Promise<void>;
   /** Private whisper — WhisperMessage (RLS sender+recipient); rejects if target offline / rate-limit. */
   whisper: (recipient: Identity, text: string) => Promise<void>;
+  seedLoot: () => void;
+  pickup: () => Promise<void>;
+  getGroundItems: () => GroundItemView[];
   /** Resolve live PlayerPose identity by hex prefix (case-insensitive); null if ambiguous/missing. */
   findIdentityByHexPrefix: (prefix: string) => Identity | null;
   getRecentChat: () => ChatMessageView[];
@@ -280,6 +293,7 @@ export function buildNeighborhoodSqls(
     'SELECT * FROM party_member',
     'SELECT * FROM party_invite',
     'SELECT * FROM chat_message',
+    'SELECT * FROM world_loot',
   ];
   for (const { x: cx, z: cz } of fillMooreNeighborhood(interestCx, interestCz)) {
     sqls.push(`SELECT * FROM crowd_proxy WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
@@ -334,6 +348,7 @@ type CharacterRow = {
   knowsEmberbolt: boolean;
   staffEquipped: boolean;
   robesEquipped: boolean;
+  hasEmberShard: boolean;
 };
 
 type CrowdProxyRow = {
@@ -379,6 +394,14 @@ type WhisperMessageRow = {
   recipient: Identity;
   text: string;
   sentAt: Timestamp;
+};
+
+type GroundItemRow = {
+  lootId: bigint;
+  x: number;
+  y: number;
+  z: number;
+  itemId: string;
 };
 
 function poseView(row: PoseRow): Pose {
@@ -436,6 +459,7 @@ function characterView(row: CharacterRow): CharacterView {
     knowsEmberbolt: row.knowsEmberbolt,
     staffEquipped: row.staffEquipped,
     robesEquipped: row.robesEquipped,
+    hasEmberShard: !!row.hasEmberShard,
   };
 }
 
@@ -491,6 +515,7 @@ export async function connectToSpacetime(
   onRemotes?: RemotesListener,
   onRemoteCombats?: RemoteCombatsListener,
   onChat?: ChatListener,
+  onGround?: GroundListener,
 ): Promise<GameNet | null> {
   const uri = resolveUri();
   const database = resolveDatabaseName();
@@ -515,6 +540,7 @@ export async function connectToSpacetime(
     const partyMemberMap = new Map<string, PartyMemberView>();
     /** messageId → ChatMessageView (wholesale chat_message). */
     const chatMessageMap = new Map<string, ChatMessageView>();
+    const groundMap = new Map<string, GroundItemView>();
     let pendingInviteFrom: string | null = null;
     /** Hex set currently included as always-relevant pose filters in the active sub. */
     let subscribedAlwaysHexes = new Set<string>();
@@ -548,6 +574,25 @@ export async function connectToSpacetime(
     };
     const emitChat = () => {
       onChat?.(listChat());
+    };
+    const listGround = (): GroundItemView[] => Array.from(groundMap.values());
+    const emitGround = () => {
+      onGround?.(listGround());
+    };
+    const upsertGround = (row: GroundItemRow) => {
+      const id = asBigInt(row.lootId).toString();
+      groundMap.set(id, {
+        lootId: asBigInt(row.lootId),
+        x: row.x,
+        y: row.y,
+        z: row.z,
+        itemId: row.itemId,
+      });
+      if (!syncingCaches) emitGround();
+    };
+    const removeGround = (row: GroundItemRow) => {
+      groundMap.delete(asBigInt(row.lootId).toString());
+      if (!syncingCaches) emitGround();
     };
 
     const localPartyId = (): string | null => {
@@ -835,6 +880,14 @@ export async function connectToSpacetime(
               }
             }
             emitChat();
+            groundMap.clear();
+            const wl = (conn.db as any).worldLoot;
+            if (wl) {
+              for (const row of wl.iter()) {
+                upsertGround(row as GroundItemRow);
+              }
+            }
+            emitGround();
             } finally {
               syncingCaches = false;
             }
@@ -1028,6 +1081,19 @@ export async function connectToSpacetime(
             removeNpc(row as NpcRow);
           });
 
+          if ((conn.db as any).worldLoot) {
+            const table = (conn.db as any).worldLoot;
+            table.onInsert((_ctx: EventContext, row: unknown) => {
+              upsertGround(row as GroundItemRow);
+            });
+            table.onUpdate((_ctx: EventContext, _old: unknown, row: unknown) => {
+              upsertGround(row as GroundItemRow);
+            });
+            table.onDelete((_ctx: EventContext, row: unknown) => {
+              removeGround(row as GroundItemRow);
+            });
+          }
+
           conn.db.crowdProxy.onInsert((_ctx: EventContext, row) => {
             upsertProxy(row as CrowdProxyRow);
           });
@@ -1183,6 +1249,11 @@ export async function connectToSpacetime(
               seedCrowdProxies: () => {
                 void conn.reducers.seedCrowdProxies({});
               },
+              seedLoot: () => {
+                try { void conn.reducers.seedLoot({}); } catch { /* ignore */ }
+              },
+              pickup: () => conn.reducers.pickup({}),
+              getGroundItems: () => listGround(),
               setTarget: (npcId: bigint) => {
                 castFeedback = npcId === 0n ? 'Cleared target' : `Target ${npcId}`;
                 void conn.reducers.setTarget({ npcId });

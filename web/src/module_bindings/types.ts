@@ -17,6 +17,7 @@ export const Character = __t.object("Character", {
   knowsEmberbolt: __t.bool(),
   staffEquipped: __t.bool(),
   robesEquipped: __t.bool(),
+  hasEmberShard: __t.bool(),
 });
 export type Character = __Infer<typeof Character>;
 
@@ -114,4 +115,13 @@ export const WhisperMessage = __t.object("WhisperMessage", {
   sentAt: __t.timestamp(),
 });
 export type WhisperMessage = __Infer<typeof WhisperMessage>;
+
+export const WorldLoot = __t.object("WorldLoot", {
+  lootId: __t.u64(),
+  x: __t.f32(),
+  y: __t.f32(),
+  z: __t.f32(),
+  itemId: __t.string(),
+});
+export type WorldLoot = __Infer<typeof WorldLoot>;
 

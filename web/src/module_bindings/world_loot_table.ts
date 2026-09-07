@@ -11,11 +11,9 @@ import {
 } from "spacetimedb";
 
 export default __t.row({
-  identity: __t.identity().primaryKey(),
-  xp: __t.i32(),
-  knowsSpark: __t.bool().name("knows_spark"),
-  knowsEmberbolt: __t.bool().name("knows_emberbolt"),
-  staffEquipped: __t.bool().name("staff_equipped"),
-  robesEquipped: __t.bool().name("robes_equipped"),
-  hasEmberShard: __t.bool().name("has_ember_shard"),
+  lootId: __t.u64().primaryKey().name("loot_id"),
+  x: __t.f32(),
+  y: __t.f32(),
+  z: __t.f32(),
+  itemId: __t.string().name("item_id"),
 });

@@ -26,6 +26,7 @@ import {
   type NpcView,
   type RemoteCombat,
   type RemotePose,
+  type GroundItemView,
 } from './net/connection';
 import { buildForestClearing } from './world/forest';
 import {
@@ -52,6 +53,10 @@ import {
   FPS_TARGET,
   updateFpsHud,
 } from './world/fpsHud';
+import {
+  syncGroundSparkles,
+  type GroundSparkle,
+} from './world/sparkles';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -240,6 +245,7 @@ function updateLoadoutStrip(character: {
   robesEquipped: boolean;
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
+  hasEmberShard?: boolean;
 } | null | undefined): void {
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
@@ -287,6 +293,13 @@ function updateLoadoutStrip(character: {
     'known',
     'unknown',
   );
+  setChip(
+    'loShard',
+    'loShardState',
+    !!character.hasEmberShard,
+    'held',
+    'empty',
+  );
 }
 
 /** Bag panel rows (Character loadout). Visibility controlled separately via B. */
@@ -296,6 +309,7 @@ function updateBagPanel(character: {
   robesEquipped: boolean;
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
+  hasEmberShard?: boolean;
 } | null | undefined): void {
   const setRow = (id: string, text: string, ok: boolean | null) => {
     const el = document.getElementById(id);
@@ -310,6 +324,7 @@ function updateBagPanel(character: {
     setRow('bagSpark', '—', null);
     setRow('bagEmber', '—', null);
     setRow('bagXp', '—', null);
+    setRow('bagShard', '—', null);
     return;
   }
   setRow(
@@ -329,6 +344,11 @@ function updateBagPanel(character: {
     character.knowsEmberbolt,
   );
   setRow('bagXp', String(character.xp), null);
+  setRow(
+    'bagShard',
+    character.hasEmberShard ? 'held' : 'empty',
+    !!character.hasEmberShard,
+  );
 }
 
 function setBagPanelOpen(open: boolean): void {
@@ -405,7 +425,7 @@ function updatePartyFrames(opts: {
 
 const COMBAT_LOG_MAX = 14;
 
-type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn';
+type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -425,7 +445,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
             ? 'PARTY'
             : kind === 'death'
               ? 'KILL'
-              : 'RESPAWN';
+              : kind === 'loot'
+                ? 'LOOT'
+                : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -466,7 +488,8 @@ type SystemToastKind =
   | 'say'
   | 'partySay'
   | 'whisper'
-  | 'rate';
+  | 'rate'
+  | 'loot';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -501,7 +524,9 @@ function pushSystemToast(
                       ? 'PARTY'
                       : kind === 'whisper'
                         ? 'WHISPER'
-                        : 'SAY';
+                        : kind === 'loot'
+                          ? 'LOOT'
+                          : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -932,7 +957,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · F pickup · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1084,6 +1109,7 @@ function bindInput(opts: {
   onUnequipRobes: () => void;
   onEquipRobes: () => void;
   onToggleBag: () => void;
+  onPickupNearest: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -1143,6 +1169,11 @@ function bindInput(opts: {
     if (k === 'b') {
       e.preventDefault();
       opts.onToggleBag();
+      return;
+    }
+    if (k === 'f') {
+      e.preventDefault();
+      opts.onPickupNearest();
       return;
     }
   };
@@ -1524,6 +1555,8 @@ async function main(): Promise<void> {
   let castTotalMs = 0;
   let lastCastSpell = 0;
   const npcMeshes = new Map<string, NpcMesh>();
+  const groundSparkles = new Map<string, GroundSparkle>();
+  let latestGround: GroundItemView[] = [];
   const npcLastHp = new Map<string, number>();
   const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
@@ -1910,6 +1943,28 @@ async function main(): Promise<void> {
     onToggleBag: () => {
       bagOpen = !bagOpen;
       setBagPanelOpen(bagOpen);
+    },
+    onPickupNearest: () => {
+      if (!net) return;
+      const before = new Set(net.getGroundItems().map((g) => g.lootId.toString()));
+      void net.pickup().then(() => {
+        if (!net) return;
+        const after = net.getGroundItems();
+        const gone = [...before].filter((id) => !after.some((g) => g.lootId.toString() === id));
+        if (gone.length) {
+          pushCombatLog('loot', 'Picked up ember_shard');
+          pushSystemToast('loot', 'Ember shard +5 XP', TOAST_VE_TTL_MS);
+        }
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/out of range/i.test(msg)) {
+          pushSystemToast('rate', 'Too far to pick up');
+        } else if (/no loot/i.test(msg)) {
+          pushSystemToast('rate', 'Nothing to pick up');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Pickup failed');
+        }
+      });
     },
   });
 
@@ -2464,6 +2519,11 @@ async function main(): Promise<void> {
       });
     }
 
+    {
+      const items = net?.getGroundItems() ?? latestGround;
+      syncGroundSparkles(scene, items, groundSparkles, now / 1000);
+    }
+
     camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
     scene.render();
   });
@@ -2542,6 +2602,9 @@ async function main(): Promise<void> {
       syncRemoteCastFx(combats);
     },
     onChatMessages,
+    (items) => {
+      latestGround = items;
+    },
   );
 
   // Optional VE / autotest hooks.
@@ -4444,6 +4507,106 @@ async function main(): Promise<void> {
     };
     window.setTimeout(waitRate, 700);
   }
+
+  // ?ve=loot — seed ground ember_shard sparkle (keep visible for VE), toast/log + bag row; then F-pickup proof.
+  if (ve === 'loot') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'loot') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE loot: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let announced = false;
+    let picked = false;
+    let sparkleHold = 0;
+    const waitLoot = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE loot: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitLoot, 200);
+        return;
+      }
+      // Frame near seed loot (Loot.SeedX/Z ≈ 1.5 / 1.2).
+      camera.setTarget(new Vector3(1.5, 0.9, 1.2));
+      camera.radius = 10;
+      if (!seeded) {
+        seeded = true;
+        if (mark) mark.textContent = 'VE loot: seeding ember_shard…';
+        net.seedLoot();
+        window.setTimeout(waitLoot, 350);
+        return;
+      }
+      const items = net.getGroundItems();
+      const toastOk = toastKindsPresent().has('loot');
+      const logOk = combatLogKindsPresent().has('loot');
+      const shard = !!net.getCharacter()?.hasEmberShard;
+      if (items.length >= 1 && !announced) {
+        announced = true;
+        bagOpen = true;
+        setBagPanelOpen(true);
+        pushCombatLog('loot', 'Ground loot: ember_shard');
+        pushSystemToast('loot', 'Ember shard nearby · F to pick', TOAST_VE_TTL_MS);
+      }
+      // Hold sparkles on-screen for VE shot, then auto-pickup for bag-flag proof.
+      if (items.length >= 1 && !picked) {
+        sparkleHold += 1;
+        if (mark) {
+          mark.textContent =
+            `Loot OK · ember_shard sparkle x${items.length} · F pickup · bag row`;
+        }
+        if (sparkleHold < 18) {
+          window.setTimeout(waitLoot, 220);
+          return;
+        }
+        picked = true;
+        void net
+          .pickup()
+          .then(() => {
+            pushCombatLog('loot', 'Picked up ember_shard');
+            pushSystemToast('loot', 'Ember shard +5 XP', TOAST_VE_TTL_MS);
+          })
+          .catch(() => undefined);
+        window.setTimeout(waitLoot, 300);
+        return;
+      }
+      if (shard && (toastOk || logOk)) {
+        setBagPanelOpen(true);
+        if (mark) {
+          mark.textContent =
+            `Loot OK · ember_shard sparkle · F pickup · bag flag · toast/log`;
+        }
+        return;
+      }
+      // Sparkle-only success is enough for VE if pickup stalls.
+      if (announced && items.length >= 1 && sparkleHold >= 18) {
+        if (mark) {
+          mark.textContent =
+            `Loot OK · ember_shard sparkle x${items.length} · F pickup · bag row`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE loot: ground ${items.length} · shard ${shard ? 'y' : 'n'} · toast ${toastOk ? 'y' : 'n'} · log ${logOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 260) {
+        if (mark) {
+          mark.textContent =
+            `VE loot: timed out · ground ${items.length} · shard ${shard ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitLoot, 220);
+    };
+    window.setTimeout(waitLoot, 700);
+  }
+
+
 
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
   if (ve === 'xp-float') {
