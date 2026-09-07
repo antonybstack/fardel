@@ -53,9 +53,11 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - VE: `?ve=humanoid-polish`
 - Training dummy scarecrow (#45): `?ve=dummy` (`ve/babylon-dummy.png`)
 - Combat floater readability (#59): thick outline + matte tints under #39 fog; `?ve=floater-read` (`ve/babylon-floater-read.png`)
+- System toast readability (#90): dark plate + category tags under #39 fog; `?ve=toast-read` (VE via user-attachments)
 - Hotbar affordance polish (#63): empty vs STAFF vs OOM clarity; `?ve=hotbar-afford` (`ve/babylon-hotbar-afford.png`)
 - Target frame / reticule contrast (#69): gold select chrome crisp vs #39 cyan fog; `?ve=target-contrast` (`ve/babylon-target-contrast.png`)
 - Party/self HP bar readability (#67): dark track + saturated green→amber→red fills; `?ve=frame-hp` (`ve/babylon-frame-hp.png`)
+- Loadout strip + tonic buff readability (#91): bronze on / cool hollow off chips + warm amber `#sfBuff.active` pulse; `?ve=loadout-buff` (user-attachments VE)
 - Combat log strip readability (#78): dark plate + damage/heal/kill/system distinct (no neon); `?ve=combat-log-read` (`ve/babylon-combat-log-read.png`)
 - Cast bar chrome readability (#74): Emberbolt/`#castBar` + CANCEL≠LOCKOUT toast chrome crisp vs #39 cyan fog; `?ve=castbar-read` (`ve/babylon-castbar-read.png`)
 

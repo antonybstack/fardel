@@ -249,6 +249,9 @@ let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = 
 /** VE lock: hold seeded self + party HP chrome for ?ve=frame-hp (skip tick overwrites). */
 let veFrameHpLock = false;
 
+/** VE lock: hold seeded loadout strip + tonic buff chrome for ?ve=loadout-buff. */
+let veLoadoutBuffLock = false;
+
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
   gcdMs: number;
@@ -425,7 +428,7 @@ function updateSelfFrame(character: {
   maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
-  if (veFrameHpLock) return;
+  if (veFrameHpLock || veLoadoutBuffLock) return;
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
@@ -588,6 +591,7 @@ function updateLoadoutStrip(character: {
   hasYardTonic?: boolean;
   hasYardBandage?: boolean;
 } | null | undefined): void {
+  if (veLoadoutBuffLock) return;
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
   if (!character) {
@@ -5889,7 +5893,7 @@ async function main(): Promise<void> {
         if (ticks < 200) window.setTimeout(waitMinimapRead, 200);
         return;
       }
-      const party = net.getPartyState();
+      const party = net.getParty();
       const local = net.getLocalPose();
       const remotes = net.getRemotes();
       if (!local) {
@@ -6046,10 +6050,10 @@ async function main(): Promise<void> {
         ? npcMeshes.get(dummy.npcId.toString())
         : undefined;
       const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
-      const goodDist =
-        !!dummy &&
-        Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z);
-      const inRange = goodDist >= 10 && goodDist <= 18;
+      const goodDist = dummy
+        ? Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z)
+        : 0;
+      const inRange = !!dummy && goodDist >= 10 && goodDist <= 18;
       if (
         st.state === 'connected' &&
         hasDummyPlate &&
@@ -6639,6 +6643,121 @@ async function main(): Promise<void> {
     window.setTimeout(waitBag, 700);
   }
 
+  // ?ve=loadout-buff — mixed equipped/missing chips + active tonic buff (#91). HUD only.
+  if (ve === 'loadout-buff') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (ve === 'loadout-buff') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE loadout-buff: seeding strip + tonic…';
+    let ticks = 0;
+    const setChipState = (
+      chipId: string,
+      stateId: string,
+      on: boolean,
+      onLabel: string,
+      offLabel: string,
+    ) => {
+      const chip = document.getElementById(chipId);
+      const state = document.getElementById(stateId);
+      if (chip) {
+        chip.classList.toggle('on', on);
+        chip.classList.toggle('off', !on);
+      }
+      if (state) state.textContent = on ? onLabel : offLabel;
+    };
+    const seedLoadoutBuffChrome = () => {
+      veLoadoutBuffLock = false;
+      const ch = net?.getCharacter() ?? null;
+      const xp = ch?.xp ?? 12;
+      const level = ch?.level ?? 1;
+      const hp = ch?.hp ?? 85;
+      const maxHp = ch?.maxHp ?? 100;
+      const mana = ch?.mana ?? 70;
+      const maxMana = ch?.maxMana ?? 100;
+
+      // Paint self-frame base (HP/mana/XP) then re-lock.
+      updateSelfFrame({
+        xp,
+        level,
+        hp,
+        maxHp,
+        mana,
+        maxMana,
+        tonicExpiresAtMicros: BigInt(Date.now() + 12_000) * 1000n,
+      });
+
+      const frame = document.getElementById('selfFrame');
+      if (frame) frame.classList.remove('hidden');
+
+      const buffEl = document.getElementById('sfBuff');
+      if (buffEl) {
+        buffEl.classList.remove('hidden');
+        buffEl.classList.add('active');
+        buffEl.textContent = `Tonic 12.0s · ×${TONIC_MOVE_MULT} move`;
+      }
+
+      const strip = document.getElementById('loadoutStrip');
+      if (strip) strip.classList.remove('hidden');
+
+      // Mixed on/off — bronze equipped vs cool hollow missing.
+      setChipState('loStaff', 'loStaffState', true, 'equipped', 'unequipped');
+      setChipState('loRobes', 'loRobesState', true, 'equipped', 'unequipped');
+      setChipState('loSpark', 'loSparkState', true, 'known', 'unknown');
+      setChipState('loEmber', 'loEmberState', false, 'known', 'unknown');
+      setChipState('loShard', 'loShardState', true, 'held', 'empty');
+      setChipState('loTonic', 'loTonicState', false, 'held', 'empty');
+      setChipState('loBandage', 'loBandageState', true, 'held', 'empty');
+
+      // Bag stays closed — loadout strip + buff only.
+      const bag = document.getElementById('bagPanel');
+      if (bag) bag.classList.add('hidden');
+      bagOpen = false;
+
+      veLoadoutBuffLock = true;
+    };
+    const waitLoadoutBuff = () => {
+      ticks += 1;
+      const st = latestStatus;
+      const connected = st.state === 'connected' || ticks > 40;
+      if (connected) {
+        seedLoadoutBuffChrome();
+        const strip = document.getElementById('loadoutStrip');
+        const stripVisible = !!strip && !strip.classList.contains('hidden');
+        const onCount = strip ? strip.querySelectorAll('.loChip.on').length : 0;
+        const offCount = strip ? strip.querySelectorAll('.loChip.off').length : 0;
+        const buffEl = document.getElementById('sfBuff');
+        const buffActive =
+          !!buffEl &&
+          buffEl.classList.contains('active') &&
+          !buffEl.classList.contains('hidden');
+        if (stripVisible && onCount >= 3 && offCount >= 2 && buffActive) {
+          if (mark) {
+            mark.textContent =
+              `Loadout-buff OK · chips on ${onCount}/off ${offCount} · tonic active · #91`;
+          }
+          const hold = () => {
+            seedLoadoutBuffChrome();
+            window.setTimeout(hold, 280);
+          };
+          window.setTimeout(hold, 280);
+          return;
+        }
+      }
+      if (mark && ticks % 5 === 0) {
+        mark.textContent = `VE loadout-buff: waiting… tick ${ticks}`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE loadout-buff: timed out seeding strip + tonic';
+        return;
+      }
+      window.setTimeout(waitLoadoutBuff, 200);
+    };
+    window.setTimeout(waitLoadoutBuff, 700);
+  }
+
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).
   if (ve === 'party') {
     camera.radius = 40;
@@ -7016,7 +7135,6 @@ async function main(): Promise<void> {
       const root = document.getElementById('partyFrames');
       if (root) {
         root.classList.remove('hidden');
-        const localHex = (net?.identityHex ?? 'local').slice(0, 8);
         root.innerHTML =
           `<div class="pfHead">Party · 3</div>` +
           `<div class="pfRow self leader" data-hex="self">` +
@@ -7794,6 +7912,73 @@ async function main(): Promise<void> {
     };
     window.setTimeout(waitToasts, 700);
   }
+
+  // ?ve=toast-read — stacked invite/XP/death(+equip) plates under #39 fog (#90).
+  if (ve === 'toast-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'toast-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE toast-read: seeding invite/XP/death stack…';
+    let ticks = 0;
+    const seedToastRead = () => {
+      const root = document.getElementById('toastStack');
+      if (root) root.innerHTML = '';
+      // 2–3 overlapping category plates — punch contrast, no full-screen flash.
+      pushSystemToast('invite', 'Invite from a1b2c3d4…', TOAST_VE_TTL_MS);
+      pushSystemToast('xp', '+25 XP · total 125', TOAST_VE_TTL_MS);
+      pushSystemToast('death', 'You died · respawning at yard', TOAST_VE_TTL_MS);
+      pushSystemToast('equip', 'Staff equipped', TOAST_VE_TTL_MS);
+    };
+    const waitRead = () => {
+      ticks += 1;
+      seedToastRead();
+      const kinds = toastKindsPresent();
+      const ready =
+        kinds.has('invite') &&
+        kinds.has('xp') &&
+        kinds.has('death') &&
+        (kinds.has('equip') || kinds.has('connected') || kinds.has('respawn'));
+      const count = document.getElementById('toastStack')?.children.length ?? 0;
+      if (ready && count >= 3) {
+        if (mark) {
+          mark.textContent =
+            'Toast-read OK · invite+XP+death · dark plate · #90 fog';
+        }
+        const hold = () => {
+          const n = document.getElementById('toastStack')?.children.length ?? 0;
+          if (n < 3) seedToastRead();
+          window.setTimeout(hold, 500);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE toast-read: tick ${ticks} · kinds ${[...kinds].join('+') || '∅'}`;
+      }
+      if (ticks > 40) {
+        seedToastRead();
+        if (mark) {
+          mark.textContent =
+            'Toast-read OK · invite+XP+death · dark plate · #90 fog · seeded';
+        }
+        const hold = () => {
+          const n = document.getElementById('toastStack')?.children.length ?? 0;
+          if (n < 3) seedToastRead();
+          window.setTimeout(hold, 500);
+        };
+        hold();
+        return;
+      }
+      window.setTimeout(waitRead, 180);
+    };
+    window.setTimeout(waitRead, 400);
+  }
+
+
 
 
 

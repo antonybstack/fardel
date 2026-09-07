@@ -13,4 +13,5 @@ import {
 export default {
   dx: __t.f32(),
   dz: __t.f32(),
+  jump: __t.bool(),
 };
