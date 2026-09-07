@@ -73,6 +73,25 @@ type DamageFloater = {
   driftX: number;
 };
 
+/** Client-only NPC death sink/fade or respawn pop-in (cosmetic). */
+type NpcLifeFx = {
+  phase: 'dying' | 'spawning';
+  bornMs: number;
+  lifeMs: number;
+  baseBodyY: number;
+  baseEmissive: Color3;
+  burst: Array<{
+    mesh: Mesh;
+    mat: StandardMaterial;
+    vx: number;
+    vy: number;
+    vz: number;
+  }>;
+};
+
+const DEATH_FX_MS = 550;
+const RESPAWN_FX_MS = 480;
+
 /** World-space billboard label above an entity (You / Dummy / remote hex). */
 type Nameplate = {
   mesh: Mesh;
@@ -373,9 +392,9 @@ function updatePartyFrames(opts: {
 
 const COMBAT_LOG_MAX = 14;
 
-type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party';
+type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn';
 
-/** Client-only scrolling combat log (cast start, HP delta, equip, party join). */
+/** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
   const root = document.getElementById('combatLogLines');
   if (!root) return;
@@ -389,7 +408,11 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
         ? 'DMG'
         : kind === 'equip'
           ? 'EQ'
-          : 'PARTY';
+          : kind === 'party'
+            ? 'PARTY'
+            : kind === 'death'
+              ? 'KILL'
+              : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -419,7 +442,14 @@ const TOAST_MAX = 5;
 const TOAST_TTL_MS = 2800;
 const TOAST_VE_TTL_MS = 9000;
 
-type SystemToastKind = 'connected' | 'invite' | 'party' | 'xp' | 'equip';
+type SystemToastKind =
+  | 'connected'
+  | 'invite'
+  | 'party'
+  | 'xp'
+  | 'equip'
+  | 'death'
+  | 'respawn';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -442,7 +472,11 @@ function pushSystemToast(
           ? 'PARTY'
           : kind === 'xp'
             ? 'XP'
-            : 'EQ';
+            : kind === 'equip'
+              ? 'EQ'
+              : kind === 'death'
+                ? 'DEATH'
+                : 'RESPAWN';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1099,6 +1133,101 @@ function spawnDamageFloater(
   };
 }
 
+
+function disposeLifeBurst(fx: NpcLifeFx): void {
+  for (const b of fx.burst) {
+    b.mesh.dispose();
+    b.mat.dispose();
+  }
+  fx.burst.length = 0;
+}
+
+function spawnDeathBurst(scene: Scene, at: Vector3): NpcLifeFx['burst'] {
+  const burst: NpcLifeFx['burst'] = [];
+  for (let i = 0; i < 10; i++) {
+    const mat = new StandardMaterial(`deathBurstMat_${Date.now()}_${i}`, scene);
+    mat.diffuseColor = new Color3(1, 0.55 + Math.random() * 0.25, 0.15);
+    mat.emissiveColor = new Color3(1.1, 0.4, 0.05);
+    mat.disableLighting = true;
+    mat.alpha = 0.95;
+    const mesh = MeshBuilder.CreateSphere(
+      `deathBurst_${Date.now()}_${i}`,
+      { diameter: 0.12 + Math.random() * 0.1, segments: 6 },
+      scene,
+    );
+    mesh.material = mat;
+    mesh.isPickable = false;
+    mesh.position = at.clone();
+    mesh.position.y += 0.7 + Math.random() * 0.5;
+    const ang = (Math.PI * 2 * i) / 10 + Math.random() * 0.4;
+    burst.push({
+      mesh,
+      mat,
+      vx: Math.cos(ang) * (1.4 + Math.random() * 1.2),
+      vy: 1.6 + Math.random() * 1.8,
+      vz: Math.sin(ang) * (1.4 + Math.random() * 1.2),
+    });
+  }
+  return burst;
+}
+
+function beginNpcDeathFx(
+  scene: Scene,
+  mesh: NpcMesh,
+): NpcLifeFx {
+  mesh.root.setEnabled(true);
+  mesh.root.scaling.setAll(1);
+  mesh.body.position.y = 0.8;
+  mesh.mat.alpha = 1;
+  mesh.mat.transparencyMode = 2; // ALPHA_BLEND
+  mesh.ring.setEnabled(false);
+  mesh.remoteRing.setEnabled(false);
+  if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
+  const at = mesh.root.position.clone();
+  at.y += 0.8;
+  return {
+    phase: 'dying',
+    bornMs: Date.now(),
+    lifeMs: DEATH_FX_MS,
+    baseBodyY: 0.8,
+    baseEmissive: mesh.mat.emissiveColor.clone(),
+    burst: spawnDeathBurst(scene, at),
+  };
+}
+
+function beginNpcRespawnFx(mesh: NpcMesh): NpcLifeFx {
+  mesh.root.setEnabled(true);
+  mesh.root.scaling.setAll(0.12);
+  mesh.body.position.y = 0.8;
+  mesh.mat.alpha = 1;
+  mesh.mat.transparencyMode = 0;
+  mesh.mat.emissiveColor = new Color3(0.85, 0.75, 0.35);
+  if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(true);
+  return {
+    phase: 'spawning',
+    bornMs: Date.now(),
+    lifeMs: RESPAWN_FX_MS,
+    baseBodyY: 0.8,
+    baseEmissive: new Color3(0, 0, 0),
+    burst: [],
+  };
+}
+
+function finishNpcLifeFx(mesh: NpcMesh, fx: NpcLifeFx): void {
+  disposeLifeBurst(fx);
+  mesh.root.scaling.setAll(1);
+  mesh.body.position.y = fx.baseBodyY;
+  mesh.mat.alpha = 1;
+  mesh.mat.transparencyMode = 0;
+  mesh.mat.emissiveColor = fx.baseEmissive.clone();
+  if (fx.phase === 'dying') {
+    mesh.root.setEnabled(false);
+    if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
+  } else {
+    mesh.root.setEnabled(true);
+  }
+}
+
 async function main(): Promise<void> {
   const canvas = document.getElementById('renderCanvas');
   if (!(canvas instanceof HTMLCanvasElement)) {
@@ -1125,9 +1254,12 @@ async function main(): Promise<void> {
   let lastCastSpell = 0;
   const npcMeshes = new Map<string, NpcMesh>();
   const npcLastHp = new Map<string, number>();
+  const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
   let latestDamageAmount = 0;
   let latestDamageAtMs = 0;
+  let latestDeathAtMs = 0;
+  let latestRespawnAtMs = 0;
   let prevStaffEquipped: boolean | null = null;
   let prevRobesEquipped: boolean | null = null;
   let prevPartySize = 0;
@@ -1490,14 +1622,15 @@ async function main(): Promise<void> {
       const key = npc.npcId.toString();
       seen.add(key);
       let mesh = npcMeshes.get(key);
+      let prevHp = npcLastHp.get(key);
       if (!mesh) {
         mesh = makeNpcMesh(scene, npc);
         npcMeshes.set(key, mesh);
+        prevHp = npc.hp;
         npcLastHp.set(key, npc.hp);
       } else {
-        const prev = npcLastHp.get(key);
-        if (prev != null && npc.hp < prev) {
-          const delta = prev - npc.hp;
+        if (prevHp != null && npc.hp < prevHp) {
+          const delta = prevHp - npc.hp;
           const ember = delta >= 20;
           const tint = ember
             ? new Color3(1, 0.55, 0.15)
@@ -1523,25 +1656,76 @@ async function main(): Promise<void> {
         }
         npcLastHp.set(key, npc.hp);
       }
+
+      const wasAlive = (prevHp ?? npc.hp) > 0;
+      const isAlive = npc.hp > 0;
+      let fx = npcLifeFx.get(key);
+
+      if (wasAlive && !isAlive && (!fx || fx.phase !== 'dying')) {
+        if (fx) {
+          disposeLifeBurst(fx);
+          npcLifeFx.delete(key);
+        }
+        fx = beginNpcDeathFx(scene, mesh);
+        npcLifeFx.set(key, fx);
+        latestDeathAtMs = Date.now();
+        const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+        const defeated =
+          npc.kind === NPC_KIND_DUMMY ? 'Dummy defeated' : `${label} defeated`;
+        pushCombatLog('death', `${defeated} (#${npc.npcId})`);
+        pushSystemToast('death', defeated, TOAST_VE_TTL_MS);
+      } else if (!wasAlive && isAlive && (!fx || fx.phase !== 'spawning')) {
+        if (fx) {
+          disposeLifeBurst(fx);
+          npcLifeFx.delete(key);
+        }
+        fx = beginNpcRespawnFx(mesh);
+        npcLifeFx.set(key, fx);
+        latestRespawnAtMs = Date.now();
+        const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+        const line =
+          npc.kind === NPC_KIND_DUMMY
+            ? 'Dummy respawned'
+            : `${label} respawned`;
+        pushCombatLog('respawn', `${line} (#${npc.npcId})`);
+        pushSystemToast('respawn', line, TOAST_VE_TTL_MS);
+      }
+
       mesh.root.position.x = npc.x;
       mesh.root.position.z = npc.z;
-      mesh.root.setEnabled(npc.hp > 0);
+
+      const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
+      if (!animating) {
+        mesh.root.setEnabled(isAlive);
+        if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+          mesh.nameplate.mesh.setEnabled(isAlive);
+        }
+      }
+
       if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
         paintNameplate(
           mesh.nameplate,
           'Dummy',
           '#e8c89a',
-          npc.maxHp > 0 ? npc.hp / npc.maxHp : 0,
+          npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
         );
-        mesh.nameplate.mesh.setEnabled(npc.hp > 0);
       }
-      const selected = selectedTargetId === npc.npcId;
-      const remoteSelected = latestRemoteCombats.some(
-        (rc) => rc.targetNpcId === npc.npcId,
-      );
-      mesh.ring.setEnabled(selected);
-      mesh.remoteRing.setEnabled(remoteSelected && !selected);
-      if (selected) {
+
+      const selected = selectedTargetId === npc.npcId && isAlive;
+      const remoteSelected =
+        isAlive &&
+        latestRemoteCombats.some((rc) => rc.targetNpcId === npc.npcId);
+      // Suppress rings while dying; keep corpse non-targetable visually.
+      if (fx?.phase === 'dying') {
+        mesh.ring.setEnabled(false);
+        mesh.remoteRing.setEnabled(false);
+      } else {
+        mesh.ring.setEnabled(selected);
+        mesh.remoteRing.setEnabled(remoteSelected && !selected);
+      }
+      if (fx?.phase === 'spawning') {
+        // Emissive flash owned by respawn FX until it finishes.
+      } else if (selected) {
         mesh.ringMat.emissiveColor = new Color3(0.95, 0.75, 0.2);
         mesh.ringMat.diffuseColor = new Color3(0.95, 0.75, 0.2);
         mesh.mat.emissiveColor = new Color3(0.15, 0.1, 0.02);
@@ -1554,13 +1738,18 @@ async function main(): Promise<void> {
         mesh.remoteRingMat.emissiveColor = new Color3(0.15, 0.7, 0.85);
         mesh.remoteRingMat.diffuseColor = new Color3(0.2, 0.85, 0.95);
         mesh.mat.emissiveColor = new Color3(0.02, 0.08, 0.12);
-      } else {
+      } else if (fx?.phase !== 'dying') {
         mesh.ringMat.emissiveColor = new Color3(0, 0, 0);
         mesh.mat.emissiveColor = new Color3(0, 0, 0);
       }
     }
     for (const [key, mesh] of npcMeshes) {
       if (!seen.has(key)) {
+        const fx = npcLifeFx.get(key);
+        if (fx) {
+          disposeLifeBurst(fx);
+          npcLifeFx.delete(key);
+        }
         disposeNameplate(mesh.nameplate);
         mesh.root.dispose();
         npcMeshes.delete(key);
@@ -1585,6 +1774,52 @@ async function main(): Promise<void> {
         f.mesh.dispose();
         f.mat.dispose();
         damageFloaters.splice(i, 1);
+      }
+    }
+
+    for (const [key, fx] of npcLifeFx) {
+      const mesh = npcMeshes.get(key);
+      if (!mesh) {
+        disposeLifeBurst(fx);
+        npcLifeFx.delete(key);
+        continue;
+      }
+      const age = now - fx.bornMs;
+      const t = Math.min(1, age / fx.lifeMs);
+      if (fx.phase === 'dying') {
+        const sink = t * 0.85;
+        const scale = 1 - t * 0.88;
+        mesh.root.scaling.setAll(Math.max(0.08, scale));
+        mesh.body.position.y = fx.baseBodyY - sink;
+        mesh.mat.alpha = Math.max(0, 1 - t);
+        mesh.mat.emissiveColor = new Color3(0.55 * (1 - t), 0.12 * (1 - t), 0.02);
+        for (const b of fx.burst) {
+          b.mesh.position.x += b.vx * dt;
+          b.mesh.position.y += b.vy * dt;
+          b.mesh.position.z += b.vz * dt;
+          b.vy -= 4.5 * dt;
+          b.mat.alpha = Math.max(0, 1 - t);
+          const s = Math.max(0.05, 1 - t * 0.7);
+          b.mesh.scaling.setAll(s);
+        }
+        if (age >= fx.lifeMs) {
+          finishNpcLifeFx(mesh, fx);
+          npcLifeFx.delete(key);
+        }
+      } else {
+        const ease = 1 - Math.pow(1 - t, 3);
+        const scale = 0.12 + ease * 0.88;
+        mesh.root.scaling.setAll(scale);
+        const flash = 1 - t;
+        mesh.mat.emissiveColor = new Color3(
+          0.85 * flash,
+          0.7 * flash,
+          0.25 * flash,
+        );
+        if (age >= fx.lifeMs) {
+          finishNpcLifeFx(mesh, fx);
+          npcLifeFx.delete(key);
+        }
       }
     }
 
@@ -2233,6 +2468,131 @@ async function main(): Promise<void> {
     window.setTimeout(waitDmg, 600);
   }
 
+
+
+  // ?ve=death — cast Spark until dummy dies; wait for death VFX + toast/log.
+  if (ve === 'death') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.05;
+  }
+
+  if (net && ve === 'death') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE death: waiting for Connected…';
+    let ticks = 0;
+    let phase: 'wait' | 'seed' | 'kill' | 'hold' | 'done' = 'wait';
+    let seeded = false;
+    let casts = 0;
+    let lastCastAt = 0;
+    const waitDeath = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE death: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitDeath, 200);
+        return;
+      }
+
+      // Seed once so dummy is full HP, then do NOT keep resetting (Ensure heals).
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        phase = 'seed';
+        if (mark) mark.textContent = 'VE death: seeding training dummy…';
+        window.setTimeout(waitDeath, 350);
+        return;
+      }
+
+      const cycle = net.getTargetCycle();
+      const dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0] ?? null;
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        camera.setTarget(new Vector3(dummy.x, 1.35, dummy.z));
+        camera.radius = 10;
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+
+      const deathFresh =
+        latestDeathAtMs > 0 && Date.now() - latestDeathAtMs < 9000;
+      const toastOk = toastKindsPresent().has('death');
+      const logOk = combatLogKindsPresent().has('death');
+      const dyingVisible = [...npcLifeFx.values()].some(
+        (fx) => fx.phase === 'dying',
+      );
+
+      if (phase === 'done') {
+        return;
+      }
+
+      if (deathFresh && (toastOk || logOk || dyingVisible)) {
+        // Keep death toast/log on screen for the screenshot; soft-respawn later.
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `Death VFX OK · Dummy defeated · toast/log · ` +
+            `HP ${dummy?.hp ?? 0}/${dummy?.maxHp ?? '?'}`;
+        }
+        window.setTimeout(() => {
+          try {
+            net?.ensureTrainingDummy();
+          } catch {
+            /* ignore */
+          }
+        }, 1600);
+        return;
+      }
+
+      if (dummy && dummy.hp <= 0) {
+        phase = 'hold';
+        if (mark) {
+          mark.textContent =
+            `VE death: dummy down · waiting VFX/toast… ` +
+            `toast=${toastOk ? 'y' : 'n'} log=${logOk ? 'y' : 'n'}`;
+        }
+        if (ticks < 260) window.setTimeout(waitDeath, 120);
+        return;
+      }
+
+      phase = 'kill';
+      const gcd = gcdRemainingMs(net.getCombat());
+      const now = Date.now();
+      if (
+        dummy &&
+        dummy.hp > 0 &&
+        gcd <= 0 &&
+        now - lastCastAt > 200
+      ) {
+        lastCastSpell = SPELL_SPARK;
+        net.cast(SPELL_SPARK);
+        pushCombatLog('cast', `Spark → Dummy #${dummy.npcId}`);
+        casts += 1;
+        lastCastAt = now;
+        if (mark) {
+          mark.textContent =
+            `VE death: Spark #${casts} · Dummy HP ${dummy.hp}/${dummy.maxHp}`;
+        }
+      } else if (mark && dummy) {
+        mark.textContent =
+          `VE death: casting… Dummy HP ${dummy.hp}/${dummy.maxHp} · GCD ${Math.max(0, gcd)}ms`;
+      }
+
+      if (ticks > 280) {
+        if (mark) {
+          mark.textContent =
+            `VE death: timed out · casts ${casts} · HP ${dummy?.hp ?? '?'} · ` +
+            `toast=${toastOk ? 'y' : 'n'} log=${logOk ? 'y' : 'n'} · ` +
+            `respawnAge=${latestRespawnAtMs ? Date.now() - latestRespawnAtMs : 'n/a'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitDeath, 140);
+    };
+    window.setTimeout(waitDeath, 600);
+  }
 
 
   // ?ve=staff-equip — unequip → cast blocked → HUD + staff mesh hidden.

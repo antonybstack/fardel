@@ -160,6 +160,7 @@ See `web/README.md` for exact commands.
 - **Combat log strip (presentation):** client-only scrolling right-column log — Cast start, HP-delta damage, staff/robes equip, party join; `?ve=combat-log` (`ve/babylon-combat-log.png`)
 - **FPS / performance overlay (presentation):** live `engine.getFps()` HUD (green ≥ 30 floor / 60 target on box reference) + near/far crowd proxies, remotes, NPCs; `?ve=fps` seeds crowd for AOI proof (`ve/babylon-fps.png`)
 - **System toast banner (presentation):** client-only transient top-center toasts — Connected / identity restore, party invite received / accepted, XP gain, short staff/robes equip feedback; `?ve=toasts` (`ve/babylon-toasts.png`)
+- **Dummy death / respawn (presentation):** NPC HP >0→≤0 plays sink/scale/fade + burst VFX, combat-log **Dummy defeated**, toast kind `death`; HP ≤0→>0 pop-in flash + **Dummy respawned** / toast `respawn`; corpse hidden after VFX (no forever clickable body); `?ve=death` (`ve/babylon-death.png`)
 - **Robes mesh visual (presentation):** `EquipRobes`/`UnequipRobes`; hotkeys **J/K**; hood/skirt/shoulders hide + drab tunic tint follow `Character.robesEquipped` (mirrors staff U/I); `tools/RobesEquipSmoke`; `?ve=robes-equip` (`ve/babylon-robes-equip.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
@@ -167,4 +168,4 @@ See `web/README.md` for exact commands.
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- Next (north-star): credited art packs when licenses land; Pages redeploy after system toasts (art packs still blocked)
+- Next (north-star): credited art packs when licenses land; Pages redeploy after death/respawn invent (art packs still blocked)
