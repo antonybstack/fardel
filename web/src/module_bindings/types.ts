@@ -50,6 +50,15 @@ export const Npc = __t.object("Npc", {
 });
 export type Npc = __Infer<typeof Npc>;
 
+export const PartyChatMessage = __t.object("PartyChatMessage", {
+  messageId: __t.u64(),
+  partyId: __t.u64(),
+  sender: __t.identity(),
+  text: __t.string(),
+  sentAt: __t.timestamp(),
+});
+export type PartyChatMessage = __Infer<typeof PartyChatMessage>;
+
 export const PartyInvite = __t.object("PartyInvite", {
   invitee: __t.identity(),
   partyId: __t.u64(),
@@ -96,4 +105,13 @@ export const PlayerPose = __t.object("PlayerPose", {
   interestChunkZ: __t.i32(),
 });
 export type PlayerPose = __Infer<typeof PlayerPose>;
+
+export const WhisperMessage = __t.object("WhisperMessage", {
+  messageId: __t.u64(),
+  sender: __t.identity(),
+  recipient: __t.identity(),
+  text: __t.string(),
+  sentAt: __t.timestamp(),
+});
+export type WhisperMessage = __Infer<typeof WhisperMessage>;
 

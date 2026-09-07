@@ -464,6 +464,8 @@ type SystemToastKind =
   | 'death'
   | 'respawn'
   | 'say'
+  | 'partySay'
+  | 'whisper'
   | 'rate';
 
 /** Client-only transient top-center system toasts. */
@@ -495,7 +497,11 @@ function pushSystemToast(
                   ? 'RESPAWN'
                   : kind === 'rate'
                     ? 'RATE'
-                    : 'SAY';
+                    : kind === 'partySay'
+                      ? 'PARTY'
+                      : kind === 'whisper'
+                        ? 'WHISPER'
+                        : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -537,17 +543,23 @@ function setChatComposing(open: boolean): void {
   }
 }
 
-/** Server-backed say line (ChatMessage insert). Dedupe by messageId; toast once. */
+/** Server-backed say / party line. Dedupe by messageId; toast once. */
 function pushChatSay(
   who: string,
   text: string,
   toastTtlMs: number = TOAST_TTL_MS,
-  opts?: { messageId?: string; local?: boolean },
+  opts?: {
+    messageId?: string;
+    local?: boolean;
+    channel?: 'say' | 'party' | 'whisper';
+    recipientHex?: string;
+  },
 ): void {
   const trimmed = text.trim();
   if (!trimmed) return;
   const root = document.getElementById('chatLines');
   const messageId = opts?.messageId;
+  const channel = opts?.channel ?? 'say';
   if (root) {
     if (messageId) {
       for (const el of Array.from(root.children)) {
@@ -556,8 +568,12 @@ function pushChatSay(
     }
     const line = document.createElement('div');
     const local = opts?.local ?? who.startsWith('You');
-    line.className = local ? 'chatLine say local' : 'chatLine say remote';
-    line.setAttribute('data-kind', 'say');
+    const chClass =
+      channel === 'party' ? 'party' : channel === 'whisper' ? 'whisper' : 'say';
+    line.className = local
+      ? `chatLine ${chClass} local`
+      : `chatLine ${chClass} remote`;
+    line.setAttribute('data-kind', chClass);
     if (messageId) line.setAttribute('data-message-id', messageId);
     const time = new Date();
     const hh = String(time.getHours()).padStart(2, '0');
@@ -565,8 +581,16 @@ function pushChatSay(
     const ss = String(time.getSeconds()).padStart(2, '0');
     const safeWho = who.replace(/</g, '&lt;');
     const safeText = trimmed.replace(/</g, '&lt;');
+    const recip = opts?.recipientHex?.slice(0, 6);
+    const channelTag =
+      channel === 'party'
+        ? `<span class="chatChannel">[P]</span>`
+        : channel === 'whisper'
+          ? `<span class="chatChannel whisperTag">[W${recip ? '→' + recip : ''}]</span>`
+          : '';
     line.innerHTML =
       `<span class="chatTag">[${hh}:${mm}:${ss}]</span>` +
+      channelTag +
       `<span class="chatWho">${safeWho}</span>` +
       safeText;
     root.appendChild(line);
@@ -575,7 +599,14 @@ function pushChatSay(
     }
     root.scrollTop = root.scrollHeight;
   }
-  pushSystemToast('say', `${who}: ${trimmed}`, toastTtlMs);
+  if (channel === 'party') {
+    pushSystemToast('partySay', `[P] ${who}: ${trimmed}`, toastTtlMs);
+  } else if (channel === 'whisper') {
+    const tip = opts?.recipientHex ? `→${opts.recipientHex.slice(0, 6)}` : '';
+    pushSystemToast('whisper', `[W${tip}] ${who}: ${trimmed}`, toastTtlMs);
+  } else {
+    pushSystemToast('say', `${who}: ${trimmed}`, toastTtlMs);
+  }
 }
 
 function chatSayKindsPresent(): Set<string> {
@@ -589,13 +620,55 @@ function chatSayKindsPresent(): Set<string> {
   return kinds;
 }
 
+type ChatCompose =
+  | { channel: 'say'; text: string }
+  | { channel: 'party'; text: string }
+  | { channel: 'whisper'; targetPrefix: string; text: string };
+
+function parseChatCompose(raw: string): ChatCompose {
+  const trimmed = raw.trim();
+  if (/^\/p(?:arty)?(?:\s+|$)/i.test(trimmed)) {
+    const body = trimmed.replace(/^\/p(?:arty)?\s*/i, '').trim();
+    return { channel: 'party', text: body };
+  }
+  const w = trimmed.match(/^\/w(?:hisper)?\s+(\S+)(?:\s+(.*))?$/i);
+  if (w) {
+    return {
+      channel: 'whisper',
+      targetPrefix: w[1] ?? '',
+      text: (w[2] ?? '').trim(),
+    };
+  }
+  return { channel: 'say', text: trimmed };
+}
+
+function updateChatPrompt(channel: 'say' | 'party' | 'whisper'): void {
+  const prompt = document.querySelector('.chatPrompt');
+  if (prompt) {
+    prompt.textContent =
+      channel === 'party' ? 'Party' : channel === 'whisper' ? 'Whisper' : 'Say';
+  }
+  const panel = document.getElementById('chatPanel');
+  if (panel) {
+    panel.classList.toggle('partyMode', channel === 'party');
+    panel.classList.toggle('whisperMode', channel === 'whisper');
+  }
+}
+
 function bindChatUi(opts: {
   whoLabel: () => string;
   sendSay: (text: string) => void;
+  sendPartySay: (text: string) => void;
+  sendWhisper: (targetPrefix: string, text: string) => void;
 }): () => void {
   const form = document.getElementById('chatForm') as HTMLFormElement | null;
   const input = document.getElementById('chatInput') as HTMLInputElement | null;
   if (!form || !input) return () => {};
+
+  const syncPromptFromInput = () => {
+    const parsed = parseChatCompose(input.value);
+    updateChatPrompt(parsed.channel);
+  };
 
   const onKey = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
@@ -607,6 +680,7 @@ function bindChatUi(opts: {
     if (e.key === 'Escape' && chatComposing) {
       e.preventDefault();
       setChatComposing(false);
+      updateChatPrompt('say');
       return;
     }
 
@@ -622,25 +696,45 @@ function bindChatUi(opts: {
       if (e.repeat) return;
       e.preventDefault();
       setChatComposing(true);
+      updateChatPrompt('say');
       return;
     }
   };
 
   const onSubmit = (e: Event) => {
     e.preventDefault();
-    const text = input.value.trim();
-    if (!text) {
+    const parsed = parseChatCompose(input.value);
+    if (parsed.channel === 'whisper') {
+      if (!parsed.targetPrefix || !parsed.text) {
+        setChatComposing(false);
+        updateChatPrompt('say');
+        return;
+      }
+      opts.sendWhisper(parsed.targetPrefix, parsed.text);
       setChatComposing(false);
+      updateChatPrompt('say');
       return;
     }
-    // Server-authoritative: render when ChatMessage insert arrives (no optimistic echo).
-    opts.sendSay(text);
+    if (!parsed.text) {
+      setChatComposing(false);
+      updateChatPrompt('say');
+      return;
+    }
+    // Server-authoritative: render when insert arrives (no optimistic echo).
+    if (parsed.channel === 'party') {
+      opts.sendPartySay(parsed.text);
+    } else {
+      opts.sendSay(parsed.text);
+    }
     setChatComposing(false);
+    updateChatPrompt('say');
   };
 
+  input.addEventListener('input', syncPromptFromInput);
   window.addEventListener('keydown', onKey, true);
   form.addEventListener('submit', onSubmit);
   return () => {
+    input.removeEventListener('input', syncPromptFromInput);
     window.removeEventListener('keydown', onKey, true);
     form.removeEventListener('submit', onSubmit);
   };
@@ -838,7 +932,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · Enter say · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1437,7 +1531,7 @@ async function main(): Promise<void> {
   let latestDamageAmount = 0;
   let latestDamageAtMs = 0;
   let latestXpGain = 0;
-  let latestXpAtMs = 0;
+  let _latestXpAtMs = 0; void _latestXpAtMs;
   let latestDeathAtMs = 0;
   let latestRespawnAtMs = 0;
   let prevStaffEquipped: boolean | null = null;
@@ -1835,6 +1929,37 @@ async function main(): Promise<void> {
         }
       });
     },
+    sendPartySay: (text) => {
+      if (!net) return;
+      void net.partySay(text).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/rate.?limit/i.test(msg)) {
+          pushSystemToast('rate', 'Party say too fast — wait a moment');
+        } else if (/not in a party/i.test(msg)) {
+          pushSystemToast('rate', 'Not in a party — /p needs mates');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Party say failed');
+        }
+      });
+    },
+    sendWhisper: (targetPrefix, text) => {
+      if (!net) return;
+      const recipient = net.findIdentityByHexPrefix(targetPrefix);
+      if (!recipient) {
+        pushSystemToast('rate', `No unique online target matching ${targetPrefix.slice(0, 12)}`);
+        return;
+      }
+      void net.whisper(recipient, text).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/rate.?limit/i.test(msg)) {
+          pushSystemToast('rate', 'Whisper too fast — wait a moment');
+        } else if (/offline/i.test(msg)) {
+          pushSystemToast('rate', 'Whisper target offline');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Whisper failed');
+        }
+      });
+    },
   });
 
   const syncNpcMeshes = (npcs: NpcView[]) => {
@@ -2218,7 +2343,7 @@ async function main(): Promise<void> {
           pushSystemToast('xp', `+${gained} XP · total ${ch.xp}`);
           xpFloaters.push(spawnXpFloater(scene, player.position, gained));
           latestXpGain = gained;
-          latestXpAtMs = Date.now();
+          _latestXpAtMs = Date.now();
           prevXp = ch.xp;
         } else if (ch.xp !== prevXp) {
           prevXp = ch.xp;
@@ -2374,11 +2499,14 @@ async function main(): Promise<void> {
       const who = local
         ? `You(${msg.senderHex.slice(0, 6)})`
         : msg.senderHex.slice(0, 6);
+      const veParam = new URLSearchParams(window.location.search).get('ve');
       const veChat =
-        new URLSearchParams(window.location.search).get('ve') === 'chat';
+        veParam === 'chat' || veParam === 'party-chat' || veParam === 'whisper';
       pushChatSay(who, msg.text, veChat ? TOAST_VE_TTL_MS : TOAST_TTL_MS, {
         messageId: msg.messageId,
         local,
+        channel: msg.channel ?? 'say',
+        recipientHex: msg.recipientHex,
       });
     }
   };
@@ -3981,6 +4109,209 @@ async function main(): Promise<void> {
     window.setTimeout(waitToasts, 700);
   }
 
+
+
+  // ?ve=party-chat — CreateParty → PartySay → party-styled strip + toast.
+  if (ve === 'party-chat') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'party-chat') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE party-chat: waiting for Connected…';
+    const proof = `Party whisper — mates only ${Date.now() % 100000}`;
+    let ticks = 0;
+    let createAttempts = 0;
+    let said = false;
+    const waitPartyChat = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE party-chat: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitPartyChat, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 13;
+      const partyNow = net.getParty();
+      if (!partyNow || partyNow.size < 1) {
+        if (createAttempts < 3) {
+          createAttempts += 1;
+          net.createParty();
+          if (mark) mark.textContent = `VE party-chat: CreateParty… (${createAttempts})`;
+          window.setTimeout(waitPartyChat, 700);
+          return;
+        }
+        if (mark) mark.textContent = 'VE party-chat: waiting party row…';
+        if (ticks < 220) window.setTimeout(waitPartyChat, 220);
+        return;
+      }
+      if (!said) {
+        said = true;
+        if (mark) mark.textContent = 'VE party-chat: PartySay…';
+        void net
+          .partySay(proof)
+          .then(() => {
+            // Pull any rows already in cache (resub may have applied after insert).
+            const cached = net.getRecentChat().filter((m) => m.channel === 'party');
+            for (const msg of cached) {
+              const local = msg.senderHex === (net.identityHex || '');
+              const who = local
+                ? `You(${msg.senderHex.slice(0, 6)})`
+                : msg.senderHex.slice(0, 6);
+              pushChatSay(who, msg.text, TOAST_VE_TTL_MS, {
+                messageId: msg.messageId,
+                local,
+                channel: 'party',
+              });
+            }
+          })
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (mark) mark.textContent = `VE party-chat: PartySay fail · ${msg.slice(0, 80)}`;
+          });
+        window.setTimeout(waitPartyChat, 600);
+        return;
+      }
+      // Also sweep cache each tick in case insert arrived without toast path.
+      {
+        const cached = net.getRecentChat().filter((m) => m.channel === 'party');
+        for (const msg of cached) {
+          const local = msg.senderHex === (net.identityHex || '');
+          const who = local
+            ? `You(${msg.senderHex.slice(0, 6)})`
+            : msg.senderHex.slice(0, 6);
+          pushChatSay(who, msg.text, TOAST_VE_TTL_MS, {
+            messageId: msg.messageId,
+            local,
+            channel: 'party',
+          });
+        }
+      }
+      const kinds = chatSayKindsPresent();
+      const toastOk = toastKindsPresent().has('partySay');
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      const linesText = document.getElementById('chatLines')?.textContent ?? '';
+      const hasProof = linesText.includes('Party whisper — mates only');
+      const hasPartyKind = kinds.has('party');
+      if (hasPartyKind && toastOk && lineCount >= 1 && hasProof) {
+        setChatComposing(true);
+        const input = document.getElementById('chatInput') as HTMLInputElement | null;
+        if (input) {
+          input.value = '/p Ready for the road.';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        updateChatPrompt('party');
+        if (mark) {
+          mark.textContent =
+            `Party chat OK · lines ${lineCount} · PartySay + /p prefix · RLS mates`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE party-chat: lines ${lineCount} · partyKind ${hasPartyKind} · toast ${toastOk ? 'partySay' : '∅'}`;
+      }
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent =
+            `VE party-chat: timed out · lines ${lineCount} · toast ${toastOk ? 'partySay' : '∅'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitPartyChat, 220);
+    };
+    window.setTimeout(waitPartyChat, 700);
+  }
+
+  // ?ve=whisper — wait for remote PlayerPose → Whisper → strip + toast.
+  if (ve === 'whisper') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'whisper') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE whisper: waiting for Connected + remote…';
+    const proof = `Private whisper only ${Date.now() % 100000}`;
+    let ticks = 0;
+    let said = false;
+    let nudged = false;
+    const waitWhisper = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE whisper: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitWhisper, 200);
+        return;
+      }
+      if (!nudged) {
+        nudged = true;
+        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0);
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 13;
+      const remotes = net.getRemotes();
+      const target = remotes[0];
+      if (!target) {
+        if (mark) {
+          mark.textContent =
+            'VE whisper: Connected · remotes 0 (start tools/SecondClient)…';
+        }
+        if (ticks < 240) window.setTimeout(waitWhisper, 250);
+        return;
+      }
+      if (!said) {
+        said = true;
+        if (mark) mark.textContent = `VE whisper: Whisper → ${target.identityHex.slice(0, 8)}…`;
+        const recipient = net.findIdentityByHexPrefix(target.identityHex.slice(0, 12));
+        if (!recipient) {
+          said = false;
+          if (ticks < 240) window.setTimeout(waitWhisper, 250);
+          return;
+        }
+        void net.whisper(recipient, proof).catch(() => undefined);
+        window.setTimeout(waitWhisper, 250);
+        return;
+      }
+      const kinds = chatSayKindsPresent();
+      const toastOk = toastKindsPresent().has('whisper');
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      const linesText = document.getElementById('chatLines')?.textContent ?? '';
+      const hasProof = linesText.includes('Private whisper only');
+      const hasWhisperKind = kinds.has('whisper');
+      if (hasWhisperKind && toastOk && lineCount >= 1 && hasProof) {
+        setChatComposing(true);
+        const input = document.getElementById('chatInput') as HTMLInputElement | null;
+        if (input) {
+          input.value = `/w ${target.identityHex.slice(0, 8)} Safe travels.`;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        updateChatPrompt('whisper');
+        if (mark) {
+          mark.textContent =
+            `Whisper OK · lines ${lineCount} · /w ${target.identityHex.slice(0, 8)} · RLS sender+target`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE whisper: lines ${lineCount} · whisperKind ${hasWhisperKind} · toast ${toastOk ? 'whisper' : '∅'}`;
+      }
+      if (ticks > 260) {
+        if (mark) {
+          mark.textContent =
+            `VE whisper: timed out · lines ${lineCount} · toast ${toastOk ? 'whisper' : '∅'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitWhisper, 220);
+    };
+    window.setTimeout(waitWhisper, 700);
+  }
 
   // ?ve=chat — Connected → public Say reducer → ChatMessage insert → strip + toast.
   if (ve === 'chat') {

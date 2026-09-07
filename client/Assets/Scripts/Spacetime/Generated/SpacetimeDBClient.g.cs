@@ -31,10 +31,12 @@ namespace SpacetimeDB.Types
             AddTable(ChatMessage = new(conn));
             AddTable(CrowdProxy = new(conn));
             AddTable(Npc = new(conn));
+            AddTable(PartyChatMessage = new(conn));
             AddTable(PartyInvite = new(conn));
             AddTable(PartyMember = new(conn));
             AddTable(PlayerCombat = new(conn));
             AddTable(PlayerPose = new(conn));
+            AddTable(WhisperMessage = new(conn));
         }
     }
 
@@ -535,10 +537,12 @@ namespace SpacetimeDB.Types
             new QueryBuilder().From.ChatMessage().ToSql(),
             new QueryBuilder().From.CrowdProxy().ToSql(),
             new QueryBuilder().From.Npc().ToSql(),
+            new QueryBuilder().From.PartyChatMessage().ToSql(),
             new QueryBuilder().From.PartyInvite().ToSql(),
             new QueryBuilder().From.PartyMember().ToSql(),
             new QueryBuilder().From.PlayerCombat().ToSql(),
             new QueryBuilder().From.PlayerPose().ToSql(),
+            new QueryBuilder().From.WhisperMessage().ToSql(),
         }
         ;
     }
@@ -549,10 +553,12 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Table<ChatMessage, ChatMessageCols, ChatMessageIxCols> ChatMessage() => new("chat_message", new ChatMessageCols("chat_message"), new ChatMessageIxCols("chat_message"));
         public global::SpacetimeDB.Table<CrowdProxy, CrowdProxyCols, CrowdProxyIxCols> CrowdProxy() => new("crowd_proxy", new CrowdProxyCols("crowd_proxy"), new CrowdProxyIxCols("crowd_proxy"));
         public global::SpacetimeDB.Table<Npc, NpcCols, NpcIxCols> Npc() => new("npc", new NpcCols("npc"), new NpcIxCols("npc"));
+        public global::SpacetimeDB.Table<PartyChatMessage, PartyChatMessageCols, PartyChatMessageIxCols> PartyChatMessage() => new("party_chat_message", new PartyChatMessageCols("party_chat_message"), new PartyChatMessageIxCols("party_chat_message"));
         public global::SpacetimeDB.Table<PartyInvite, PartyInviteCols, PartyInviteIxCols> PartyInvite() => new("party_invite", new PartyInviteCols("party_invite"), new PartyInviteIxCols("party_invite"));
         public global::SpacetimeDB.Table<PartyMember, PartyMemberCols, PartyMemberIxCols> PartyMember() => new("party_member", new PartyMemberCols("party_member"), new PartyMemberIxCols("party_member"));
         public global::SpacetimeDB.Table<PlayerCombat, PlayerCombatCols, PlayerCombatIxCols> PlayerCombat() => new("player_combat", new PlayerCombatCols("player_combat"), new PlayerCombatIxCols("player_combat"));
         public global::SpacetimeDB.Table<PlayerPose, PlayerPoseCols, PlayerPoseIxCols> PlayerPose() => new("player_pose", new PlayerPoseCols("player_pose"), new PlayerPoseIxCols("player_pose"));
+        public global::SpacetimeDB.Table<WhisperMessage, WhisperMessageCols, WhisperMessageIxCols> WhisperMessage() => new("whisper_message", new WhisperMessageCols("whisper_message"), new WhisperMessageIxCols("whisper_message"));
     }
 
     public sealed class TypedSubscriptionBuilder
@@ -643,11 +649,13 @@ namespace SpacetimeDB.Types
                 Reducer.InviteToParty args => Reducers.InvokeInviteToParty(eventContext, args),
                 Reducer.LeaveParty args => Reducers.InvokeLeaveParty(eventContext, args),
                 Reducer.Move args => Reducers.InvokeMove(eventContext, args),
+                Reducer.PartySay args => Reducers.InvokePartySay(eventContext, args),
                 Reducer.Say args => Reducers.InvokeSay(eventContext, args),
                 Reducer.SeedCrowdProxies args => Reducers.InvokeSeedCrowdProxies(eventContext, args),
                 Reducer.SetTarget args => Reducers.InvokeSetTarget(eventContext, args),
                 Reducer.UnequipRobes args => Reducers.InvokeUnequipRobes(eventContext, args),
                 Reducer.UnequipStaff args => Reducers.InvokeUnequipStaff(eventContext, args),
+                Reducer.Whisper args => Reducers.InvokeWhisper(eventContext, args),
                 _ => throw new ArgumentOutOfRangeException("Reducer", $"Unknown reducer {reducer}")
             };
         }

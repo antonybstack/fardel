@@ -26,9 +26,19 @@ namespace SpacetimeDB.Types
 
             public readonly IdentityUniqueIndex Identity;
 
+            public sealed class PartyIdIndex : BTreeIndexBase<ulong>
+            {
+                protected override ulong GetKey(PartyMember row) => row.PartyId;
+
+                public PartyIdIndex(PartyMemberHandle table) : base(table) { }
+            }
+
+            public readonly PartyIdIndex PartyId;
+
             internal PartyMemberHandle(DbConnection conn) : base(conn)
             {
                 Identity = new(this);
+                PartyId = new(this);
             }
 
             protected override object GetPrimaryKey(PartyMember row) => row.Identity;
@@ -54,10 +64,12 @@ namespace SpacetimeDB.Types
     public sealed class PartyMemberIxCols
     {
         public global::SpacetimeDB.IxCol<PartyMember, SpacetimeDB.Identity> Identity { get; }
+        public global::SpacetimeDB.IxCol<PartyMember, ulong> PartyId { get; }
 
         public PartyMemberIxCols(string tableName)
         {
             Identity = new global::SpacetimeDB.IxCol<PartyMember, SpacetimeDB.Identity>(tableName, "identity");
+            PartyId = new global::SpacetimeDB.IxCol<PartyMember, ulong>(tableName, "party_id");
         }
     }
 }

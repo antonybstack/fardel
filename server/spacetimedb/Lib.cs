@@ -1,6 +1,8 @@
 using Fardel.Shared;
 using SpacetimeDB;
 
+#pragma warning disable STDB_UNSTABLE
+
 public static partial class Module
 {
     public const int NpcKindDummy = 1;
@@ -44,6 +46,7 @@ public static partial class Module
     {
         [SpacetimeDB.PrimaryKey]
         public Identity Identity;
+        [SpacetimeDB.Index.BTree]
         public ulong PartyId;
         public bool IsLeader;
     }
@@ -109,6 +112,53 @@ public static partial class Module
         public string Text;
         public Timestamp SentAt;
     }
+
+    /// <summary>
+    /// Party channel — PartySay inserts; RLS ClientVisibilityFilter keeps
+    /// rows visible only to current PartyMember mates (ADR invent).
+    /// </summary>
+    [SpacetimeDB.Table(Accessor = "PartyChatMessage", Public = true)]
+    public partial struct PartyChatMessage
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong MessageId;
+        [SpacetimeDB.Index.BTree]
+        public ulong PartyId;
+        public Identity Sender;
+        public string Text;
+        public Timestamp SentAt;
+    }
+
+    /// <summary>Only party mates see PartyChatMessage rows (join on party_id).</summary>
+    [SpacetimeDB.ClientVisibilityFilter]
+    public static readonly Filter PartyChatVisibleToMates = new Filter.Sql(
+        "SELECT pcm.* FROM party_chat_message pcm " +
+        "JOIN party_member pm ON pm.party_id = pcm.party_id " +
+        "WHERE pm.identity = :sender"
+    );
+
+    /// <summary>
+    /// Private whisper — Whisper reducer inserts; RLS keeps rows visible only to
+    /// sender and recipient identities.
+    /// </summary>
+    [SpacetimeDB.Table(Accessor = "WhisperMessage", Public = true)]
+    public partial struct WhisperMessage
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong MessageId;
+        [SpacetimeDB.Index.BTree]
+        public Identity Sender;
+        [SpacetimeDB.Index.BTree]
+        public Identity Recipient;
+        public string Text;
+        public Timestamp SentAt;
+    }
+
+    /// <summary>Only sender and recipient see WhisperMessage rows.</summary>
+    [SpacetimeDB.ClientVisibilityFilter]
+    public static readonly Filter WhisperVisibleToParticipants = new Filter.Sql(
+        "SELECT * FROM whisper_message WHERE sender = :sender OR recipient = :sender"
+    );
 
     [SpacetimeDB.Table(Accessor = "PendingCast", Scheduled = nameof(ResolveCast), ScheduledAt = nameof(ScheduledAt))]
     public partial struct PendingCast
@@ -778,6 +828,157 @@ public static partial class Module
         }
 
         Log.Info($"Say {ctx.Sender}: {trimmed}");
+    }
+
+    /// <summary>Party channel say — sender must be PartyMember; RLS hides from outsiders.</summary>
+    [SpacetimeDB.Reducer]
+    public static void PartySay(ReducerContext ctx, string text)
+    {
+        var self = ctx.Db.PartyMember.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Not in a party");
+
+        var trimmed = (text ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+        {
+            throw new Exception("Empty party say");
+        }
+
+        if (trimmed.Length > Chat.SayMaxLen)
+        {
+            trimmed = trimmed.Substring(0, Chat.SayMaxLen);
+        }
+
+        Timestamp? lastSent = null;
+        foreach (var m in ctx.Db.PartyChatMessage.Iter())
+        {
+            if (m.Sender != ctx.Sender)
+            {
+                continue;
+            }
+            if (lastSent is null || m.SentAt > lastSent.Value)
+            {
+                lastSent = m.SentAt;
+            }
+        }
+        if (lastSent is { } last && ctx.Timestamp < last + Ms(Chat.SayMinIntervalMs))
+        {
+            throw new Exception("PartySay rate-limited");
+        }
+
+        ctx.Db.PartyChatMessage.Insert(new PartyChatMessage
+        {
+            PartyId = self.PartyId,
+            Sender = ctx.Sender,
+            Text = trimmed,
+            SentAt = ctx.Timestamp,
+        });
+
+        var count = 0;
+        foreach (var _ in ctx.Db.PartyChatMessage.Iter())
+        {
+            count++;
+        }
+        while (count > Chat.ChatWindowMax)
+        {
+            ulong oldestId = 0;
+            var found = false;
+            foreach (var m in ctx.Db.PartyChatMessage.Iter())
+            {
+                if (!found || m.MessageId < oldestId)
+                {
+                    oldestId = m.MessageId;
+                    found = true;
+                }
+            }
+            if (!found)
+            {
+                break;
+            }
+            ctx.Db.PartyChatMessage.MessageId.Delete(oldestId);
+            count--;
+        }
+
+        Log.Info($"PartySay party={self.PartyId} {ctx.Sender}: {trimmed}");
+    }
+
+
+    /// <summary>Private whisper — recipient must exist (pose/character); RLS hides from others.</summary>
+    [SpacetimeDB.Reducer]
+    public static void Whisper(ReducerContext ctx, Identity recipient, string text)
+    {
+        if (recipient == ctx.Sender)
+        {
+            throw new Exception("Cannot whisper self");
+        }
+
+        if (ctx.Db.PlayerPose.Identity.Find(recipient) is null &&
+            ctx.Db.Character.Identity.Find(recipient) is null)
+        {
+            throw new Exception("Whisper target offline");
+        }
+
+        var trimmed = (text ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+        {
+            throw new Exception("Empty whisper");
+        }
+
+        if (trimmed.Length > Chat.SayMaxLen)
+        {
+            trimmed = trimmed.Substring(0, Chat.SayMaxLen);
+        }
+
+        Timestamp? lastSent = null;
+        foreach (var m in ctx.Db.WhisperMessage.Iter())
+        {
+            if (m.Sender != ctx.Sender)
+            {
+                continue;
+            }
+            if (lastSent is null || m.SentAt > lastSent.Value)
+            {
+                lastSent = m.SentAt;
+            }
+        }
+        if (lastSent is { } last && ctx.Timestamp < last + Ms(Chat.SayMinIntervalMs))
+        {
+            throw new Exception("Whisper rate-limited");
+        }
+
+        ctx.Db.WhisperMessage.Insert(new WhisperMessage
+        {
+            Sender = ctx.Sender,
+            Recipient = recipient,
+            Text = trimmed,
+            SentAt = ctx.Timestamp,
+        });
+
+        var count = 0;
+        foreach (var _ in ctx.Db.WhisperMessage.Iter())
+        {
+            count++;
+        }
+        while (count > Chat.ChatWindowMax)
+        {
+            ulong oldestId = 0;
+            var found = false;
+            foreach (var m in ctx.Db.WhisperMessage.Iter())
+            {
+                if (!found || m.MessageId < oldestId)
+                {
+                    oldestId = m.MessageId;
+                    found = true;
+                }
+            }
+            if (!found)
+            {
+                break;
+            }
+            ctx.Db.WhisperMessage.MessageId.Delete(oldestId);
+            count--;
+        }
+
+        Log.Info($"Whisper {ctx.Sender} -> {recipient}: {trimmed}");
     }
 
     static ulong PartyIdFrom(Identity leader, Timestamp ts)

@@ -163,6 +163,8 @@ See `web/README.md` for exact commands.
 - **Dummy death / respawn (presentation):** NPC HP >0→≤0 plays sink/scale/fade + burst VFX, combat-log **Dummy defeated**, toast kind `death`; HP ≤0→>0 pop-in flash + **Dummy respawned** / toast `respawn`; corpse hidden after VFX (no forever clickable body); `?ve=death` (`ve/babylon-death.png`)
 - **Chat / public Say (presentation + module):** `ChatMessage` table + public `Say` reducer (trim/truncate 120, prune >50); Babylon strip renders server inserts (You vs remote hex), toast kind `say`; `tools/ChatSmoke` (A→B); `?ve=chat` (`ve/babylon-say.png`)
 - **Say rate-limit (module + presentation):** per-identity 1s min interval on `Say` (`Fardel.Shared.Chat.SayMinIntervalMs`); reject `"Say rate-limited"`; client toast kind `rate`; `tools/ChatSmoke` proves reject + post-window OK; `?ve=rate` (`ve/babylon-rate.png`)
+- **Party channel / PartySay (module + presentation):** `PartyChatMessage` + `PartySay` reducer; RLS `ClientVisibilityFilter` (join `party_member`) so outsiders never see rows; Babylon `/p ` prefix + party styling; `tools/ChatSmoke` A+B party / C outsider; `?ve=party-chat` (`ve/babylon-party-chat.png`)
+- **Whisper DM (module + presentation):** `WhisperMessage` + `Whisper(recipient, text)` reducer; RLS sender OR recipient; Babylon `/w <hex> text` + purple styling; `tools/ChatSmoke` A→B / C outsider; `?ve=whisper` + SecondClient (`ve/babylon-whisper.png`)
 - **XP floater (presentation):** client-only `+N XP` billboard near local player when `Character.Xp` increases (mirrors damage floaters); `?ve=xp-float` (`ve/babylon-xp-float.png`)
 - **Cast projectile / beam VFX (presentation):** Spark fast sphere+trail bolt to target + impact pop; Emberbolt thicker windup beam (local + remote unified via `web/src/world/castVfx.ts`); clear impact pop on hit; `?ve=projectile` (`ve/babylon-projectile.png`)
 - **Robes mesh visual (presentation):** `EquipRobes`/`UnequipRobes`; hotkeys **J/K**; hood/skirt/shoulders hide + drab tunic tint follow `Character.robesEquipped` (mirrors staff U/I); `tools/RobesEquipSmoke`; `?ve=robes-equip` (`ve/babylon-robes-equip.png`)
@@ -172,4 +174,4 @@ See `web/README.md` for exact commands.
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- Next (north-star): credited art packs when licenses land (still blocked); optional party/whisper chat channels; optional loot/pickup invent later
+- Next (north-star): credited art packs when licenses land (still blocked); optional loot/pickup invent; optional trade invent later

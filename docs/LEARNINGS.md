@@ -96,3 +96,8 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 - Say rate-limit is module-side over existing `ChatMessage.SentAt` (no new table): reject if last row from same identity is within `Chat.SayMinIntervalMs`. Client catches reducer `SenderError` and toasts kind `rate` — keeps ChatSmoke / wholesale chat path unchanged aside from the reject proof.
 - XP floater reuses the damage-number billboard path (`spawnWorldFloater`) on `Character.Xp` deltas near the local player — Cosmetics only; no XP-event table.
 
+- Browser `PartySay` adds a **local self-echo** after reducer commit when the RLS row has not yet appeared in `party_chat_message` (JS + AOI resubscribe can miss sender inserts). Headless `ChatSmoke` still proves true RLS: mate sees, outsider does not. Prefer fixing delivery later over trusting echo for authority.
+- `PartySay` + `PartyChatMessage` uses SpacetimeDB RLS (`ClientVisibilityFilter` join on `party_member.party_id`) so `SubscribeToAllTables` still hides party rows from outsiders — prove with a third client in ChatSmoke, not client-side filtering alone. Join columns need `[Index.BTree]` (`PartyId` on both tables). RLS is STDB_UNSTABLE — keep the pragma on the module.
+- `Whisper` + `WhisperMessage` uses RLS `sender = :sender OR recipient = :sender` (BTree on both identity columns). Headless ChatSmoke: A→B visible to A+B, hidden from C. Web `/w <hexprefix> text` resolves via live `player_pose` hex prefix (must be unique).
+- Web `/p ` (or `/party `) prefix routes compose to `partySay`; party lines use `[P]` + green styling; toast kind `partySay`. Solo `CreateParty` is enough for `?ve=party-chat` screenshot; outsider proof stays headless. Whisper VE needs `tools/SecondClient` for a remote target (`?ve=whisper`).
+

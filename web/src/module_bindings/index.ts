@@ -43,11 +43,13 @@ import EquipStaffReducer from "./equip_staff_reducer";
 import InviteToPartyReducer from "./invite_to_party_reducer";
 import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
+import PartySayReducer from "./party_say_reducer";
 import SayReducer from "./say_reducer";
 import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
 import SetTargetReducer from "./set_target_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
+import WhisperReducer from "./whisper_reducer";
 
 // Import all procedure arg schemas
 
@@ -56,10 +58,12 @@ import CharacterRow from "./character_table";
 import ChatMessageRow from "./chat_message_table";
 import CrowdProxyRow from "./crowd_proxy_table";
 import NpcRow from "./npc_table";
+import PartyChatMessageRow from "./party_chat_message_table";
 import PartyInviteRow from "./party_invite_table";
 import PartyMemberRow from "./party_member_table";
 import PlayerCombatRow from "./player_combat_table";
 import PlayerPoseRow from "./player_pose_table";
+import WhisperMessageRow from "./whisper_message_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -109,6 +113,20 @@ const tablesSchema = __schema({
       { name: 'npc_npc_id_key', constraint: 'unique', columns: ['npcId'] },
     ],
   }, NpcRow),
+  partyChatMessage: __table({
+    name: 'party_chat_message',
+    indexes: [
+      { accessor: 'MessageId', name: 'party_chat_message_message_id_idx_btree', algorithm: 'btree', columns: [
+        'messageId',
+      ] },
+      { accessor: 'PartyId', name: 'party_chat_message_party_id_idx_btree', algorithm: 'btree', columns: [
+        'partyId',
+      ] },
+    ],
+    constraints: [
+      { name: 'party_chat_message_message_id_key', constraint: 'unique', columns: ['messageId'] },
+    ],
+  }, PartyChatMessageRow),
   partyInvite: __table({
     name: 'party_invite',
     indexes: [
@@ -125,6 +143,9 @@ const tablesSchema = __schema({
     indexes: [
       { accessor: 'Identity', name: 'party_member_identity_idx_btree', algorithm: 'btree', columns: [
         'identity',
+      ] },
+      { accessor: 'PartyId', name: 'party_member_party_id_idx_btree', algorithm: 'btree', columns: [
+        'partyId',
       ] },
     ],
     constraints: [
@@ -153,6 +174,23 @@ const tablesSchema = __schema({
       { name: 'player_pose_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PlayerPoseRow),
+  whisperMessage: __table({
+    name: 'whisper_message',
+    indexes: [
+      { accessor: 'MessageId', name: 'whisper_message_message_id_idx_btree', algorithm: 'btree', columns: [
+        'messageId',
+      ] },
+      { accessor: 'Recipient', name: 'whisper_message_recipient_idx_btree', algorithm: 'btree', columns: [
+        'recipient',
+      ] },
+      { accessor: 'Sender', name: 'whisper_message_sender_idx_btree', algorithm: 'btree', columns: [
+        'sender',
+      ] },
+    ],
+    constraints: [
+      { name: 'whisper_message_message_id_key', constraint: 'unique', columns: ['messageId'] },
+    ],
+  }, WhisperMessageRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
@@ -166,11 +204,13 @@ const reducersSchema = __reducers(
   __reducerSchema("invite_to_party", InviteToPartyReducer),
   __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
+  __reducerSchema("party_say", PartySayReducer),
   __reducerSchema("say", SayReducer),
   __reducerSchema("seed_crowd_proxies", SeedCrowdProxiesReducer),
   __reducerSchema("set_target", SetTargetReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
+  __reducerSchema("whisper", WhisperReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */
@@ -187,6 +227,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "CrowdProxy": Omit<typeof tablesSchema.schemaType.tables["crowdProxy"], "accessorName"> & { readonly accessorName: "CrowdProxy" };
     /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
     readonly "Npc": Omit<typeof tablesSchema.schemaType.tables["npc"], "accessorName"> & { readonly accessorName: "Npc" };
+    /** @deprecated Use `partyChatMessage` instead. This alias will be removed in the next major version. */
+    readonly "PartyChatMessage": Omit<typeof tablesSchema.schemaType.tables["partyChatMessage"], "accessorName"> & { readonly accessorName: "PartyChatMessage" };
     /** @deprecated Use `partyInvite` instead. This alias will be removed in the next major version. */
     readonly "PartyInvite": Omit<typeof tablesSchema.schemaType.tables["partyInvite"], "accessorName"> & { readonly accessorName: "PartyInvite" };
     /** @deprecated Use `partyMember` instead. This alias will be removed in the next major version. */
@@ -195,6 +237,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "PlayerCombat": Omit<typeof tablesSchema.schemaType.tables["playerCombat"], "accessorName"> & { readonly accessorName: "PlayerCombat" };
     /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
     readonly "PlayerPose": Omit<typeof tablesSchema.schemaType.tables["playerPose"], "accessorName"> & { readonly accessorName: "PlayerPose" };
+    /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
+    readonly "WhisperMessage": Omit<typeof tablesSchema.schemaType.tables["whisperMessage"], "accessorName"> & { readonly accessorName: "WhisperMessage" };
   };
 };
 
@@ -217,10 +261,12 @@ const tableAccessorAliases = {
   "ChatMessage": "chatMessage",
   "CrowdProxy": "crowdProxy",
   "Npc": "npc",
+  "PartyChatMessage": "partyChatMessage",
   "PartyInvite": "partyInvite",
   "PartyMember": "partyMember",
   "PlayerCombat": "playerCombat",
   "PlayerPose": "playerPose",
+  "WhisperMessage": "whisperMessage",
 } as const;
 
 function __withTableAccessorAliases<T extends object>(target: T, freeze = false): T {
@@ -249,6 +295,8 @@ export type DbView = __DbViewBase & {
   readonly "CrowdProxy": __DbViewBase["crowdProxy"];
   /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
   readonly "Npc": __DbViewBase["npc"];
+  /** @deprecated Use `partyChatMessage` instead. This alias will be removed in the next major version. */
+  readonly "PartyChatMessage": __DbViewBase["partyChatMessage"];
   /** @deprecated Use `partyInvite` instead. This alias will be removed in the next major version. */
   readonly "PartyInvite": __DbViewBase["partyInvite"];
   /** @deprecated Use `partyMember` instead. This alias will be removed in the next major version. */
@@ -257,6 +305,8 @@ export type DbView = __DbViewBase & {
   readonly "PlayerCombat": __DbViewBase["playerCombat"];
   /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
   readonly "PlayerPose": __DbViewBase["playerPose"];
+  /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
+  readonly "WhisperMessage": __DbViewBase["whisperMessage"];
 };
 
 type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
@@ -269,6 +319,8 @@ export type Tables = __TablesBase & {
   readonly "CrowdProxy": __TablesBase["crowdProxy"];
   /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
   readonly "Npc": __TablesBase["npc"];
+  /** @deprecated Use `partyChatMessage` instead. This alias will be removed in the next major version. */
+  readonly "PartyChatMessage": __TablesBase["partyChatMessage"];
   /** @deprecated Use `partyInvite` instead. This alias will be removed in the next major version. */
   readonly "PartyInvite": __TablesBase["partyInvite"];
   /** @deprecated Use `partyMember` instead. This alias will be removed in the next major version. */
@@ -277,6 +329,8 @@ export type Tables = __TablesBase & {
   readonly "PlayerCombat": __TablesBase["playerCombat"];
   /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
   readonly "PlayerPose": __TablesBase["playerPose"];
+  /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
+  readonly "WhisperMessage": __TablesBase["whisperMessage"];
 };
 
 /** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */

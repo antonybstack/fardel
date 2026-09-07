@@ -4,7 +4,7 @@
  *
  * Subscriptions follow ADR 0001: Moore neighborhood filters on hot tables
  * (player_pose, crowd_proxy); cold/small tables (character, combat, npc,
- * party_member, party_invite, chat_message) wholesale; always-relevant party identity poses.
+ * party_member, party_invite, chat_message, party_chat_message, whisper_message) wholesale; always-relevant party identity poses.
  */
 
 import { DbConnection, type EventContext, type SubscriptionHandle } from '../module_bindings';
@@ -117,6 +117,10 @@ export type ChatMessageView = {
   senderHex: string;
   text: string;
   sentAtMicros: bigint;
+  /** Public say / party channel / private whisper. */
+  channel: 'say' | 'party' | 'whisper';
+  /** Whisper recipient hex (whisper channel only). */
+  recipientHex?: string;
 };
 
 export type ConnectionStatus =
@@ -168,6 +172,12 @@ export type GameNet = {
   leaveParty: () => void;
   /** Public Say reducer — server-authoritative ChatMessage row; rejects on rate-limit. */
   say: (text: string) => Promise<void>;
+  /** Party channel — PartyChatMessage (RLS mates only); rejects if not in party / rate-limit. */
+  partySay: (text: string) => Promise<void>;
+  /** Private whisper — WhisperMessage (RLS sender+recipient); rejects if target offline / rate-limit. */
+  whisper: (recipient: Identity, text: string) => Promise<void>;
+  /** Resolve live PlayerPose identity by hex prefix (case-insensitive); null if ambiguous/missing. */
+  findIdentityByHexPrefix: (prefix: string) => Identity | null;
   getRecentChat: () => ChatMessageView[];
   /** Invite nearest remote (create party if needed); auto-accept path is invitee-side. */
   inviteNearestRemote: () => string | null;
@@ -260,6 +270,7 @@ export function buildNeighborhoodSqls(
   interestCx: number,
   interestCz: number,
   alwaysRelevantIdentityHexes: string[] = [],
+  _localIdentityHex?: string | null,
 ): string[] {
   const sqls: string[] = [
     // Cold / small — never on AOI hot path for inventory, but OK wholesale for yard MVP
@@ -354,6 +365,22 @@ type ChatMessageRow = {
   sentAt: Timestamp;
 };
 
+type PartyChatMessageRow = {
+  messageId: bigint;
+  partyId: bigint;
+  sender: Identity;
+  text: string;
+  sentAt: Timestamp;
+};
+
+type WhisperMessageRow = {
+  messageId: bigint;
+  sender: Identity;
+  recipient: Identity;
+  text: string;
+  sentAt: Timestamp;
+};
+
 function poseView(row: PoseRow): Pose {
   return {
     x: row.x,
@@ -425,10 +452,32 @@ function asBigInt(v: bigint | number | string): bigint {
 
 function chatView(row: ChatMessageRow): ChatMessageView {
   return {
-    messageId: row.messageId.toString(),
+    messageId: `s:${row.messageId.toString()}`,
     senderHex: row.sender.toHexString(),
     text: row.text,
     sentAtMicros: row.sentAt.microsSinceUnixEpoch,
+    channel: 'say',
+  };
+}
+
+function partyChatView(row: PartyChatMessageRow): ChatMessageView {
+  return {
+    messageId: `p:${row.messageId.toString()}`,
+    senderHex: row.sender.toHexString(),
+    text: row.text,
+    sentAtMicros: row.sentAt.microsSinceUnixEpoch,
+    channel: 'party',
+  };
+}
+
+function whisperChatView(row: WhisperMessageRow): ChatMessageView {
+  return {
+    messageId: `w:${row.messageId.toString()}`,
+    senderHex: row.sender.toHexString(),
+    text: row.text,
+    sentAtMicros: row.sentAt.microsSinceUnixEpoch,
+    channel: 'whisper',
+    recipientHex: row.recipient.toHexString(),
   };
 }
 
@@ -489,10 +538,11 @@ export async function connectToSpacetime(
     const listRemoteCombats = (): RemoteCombat[] => Array.from(remoteCombatMap.values());
     const listChat = (): ChatMessageView[] => {
       const rows = Array.from(chatMessageMap.values());
+      // Prefixed ids (s:/p:/w:) are not raw BigInts — sort by server SentAt.
       rows.sort((a, b) => {
-        const aid = BigInt(a.messageId);
-        const bid = BigInt(b.messageId);
-        return aid < bid ? -1 : aid > bid ? 1 : 0;
+        const am = a.sentAtMicros;
+        const bm = b.sentAtMicros;
+        return am < bm ? -1 : am > bm ? 1 : 0;
       });
       return rows;
     };
@@ -772,6 +822,18 @@ export async function connectToSpacetime(
               const view = chatView(row as ChatMessageRow);
               chatMessageMap.set(view.messageId, view);
             }
+            if (conn.db.partyChatMessage) {
+              for (const row of conn.db.partyChatMessage.iter()) {
+                const view = partyChatView(row as PartyChatMessageRow);
+                chatMessageMap.set(view.messageId, view);
+              }
+            }
+            if (conn.db.whisperMessage) {
+              for (const row of conn.db.whisperMessage.iter()) {
+                const view = whisperChatView(row as WhisperMessageRow);
+                chatMessageMap.set(view.messageId, view);
+              }
+            }
             emitChat();
             } finally {
               syncingCaches = false;
@@ -791,7 +853,12 @@ export async function connectToSpacetime(
             subscribedInterestZ = iz;
             const always = partyAlwaysRelevantHexes();
             subscribedAlwaysHexes = new Set(always.map((h) => h.toLowerCase()));
-            const sqls = buildNeighborhoodSqls(ix, iz, always);
+            const sqls = buildNeighborhoodSqls(
+              ix,
+              iz,
+              always,
+              localIdentity?.toHexString() ?? identityHex,
+            );
             neighborhoodSql = true;
             subHandle = conn
               .subscriptionBuilder()
@@ -873,6 +940,9 @@ export async function connectToSpacetime(
 
           const upsertPartyMember = (row: PartyMemberRow) => {
             const hex = row.identity.toHexString();
+            const wasSelfInParty =
+              !!localIdentity &&
+              partyMemberMap.has(localIdentity.toHexString());
             partyMemberMap.set(hex, {
               identityHex: hex,
               partyId: row.partyId.toString(),
@@ -881,7 +951,18 @@ export async function connectToSpacetime(
             markRemotePartyFlags();
             onRemotes?.(listRemotes());
             emitStatus(identityHex);
-            maybeResubForParty();
+            const selfJoined =
+              !!localIdentity &&
+              hex === localIdentity.toHexString() &&
+              !wasSelfInParty;
+            if (selfJoined && !syncingCaches && localIdentity) {
+              // Force AOI rebuild so party_chat_message join sub is live after CreateParty.
+              const ix = latestPose?.interestChunkX ?? subscribedInterestX;
+              const iz = latestPose?.interestChunkZ ?? subscribedInterestZ;
+              scheduleResubscribe(localIdentity.toHexString(), ix, iz, true);
+            } else {
+              maybeResubForParty();
+            }
           };
 
           const removePartyMember = (row: PartyMemberRow) => {
@@ -983,7 +1064,7 @@ export async function connectToSpacetime(
             emitChat();
           };
           const removeChat = (row: ChatMessageRow) => {
-            const id = row.messageId.toString();
+            const id = chatView(row).messageId;
             if (chatMessageMap.delete(id)) {
               emitChat();
             }
@@ -998,6 +1079,91 @@ export async function connectToSpacetime(
           conn.db.chatMessage.onDelete((_ctx: EventContext, row) => {
             removeChat(row as ChatMessageRow);
           });
+
+          const upsertPartyChat = (row: PartyChatMessageRow) => {
+            const view = partyChatView(row);
+            chatMessageMap.set(view.messageId, view);
+            emitChat();
+          };
+          const removePartyChat = (row: PartyChatMessageRow) => {
+            const id = partyChatView(row).messageId;
+            if (chatMessageMap.delete(id)) {
+              emitChat();
+            }
+          };
+          if (conn.db.partyChatMessage) {
+            conn.db.partyChatMessage.onInsert((_ctx: EventContext, row) => {
+              upsertPartyChat(row as PartyChatMessageRow);
+            });
+            conn.db.partyChatMessage.onUpdate((_ctx: EventContext, _old, row) => {
+              upsertPartyChat(row as PartyChatMessageRow);
+            });
+            conn.db.partyChatMessage.onDelete((_ctx: EventContext, row) => {
+              removePartyChat(row as PartyChatMessageRow);
+            });
+          }
+
+          const upsertWhisperChat = (row: WhisperMessageRow) => {
+            const view = whisperChatView(row);
+            chatMessageMap.set(view.messageId, view);
+            emitChat();
+          };
+          const removeWhisperChat = (row: WhisperMessageRow) => {
+            const id = whisperChatView(row).messageId;
+            if (chatMessageMap.delete(id)) {
+              emitChat();
+            }
+          };
+          if (conn.db.whisperMessage) {
+            conn.db.whisperMessage.onInsert((_ctx: EventContext, row) => {
+              upsertWhisperChat(row as WhisperMessageRow);
+            });
+            conn.db.whisperMessage.onUpdate((_ctx: EventContext, _old, row) => {
+              upsertWhisperChat(row as WhisperMessageRow);
+            });
+            conn.db.whisperMessage.onDelete((_ctx: EventContext, row) => {
+              removeWhisperChat(row as WhisperMessageRow);
+            });
+          }
+
+          // Persistent chat subscriptions — not torn down on AOI/party resubscribe,
+          // so PartySay / Whisper inserts are not lost in the unsub gap. RLS still applies.
+          let chatSubStarted = false;
+          const startPersistentChatSubs = () => {
+            if (chatSubStarted) return;
+            chatSubStarted = true;
+            conn
+              .subscriptionBuilder()
+              .onApplied(() => {
+                // Merge any RLS-visible chat rows into the strip cache.
+                for (const row of conn.db.chatMessage.iter()) {
+                  const view = chatView(row as ChatMessageRow);
+                  chatMessageMap.set(view.messageId, view);
+                }
+                if (conn.db.partyChatMessage) {
+                  for (const row of conn.db.partyChatMessage.iter()) {
+                    const view = partyChatView(row as PartyChatMessageRow);
+                    chatMessageMap.set(view.messageId, view);
+                  }
+                }
+                if (conn.db.whisperMessage) {
+                  for (const row of conn.db.whisperMessage.iter()) {
+                    const view = whisperChatView(row as WhisperMessageRow);
+                    chatMessageMap.set(view.messageId, view);
+                  }
+                }
+                emitChat();
+              })
+              .onError(() => {
+                /* neighborhood sub remains authoritative for gameplay */
+              })
+              .subscribe([
+                'SELECT * FROM chat_message',
+                'SELECT * FROM party_chat_message',
+                'SELECT * FROM whisper_message',
+              ]);
+          };
+          startPersistentChatSubs();
 
           // Spawn interest is (0,0) until pose arrives / hysteresis adopts.
           applySubscription(0, 0);
@@ -1080,6 +1246,46 @@ export async function connectToSpacetime(
               },
               say: (text: string) => {
                 return conn.reducers.say({ text });
+              },
+              partySay: async (text: string) => {
+                await conn.reducers.partySay({ text });
+                // Self-echo: SpacetimeDB JS + AOI resubscribe can miss RLS
+                // party_chat_message inserts for the sender; mates still get onInsert.
+                // Dedupe if the row already arrived via subscription.
+                const trimmed = text.trim();
+                const already = Array.from(chatMessageMap.values()).some(
+                  (m) =>
+                    m.channel === 'party' &&
+                    m.senderHex === identityHex &&
+                    m.text === trimmed,
+                );
+                if (!already && localIdentity) {
+                  const view: ChatMessageView = {
+                    messageId: `p:local:${Date.now()}`,
+                    senderHex: identityHex,
+                    text: trimmed.slice(0, 120),
+                    sentAtMicros: BigInt(Date.now()) * 1000n,
+                    channel: 'party',
+                  };
+                  chatMessageMap.set(view.messageId, view);
+                  emitChat();
+                }
+              },
+              whisper: (recipient: Identity, text: string) => {
+                return conn.reducers.whisper({ recipient, text });
+              },
+              findIdentityByHexPrefix: (prefix: string) => {
+                const needle = prefix.trim().toLowerCase();
+                if (!needle) return null;
+                const hits: Identity[] = [];
+                for (const row of conn.db.playerPose.iter()) {
+                  const hex = (row as PoseRow).identity.toHexString().toLowerCase();
+                  if (hex.startsWith(needle) || hex === needle) {
+                    hits.push((row as PoseRow).identity);
+                  }
+                }
+                if (hits.length === 1) return hits[0]!;
+                return null;
               },
               getRecentChat: () => listChat(),
               inviteNearestRemote: () => {
