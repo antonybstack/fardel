@@ -20,6 +20,19 @@ public static class Combat
     public const float DummySpawnY = 0f;
     public const float DummySpawnZ = 0f;
 
+    /// <summary>Player Character.MaxHp seed (durable).</summary>
+    public const int PlayerMaxHp = 100;
+
+    /// <summary>
+    /// Light thorns when a spell lands on the training dummy — single-client
+    /// player-HP proof without changing Cast targeting. Sized so CombatSmoke
+    /// (~7 ApplyDamage hits) stays under PlayerMaxHp.
+    /// </summary>
+    public const int DummyThornsDamage = 10;
+
+    /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
+    public const int RespawnDelayMs = 2500;
+
     public static bool TryGetSpell(int spellId, out int castMs, out int damage)
     {
         switch (spellId)

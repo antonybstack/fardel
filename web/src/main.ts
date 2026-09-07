@@ -235,9 +235,11 @@ function tonicRemainingMs(character: {
   return Number(left / 1000n);
 }
 
-/** Player self-frame: You + XP + tonic buff timer (no player HP on Character yet). */
+/** Player self-frame: You + XP + HP bar + tonic buff timer. */
 function updateSelfFrame(character: {
   xp: number;
+  hp?: number;
+  maxHp?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
   const frame = document.getElementById('selfFrame');
@@ -251,6 +253,17 @@ function updateSelfFrame(character: {
   const xpEl = document.getElementById('sfXp');
   if (nameEl) nameEl.textContent = 'You';
   if (xpEl) xpEl.textContent = `XP ${character.xp}`;
+  const fill = document.getElementById('sfHpFill');
+  const label = document.getElementById('sfHpLabel');
+  const hp = character.hp ?? 0;
+  const maxHp = character.maxHp ?? 0;
+  const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
+  if (fill) {
+    fill.style.width = `${(frac * 100).toFixed(1)}%`;
+    fill.classList.toggle('mid', frac > 0.25 && frac <= 0.55);
+    fill.classList.toggle('low', frac <= 0.25);
+  }
+  if (label) label.textContent = maxHp > 0 ? `${hp}/${maxHp}` : '—';
   const buffEl = document.getElementById('sfBuff');
   if (buffEl) {
     const leftMs = tonicRemainingMs(character);
@@ -264,6 +277,20 @@ function updateSelfFrame(character: {
       buffEl.classList.remove('active');
       buffEl.textContent = 'Tonic —';
     }
+  }
+}
+
+function setDeathGreyout(on: boolean, sub?: string): void {
+  const el = document.getElementById('deathGreyout');
+  if (!el) return;
+  if (on) {
+    el.classList.remove('hidden');
+    el.setAttribute('aria-hidden', 'false');
+    const subEl = document.getElementById('deathSub');
+    if (subEl && sub) subEl.textContent = sub;
+  } else {
+    el.classList.add('hidden');
+    el.setAttribute('aria-hidden', 'true');
   }
 }
 
@@ -1704,6 +1731,9 @@ async function main(): Promise<void> {
   let prevPartySize = 0;
   let prevPartyMemberKey = '';
   let prevXp: number | null = null;
+  let prevPlayerHp: number | null = null;
+  let latestPlayerDeathAtMs = 0;
+  let latestPlayerRespawnAtMs = 0;
   let prevPendingInvite: string | null = null;
   let toastedConnected = false;
   let toastedInviteAcceptKey = '';
@@ -2691,6 +2721,34 @@ async function main(): Promise<void> {
           prevXp = ch.xp;
         } else if (ch.xp !== prevXp) {
           prevXp = ch.xp;
+        }
+
+        // Player HP death / respawn (Character.Hp authority).
+        if (typeof ch.hp === 'number') {
+          if (prevPlayerHp === null) {
+            prevPlayerHp = ch.hp;
+            if (ch.hp <= 0) setDeathGreyout(true, 'Respawning at yard…');
+          } else if (ch.hp <= 0 && prevPlayerHp > 0) {
+            setDeathGreyout(true, 'Respawning at yard…');
+            pushCombatLog('death', 'You died');
+            pushSystemToast('death', 'You died · respawning', TOAST_VE_TTL_MS);
+            selectedTargetId = 0n;
+            latestPlayerDeathAtMs = Date.now();
+            prevPlayerHp = ch.hp;
+          } else if (ch.hp > 0 && prevPlayerHp <= 0) {
+            setDeathGreyout(false);
+            pushCombatLog('respawn', 'You respawned at yard');
+            pushSystemToast('respawn', 'Respawned · full HP', TOAST_VE_TTL_MS);
+            flashMesh(humanoid.mat, new Color3(0.55, 0.85, 1.0), 900);
+            latestPlayerRespawnAtMs = Date.now();
+            prevPlayerHp = ch.hp;
+          } else if (ch.hp !== prevPlayerHp) {
+            if (ch.hp < prevPlayerHp) {
+              const dmg = prevPlayerHp - ch.hp;
+              pushCombatLog('damage', `Thorns −${dmg} · You ${ch.hp}/${ch.maxHp}`);
+            }
+            prevPlayerHp = ch.hp;
+          }
         }
       }
       {
@@ -5411,6 +5469,174 @@ async function main(): Promise<void> {
   }
 
 
+
+
+
+  // ?ve=player-hp — Spark dummy thorns until You die; greyout + self-frame HP; wait respawn.
+  if (ve === 'player-hp') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'player-hp') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE player-hp: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let casts = 0;
+    let lastCastAt = 0;
+    let sawDeath = false;
+    let phase: 'kill' | 'dead' | 'done' = 'kill';
+    const waitHp = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE player-hp: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitHp, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE player-hp: equipping staff…';
+        window.setTimeout(waitHp, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      const deathFresh =
+        latestPlayerDeathAtMs > 0 && Date.now() - latestPlayerDeathAtMs < 12000;
+      const respawnFresh =
+        latestPlayerRespawnAtMs > 0 && Date.now() - latestPlayerRespawnAtMs < 12000;
+      const grey = document.getElementById('deathGreyout');
+      const greyOn = !!grey && !grey.classList.contains('hidden');
+      const toastDeath = toastKindsPresent().has('death');
+      const toastRespawn = toastKindsPresent().has('respawn');
+      const hpLabel = document.getElementById('sfHpLabel')?.textContent ?? '';
+      const selfVisible =
+        !!document.getElementById('selfFrame') &&
+        !document.getElementById('selfFrame')!.classList.contains('hidden');
+
+      if (phase === 'done') return;
+
+      const ch = net.getCharacter();
+      if (ch && ch.hp <= 0) {
+        sawDeath = true;
+        phase = 'dead';
+        setDeathGreyout(true, 'Respawning at yard…');
+      }
+
+      // Prefer screenshot while dead (greyout + empty-ish HP) before respawn clears it.
+      if (
+        sawDeath &&
+        (greyOn || deathFresh || toastDeath) &&
+        selfVisible &&
+        ((ch?.hp ?? 1) <= 0 || deathFresh)
+      ) {
+        phase = 'done';
+        setDeathGreyout(true, 'Respawning at yard…');
+        if (mark) {
+          mark.textContent =
+            `Player HP OK · You died · greyout · self HP ${hpLabel || (ch ? `${ch.hp}/${ch.maxHp}` : '—')} · casts ${casts}`;
+        }
+        // Keep re-asserting greyout so a fast respawn still shows for the shot.
+        const hold = () => {
+          setDeathGreyout(true, 'Respawning at yard…');
+          window.setTimeout(hold, 200);
+        };
+        hold();
+        return;
+      }
+
+      // If respawn already happened, still prove bar + toast trail.
+      if (
+        sawDeath &&
+        respawnFresh &&
+        toastRespawn &&
+        selfVisible &&
+        ch &&
+        ch.hp === ch.maxHp
+      ) {
+        phase = 'done';
+        setDeathGreyout(false);
+        if (mark) {
+          mark.textContent =
+            `Player HP OK · death→respawn · HP ${ch.hp}/${ch.maxHp} · self-frame`;
+        }
+        return;
+      }
+
+      if (phase === 'dead') {
+        if (mark) {
+          mark.textContent =
+            `VE player-hp: dead · grey=${greyOn ? 'y' : 'n'} toast=${toastDeath ? 'y' : 'n'} · waiting shot…`;
+        }
+        if (ticks < 360) window.setTimeout(waitHp, 120);
+        return;
+      }
+
+      // Kill phase: spark dummy for thorns.
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE player-hp: seeding dummy…';
+        window.setTimeout(waitHp, 350);
+        return;
+      }
+      const cycle = net.getTargetCycle();
+      let dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        cycle[0] ??
+        null;
+      // Dead/missing dummy: Ensure heals — getTargetCycle may omit corpses.
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE player-hp: resetting dummy…';
+        window.setTimeout(waitHp, 280);
+        return;
+      }
+      syncNpcMeshes(net.getNpcs());
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 10;
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      const gcd = gcdRemainingMs(net.getCombat());
+      const now = Date.now();
+      if (
+        dummy &&
+        dummy.hp > 0 &&
+        ch &&
+        ch.hp > 0 &&
+        gcd <= 0 &&
+        now - lastCastAt > 1250
+      ) {
+        lastCastSpell = SPELL_SPARK;
+        net.cast(SPELL_SPARK);
+        pushCombatLog('cast', `Spark → Dummy #${dummy.npcId}`);
+        casts += 1;
+        lastCastAt = now;
+        if (mark) {
+          mark.textContent =
+            `VE player-hp: Spark #${casts} · You ${ch.hp}/${ch.maxHp} · Dummy ${dummy.hp}/${dummy.maxHp}`;
+        }
+      } else if (mark && ch) {
+        mark.textContent =
+          `VE player-hp: casting… You ${ch.hp}/${ch.maxHp} · GCD ${Math.max(0, gcd)}ms`;
+      }
+      if (ticks > 420) {
+        if (mark) {
+          mark.textContent =
+            `VE player-hp: timed out · casts ${casts} · You ${ch?.hp ?? '?'}/${ch?.maxHp ?? '?'} · ` +
+            `death=${sawDeath ? 'y' : 'n'} grey=${greyOn ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitHp, 140);
+    };
+    window.setTimeout(waitHp, 600);
+  }
 
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
   if (ve === 'xp-float') {

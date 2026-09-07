@@ -99,6 +99,8 @@ export type CharacterView = {
   hasEmberShard: boolean;
   hasYardTonic: boolean;
   tonicExpiresAtMicros: bigint;
+  hp: number;
+  maxHp: number;
 };
 
 export type PartyMemberView = {
@@ -386,6 +388,8 @@ type CharacterRow = {
   hasEmberShard: boolean;
   hasYardTonic: boolean;
   tonicExpiresAt: Timestamp;
+  hp: number;
+  maxHp: number;
 };
 
 type CrowdProxyRow = {
@@ -499,6 +503,8 @@ function characterView(row: CharacterRow): CharacterView {
     hasEmberShard: !!row.hasEmberShard,
     hasYardTonic: !!row.hasYardTonic,
     tonicExpiresAtMicros: row.tonicExpiresAt.microsSinceUnixEpoch,
+    hp: row.hp ?? 0,
+    maxHp: row.maxHp ?? 0,
   };
 }
 

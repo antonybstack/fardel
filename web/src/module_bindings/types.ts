@@ -20,6 +20,8 @@ export const Character = __t.object("Character", {
   hasEmberShard: __t.bool(),
   hasYardTonic: __t.bool(),
   tonicExpiresAt: __t.timestamp(),
+  hp: __t.i32(),
+  maxHp: __t.i32(),
 });
 export type Character = __Infer<typeof Character>;
 
@@ -84,6 +86,13 @@ export const PendingCast = __t.object("PendingCast", {
   targetNpcId: __t.u64(),
 });
 export type PendingCast = __Infer<typeof PendingCast>;
+
+export const PendingPlayerRespawn = __t.object("PendingPlayerRespawn", {
+  scheduleId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  player: __t.identity(),
+});
+export type PendingPlayerRespawn = __Infer<typeof PendingPlayerRespawn>;
 
 export const PlayerCombat = __t.object("PlayerCombat", {
   identity: __t.identity(),

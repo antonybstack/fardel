@@ -1117,3 +1117,79 @@ body {
 .sysToast.vendor {
   border-color: rgba(80, 220, 160, 0.55);
 }
+
+
+/* Self-frame player HP bar (Character.Hp / MaxHp). */
+.sfHpBar {
+  position: relative;
+  margin-top: 6px;
+  height: 14px;
+  background: rgba(12, 12, 16, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.sfHpFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  background: linear-gradient(90deg, #2f6f8f, #5eb8d6);
+  transition: width 80ms linear, background 120ms ease;
+}
+.sfHpFill.mid {
+  background: linear-gradient(90deg, #a87a12, #e6be37);
+}
+.sfHpFill.low {
+  background: linear-gradient(90deg, #a02820, #dc463c);
+}
+.sfHpLabel {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 0 8px;
+  font-size: 10px;
+  line-height: 14px;
+  color: #e8eefc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Player death greyout overlay. */
+#deathGreyout {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 14, 0.55);
+  backdrop-filter: grayscale(0.85) brightness(0.55);
+  -webkit-backdrop-filter: grayscale(0.85) brightness(0.55);
+}
+#deathGreyout.hidden {
+  display: none;
+}
+.deathGreyInner {
+  text-align: center;
+  padding: 18px 28px;
+  border-radius: 10px;
+  background: rgba(10, 12, 20, 0.72);
+  border: 1px solid rgba(220, 120, 120, 0.45);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+}
+.deathTitle {
+  color: #ffb0a8;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+}
+.deathSub {
+  margin-top: 6px;
+  color: #c8d0e4;
+  font-size: 13px;
+}

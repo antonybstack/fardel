@@ -79,6 +79,11 @@ public static partial class Module
         public bool HasYardTonic;
         /// <summary>Move-speed buff expiry (UseYardTonic). Inactive when &lt;= now.</summary>
         public Timestamp TonicExpiresAt;
+        /// <summary>Player hit points (dummy thorns / future PvE). Hp≤0 = dead until respawn.</summary>
+        [SpacetimeDB.Default(100)]
+        public int Hp;
+        [SpacetimeDB.Default(100)]
+        public int MaxHp;
     }
 
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
@@ -218,6 +223,16 @@ public static partial class Module
         public ulong TargetNpcId;
     }
 
+    /// <summary>Player death → short delay → yard-origin respawn with full HP.</summary>
+    [SpacetimeDB.Table(Accessor = "PendingPlayerRespawn", Scheduled = nameof(ResolvePlayerRespawn), ScheduledAt = nameof(ScheduledAt))]
+    public partial struct PendingPlayerRespawn
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong ScheduleId;
+        public ScheduleAt ScheduledAt;
+        public Identity Player;
+    }
+
     [SpacetimeDB.Reducer(ReducerKind.ClientConnected)]
     public static void ClientConnected(ReducerContext ctx)
     {
@@ -253,9 +268,14 @@ public static partial class Module
     {
         var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
+        var mover = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (mover.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
         var maxStep = Movement.MaxStepMeters;
-        if (ctx.Db.Character.Identity.Find(ctx.Sender) is { } mover
-            && ctx.Timestamp < mover.TonicExpiresAt)
+        if (ctx.Timestamp < mover.TonicExpiresAt)
         {
             maxStep *= Tonic.MoveSpeedMult;
         }
@@ -351,6 +371,10 @@ public static partial class Module
 
         var character = ctx.Db.Character.Identity.Find(ctx.Sender)
             ?? throw new Exception("Character missing");
+        if (character.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
         if (spellId == Combat.SpellSpark && !character.KnowsSpark)
         {
             throw new Exception("Spark unknown");
@@ -691,6 +715,8 @@ public static partial class Module
             HasEmberShard = false,
             HasYardTonic = false,
             TonicExpiresAt = ctx.Timestamp,
+            Hp = Combat.PlayerMaxHp,
+            MaxHp = Combat.PlayerMaxHp,
         });
     }
 
@@ -766,6 +792,88 @@ public static partial class Module
             Log.Info($"Dummy killed by {caster}, xp={character.Xp}");
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
         }
+
+        // Dummy thorns — light player HP proof without changing Cast targeting.
+        ApplyPlayerDamage(ctx, caster, Combat.DummyThornsDamage);
+    }
+
+    /// <summary>Subtract player HP; on Hp≤0 clear target and schedule yard respawn.</summary>
+    static void ApplyPlayerDamage(ReducerContext ctx, Identity target, int damage)
+    {
+        if (damage <= 0)
+        {
+            return;
+        }
+
+        if (ctx.Db.Character.Identity.Find(target) is not { } ch || ch.Hp <= 0)
+        {
+            return;
+        }
+
+        ch.Hp = Math.Max(0, ch.Hp - damage);
+        ctx.Db.Character.Identity.Update(ch);
+        if (ch.Hp > 0)
+        {
+            return;
+        }
+
+        if (ctx.Db.PlayerCombat.Identity.Find(target) is { } combat)
+        {
+            combat.TargetNpcId = 0;
+            combat.CastingSpellId = 0;
+            ctx.Db.PlayerCombat.Identity.Update(combat);
+        }
+
+        ctx.Db.PendingPlayerRespawn.Insert(new PendingPlayerRespawn
+        {
+            ScheduledAt = new ScheduleAt.Time(ctx.Timestamp + Ms(Combat.RespawnDelayMs)),
+            Player = target,
+        });
+        Log.Info($"Player {target} died; respawn in {Combat.RespawnDelayMs}ms");
+    }
+
+    /// <summary>Full HP + teleport to yard origin after death delay.</summary>
+    [SpacetimeDB.Reducer]
+    public static void ResolvePlayerRespawn(ReducerContext ctx, PendingPlayerRespawn pending)
+    {
+        if (ctx.Db.Character.Identity.Find(pending.Player) is { } ch)
+        {
+            // Only revive if still dead (ignore stale schedules).
+            if (ch.Hp <= 0)
+            {
+                ch.Hp = ch.MaxHp > 0 ? ch.MaxHp : Combat.PlayerMaxHp;
+                if (ch.MaxHp <= 0)
+                {
+                    ch.MaxHp = Combat.PlayerMaxHp;
+                }
+                ctx.Db.Character.Identity.Update(ch);
+            }
+        }
+
+        if (ctx.Db.PlayerPose.Identity.Find(pending.Player) is { } pose)
+        {
+            Movement.ChunkCoords(Movement.SpawnX, Movement.SpawnZ, out var cx, out var cz);
+            pose.X = Movement.SpawnX;
+            pose.Y = Movement.SpawnY;
+            pose.Z = Movement.SpawnZ;
+            pose.ChunkX = cx;
+            pose.ChunkZ = cz;
+            var ix = pose.InterestChunkX;
+            var iz = pose.InterestChunkZ;
+            Aoi.UpdateInterest(pose.X, pose.Z, cx, cz, ref ix, ref iz);
+            pose.InterestChunkX = ix;
+            pose.InterestChunkZ = iz;
+            ctx.Db.PlayerPose.Identity.Update(pose);
+        }
+
+        if (ctx.Db.PlayerCombat.Identity.Find(pending.Player) is { } combat)
+        {
+            combat.TargetNpcId = 0;
+            combat.CastingSpellId = 0;
+            ctx.Db.PlayerCombat.Identity.Update(combat);
+        }
+
+        Log.Info($"Player {pending.Player} respawned at yard origin");
     }
 
 

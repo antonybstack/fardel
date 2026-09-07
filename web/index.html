@@ -28,6 +28,10 @@
         <span id="sfName">You</span>
         <span id="sfXp" class="sfXp">XP —</span>
       </div>
+      <div class="sfHpBar" aria-label="Player HP">
+        <div class="sfHpFill" id="sfHpFill"></div>
+        <span class="sfHpLabel" id="sfHpLabel">—</span>
+      </div>
       <div id="sfBuff" class="sfBuff hidden">Tonic —</div>
       <div class="sfHint">GCD on hotbar · B bag · V use tonic</div>
     </div>
@@ -113,6 +117,12 @@
         <span class="chatPrompt">Say</span>
         <input id="chatInput" type="text" maxlength="120" spellcheck="false" placeholder="say… /p party… /w hex whisper…" />
       </form>
+    </div>
+    <div id="deathGreyout" class="hidden" aria-hidden="true">
+      <div class="deathGreyInner">
+        <div class="deathTitle">You died</div>
+        <div class="deathSub" id="deathSub">Respawning…</div>
+      </div>
     </div>
     <div id="toastStack" aria-live="polite" aria-label="System toasts"></div>
     <div id="hud">
