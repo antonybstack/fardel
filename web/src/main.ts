@@ -2,11 +2,8 @@ import {
   ArcRotateCamera,
   ArcRotateCameraPointersInput,
   Color3,
-  Color4,
-  DirectionalLight,
   DynamicTexture,
   Engine,
-  HemisphericLight,
   InstancedMesh,
   Material,
   Mesh,
@@ -4501,29 +4498,11 @@ async function main(): Promise<void> {
     window.setTimeout(waitHumanoid, 600);
   }
 
-  // ?ve=humanoid-polish — close frame; robes+staff on; silhouette/materials proof.
-  // Apply final #32 atmosphere lock (PR #39) so VE matches upcoming forest mood.
+  // ?ve=humanoid-polish — play-cam frame; robes+staff on; silhouette/materials under canonical #39 forest lights.
   if (ve === 'humanoid-polish') {
-    camera.radius = 5.8;
+    camera.radius = 11;
     camera.alpha = Math.PI / 2.55;
     camera.beta = Math.PI / 2.65;
-    // Final #32 lighting lock (Dev3 PR #39) — temporary until forest.ts lands on develop.
-    scene.clearColor = new Color4(0.24, 0.36, 0.46, 1);
-    scene.fogMode = Scene.FOGMODE_EXP2;
-    scene.fogDensity = 0.015;
-    scene.fogColor = new Color3(0.34, 0.55, 0.7);
-    const hemi = scene.getLightByName('hemiForest');
-    if (hemi instanceof HemisphericLight) {
-      hemi.intensity = 0.78;
-      hemi.diffuse = new Color3(0.68, 0.78, 0.86);
-      hemi.groundColor = new Color3(0.18, 0.28, 0.12);
-    }
-    const sun = scene.getLightByName('sunForest');
-    if (sun instanceof DirectionalLight) {
-      sun.intensity = 0.98;
-      sun.diffuse = new Color3(1.0, 0.82, 0.52);
-      sun.specular = new Color3(0.42, 0.32, 0.18);
-    }
   }
   if (net && ve === 'humanoid-polish') {
     const mark = document.getElementById('persistMark');
@@ -4554,7 +4533,7 @@ async function main(): Promise<void> {
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
       camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
-      camera.radius = 5.8;
+      camera.radius = 11;
       camera.alpha = Math.PI / 2.55;
       camera.beta = Math.PI / 2.65;
       const staffOn = humanoid.staff.isEnabled();
@@ -4562,7 +4541,7 @@ async function main(): Promise<void> {
       if (staffOn && robesOn) {
         if (mark) {
           mark.textContent =
-            'Humanoid polish OK · silhouette · robes/staff · #32 final lights';
+            'Humanoid polish OK · silhouette · robes/staff · canonical forest lights';
         }
         return;
       }
