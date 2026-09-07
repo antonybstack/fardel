@@ -57,7 +57,7 @@
       </div>
       <div id="sfBuff" class="sfBuff hidden">Tonic —</div>
       <div id="sfRest" class="sfRest hidden" aria-live="polite">Resting…</div>
-      <div class="sfHint">GCD on hotbar · B bag · V tonic · R rest · mana pool</div>
+      <div class="sfHint">GCD on hotbar · B bag · V tonic · N bandage · R rest · mana pool</div>
     </div>
     <div id="loadoutStrip" class="hidden" aria-label="Loadout strip">
       <div class="loChip" id="loStaff" data-kind="staff">
@@ -90,7 +90,12 @@
         <span class="loLabel">Tonic</span>
         <span class="loState" id="loTonicState">—</span>
       </div>
-    </div>
+          <div class="loChip" id="loBandage" data-kind="bandage">
+        <span class="loIcon bandage" aria-hidden="true">🩹</span>
+        <span class="loLabel">Bandage</span>
+        <span class="loState" id="loBandageState">—</span>
+      </div>
+</div>
     <div id="bagPanel" class="hidden" aria-label="Bag / loadout">
       <div class="bagHead">
         <span class="bagTitle">Bag / loadout</span>
@@ -105,7 +110,8 @@
       <div class="bagRow"><span>Mana</span><span id="bagMana">—</span></div>
       <div class="bagRow"><span>Ember shard</span><span id="bagShard">—</span></div>
       <div class="bagRow"><span>Yard tonic</span><span id="bagTonic">—</span></div>
-      <div class="bagFoot">Casts need staff + known spell · U/I staff · J/K robes · E vendor · V use tonic</div>
+      <div class="bagRow"><span>Yard bandage</span><span id="bagBandage">—</span></div>
+      <div class="bagFoot">Casts need staff + known spell · U/I staff · J/K robes · E vendor · V tonic · N bandage</div>
     </div>
     <div id="keysLegend" class="hidden" aria-label="Keybind legend">
       <div class="bagHead">
@@ -128,6 +134,7 @@
           <span class="klChip"><kbd>E</kbd> vendor</span>
           <span class="klChip"><kbd>F</kbd> pickup</span>
           <span class="klChip"><kbd>V</kbd> tonic</span>
+          <span class="klChip"><kbd>N</kbd> bandage</span>
           <span class="klChip"><kbd>R</kbd> rest</span>
         </div>
         <div class="klRow">
@@ -149,7 +156,8 @@
       </div>
       <div class="bagRow"><span>Buy shard</span><span id="vendorBuyXp">5 XP</span></div>
       <div class="bagRow"><span>Sell shard</span><span id="vendorSellXp">+5 XP</span></div>
-      <div class="bagFoot">E nearby: no shard → buy · has shard → sell</div>
+      <div class="bagRow"><span>Buy bandage</span><span id="vendorBuyBandageXp">5 XP</span></div>
+      <div class="bagFoot">E nearby: no shard → buy · has shard → sell · N use bandage</div>
     </div>
     <div id="combatLog" aria-label="Combat log">
       <div class="clHead">Combat log</div>

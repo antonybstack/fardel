@@ -1,6 +1,9 @@
 namespace Fardel.Shared;
 
-/// <summary>Out-of-combat Rest (bandage-style) — instant heal + mana restore + cooldown.</summary>
+/// <summary>
+/// Out-of-combat Rest — free instant heal + mana restore + cooldown.
+/// Distinct from the yard Bandage consumable (BuyYardBandage / UseBandage).
+/// </summary>
 public static class Rest
 {
     /// <summary>HP restored per Rest reducer call (clamped to MaxHp).</summary>

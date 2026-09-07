@@ -20,6 +20,8 @@ export const Character = __t.object("Character", {
   hasEmberShard: __t.bool(),
   hasYardTonic: __t.bool(),
   tonicExpiresAt: __t.timestamp(),
+  hasYardBandage: __t.bool(),
+  bandageReadyAt: __t.timestamp(),
   hp: __t.i32(),
   maxHp: __t.i32(),
   level: __t.i32(),
