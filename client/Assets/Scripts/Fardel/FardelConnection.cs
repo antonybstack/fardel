@@ -16,6 +16,10 @@ namespace Fardel
         DbConnection? _conn;
         string _status = "Connecting…";
         string _identity = "";
+        int _retries;
+
+        public string Status => _status;
+        public string IdentityText => _identity;
 
         void Awake()
         {
@@ -23,9 +27,56 @@ namespace Fardel
             {
                 gameObject.AddComponent<SpacetimeDBNetworkManager>();
             }
+
+            ResolveEndpoint();
         }
 
         void Start() => Connect();
+
+        void ResolveEndpoint()
+        {
+            var pageUrl = Application.absoluteURL ?? "";
+            var servedFromLocal =
+                pageUrl.Contains("127.0.0.1", System.StringComparison.OrdinalIgnoreCase)
+                || pageUrl.Contains("localhost", System.StringComparison.OrdinalIgnoreCase);
+
+            // Player builds on a real host default to the preview tunnel.
+            // Localhost WebGL must keep 127.0.0.1 (do not rewrite before ?db=).
+            if (!Application.isEditor && !servedFromLocal && uri.Contains("127.0.0.1"))
+            {
+                uri = "https://dev-db.sparkify.dev";
+            }
+
+            // ?db= / ?database= always win (local serve / Pages debug)
+            if (string.IsNullOrEmpty(pageUrl))
+            {
+                return;
+            }
+
+            var qIdx = pageUrl.IndexOf('?');
+            if (qIdx < 0)
+            {
+                return;
+            }
+
+            foreach (var part in pageUrl[(qIdx + 1)..].Split('&'))
+            {
+                var kv = part.Split('=', 2);
+                if (kv.Length != 2)
+                {
+                    continue;
+                }
+
+                if (kv[0] == "db")
+                {
+                    uri = UnityEngine.Networking.UnityWebRequest.UnEscapeURL(kv[1]);
+                }
+                else if (kv[0] == "database")
+                {
+                    databaseName = UnityEngine.Networking.UnityWebRequest.UnEscapeURL(kv[1]);
+                }
+            }
+        }
 
         void Connect()
         {
@@ -44,12 +95,28 @@ namespace Fardel
             _status = "Connected";
             _identity = identity.ToString();
             Debug.Log($"[Fardel] Connected as {_identity}");
+            try
+            {
+                var dir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.dataPath, "..", "..", "ve"));
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "connect-ready.txt"), _identity);
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[Fardel] VE marker write failed: {ex.Message}");
+            }
         }
 
         void OnConnectError(System.Exception e)
         {
             _status = $"Error: {e.Message}";
             Debug.LogError($"[Fardel] Connect error: {e}");
+            if (_retries < 8)
+            {
+                _retries++;
+                _status = $"Retrying… ({_retries})";
+                Invoke(nameof(Connect), 1.5f);
+            }
         }
 
         void OnDisconnected(DbConnection conn, System.Exception? e)

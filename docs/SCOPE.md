@@ -114,4 +114,5 @@ Before starting work, answer:
 ## Status
 
 - **Phase:** **slice 4 (AOI) proven** via `tools/AoiSmoke` (headless); Unity FPS floor still deferred with Editor
+- **Web milestone:** Unity WebGL Connect on `play.sparkify.dev` + local `serve-webgl.py` (headless smokes remain the slice gate)
 - **POC north-star:** not started

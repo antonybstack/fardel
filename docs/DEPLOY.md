@@ -102,7 +102,7 @@ Validate early:
 
 - [x] Deploy policy documented
 - [x] `dev-db.sparkify.dev` on existing Mac `sparkify` tunnel → `127.0.0.1:3000` (HTTP 404 from SpacetimeDB root is healthy)
-- [x] **Cloudflare Pages project `fardel` live** — production deployment of `web-placeholder/`; custom domain `play.sparkify.dev` attached (CNAME → `fardel.pages.dev`, proxied)
+- [x] **Cloudflare Pages project `fardel` live** — Unity WebGL Connect build on `play.sparkify.dev` (CNAME → `fardel.pages.dev`, proxied); placeholder retired
 - [ ] Prod SpacetimeDB (`db.sparkify.dev` or MainCloud URI)
 
 ### Tunnel ops note (this machine)
@@ -115,7 +115,20 @@ Reuses the existing **`sparkify`** cloudflared LaunchDaemon (`com.cloudflare.spa
 
 `play.sparkify.dev` no longer needs tunnel ingress (DNS points at Pages). **Follow-up:** remove the `play.sparkify.dev` → `:8787` ingress block from the Mac cloudflared configs / LaunchDaemon when convenient (needs sudo on the Studio); interim Mac tunnel can drop play ingress without affecting Pages.
 
+### Unity WebGL client (Pages)
+
+Live client is a **Unity WebGL** Connect build (gzip + decompressionFallback → `.unityweb` assets):
+
+- Local: `python3 tools/scripts/serve-webgl.py` → `http://127.0.0.1:8788/`
+  - Keeps `http://127.0.0.1:3000` (no tunnel rewrite)
+- Pages: `play.sparkify.dev` → Cloudflare Pages project `fardel`
+  - Connects to `https://dev-db.sparkify.dev` (Mac cloudflared → local SpacetimeDB)
+- Build: `Unity -batchmode -executeMethod Fardel.Editor.FardelWebBuild.BuildWebGL`
+- Note: Cloudflare Pages strips `Content-Encoding` from `_headers`; Unity decompressionFallback ungzip's client-side. Keep wasm under the 25 MiB/file Pages limit via gzip.
+- Override: `?db=` / `?database=` on the page URL always wins.
+
 ### Play placeholder (Pages)
+
 
 Production client placeholder is on **Cloudflare Pages**:
 
