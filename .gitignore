@@ -8,9 +8,7 @@
 [Uu]ser[Ss]ettings/
 [Mm]emoryCaptures/
 [Rr]ecordings/
-*.csproj
-!server/**/*.csproj
-!shared/**/*.csproj
+# Unity-generated project files (keep hand-authored under server/shared/tools)
 *.unityproj
 *.sln
 *.suo
@@ -30,18 +28,18 @@
 *.aab
 *.unitypackage
 sysinfo.txt
-crashlytics-build.properties
+crashlytics-build-properties
 
-# .NET / SpacetimeDB
+# .NET / SpacetimeDB build outputs
 bin/
 obj/
 *.user
 *.DotSettings.user
-.vs/
-# NuGet (do not use bare packages/ — matches Unity Packages/ on macOS)
-**/[Nn]uGet/
 TestResults/
 *.nupkg
+
+# Hand-authored csproj must stay tracked
+# (do NOT ignore *.csproj globally — macOS + Unity Packages clash)
 
 # SpacetimeDB local
 .spacetime/
@@ -65,7 +63,7 @@ unity-*.log
 spacetime-*.log
 module-build.log
 docker-module-build.log
-
-# Unity project packages manifest must be tracked
-!client/Packages/
-!client/Packages/**
+*-smoke.log
+connect-smoke*.log
+combat-smoke.log
+move-smoke.log

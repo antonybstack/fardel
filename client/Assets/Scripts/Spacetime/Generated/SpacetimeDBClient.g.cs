@@ -27,6 +27,7 @@ namespace SpacetimeDB.Types
     {
         public RemoteTables(DbConnection conn)
         {
+            AddTable(Character = new(conn));
             AddTable(Npc = new(conn));
             AddTable(PlayerCombat = new(conn));
             AddTable(PlayerPose = new(conn));
@@ -526,6 +527,7 @@ namespace SpacetimeDB.Types
 
         internal static string[] AllTablesSqlQueries() => new string[]
         {
+            new QueryBuilder().From.Character().ToSql(),
             new QueryBuilder().From.Npc().ToSql(),
             new QueryBuilder().From.PlayerCombat().ToSql(),
             new QueryBuilder().From.PlayerPose().ToSql(),
@@ -535,6 +537,7 @@ namespace SpacetimeDB.Types
 
     public sealed class From
     {
+        public global::SpacetimeDB.Table<Character, CharacterCols, CharacterIxCols> Character() => new("character", new CharacterCols("character"), new CharacterIxCols("character"));
         public global::SpacetimeDB.Table<Npc, NpcCols, NpcIxCols> Npc() => new("npc", new NpcCols("npc"), new NpcIxCols("npc"));
         public global::SpacetimeDB.Table<PlayerCombat, PlayerCombatCols, PlayerCombatIxCols> PlayerCombat() => new("player_combat", new PlayerCombatCols("player_combat"), new PlayerCombatIxCols("player_combat"));
         public global::SpacetimeDB.Table<PlayerPose, PlayerPoseCols, PlayerPoseIxCols> PlayerPose() => new("player_pose", new PlayerPoseCols("player_pose"), new PlayerPoseIxCols("player_pose"));

@@ -97,7 +97,9 @@ Keep [ADR 0002](adr/0002-client-host-webgpu.md): Unity remains the **v1 ship cli
 
 - `tools/ConnectSmoke` (slice 0)
 - `tools/MoveSmoke` (slice 1)
-- later cast/GCD smokes (slice 2)
+- `tools/CombatSmoke` (slice 2)
+- `tools/PersistSmoke` (slice 3)
+- later AOI / alloc smokes (slice 4)
 
 Unity Connect scene / forest art resume when those gates pass (presentation, not net learning).
 
@@ -111,5 +113,5 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 2 (Combat) proven** via `tools/CombatSmoke`; next **slice 3 (Persist)**
+- **Phase:** **slice 3 (Persist) proven** via `tools/PersistSmoke`; next **slice 4 (Perf / AOI)**
 - **POC north-star:** not started

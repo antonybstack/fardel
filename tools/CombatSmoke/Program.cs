@@ -29,6 +29,8 @@ try
         .SubscribeToAllTables();
     await Pump(subscribed.Task, timeoutMs, conn, "subscribe");
 
+    await PumpUntil(() => conn.Db.Character.Identity.Find(identity) is not null, timeoutMs, conn, "character ready");
+
     conn.Reducers.EnsureTrainingDummy();
     await PumpUntil(() => FindDummy(conn) is { Hp: > 0 }, timeoutMs, conn, "dummy ready");
 
@@ -40,7 +42,7 @@ try
         conn.Db.PlayerCombat.Identity.Find(identity) is { } cc && cc.TargetNpcId == dummy.NpcId,
         timeoutMs, conn, "target set");
 
-    var startXp = conn.Db.PlayerCombat.Identity.Find(identity) is { } c0 ? c0.Xp : 0;
+    var startXp = conn.Db.Character.Identity.Find(identity) is { } c0 ? c0.Xp : 0;
 
     while (FindDummy(conn) is { Hp: > 0 })
     {
@@ -55,7 +57,7 @@ try
     }
 
     await PumpUntil(() =>
-        conn.Db.PlayerCombat.Identity.Find(identity) is { } cc && cc.Xp >= startXp + Combat.XpPerKill,
+        conn.Db.Character.Identity.Find(identity) is { } cc && cc.Xp >= startXp + Combat.XpPerKill,
         timeoutMs, conn, "xp after spark kill");
     Console.WriteLine("spark-kill xp OK");
 

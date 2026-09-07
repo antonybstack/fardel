@@ -18,6 +18,19 @@ public static partial class Module
         public int ChunkZ;
     }
 
+    /// <summary>Durable traveler row — survives disconnect (slice 3).</summary>
+    [SpacetimeDB.Table(Accessor = "Character", Public = true)]
+    public partial struct Character
+    {
+        [SpacetimeDB.PrimaryKey]
+        public Identity Identity;
+        public int Xp;
+        public bool KnowsSpark;
+        public bool KnowsEmberbolt;
+        public bool StaffEquipped;
+        public bool RobesEquipped;
+    }
+
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
     public partial struct PlayerCombat
     {
@@ -25,7 +38,6 @@ public static partial class Module
         public Identity Identity;
         public ulong TargetNpcId;
         public Timestamp GcdReadyAt;
-        public int Xp;
     }
 
     [SpacetimeDB.Table(Accessor = "Npc", Public = true)]
@@ -57,13 +69,15 @@ public static partial class Module
     {
         Log.Info($"Client connected: {ctx.Sender}");
         EnsureDummy(ctx);
-        EnsurePlayer(ctx, ctx.Sender);
+        EnsureCharacter(ctx, ctx.Sender);
+        EnsureSession(ctx, ctx.Sender);
     }
 
     [SpacetimeDB.Reducer(ReducerKind.ClientDisconnected)]
     public static void ClientDisconnected(ReducerContext ctx)
     {
         Log.Info($"Client disconnected: {ctx.Sender}");
+        // Character row is durable — do not delete.
         if (ctx.Db.PlayerPose.Identity.Find(ctx.Sender) is { } pose)
         {
             ctx.Db.PlayerPose.Identity.Delete(pose.Identity);
@@ -80,7 +94,6 @@ public static partial class Module
     {
         var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
-
         Movement.ClampWishStep(ref dx, ref dz);
         var x = pose.X + dx;
         var z = pose.Z + dz;
@@ -106,7 +119,6 @@ public static partial class Module
         ctx.Db.PlayerCombat.Identity.Update(combat);
     }
 
-    /// <summary>Cast Spark (1) or Emberbolt (2) at current target. Shared GCD.</summary>
     [SpacetimeDB.Reducer]
     public static void Cast(ReducerContext ctx, int spellId)
     {
@@ -115,9 +127,25 @@ public static partial class Module
             throw new Exception("Unknown spell");
         }
 
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (spellId == Combat.SpellSpark && !character.KnowsSpark)
+        {
+            throw new Exception("Spark unknown");
+        }
+
+        if (spellId == Combat.SpellEmberbolt && !character.KnowsEmberbolt)
+        {
+            throw new Exception("Emberbolt unknown");
+        }
+
+        if (!character.StaffEquipped)
+        {
+            throw new Exception("Staff required");
+        }
+
         var combat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerCombat missing");
-
         if (ctx.Timestamp < combat.GcdReadyAt)
         {
             throw new Exception("GCD");
@@ -164,7 +192,6 @@ public static partial class Module
         ApplyDamage(ctx, cast.Caster, cast.TargetNpcId, damage);
     }
 
-    /// <summary>Test helper: reset/ensure a living dummy for smokes.</summary>
     [SpacetimeDB.Reducer]
     public static void EnsureTrainingDummy(ReducerContext ctx)
     {
@@ -183,7 +210,25 @@ public static partial class Module
         }
     }
 
-    static void EnsurePlayer(ReducerContext ctx, Identity id)
+    static void EnsureCharacter(ReducerContext ctx, Identity id)
+    {
+        if (ctx.Db.Character.Identity.Find(id) is not null)
+        {
+            return;
+        }
+
+        ctx.Db.Character.Insert(new Character
+        {
+            Identity = id,
+            Xp = 0,
+            KnowsSpark = true,
+            KnowsEmberbolt = true,
+            StaffEquipped = true,
+            RobesEquipped = true,
+        });
+    }
+
+    static void EnsureSession(ReducerContext ctx, Identity id)
     {
         if (ctx.Db.PlayerPose.Identity.Find(id) is null)
         {
@@ -207,7 +252,6 @@ public static partial class Module
                 Identity = id,
                 TargetNpcId = 0,
                 GcdReadyAt = ctx.Timestamp,
-                Xp = 0,
             });
         }
     }
@@ -243,14 +287,11 @@ public static partial class Module
         row.Hp = Math.Max(0, row.Hp - damage);
         ctx.Db.Npc.NpcId.Update(row);
 
-        if (row.Hp == 0)
+        if (row.Hp == 0 && ctx.Db.Character.Identity.Find(caster) is { } character)
         {
-            if (ctx.Db.PlayerCombat.Identity.Find(caster) is { } combat)
-            {
-                combat.Xp += Combat.XpPerKill;
-                ctx.Db.PlayerCombat.Identity.Update(combat);
-                Log.Info($"Dummy killed by {caster}, xp={combat.Xp}");
-            }
+            character.Xp += Combat.XpPerKill;
+            ctx.Db.Character.Identity.Update(character);
+            Log.Info($"Dummy killed by {caster}, xp={character.Xp}");
         }
     }
 

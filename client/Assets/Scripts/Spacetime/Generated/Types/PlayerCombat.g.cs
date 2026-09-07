@@ -19,20 +19,16 @@ namespace SpacetimeDB.Types
         public ulong TargetNpcId;
         [DataMember(Name = "gcd_ready_at")]
         public SpacetimeDB.Timestamp GcdReadyAt;
-        [DataMember(Name = "xp")]
-        public int Xp;
 
         public PlayerCombat(
             SpacetimeDB.Identity Identity,
             ulong TargetNpcId,
-            SpacetimeDB.Timestamp GcdReadyAt,
-            int Xp
+            SpacetimeDB.Timestamp GcdReadyAt
         )
         {
             this.Identity = Identity;
             this.TargetNpcId = TargetNpcId;
             this.GcdReadyAt = GcdReadyAt;
-            this.Xp = Xp;
         }
 
         public PlayerCombat()

@@ -42,14 +42,12 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Identity> Identity { get; }
         public global::SpacetimeDB.Col<PlayerCombat, ulong> TargetNpcId { get; }
         public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp> GcdReadyAt { get; }
-        public global::SpacetimeDB.Col<PlayerCombat, int> Xp { get; }
 
         public PlayerCombatCols(string tableName)
         {
             Identity = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Identity>(tableName, "identity");
             TargetNpcId = new global::SpacetimeDB.Col<PlayerCombat, ulong>(tableName, "target_npc_id");
             GcdReadyAt = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp>(tableName, "gcd_ready_at");
-            Xp = new global::SpacetimeDB.Col<PlayerCombat, int>(tableName, "xp");
         }
     }
 
