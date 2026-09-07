@@ -1351,7 +1351,7 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Player death greyout overlay. */
+/* Player death greyout overlay — strong desaturation + dark vignette. */
 #deathGreyout {
   position: absolute;
   inset: 0;
@@ -1360,32 +1360,47 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(6, 8, 14, 0.55);
-  backdrop-filter: grayscale(0.85) brightness(0.55);
-  -webkit-backdrop-filter: grayscale(0.85) brightness(0.55);
+  background:
+    radial-gradient(ellipse at center, rgba(8, 6, 10, 0.42) 0%, rgba(2, 2, 6, 0.88) 72%, rgba(0, 0, 0, 0.94) 100%),
+    rgba(4, 5, 10, 0.72);
+  backdrop-filter: grayscale(1) brightness(0.32) contrast(1.05);
+  -webkit-backdrop-filter: grayscale(1) brightness(0.32) contrast(1.05);
 }
 #deathGreyout.hidden {
   display: none;
 }
 .deathGreyInner {
   text-align: center;
-  padding: 18px 28px;
-  border-radius: 10px;
-  background: rgba(10, 12, 20, 0.72);
-  border: 1px solid rgba(220, 120, 120, 0.45);
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+  padding: 22px 34px;
+  border-radius: 12px;
+  background: rgba(8, 8, 14, 0.88);
+  border: 1px solid rgba(255, 110, 110, 0.55);
+  box-shadow: 0 6px 36px rgba(0, 0, 0, 0.7), inset 0 0 24px rgba(80, 0, 0, 0.18);
 }
 .deathTitle {
-  color: #ffb0a8;
-  font-size: 22px;
+  color: #ffc2ba;
+  font-size: 28px;
   font-weight: 800;
-  letter-spacing: 0.04em;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  letter-spacing: 0.06em;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85), 0 0 18px rgba(255, 60, 60, 0.35);
 }
 .deathSub {
-  margin-top: 6px;
-  color: #c8d0e4;
-  font-size: 13px;
+  margin-top: 10px;
+  color: #e4eaf8;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+.deathCountdown {
+  margin-top: 8px;
+  color: #fff6f0;
+  font-size: 42px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9), 0 0 20px rgba(255, 90, 70, 0.4);
 }
 
 

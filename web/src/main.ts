@@ -377,15 +377,101 @@ function updateSelfFrame(character: {
   }
 }
 
-function setDeathGreyout(on: boolean, sub?: string): void {
+/** Mirror Combat.RespawnDelayMs — client display only, do not import shared C#. */
+const RESPAWN_DELAY_MS = 2500;
+let deathCountdownTimer: number | null = null;
+let deathCountdownEndsAt = 0;
+
+function clearDeathCountdown(): void {
+  if (deathCountdownTimer != null) {
+    window.clearInterval(deathCountdownTimer);
+    deathCountdownTimer = null;
+  }
+  deathCountdownEndsAt = 0;
+  const dig = document.getElementById('deathCountdown');
+  if (dig) {
+    dig.textContent = '';
+    dig.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function formatRespawnCountdown(remainMs: number): { sub: string; digit: string } {
+  if (remainMs <= 0) {
+    return { sub: 'Respawning at yard…', digit: '' };
+  }
+  const sec = remainMs / 1000;
+  const rounded = Math.max(0.1, Math.round(sec * 10) / 10);
+  const whole = Math.ceil(rounded);
+  const label =
+    rounded >= 1
+      ? `Respawn in ${Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)}s…`
+      : `Respawn in ${rounded.toFixed(1)}s…`;
+  const digit = rounded >= 1 ? String(whole) : rounded.toFixed(1);
+  return { sub: label, digit };
+}
+
+function tickDeathCountdown(): void {
+  const remain = deathCountdownEndsAt - Date.now();
+  const { sub, digit } = formatRespawnCountdown(remain);
+  const subEl = document.getElementById('deathSub');
+  if (subEl) subEl.textContent = sub;
+  const dig = document.getElementById('deathCountdown');
+  if (dig) {
+    if (digit) {
+      dig.textContent = digit;
+      dig.setAttribute('aria-hidden', 'false');
+    } else {
+      dig.textContent = '';
+      dig.setAttribute('aria-hidden', 'true');
+    }
+  }
+  if (remain <= 0) {
+    clearDeathCountdown();
+    if (subEl) subEl.textContent = 'Respawning at yard…';
+  }
+}
+
+function startDeathCountdown(delayMs: number = RESPAWN_DELAY_MS): void {
+  clearDeathCountdown();
+  deathCountdownEndsAt = Date.now() + delayMs;
+  tickDeathCountdown();
+  deathCountdownTimer = window.setInterval(tickDeathCountdown, 100);
+}
+
+/** Show/hide death greyout. When on without a freeze sub, runs live respawn countdown. */
+function setDeathGreyout(
+  on: boolean,
+  sub?: string,
+  opts?: { countdown?: boolean; freezeSub?: boolean },
+): void {
   const el = document.getElementById('deathGreyout');
   if (!el) return;
   if (on) {
     el.classList.remove('hidden');
     el.setAttribute('aria-hidden', 'false');
-    const subEl = document.getElementById('deathSub');
-    if (subEl && sub) subEl.textContent = sub;
+    if (opts?.freezeSub && sub) {
+      clearDeathCountdown();
+      const subEl = document.getElementById('deathSub');
+      if (subEl) subEl.textContent = sub;
+      const dig = document.getElementById('deathCountdown');
+      if (dig) {
+        const m = /Respawn in\s+([\d.]+)/i.exec(sub);
+        dig.textContent = m ? String(Math.ceil(Number(m[1]))) : '2';
+        dig.setAttribute('aria-hidden', 'false');
+      }
+      return;
+    }
+    const wantCountdown = opts?.countdown !== false;
+    if (wantCountdown) {
+      if (deathCountdownTimer == null) startDeathCountdown();
+      else tickDeathCountdown();
+    } else {
+      clearDeathCountdown();
+      const subEl = document.getElementById('deathSub');
+      if (subEl && sub) subEl.textContent = sub;
+    }
   } else {
+    clearDeathCountdown();
     el.classList.add('hidden');
     el.setAttribute('aria-hidden', 'true');
   }
@@ -3405,22 +3491,22 @@ async function main(): Promise<void> {
           if (prevPlayerHp === null) {
             prevPlayerHp = ch.hp;
             if (ch.hp <= 0) {
-              setDeathGreyout(true, 'Respawning at yard…');
+              setDeathGreyout(true);
               setLocalGhost(true);
             }
           } else if (ch.hp <= 0 && prevPlayerHp > 0) {
-            setDeathGreyout(true, 'Respawning at yard…');
+            setDeathGreyout(true);
             setLocalGhost(true);
-            pushCombatLog('death', 'You died');
-            pushSystemToast('death', 'You died · respawning', TOAST_VE_TTL_MS);
+            pushCombatLog('death', 'You died · respawning at yard');
+            pushSystemToast('death', 'You died · respawning at yard', TOAST_VE_TTL_MS);
             selectedTargetId = 0n;
             latestPlayerDeathAtMs = Date.now();
             prevPlayerHp = ch.hp;
           } else if (ch.hp > 0 && prevPlayerHp <= 0) {
             setDeathGreyout(false);
             setLocalGhost(false);
-            pushCombatLog('respawn', 'You respawned at yard');
-            pushSystemToast('respawn', 'Respawned · full HP', TOAST_VE_TTL_MS);
+            pushCombatLog('respawn', 'You respawned at yard · full HP');
+            pushSystemToast('respawn', 'Respawned at yard · full HP', TOAST_VE_TTL_MS);
             flashMesh(humanoid.mat, new Color3(0.55, 0.85, 1.0), 900);
             latestPlayerRespawnAtMs = Date.now();
             prevPlayerHp = ch.hp;
@@ -6862,7 +6948,7 @@ async function main(): Promise<void> {
       if (ch && ch.hp <= 0) {
         sawDeath = true;
         phase = 'dead';
-        setDeathGreyout(true, 'Respawning at yard…');
+        setDeathGreyout(true);
       }
 
       // Prefer screenshot while dead (greyout + empty-ish HP) before respawn clears it.
@@ -6873,7 +6959,7 @@ async function main(): Promise<void> {
         ((ch?.hp ?? 1) <= 0 || deathFresh)
       ) {
         phase = 'done';
-        setDeathGreyout(true, 'Respawning at yard…');
+        setDeathGreyout(true);
         if (mark) {
           mark.textContent =
             `Player HP OK · You died · greyout · ghost · self HP ${hpLabel || (ch ? `${ch.hp}/${ch.maxHp}` : '—')} · casts ${casts}`;
@@ -6881,7 +6967,7 @@ async function main(): Promise<void> {
         }
         // Keep re-asserting greyout so a fast respawn still shows for the shot.
         const hold = () => {
-          setDeathGreyout(true, 'Respawning at yard…');
+          setDeathGreyout(true);
           setLocalGhost(true);
           window.setTimeout(hold, 200);
         };
@@ -6976,6 +7062,153 @@ async function main(): Promise<void> {
       window.setTimeout(waitHp, 140);
     };
     window.setTimeout(waitHp, 600);
+  }
+
+  // ?ve=death-ux — stronger greyout + live respawn countdown + clearer death toast; hold for shot.
+  if (ve === 'death-ux') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'death-ux') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE death-ux: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let casts = 0;
+    let lastCastAt = 0;
+    let sawDeath = false;
+    let phase: 'kill' | 'dead' | 'done' = 'kill';
+    const waitDeathUx = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE death-ux: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitDeathUx, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE death-ux: equipping staff…';
+        window.setTimeout(waitDeathUx, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      const deathFresh =
+        latestPlayerDeathAtMs > 0 && Date.now() - latestPlayerDeathAtMs < 12000;
+      const grey = document.getElementById('deathGreyout');
+      const greyOn = !!grey && !grey.classList.contains('hidden');
+      const toastDeath = toastKindsPresent().has('death');
+      const subText = document.getElementById('deathSub')?.textContent ?? '';
+      const countdownOk = /Respawn in\s+[\d.]+s/i.test(subText) || /Respawning/i.test(subText);
+      const digText = document.getElementById('deathCountdown')?.textContent ?? '';
+
+      if (phase === 'done') return;
+
+      const ch = net.getCharacter();
+      if (ch && ch.hp <= 0) {
+        sawDeath = true;
+        phase = 'dead';
+        setDeathGreyout(true);
+      }
+
+      if (
+        sawDeath &&
+        greyOn &&
+        toastDeath &&
+        countdownOk &&
+        ((ch?.hp ?? 1) <= 0 || deathFresh)
+      ) {
+        phase = 'done';
+        // Freeze a clear mid-countdown frame for the screenshot.
+        setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
+        setLocalGhost(true);
+        if (mark) {
+          mark.textContent =
+            `Death UX OK · greyout · countdown · toast` +
+            (digText || subText ? ` · ${digText || subText}` : '') +
+            ` · casts ${casts}`;
+        }
+        const hold = () => {
+          setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
+          setLocalGhost(true);
+          window.setTimeout(hold, 200);
+        };
+        hold();
+        return;
+      }
+
+      if (phase === 'dead') {
+        if (mark) {
+          mark.textContent =
+            `VE death-ux: dead · grey=${greyOn ? 'y' : 'n'} toast=${toastDeath ? 'y' : 'n'} ` +
+            `cd=${countdownOk ? 'y' : 'n'} · ${subText || '—'} · waiting shot…`;
+        }
+        if (ticks < 360) window.setTimeout(waitDeathUx, 120);
+        return;
+      }
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE death-ux: seeding dummy…';
+        window.setTimeout(waitDeathUx, 350);
+        return;
+      }
+      const cycle = net.getTargetCycle();
+      let dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        cycle[0] ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE death-ux: resetting dummy…';
+        window.setTimeout(waitDeathUx, 280);
+        return;
+      }
+      syncNpcMeshes(net.getNpcs());
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 10;
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      const gcd = gcdRemainingMs(net.getCombat());
+      const now = Date.now();
+      if (
+        dummy &&
+        dummy.hp > 0 &&
+        ch &&
+        ch.hp > 0 &&
+        gcd <= 0 &&
+        now - lastCastAt > 1250
+      ) {
+        lastCastSpell = SPELL_SPARK;
+        net.cast(SPELL_SPARK);
+        pushCombatLog('cast', `Spark → Dummy #${dummy.npcId}`);
+        casts += 1;
+        lastCastAt = now;
+        if (mark) {
+          mark.textContent =
+            `VE death-ux: Spark #${casts} · You ${ch.hp}/${ch.maxHp} · Dummy ${dummy.hp}/${dummy.maxHp}`;
+        }
+      } else if (mark && ch) {
+        mark.textContent =
+          `VE death-ux: casting… You ${ch.hp}/${ch.maxHp} · GCD ${Math.max(0, gcd)}ms`;
+      }
+      if (ticks > 420) {
+        if (mark) {
+          mark.textContent =
+            `VE death-ux: timed out · casts ${casts} · You ${ch?.hp ?? '?'}/${ch?.maxHp ?? '?'} · ` +
+            `death=${sawDeath ? 'y' : 'n'} grey=${greyOn ? 'y' : 'n'} toast=${toastDeath ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitDeathUx, 140);
+    };
+    window.setTimeout(waitDeathUx, 600);
   }
 
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
