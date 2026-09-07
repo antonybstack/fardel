@@ -116,5 +116,5 @@ Before starting work, answer:
 - **Phase:** **slice 4 (AOI) proven** via `tools/AoiSmoke` (headless); browser FPS floor tracked with Babylon presentation
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
-- **Babylon presentation:** Connect green; **Move** WASD + RMB look + `PlayerPose` reconcile (see `ve/babylon-move.png`)
-- **POC north-star:** not started
+- **Babylon presentation:** Connect green; Move green; **Combat** Tab-target + Spark/Emberbolt + GCD HUD (see `ve/babylon-combat.png`)
+- **POC north-star:** not started (next presentation: Persist)

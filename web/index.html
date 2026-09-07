@@ -10,6 +10,16 @@
     <canvas id="renderCanvas"></canvas>
     <div id="hud">
       <div id="status">Booting…</div>
+      <div id="combatBars">
+        <div class="bar" id="gcdBar">
+          <div class="barFill" id="gcdFill"></div>
+          <span class="barLabel" id="gcdLabel">GCD —</span>
+        </div>
+        <div class="bar hidden" id="castBar">
+          <div class="barFill cast" id="castFill"></div>
+          <span class="barLabel" id="castLabel">—</span>
+        </div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

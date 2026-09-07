@@ -116,4 +116,7 @@ See `web/README.md` for exact commands.
 - **Connect (presentation):** green in browser (HUD Connected + identity)
 - **Move (presentation):** WASD → `Move` reducer; RMB ArcRotate look; capsule
   reconciles to `PlayerPose`; HUD shows Connected + `pos`
-- Next: Combat presentation (tab-target dummy, Spark/Emberbolt, GCD UI)
+- **Combat (presentation):** Tab cycles NPC targets; hotkeys 1=Spark / 2=Emberbolt
+  → `Cast`; `EnsureTrainingDummy` on subscribe; GCD + cast bars in HUD; selected
+  target highlight + cast flash (`ve/babylon-combat.png`)
+- Next: Persist presentation (refresh keeps XP + loadout)
