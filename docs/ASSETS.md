@@ -42,10 +42,15 @@ credits are chosen (see ledger below).
 
 ## How we source (v1)
 
-- **Buy or pull a small coherent pack** (itch / CC0 / store) for: stylized forest, mountain/sky backdrop, basic RPG humanoid.
-- Prefer **one environment pack + one character pack** over five mismatched freebies.
-- Keep sources under something like `web/public/third-party/<pack>/` (or former Unity `client/Assets/ThirdParty/`) with a `LICENSE` or root `docs/asset-credits.md` entry.
+**Hard rule:** we **do not purchase** assets. Only:
+
+1. **Free open-source / CC0** (or similarly free for commercial use) packs with a clear license + URL, or
+2. **Original / procedural** work we develop ourselves (kitbash upgrades in `web/src/world/`, etc.).
+
+- Prefer **one coherent free env kit + one free character kit** over five mismatched freebies — or stay procedural until a free fit exists.
+- Keep sources under something like `web/public/third-party/<pack>/` with a `LICENSE` or `docs/asset-credits.md` entry.
 - **Do not** commit huge binary packs until chosen; this doc locks *intent*. Add credits in the same PR as the import.
+- Paid itch/store packs are **out of scope** even if “cheap.”
 
 ## Pipeline (POC-simple)
 

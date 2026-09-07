@@ -37,7 +37,7 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 | **QA Feel** | Feel / UX playtests; `feel`-labeled Issues; Mac/Pages FPS truth (not box SwiftShader) | Feature invent |
 | **Reviewer** | Review PRs targeting `develop`: correctness, smoke coverage, schema-collision risk, lane conflicts; concrete feedback | Own features; push merges |
 | **Release** | On Lead greenlight: promote pinned `develop` SHA → `main`, Mac smoke, Cloudflare Pages deploy, VE + release beat | Cut without greenlight; expand tip silently; invent features; run two cuts at once |
-| **Art** | Visual north star vs [ASSETS.md](ASSETS.md); art-direction briefs; license-safe pack **shortlists**; break visual work into Issues for Devs; look-language coherence | Invent gameplay systems; **buy** third-party art packs without Antony/Lead greenlight; leave Devs idle on visuals |
+| **Art** | Visual north star vs [ASSETS.md](ASSETS.md); art-direction briefs; **free OSS/CC0 or original-only** shortlists; break visual work into Issues for Devs; look-language coherence | Invent gameplay systems; propose **paid** asset packs; leave Devs idle on visuals |
 
 ### Seat map (shared computer)
 
@@ -248,7 +248,7 @@ Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as
 5. Stay quiet if nothing changed.
 6. Never wipe non-local DBs.
 7. **No idle seats:** if open Issues < idle Devs, file or ask Art to file the next visual/feel tickets and assign.
-8. Third-party **art pack purchases** (paid itch/store kits) need Antony/Lead greenlight — shortlists and procedural polish do not.
+8. **No paid art packs** — Art shortlists free/OSS only; otherwise Devs ship original/procedural polish.
 
 ---
 
@@ -280,7 +280,7 @@ Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specif
 | Auto-review / approval blocks merges or elevated Shell | Escalate honestly to Antony; never credential workarounds |
 | Channel 6-member cap | Split **Fardel** vs **Fardel QA**; add **Fardel Art** when visuals need a standing room |
 | Idle Devs + empty Issues board | Lead/Art must file Issues and assign — never “wait for inspiration” |
-| Visual gap vs hordes/RS/WoW mood | Art owns north star (#31-style); Devs implement presentation Issues; pack **buy** is a human gate |
+| Visual gap vs hordes/RS/WoW mood | Art owns north star (#31-style); Devs implement presentation Issues; **no paid packs** — free/OSS or DIY |
 | Tip moves mid-rebase | `git fetch origin develop` before rebase; Lead broadcasts SHA after every merge |
 | VE missing from PR (gitignore) | `git add -f ve/...` + embed in body as Done-when |
 | Stale GitHub `CONFLICTING` / mergeable noise | Re-fetch base; rebase; reopen PR if GitHub lies |
@@ -368,20 +368,20 @@ done
 - Re-ping merged PRs
 - Expand a release past the greenlit tip
 - Treat box SwiftShader FPS as ship feel
-- Purchase third-party art packs without Antony/Lead greenlight (shortlist only)
+- Purchase third-party art packs (forbidden — free/OSS or original only)
 
 ---
 
-## 13. Art packs vs “purchases”
+## 13. Art sourcing (no purchases)
 
-In this runbook, **purchase** means buying a **third-party art/asset pack** (itch.io, Unity/store kits, paid CC commercial packs) to replace procedural kitbash — see [ASSETS.md](ASSETS.md).
+**Hard rule (Antony):** we **cannot purchase** assets. Only **free open-source / CC0** (commercial-use free) packs, or **original/procedural** work we develop — see [ASSETS.md](ASSETS.md).
 
-It does **not** mean shopping, subscriptions, or unrelated spend. Flow:
+Flow:
 
-1. **Art** shortlists 1 env + 1 character pack (license + URL + web-budget fit) on an Issue.
-2. **Antony or Lead** greenlights the buy (human gate).
-3. Import + credits ledger land in the same PR as the assets.
-4. Until then: procedural / kitbash presentation Issues (`lane:art` + `lane:client`) keep shipping.
+1. **Art** shortlists free/OSS options (license + URL + web-budget fit) **or** specifies DIY procedural upgrades on an Issue.
+2. No buy greenlight path — paid itch/store kits are rejected.
+3. Import + credits ledger land in the same PR as any third-party free assets.
+4. Procedural / kitbash presentation Issues (`lane:art` + `lane:client`) are first-class, not a stopgap apology.
 
 ## 14. Minimal assign template (copy/paste)
 
