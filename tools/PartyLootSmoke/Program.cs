@@ -121,6 +121,14 @@ try
         && connB.Db.PartyMember.Identity.Find(idB) is null,
         timeoutMs, connA, connB, "left party");
 
+    // Killer likely died to thorns on the far-party kill; wait for yard respawn
+    // before SeedLoot/Pickup so we do not clear loot while dead and then Cast dead.
+    await PumpUntilBoth(() =>
+        connA.Db.Character.Identity.Find(idA) is { Hp: var h, MaxHp: var m }
+        && m > 0 && h == m,
+        timeoutMs, connA, connB, "A respawned before solo");
+    Console.WriteLine("A alive after thorns death (or never died)");
+
     // Walk A near leftover loot and clear so solo delta is readable.
     connA.Reducers.SeedLoot();
     await PumpUntilBoth(() => CountLoot(connA, Loot.EmberShardItemId) >= 1,
@@ -174,6 +182,17 @@ static void EnsureStaff(DbConnection conn, Identity id)
 
 static async Task KillDummy(DbConnection killer, Identity killerId, DbConnection other)
 {
+    // Two prior kills deal DummyMaxHp/SparkDamage * DummyThornsDamage = 100 thorns,
+    // so the killer dies on the far-party kill. SeedLoot respawns at SeedXZ (near
+    // yard spawn) where a dead body can still Pickup — solo-clear then races the
+    // 2500ms respawn and Cast("Dead") never damages → TimeoutException: spark tick.
+    await PumpUntilBoth(() =>
+        killer.Db.Character.Identity.Find(killerId) is { Hp: > 0 },
+        timeoutMs, killer, other, "killer alive");
+    EnsureStaff(killer, killerId);
+    // Loot walks / yard respawn can leave the killer outside CastRangeMeters.
+    await WalkNear(killer, killerId, Combat.DummySpawnX, Combat.DummySpawnZ);
+
     killer.Reducers.EnsureTrainingDummy();
     await PumpUntilBoth(() => FindDummy(killer) is { Hp: var h } && h == Combat.DummyMaxHp,
         timeoutMs, killer, other, "dummy ready");
@@ -283,7 +302,7 @@ static void Fail(string msg)
     Environment.ExitCode = 1;
 }
 
-static async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
+async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
 {
     var tcs = new TaskCompletionSource<Identity>();
     var conn = DbConnection.Builder()
