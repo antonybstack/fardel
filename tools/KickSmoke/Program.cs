@@ -246,7 +246,7 @@ static Npc? FindDummy(DbConnection conn)
 
 static void Fail(string msg) { Console.Error.WriteLine("FAIL: " + msg); Environment.ExitCode = 1; }
 
-static async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
+async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
 {
     var connected = new TaskCompletionSource<Identity>();
     var c = DbConnection.Builder().WithUri(uri).WithDatabaseName(db)
