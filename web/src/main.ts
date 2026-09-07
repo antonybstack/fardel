@@ -69,6 +69,22 @@ function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number)
   }
 }
 
+function formatLoadout(ch: NonNullable<Extract<ConnectionStatus, { state: 'connected' }>['character']>): string {
+  const gear = [
+    ch.staffEquipped ? 'staff' : null,
+    ch.robesEquipped ? 'robes' : null,
+  ]
+    .filter(Boolean)
+    .join('+') || '(none)';
+  const spells = [
+    ch.knowsSpark ? 'Spark' : null,
+    ch.knowsEmberbolt ? 'Emberbolt' : null,
+  ]
+    .filter(Boolean)
+    .join('+') || '(none)';
+  return `XP ${ch.xp} · loadout ${gear} · spells ${spells}`;
+}
+
 function formatStatus(s: ConnectionStatus, nowMs: number): string {
   if (s.state === 'connected') {
     const poseLine = s.pose
@@ -81,9 +97,15 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
     const gcd = gcdRemainingMs(s.combat, nowMs);
     const gcdLine = gcd > 0 ? `GCD: ${(gcd / 1000).toFixed(2)}s` : 'GCD: ready';
     const castLine = s.castFeedback ? `cast: ${s.castFeedback}` : 'cast: —';
+    const persistLine = s.restoredToken
+      ? 'persist: restored token (same identity)'
+      : 'persist: new token saved';
+    const xpLine = s.character ? formatLoadout(s.character) : 'XP/loadout: —';
     return [
       'Connected',
       `identity: ${s.identityHex}`,
+      xpLine,
+      persistLine,
       poseLine,
       targetLine,
       gcdLine,
@@ -94,7 +116,8 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
     ].join('\n');
   }
   if (s.state === 'connecting') {
-    return `Connecting…\nuri: ${s.uri}\ndb: ${s.database}`;
+    const restore = s.restoredToken ? ' (restoring token…)' : '';
+    return `Connecting…${restore}\nuri: ${s.uri}\ndb: ${s.database}`;
   }
   if (s.state === 'error') {
     return `Error: ${s.message}\nuri: ${s.uri}\ndb: ${s.database}`;
@@ -479,11 +502,76 @@ async function main(): Promise<void> {
     (combat) => {
       if (combat) selectedTargetId = combat.targetNpcId;
     },
+    (_character) => {
+      /* HUD refreshed via onStatus */
+    },
   );
 
-  // Optional VE / autotest: ?ve=combat targets dummy and casts Spark once.
+  // Optional VE / autotest hooks.
   const params = new URLSearchParams(window.location.search);
-  if (net && params.get('ve') === 'combat') {
+  const ve = params.get('ve');
+
+  // ?ve=persist — kill dummy for XP, then soft-reload with token so HUD proves restore.
+  if (net && ve === 'persist') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE persist: earning XP…';
+    const tryPersist = () => {
+      if (!net) return;
+      net.ensureTrainingDummy();
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (!dummy) {
+        window.setTimeout(tryPersist, 250);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      const startXp = net.getCharacter()?.xp ?? 0;
+      let casts = 0;
+      const castLoop = () => {
+        if (!net) return;
+        const ch = net.getCharacter();
+        if (ch && ch.xp > startXp) {
+          if (mark) {
+            mark.textContent = `VE persist: XP ${ch.xp} — reloading with token…`;
+          }
+          window.setTimeout(() => {
+            const u = new URL(window.location.href);
+            u.searchParams.set('ve', 'persist-restored');
+            window.location.replace(u.toString());
+          }, 600);
+          return;
+        }
+        if (casts > 40) {
+          if (mark) mark.textContent = 'VE persist: timed out waiting for XP';
+          return;
+        }
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          net.cast(SPELL_SPARK);
+          casts += 1;
+        }
+        window.setTimeout(castLoop, 400);
+      };
+      window.setTimeout(castLoop, 500);
+    };
+    window.setTimeout(tryPersist, 700);
+  }
+
+  if (net && ve === 'persist-restored') {
+    const mark = document.getElementById('persistMark');
+    const waitHud = () => {
+      if (!net) return;
+      const ch = net.getCharacter();
+      if (ch && mark) {
+        mark.textContent = `Persist OK · identity ${net.identityHex.slice(0, 12)}… · XP ${ch.xp} · staff+robes · Spark+Emberbolt`;
+        return;
+      }
+      window.setTimeout(waitHud, 200);
+    };
+    window.setTimeout(waitHud, 400);
+  }
+
+  if (net && ve === 'combat') {
     const tryCast = () => {
       if (!net) return;
       net.ensureTrainingDummy();

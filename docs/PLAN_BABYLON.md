@@ -119,4 +119,8 @@ See `web/README.md` for exact commands.
 - **Combat (presentation):** Tab cycles NPC targets; hotkeys 1=Spark / 2=Emberbolt
   → `Cast`; `EnsureTrainingDummy` on subscribe; GCD + cast bars in HUD; selected
   target highlight + cast flash (`ve/babylon-combat.png`)
-- Next: Persist presentation (refresh keeps XP + loadout)
+- **Persist (presentation):** auth token in `localStorage`; refresh restores same
+  identity + Character XP + starter loadout (staff/robes + Spark/Emberbolt);
+  HUD shows XP/loadout + restore proof (`ve/babylon-persist.png`);
+  `tools/PersistSmoke` green
+- Next: AOI presentation (chunk neighborhood + crowd proxies)

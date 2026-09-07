@@ -1,5 +1,5 @@
 /**
- * SpacetimeDB connection for the Babylon client (Connect + Move + Combat).
+ * SpacetimeDB connection for the Babylon client (Connect + Move + Combat + Persist).
  */
 
 import { DbConnection, type EventContext } from '../module_bindings';
@@ -10,6 +10,9 @@ export const SPELL_EMBERBOLT = 2;
 export const GCD_MS = 1200;
 export const EMBERBOLT_CAST_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
+
+/** localStorage key for SpacetimeDB auth token (Persist slice). */
+export const AUTH_TOKEN_KEY = 'fardel.spacetime.token';
 
 export type Pose = { x: number; y: number; z: number; yaw: number };
 
@@ -29,8 +32,16 @@ export type CombatView = {
   gcdReadyAtMicros: bigint;
 };
 
+export type CharacterView = {
+  xp: number;
+  knowsSpark: boolean;
+  knowsEmberbolt: boolean;
+  staffEquipped: boolean;
+  robesEquipped: boolean;
+};
+
 export type ConnectionStatus =
-  | { state: 'connecting'; uri: string; database: string }
+  | { state: 'connecting'; uri: string; database: string; restoredToken: boolean }
   | {
       state: 'connected';
       uri: string;
@@ -39,7 +50,9 @@ export type ConnectionStatus =
       pose?: Pose;
       combat?: CombatView;
       targetNpc?: NpcView | null;
+      character?: CharacterView;
       castFeedback?: string;
+      restoredToken: boolean;
     }
   | { state: 'disconnected'; uri: string; database: string }
   | { state: 'error'; uri: string; database: string; message: string };
@@ -48,6 +61,7 @@ export type StatusListener = (status: ConnectionStatus) => void;
 export type PoseListener = (pose: Pose) => void;
 export type NpcsListener = (npcs: NpcView[]) => void;
 export type CombatListener = (combat: CombatView | null) => void;
+export type CharacterListener = (character: CharacterView | null) => void;
 
 export type GameNet = {
   identityHex: string;
@@ -58,6 +72,7 @@ export type GameNet = {
   cast: (spellId: number) => void;
   getLocalPose: () => Pose | null;
   getCombat: () => CombatView | null;
+  getCharacter: () => CharacterView | null;
   getNpcs: () => NpcView[];
   /** Sorted target cycle list (alive NPCs, dummy first). */
   getTargetCycle: () => NpcView[];
@@ -76,6 +91,31 @@ function resolveUri(): string {
 function resolveDatabaseName(): string {
   const params = new URLSearchParams(window.location.search);
   return params.get('module') ?? params.get('name') ?? DEFAULT_DATABASE;
+}
+
+export function loadAuthToken(): string | null {
+  try {
+    const t = localStorage.getItem(AUTH_TOKEN_KEY);
+    return t && t.length > 0 ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveAuthToken(token: string): void {
+  try {
+    localStorage.setItem(AUTH_TOKEN_KEY, token);
+  } catch {
+    /* private mode / quota — ignore */
+  }
+}
+
+export function clearAuthToken(): void {
+  try {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 type PoseRow = {
@@ -102,6 +142,15 @@ type NpcRow = {
   maxHp: number;
 };
 
+type CharacterRow = {
+  identity: Identity;
+  xp: number;
+  knowsSpark: boolean;
+  knowsEmberbolt: boolean;
+  staffEquipped: boolean;
+  robesEquipped: boolean;
+};
+
 function poseView(row: PoseRow): Pose {
   return { x: row.x, y: row.y, z: row.z, yaw: row.yaw };
 }
@@ -125,6 +174,16 @@ function combatView(row: CombatRow): CombatView {
   };
 }
 
+function characterView(row: CharacterRow): CharacterView {
+  return {
+    xp: row.xp,
+    knowsSpark: row.knowsSpark,
+    knowsEmberbolt: row.knowsEmberbolt,
+    staffEquipped: row.staffEquipped,
+    robesEquipped: row.robesEquipped,
+  };
+}
+
 function asBigInt(v: bigint | number | string): bigint {
   if (typeof v === 'bigint') return v;
   return BigInt(v);
@@ -132,16 +191,20 @@ function asBigInt(v: bigint | number | string): bigint {
 
 /**
  * Connect, subscribe to all tables, ensure training dummy, return net handle.
+ * Reuses localStorage auth token when present so refresh restores identity + Character.
  */
 export async function connectToSpacetime(
   onStatus: StatusListener,
   onLocalPose?: PoseListener,
   onNpcs?: NpcsListener,
   onCombat?: CombatListener,
+  onCharacter?: CharacterListener,
 ): Promise<GameNet | null> {
   const uri = resolveUri();
   const database = resolveDatabaseName();
-  onStatus({ state: 'connecting', uri, database });
+  const savedToken = loadAuthToken();
+  const restoredToken = savedToken != null;
+  onStatus({ state: 'connecting', uri, database, restoredToken });
 
   const wsUri = uri.replace(/^http/, 'ws');
 
@@ -150,6 +213,7 @@ export async function connectToSpacetime(
     let localIdentity: Identity | null = null;
     let latestPose: Pose | null = null;
     let latestCombat: CombatView | null = null;
+    let latestCharacter: CharacterView | null = null;
     let castFeedback = '';
     const npcMap = new Map<string, NpcView>();
 
@@ -188,7 +252,9 @@ export async function connectToSpacetime(
         targetNpc: latestCombat
           ? findNpc(latestCombat.targetNpcId)
           : null,
+        character: latestCharacter ?? undefined,
         castFeedback: castFeedback || undefined,
+        restoredToken,
       });
     };
 
@@ -197,12 +263,21 @@ export async function connectToSpacetime(
     };
 
     try {
-      const builder = DbConnection.builder()
+      let builder = DbConnection.builder()
         .withUri(wsUri)
-        .withDatabaseName(database)
-        .onConnect((conn, identity) => {
+        .withDatabaseName(database);
+
+      if (savedToken) {
+        builder = builder.withToken(savedToken);
+      }
+
+      builder
+        .onConnect((conn, identity, token) => {
           localIdentity = identity;
           const identityHex = identity.toHexString();
+          if (token) {
+            saveAuthToken(token);
+          }
 
           const emitPose = (row: PoseRow) => {
             if (!localIdentity || !row.identity.isEqual(localIdentity)) return;
@@ -215,6 +290,13 @@ export async function connectToSpacetime(
             if (!localIdentity || !row.identity.isEqual(localIdentity)) return;
             latestCombat = combatView(row);
             onCombat?.(latestCombat);
+            emitStatus(identityHex);
+          };
+
+          const emitCharacterRow = (row: CharacterRow) => {
+            if (!localIdentity || !row.identity.isEqual(localIdentity)) return;
+            latestCharacter = characterView(row);
+            onCharacter?.(latestCharacter);
             emitStatus(identityHex);
           };
 
@@ -245,6 +327,13 @@ export async function connectToSpacetime(
             emitCombatRow(row as CombatRow);
           });
 
+          conn.db.character.onInsert((_ctx: EventContext, row) => {
+            emitCharacterRow(row as CharacterRow);
+          });
+          conn.db.character.onUpdate((_ctx: EventContext, _old, row) => {
+            emitCharacterRow(row as CharacterRow);
+          });
+
           conn.db.npc.onInsert((_ctx: EventContext, row) => {
             upsertNpc(row as NpcRow);
           });
@@ -263,6 +352,9 @@ export async function connectToSpacetime(
               }
               for (const row of conn.db.playerCombat.iter()) {
                 emitCombatRow(row as CombatRow);
+              }
+              for (const row of conn.db.character.iter()) {
+                emitCharacterRow(row as CharacterRow);
               }
               for (const row of conn.db.npc.iter()) {
                 upsertNpc(row as NpcRow);
@@ -315,6 +407,7 @@ export async function connectToSpacetime(
               },
               getLocalPose: () => latestPose,
               getCombat: () => latestCombat,
+              getCharacter: () => latestCharacter,
               getNpcs: () => listNpcs(),
               getTargetCycle: () => targetCycle(),
               cycleTarget: () => {
@@ -340,13 +433,16 @@ export async function connectToSpacetime(
           }
         })
         .onConnectError((_ctx, err) => {
+          // Bad/expired token: clear and let caller/user refresh for a new identity.
+          if (savedToken) {
+            clearAuthToken();
+          }
           finishError(err instanceof Error ? err.message : String(err));
         })
         .onDisconnect(() => {
           onStatus({ state: 'disconnected', uri, database });
-        });
-
-      builder.build();
+        })
+        .build();
     } catch (err) {
       finishError(err instanceof Error ? err.message : String(err));
     }
