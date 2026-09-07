@@ -45,9 +45,9 @@ Goal: a **playable browser yard** with Fardel’s controls and classless seed �
 ### 4 — Perf scaffold
 - Instanced crowd proxy (capsules OK)
 - Alloc budget check in a smoke path
-- AOI subscription radius documented and enforced
+- AOI chunk-neighborhood subscriptions per [ADR 0001](adr/0001-aoi-interest.md) documented and enforced
 
-**Done when:** N proxies on-screen with a stated FPS floor on a reference machine; AOI does not subscribe the whole map.
+**Done when:** N proxies on-screen with a stated FPS floor on a reference machine; clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
 
 ## Out of MVP
 

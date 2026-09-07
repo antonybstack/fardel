@@ -32,9 +32,16 @@ Exact table schemas land with slice 1+ code — this doc owns the *rules*.
 
 ## Interest management
 
-- Never subscribe the entire world.
-- Slice world into **chunks** or **radius AOI** tables; subscription follows the local player.
-- Under load: **degrade pose publish rate** (hordes-style dynamic tick), never degrade gold/XP correctness.
+**Decision:** chunk-grid AOI — see [ADR 0001](adr/0001-aoi-interest.md).
+
+Summary:
+
+- Partition the world into **stable chunks**; subscribe **current + Moore neighborhood** (not whole-world, not continuous radius as the primary key).
+- **Hysteresis** on chunk borders to avoid resubscribe thrash.
+- Hot only: pose / vitals / cast / target / short combat events. Bag / skills / XP stay cold.
+- **Always-relevant:** self, party, tab-target, active combat/cast partners.
+- Under load: **degrade pose publish rate** (hordes-style dynamic tick), never gold/XP correctness.
+- Network LOD (coarse pose tier) is a **follow-up** when metrics demand it — not a v1 requirement.
 
 ## Client prediction (narrow)
 

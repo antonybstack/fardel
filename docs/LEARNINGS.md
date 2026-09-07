@@ -60,3 +60,7 @@ The name **Fardel** is the reminder: the load you carry *is* the character.
 ## C# performance stance
 
 Treat **.NET 10 / C# 14 Span-first, zero-heap hot paths** as a first-class design constraint (see [STACK.md](STACK.md) / [ARCHITECTURE.md](ARCHITECTURE.md)). Unity and SpacetimeDB WASM may lag desktop BCL features — Shared stays on full .NET 10 so we don’t invent a second, sloppy dialect.
+
+## AOI (interest management)
+
+Fardel follows dek/hordes **bucket culling + dynamic tick** ideas via SpacetimeDB subscriptions: stable chunks, Moore neighborhood, hysteresis, pose-rate load shed. Decision: [ADR 0001](adr/0001-aoi-interest.md).

@@ -20,6 +20,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/MVP.md](docs/MVP.md) | Slice plan to a playable yard |
 | [docs/LEARNINGS.md](docs/LEARNINGS.md) | What we take from prior POCs + hordes/dek |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Cloudflare / sparkify.dev / Mac tunnel |
+| [docs/adr/0001-aoi-interest.md](docs/adr/0001-aoi-interest.md) | AOI: chunk neighborhood, hysteresis, load shed |
 
 ## Prior art (not this repo)
 
