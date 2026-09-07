@@ -12,6 +12,7 @@ Locked for Fardel v1. Change only with an explicit architecture decision record.
 | C# / .NET target | **.NET 10 + C# 14** where the host allows | Span-first, zero-heap hot paths; SpacetimeDB module prefers .NET 10 NativeAOT-LLVM |
 | Client host | **Unity 6.6+** (v1 host) | Official SpacetimeDB C# path; not forever — see [ADR 0002](adr/0002-client-host-webgpu.md) |
 | Graphics | **WebGPU primary, WebGL 2 fallback** | Fast path + playable fallback; ship criteria = fallback ([ADR 0002](adr/0002-client-host-webgpu.md)) |
+| Render pipeline | **URP** (Unity 6) | Built-in RP deprecated; matches WebGPU/stylized path |
 | Client compile | **IL2CPP** web builds | No Mono-interpreted browser client |
 | Net SDK | **SpacetimeDB C# SDK** | Call `FrameTick()` every frame; do not invent a second protocol |
 | Presentation law | **Data-oriented** | GPU instancing + VAT/compute skinning for crowds; zero alloc in hot loops |
