@@ -32,10 +32,11 @@ try
     await PumpUntil(() => conn.Db.Character.Identity.Find(identity) is not null, timeoutMs, conn, "character ready");
 
     conn.Reducers.EnsureTrainingDummy();
-    await PumpUntil(() => FindDummy(conn) is { Hp: > 0 }, timeoutMs, conn, "dummy ready");
+    await PumpUntil(() => FindDummy(conn) is { Hp: var h } && h == Combat.DummyMaxHp, timeoutMs, conn, "dummy ready full");
 
     var dummy = FindDummy(conn) ?? throw new Exception("no dummy");
-    Console.WriteLine($"dummy id={dummy.NpcId} hp={dummy.Hp}");
+    var chReady = conn.Db.Character.Identity.Find(identity)!;
+    Console.WriteLine($"dummy id={dummy.NpcId} hp={dummy.Hp}/{dummy.MaxHp} mana={chReady.Mana}/{chReady.MaxMana} staff={chReady.StaffEquipped}");
 
     conn.Reducers.SetTarget(dummy.NpcId);
     await PumpUntil(() =>
