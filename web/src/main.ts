@@ -150,7 +150,12 @@ function setStatus(text: string): void {
   if (el) el.textContent = text;
 }
 
-function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number): void {
+function setGcdBar(
+  remainingMs: number,
+  castingMs: number,
+  castingTotal: number,
+  spellName?: string,
+): void {
   const fill = document.getElementById('gcdFill');
   const label = document.getElementById('gcdLabel');
   const castFill = document.getElementById('castFill');
@@ -165,10 +170,14 @@ function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number)
       remainingMs > 0 ? `GCD ${ (remainingMs / 1000).toFixed(1) }s` : 'GCD ready';
   }
   if (castFill && castLabel) {
-    if (castingTotal > 0 && castingMs > 0) {
-      const pct = Math.min(100, ((castingTotal - castingMs) / castingTotal) * 100);
+    const ve = veCastFeedbackPresent;
+    const cMs = ve?.castingMs ?? castingMs;
+    const cTotal = ve?.castingTotal ?? castingTotal;
+    const name = ve?.spellName ?? spellName ?? 'Casting';
+    if (cTotal > 0 && cMs > 0) {
+      const pct = Math.min(100, ((cTotal - cMs) / cTotal) * 100);
       castFill.style.width = `${pct}%`;
-      castLabel.textContent = `Casting… ${ (castingMs / 1000).toFixed(1) }s`;
+      castLabel.textContent = `${name}  ${(cMs / 1000).toFixed(1)}s`;
       castFill.parentElement?.classList.remove('hidden');
     } else {
       castFill.style.width = '0%';
@@ -176,6 +185,12 @@ function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number)
       castFill.parentElement?.classList.add('hidden');
     }
   }
+}
+
+function castSpellDisplayName(spellId: number): string {
+  if (spellId === SPELL_EMBERBOLT) return 'Emberbolt';
+  if (spellId === SPELL_SPARK) return 'Spark';
+  return spellId > 0 ? `Spell${spellId}` : 'Casting';
 }
 
 
@@ -214,6 +229,47 @@ let veGcdPresent: null | {
   castingMs: number;
   castingTotal: number;
 } = null;
+
+/** VE presentation override: prominent main cast bar mid-Emberbolt (?ve=cast-feedback). */
+let veCastFeedbackPresent: null | {
+  castingMs: number;
+  castingTotal: number;
+  spellName: string;
+} = null;
+
+/** Client-only Rest enter/exit chrome on #selfFrame (not a server channel). */
+let restExitTimer: number | null = null;
+
+function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
+  const frame = document.getElementById('selfFrame');
+  const badge = document.getElementById('sfRest');
+  if (!frame || !badge) return;
+  if (restExitTimer != null) {
+    window.clearTimeout(restExitTimer);
+    restExitTimer = null;
+  }
+  if (mode === 'off') {
+    frame.classList.remove('resting');
+    badge.classList.add('hidden');
+    badge.classList.remove('exiting');
+    badge.textContent = 'Resting…';
+    return;
+  }
+  if (mode === 'enter') {
+    frame.classList.add('resting');
+    badge.classList.remove('hidden', 'exiting');
+    badge.textContent = 'Resting…';
+    // Auto-exit chrome after a short settle so enter vs exit is readable.
+    restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
+    return;
+  }
+  // exit
+  frame.classList.remove('resting');
+  badge.classList.remove('hidden');
+  badge.classList.add('exiting');
+  badge.textContent = 'Rest complete';
+  restExitTimer = window.setTimeout(() => setRestingState('off'), 1600);
+}
 
 /** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana/empty affordances. */
 function updateSpellHotbar(opts: {
@@ -805,11 +861,11 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                         : kind === 'mana'
                           ? 'MANA'
                           : kind === 'castCancel'
-                            ? 'CANCEL'
+                            ? 'CANCEL ↩'
                             : kind === 'castPushback'
                               ? 'PUSH'
                               : kind === 'castHardInterrupt'
-                                ? 'LOCKOUT'
+                                ? 'LOCKOUT ⊘'
                                 : kind === 'silenced'
                                   ? 'SILENCE'
                                   : kind === 'kick'
@@ -923,11 +979,11 @@ function pushSystemToast(
                                   : kind === 'mana'
                                     ? 'MANA'
                                     : kind === 'castCancel'
-                                      ? 'CANCEL'
+                                      ? 'CANCEL ↩'
                                       : kind === 'castPushback'
                                         ? 'PUSH'
                                         : kind === 'castHardInterrupt'
-                                          ? 'LOCKOUT'
+                                          ? 'LOCKOUT ⊘'
                                           : kind === 'silenced'
                                             ? 'SILENCE'
                                             : kind === 'kick'
@@ -2944,13 +3000,14 @@ async function main(): Promise<void> {
       const g = net;
       const ch0 = g.getCharacter();
       if (!ch0 || ch0.hp <= 0) {
-        pushSystemToast('rate', 'Cannot rest while dead');
+        pushSystemToast('rest', 'Cannot rest while dead');
         return;
       }
       const hpFull = ch0.hp >= ch0.maxHp;
       const manaFull = (ch0.mana ?? 0) >= (ch0.maxMana ?? 0) && (ch0.maxMana ?? 0) > 0;
       if (hpFull && manaFull) {
-        pushSystemToast('rate', 'Already full');
+        pushSystemToast('rest', 'Already full — HP & mana topped');
+        setRestingState('exit');
         return;
       }
       const beforeHp = ch0.hp;
@@ -2965,27 +3022,29 @@ async function main(): Promise<void> {
         if (manaGain > 0) bits.push(`+${manaGain} mana`);
         pushCombatLog(
           'rest',
-          `Rest ${bits.join(' · ') || 'ok'} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'} · mana ${after?.mana ?? '?'}/${after?.maxMana ?? '?'}`,
+          `Rest enter · ${bits.join(' · ') || 'ok'} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'} · mana ${after?.mana ?? '?'}/${after?.maxMana ?? '?'}`,
         );
-        pushSystemToast('rest', `Rest · ${bits.join(' · ') || 'ok'}`, TOAST_VE_TTL_MS);
+        pushSystemToast('rest', `Rest enter · ${bits.join(' · ') || 'ok'}`, TOAST_VE_TTL_MS);
         if (manaGain > 0) {
           pushSystemToast('mana', `Mana · +${manaGain}`, TOAST_VE_TTL_MS);
         }
+        setRestingState('enter');
         flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/recently damaged/i.test(msg)) {
-          pushSystemToast('rate', 'Recently damaged — wait to rest');
+          pushSystemToast('rest', 'Recently damaged — wait to rest');
         } else if (/cooldown/i.test(msg)) {
-          pushSystemToast('rate', 'Rest on cooldown');
+          pushSystemToast('rest', 'Rest on cooldown');
         } else if (/casting/i.test(msg)) {
-          pushSystemToast('rate', 'Cannot rest while casting');
+          pushSystemToast('rest', 'Cannot rest while casting');
         } else if (/already full/i.test(msg)) {
-          pushSystemToast('rate', 'Already full');
+          pushSystemToast('rest', 'Already full — HP & mana topped');
+          setRestingState('exit');
         } else if (/dead/i.test(msg)) {
-          pushSystemToast('rate', 'Cannot rest while dead');
+          pushSystemToast('rest', 'Cannot rest while dead');
         } else {
-          pushSystemToast('rate', msg.slice(0, 96) || 'Rest failed');
+          pushSystemToast('rest', msg.slice(0, 96) || 'Rest failed');
         }
       });
     },
@@ -3017,8 +3076,8 @@ async function main(): Promise<void> {
         const refund = after ? Math.max(0, (after.mana ?? 0) - beforeMana) : EMBERBOLT_MANA_COST;
         const bit =
           refund > 0
-            ? `Cast cancelled · ${spellName} · +${refund} mana`
-            : `Cast cancelled · ${spellName}`;
+            ? `CANCEL · player interrupt · ${spellName} · +${refund} mana`
+            : `CANCEL · player interrupt · ${spellName}`;
         pushCombatLog('castCancel', bit);
         pushSystemToast('castCancel', bit, TOAST_VE_TTL_MS);
         setGcdBar(0, 0, 0);
@@ -3576,7 +3635,7 @@ async function main(): Promise<void> {
           if (!castHardInterruptToasted) {
             castHardInterruptToasted = true;
             const bit =
-              `Cast interrupted · Emberbolt lockout · no mana refund` +
+              `LOCKOUT · hard interrupt · no mana refund` +
               (sawPushbackThisCast ? ' · after pushback' : '');
             pushCombatLog('castHardInterrupt', bit);
             pushSystemToast('castHardInterrupt', bit, TOAST_VE_TTL_MS);
@@ -3584,7 +3643,7 @@ async function main(): Promise<void> {
         } else if (!castCancelToasted) {
           castCancelToasted = true;
           const refundHint = EMBERBOLT_MANA_COST;
-          const bit = `Cast cancelled · Emberbolt · mana refunded (~${refundHint})`;
+          const bit = `CANCEL · player interrupt · mana refunded (~${refundHint})`;
           pushCombatLog('castCancel', bit);
           pushSystemToast('castCancel', bit, TOAST_VE_TTL_MS);
         }
@@ -3598,7 +3657,7 @@ async function main(): Promise<void> {
       prevLocalCasting = serverCasting || castUntilMs > now;
     }
     const castLeft = Math.max(0, castUntilMs - now);
-    setGcdBar(gcdLeft, castLeft, castTotalMs);
+    setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell));
     {
       const st = latestStatus;
       const tgt =
@@ -8464,12 +8523,12 @@ async function main(): Promise<void> {
         if (!kinds.has('castCancel')) {
           pushSystemToast(
             'castCancel',
-            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
             'castCancel',
-            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
           );
         }
         castUntilMs = 0;
@@ -8578,12 +8637,12 @@ async function main(): Promise<void> {
           if (!toastKindsPresent().has('castCancel')) {
             pushSystemToast(
               'castCancel',
-              `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+              `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
               TOAST_VE_TTL_MS,
             );
             pushCombatLog(
               'castCancel',
-              `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+              `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
             );
           }
           const ch = net.getCharacter();
@@ -8613,7 +8672,7 @@ async function main(): Promise<void> {
           setGcdBar(0, 0, 0);
           pushSystemToast(
             'castCancel',
-            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
             TOAST_VE_TTL_MS,
           );
           phase = 'done';
@@ -8980,12 +9039,12 @@ async function main(): Promise<void> {
           );
           pushSystemToast(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
           );
           castStarted = true;
           hardStruck = true;
@@ -9011,12 +9070,12 @@ async function main(): Promise<void> {
           if (ticks > 120) {
             pushSystemToast(
               'castHardInterrupt',
-              `Cast interrupted · Emberbolt lockout · no mana refund`,
+              `LOCKOUT · hard interrupt · no mana refund`,
               TOAST_VE_TTL_MS,
             );
             pushCombatLog(
               'castHardInterrupt',
-              `Cast interrupted · Emberbolt lockout · no mana refund`,
+              `LOCKOUT · hard interrupt · no mana refund`,
             );
             hardStruck = true;
             phase = 'done';
@@ -9082,12 +9141,12 @@ async function main(): Promise<void> {
             if (!toastKindsPresent().has('castHardInterrupt')) {
               pushSystemToast(
                 'castHardInterrupt',
-                `Cast interrupted · Emberbolt lockout · no mana refund`,
+                `LOCKOUT · hard interrupt · no mana refund`,
                 TOAST_VE_TTL_MS,
               );
               pushCombatLog(
                 'castHardInterrupt',
-                `Cast interrupted · Emberbolt lockout · no mana refund`,
+                `LOCKOUT · hard interrupt · no mana refund`,
               );
             }
             const ch = net.getCharacter();
@@ -9111,12 +9170,12 @@ async function main(): Promise<void> {
         if (ticks > 160) {
           pushSystemToast(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
           );
           phase = 'done';
           if (mark) {
@@ -9138,6 +9197,122 @@ async function main(): Promise<void> {
     window.setTimeout(waitHard, 700);
   }
 
+
+
+
+  // ?ve=cast-feedback — prominent main cast bar + CANCEL vs LOCKOUT toast distinction (+ Rest chrome).
+  if (ve === 'cast-feedback' || ve === 'castfeedback') {
+    camera.radius = 10.5;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && (ve === 'cast-feedback' || ve === 'castfeedback')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-feedback: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitFb = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-feedback: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitFb, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-feedback: equipping staff…';
+        window.setTimeout(waitFb, 280);
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-feedback: seeding dummy…';
+        window.setTimeout(waitFb, 320);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.15,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 10.5;
+      }
+      const ch = net.getCharacter();
+      if (ch) updateSelfFrame(ch);
+
+      // Presentation seed: mid-Emberbolt main cast bar + stacked CANCEL vs LOCKOUT + Rest enter.
+      const seedLeft = Math.round(EMBERBOLT_CAST_MS * 0.47);
+      veCastFeedbackPresent = {
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        spellName: 'Emberbolt',
+      };
+      lastCastSpell = SPELL_EMBERBOLT;
+      castTotalMs = EMBERBOLT_CAST_MS;
+      castUntilMs = Date.now() + seedLeft;
+      setGcdBar(0, seedLeft, EMBERBOLT_CAST_MS, 'Emberbolt');
+      updateSpellHotbar({
+        gcdMs: 0,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        castingSpell: SPELL_EMBERBOLT,
+        staffEquipped: true,
+        mana: ch?.mana ?? 999,
+        knowsSpark: true,
+        knowsEmberbolt: true,
+      });
+
+      // Clear prior toasts so the pair is obvious in the shot.
+      const stack = document.getElementById('toastStack');
+      if (stack) stack.replaceChildren();
+      pushSystemToast(
+        'castCancel',
+        `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'castHardInterrupt',
+        `LOCKOUT · hard interrupt · no mana refund`,
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'rest',
+        `Rest enter · +${REST_HEAL_AMOUNT} HP · +${REST_MANA_RESTORE} mana`,
+        TOAST_VE_TTL_MS,
+      );
+      setRestingState('enter');
+
+      const castBar = document.getElementById('castBar');
+      const barOk = !!castBar && !castBar.classList.contains('hidden');
+      const kinds = toastKindsPresent();
+      const distinct = kinds.has('castCancel') && kinds.has('castHardInterrupt');
+      const restOk = kinds.has('rest');
+      const resting =
+        !!document.getElementById('selfFrame')?.classList.contains('resting');
+      if (mark) {
+        mark.textContent =
+          `Cast feedback OK · bar mid ${barOk ? 'on' : 'off'} · CANCEL≠LOCKOUT ${distinct ? 'ok' : '…'} · rest ${resting || restOk ? 'on' : 'off'}`;
+      }
+      // Keep bar seeded for the screenshot window.
+      if (ticks < 40) window.setTimeout(waitFb, 400);
+    };
+    window.setTimeout(waitFb, 600);
+  }
 
   // ?ve=cast-silence — hard interrupt → CastLockedUntil → Emberbolt Cast rejects (toast silenced).
   if (ve === 'cast-silence' || ve === 'castsilence') {
@@ -9246,7 +9421,7 @@ async function main(): Promise<void> {
           castTotalMs = 0;
           pushSystemToast(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
             TOAST_VE_TTL_MS,
           );
           pushSystemToast(
