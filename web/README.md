@@ -55,6 +55,7 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=bag` | Prove You+XP self-frame, staff/Spark/Emberbolt loadout strip, B bag panel (`ve/babylon-bag.png`) |
 | `?ve=hotbar` / `?ve=target-frame` | Select Dummy + cast Spark/Emberbolt; prove target frame + spell hotbar (`ve/babylon-hotbar.png`) |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
+| `?ve=cast-cancel` | Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast (`ve/babylon-cast-cancel.png`) |
 | `?ve=humanoid` | Frame local procedural humanoid + staff |
 | `?ve=forest` / `?ve=aoi` / `?ve=combat` / `?ve=persist` | Slice presentation shots |
 

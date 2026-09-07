@@ -13,7 +13,7 @@ public static class Combat
     public const int SparkDamage = 10;
     public const int EmberboltDamage = 25;
 
-    /// <summary>Mana spent when Cast starts (instant or windup).</summary>
+    /// <summary>Mana spent when Cast starts (instant or windup). Windup cancel/move-interrupt refunds.</summary>
     public const int SparkManaCost = 5;
     public const int EmberboltManaCost = 20;
 

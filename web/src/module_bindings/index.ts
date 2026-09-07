@@ -38,6 +38,7 @@ import AcceptPartyInviteReducer from "./accept_party_invite_reducer";
 import AcceptTradeReducer from "./accept_trade_reducer";
 import BuyFromVendorReducer from "./buy_from_vendor_reducer";
 import BuyYardTonicReducer from "./buy_yard_tonic_reducer";
+import CancelCastReducer from "./cancel_cast_reducer";
 import CancelTradeReducer from "./cancel_trade_reducer";
 import CastReducer from "./cast_reducer";
 import CreatePartyReducer from "./create_party_reducer";
@@ -245,6 +246,7 @@ const reducersSchema = __reducers(
   __reducerSchema("accept_trade", AcceptTradeReducer),
   __reducerSchema("buy_from_vendor", BuyFromVendorReducer),
   __reducerSchema("buy_yard_tonic", BuyYardTonicReducer),
+  __reducerSchema("cancel_cast", CancelCastReducer),
   __reducerSchema("cancel_trade", CancelTradeReducer),
   __reducerSchema("cast", CastReducer),
   __reducerSchema("create_party", CreatePartyReducer),

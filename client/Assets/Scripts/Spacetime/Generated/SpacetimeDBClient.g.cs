@@ -653,6 +653,7 @@ namespace SpacetimeDB.Types
                 Reducer.AcceptTrade args => Reducers.InvokeAcceptTrade(eventContext, args),
                 Reducer.BuyFromVendor args => Reducers.InvokeBuyFromVendor(eventContext, args),
                 Reducer.BuyYardTonic args => Reducers.InvokeBuyYardTonic(eventContext, args),
+                Reducer.CancelCast args => Reducers.InvokeCancelCast(eventContext, args),
                 Reducer.CancelTrade args => Reducers.InvokeCancelTrade(eventContext, args),
                 Reducer.Cast args => Reducers.InvokeCast(eventContext, args),
                 Reducer.CreateParty args => Reducers.InvokeCreateParty(eventContext, args),

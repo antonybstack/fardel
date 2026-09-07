@@ -580,7 +580,8 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'vendor'
   | 'tonic'
   | 'rest'
-  | 'mana';
+  | 'mana'
+  | 'castCancel';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -612,7 +613,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                         ? 'REST'
                         : kind === 'mana'
                           ? 'MANA'
-                          : 'RESPAWN';
+                          : kind === 'castCancel'
+                            ? 'CANCEL'
+                            : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -660,7 +663,8 @@ type SystemToastKind =
   | 'vendor'
   | 'tonic'
   | 'rest'
-  | 'mana';
+  | 'mana'
+  | 'castCancel';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -709,7 +713,9 @@ function pushSystemToast(
                                   ? 'REST'
                                   : kind === 'mana'
                                     ? 'MANA'
-                                    : 'SAY';
+                                    : kind === 'castCancel'
+                                      ? 'CANCEL'
+                                      : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1203,7 +1209,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top · mana pool',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · Esc cancel cast · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top · mana pool · cast cancel',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1410,6 +1416,7 @@ function bindInput(opts: {
   onPickupNearest: () => void;
   onUseYardTonic: () => void;
   onRest: () => void;
+  onCancelCast: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -1499,6 +1506,11 @@ function bindInput(opts: {
     if (k === 'r') {
       e.preventDefault();
       opts.onRest();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      opts.onCancelCast();
       return;
     }
   };
@@ -1894,6 +1906,8 @@ async function main(): Promise<void> {
   let castUntilMs = 0;
   let castTotalMs = 0;
   let lastCastSpell = 0;
+  let prevLocalCasting = false;
+  let castCancelToasted = false;
   const npcMeshes = new Map<string, NpcMesh>();
   const vendorMeshes = new Map<string, { root: Mesh; mat: StandardMaterial; nameplate: Nameplate | null }>();
   let vendorOpen = false; void vendorOpen;
@@ -2219,6 +2233,8 @@ async function main(): Promise<void> {
       if (spellId === SPELL_EMBERBOLT) {
         castTotalMs = EMBERBOLT_CAST_MS;
         castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+        castCancelToasted = false;
+        prevLocalCasting = true;
       } else {
         castTotalMs = 0;
         castUntilMs = 0;
@@ -2508,6 +2524,52 @@ async function main(): Promise<void> {
         } else {
           pushSystemToast('rate', msg.slice(0, 96) || 'Rest failed');
         }
+      });
+    },
+    onCancelCast: () => {
+      if (!net) return;
+      const combat = net.getCombat();
+      const wind = castRemainingMs(combat);
+      if (!combat || combat.castingSpellId === 0 || wind <= 0) {
+        // Also clear optimistic local cast bar if any.
+        if (castUntilMs > Date.now()) {
+          castUntilMs = 0;
+          castTotalMs = 0;
+        }
+        return;
+      }
+      const beforeMana = net.getCharacter()?.mana ?? 0;
+      const spellName =
+        combat.castingSpellId === SPELL_EMBERBOLT
+          ? 'Emberbolt'
+          : combat.castingSpellId === SPELL_SPARK
+            ? 'Spark'
+            : `Spell${combat.castingSpellId}`;
+      void net.cancelCast().then(() => {
+        castUntilMs = 0;
+        castTotalMs = 0;
+        lastCastSpell = 0;
+        const after = net?.getCharacter();
+        if (after) updateSelfFrame(after);
+        const refund = after ? Math.max(0, (after.mana ?? 0) - beforeMana) : EMBERBOLT_MANA_COST;
+        const bit =
+          refund > 0
+            ? `Cast cancelled · ${spellName} · +${refund} mana`
+            : `Cast cancelled · ${spellName}`;
+        pushCombatLog('castCancel', bit);
+        pushSystemToast('castCancel', bit, TOAST_VE_TTL_MS);
+        setGcdBar(0, 0, 0);
+        updateSpellHotbar({
+          gcdMs: gcdRemainingMs(net?.getCombat()),
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: after?.staffEquipped ?? true,
+          mana: after?.mana ?? 0,
+        });
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Cancel cast failed');
       });
     },
   });
@@ -2909,6 +2971,31 @@ async function main(): Promise<void> {
       latestStatus.state === 'connected' ? latestStatus.combat : null,
       now,
     );
+    // Server-authority cast cancel (Move interrupt / CancelCast): clear local bar + toast.
+    {
+      const combatNow = net?.getCombat() ?? null;
+      const serverCasting =
+        !!combatNow &&
+        combatNow.castingSpellId !== 0 &&
+        castRemainingMs(combatNow, now) > 0;
+      if (prevLocalCasting && !serverCasting && castUntilMs > now) {
+        // Interrupted before predicted end — clear bar; toast once.
+        castUntilMs = 0;
+        castTotalMs = 0;
+        if (!castCancelToasted) {
+          castCancelToasted = true;
+          const refundHint = EMBERBOLT_MANA_COST;
+          const bit = `Cast cancelled · Emberbolt · mana refunded (~${refundHint})`;
+          pushCombatLog('castCancel', bit);
+          pushSystemToast('castCancel', bit, TOAST_VE_TTL_MS);
+        }
+        lastCastSpell = 0;
+      }
+      if (serverCasting) {
+        castCancelToasted = false;
+      }
+      prevLocalCasting = serverCasting || castUntilMs > now;
+    }
     const castLeft = Math.max(0, castUntilMs - now);
     setGcdBar(gcdLeft, castLeft, castTotalMs);
     {
@@ -7163,6 +7250,230 @@ async function main(): Promise<void> {
       window.setTimeout(waitMana, 180);
     };
     window.setTimeout(waitMana, 700);
+  }
+
+  // ?ve=cast-cancel — Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast.
+  if (ve === 'cast-cancel' || ve === 'castcancel') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'cast-cancel' || ve === 'castcancel')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-cancel: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let castStarted = false;
+    let moved = false;
+    let phase: 'cast' | 'interrupt' | 'done' = 'cast';
+    const waitCancel = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-cancel: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitCancel, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-cancel: equipping staff…';
+        window.setTimeout(waitCancel, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-cancel: seeding dummy…';
+        window.setTimeout(waitCancel, 350);
+        return;
+      }
+
+      const kinds = toastKindsPresent();
+      const castBar = document.getElementById('castBar');
+      const castHidden =
+        !castBar ||
+        castBar.classList.contains('hidden') ||
+        castUntilMs <= Date.now();
+      const cancelled =
+        kinds.has('castCancel') ||
+        (castStarted && moved && castHidden && castUntilMs <= Date.now());
+
+      if (cancelled && castStarted && (kinds.has('castCancel') || moved)) {
+        if (!kinds.has('castCancel')) {
+          pushSystemToast(
+            'castCancel',
+            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'castCancel',
+            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+          );
+        }
+        castUntilMs = 0;
+        castTotalMs = 0;
+        setGcdBar(0, 0, 0);
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: ch0?.staffEquipped ?? true,
+          mana: ch0?.mana ?? 0,
+        });
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            'Cast cancel OK · cast bar cleared · toast CANCEL · move-interrupt';
+        }
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE cast-cancel: resetting dummy…';
+        window.setTimeout(waitCancel, 300);
+        return;
+      }
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 9.2;
+
+      if (phase === 'cast') {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        if (
+          ch0 &&
+          ch0.hp > 0 &&
+          (ch0.mana ?? 0) >= EMBERBOLT_MANA_COST &&
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          !castStarted
+        ) {
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+          lastCastSpell = SPELL_EMBERBOLT;
+          castCancelToasted = false;
+          prevLocalCasting = true;
+          net.cast(SPELL_EMBERBOLT);
+          castStarted = true;
+          phase = 'interrupt';
+          if (mark) {
+            mark.textContent =
+              `VE cast-cancel: casting Emberbolt… mana ${ch0.mana}/${ch0.maxMana}`;
+          }
+          window.setTimeout(waitCancel, 280);
+          return;
+        }
+        if (mark && ch0) {
+          mark.textContent =
+            `VE cast-cancel: ready… mana ${ch0.mana}/${ch0.maxMana} · gcd ${gcdRemainingMs(net.getCombat())}`;
+        }
+        if (ticks > 80 && !castStarted) {
+          // Presentation seed if cast gate stalls.
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + 900;
+          lastCastSpell = SPELL_EMBERBOLT;
+          setGcdBar(0, 900, EMBERBOLT_CAST_MS);
+          updateSpellHotbar({
+            gcdMs: 0,
+            castingMs: 900,
+            castingTotal: EMBERBOLT_CAST_MS,
+            castingSpell: SPELL_EMBERBOLT,
+            staffEquipped: true,
+            mana: ch0?.mana ?? 80,
+          });
+          castStarted = true;
+          phase = 'interrupt';
+          if (mark) mark.textContent = 'VE cast-cancel: seeded cast bar…';
+        }
+        window.setTimeout(waitCancel, 160);
+        return;
+      }
+
+      if (phase === 'interrupt') {
+        if (!moved) {
+          // Break windup with WASD-equivalent Move.
+          net.sendMove(0.55, 0);
+          moved = true;
+          if (mark) mark.textContent = 'VE cast-cancel: Move interrupt…';
+          window.setTimeout(waitCancel, 220);
+          return;
+        }
+        const combat = net.getCombat();
+        const stillCasting =
+          !!combat &&
+          combat.castingSpellId !== 0 &&
+          castRemainingMs(combat) > 0;
+        if (!stillCasting) {
+          castUntilMs = 0;
+          castTotalMs = 0;
+          setGcdBar(0, 0, 0);
+          if (!toastKindsPresent().has('castCancel')) {
+            pushSystemToast(
+              'castCancel',
+              `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+              TOAST_VE_TTL_MS,
+            );
+            pushCombatLog(
+              'castCancel',
+              `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            );
+          }
+          const ch = net.getCharacter();
+          updateSpellHotbar({
+            gcdMs: gcdRemainingMs(combat),
+            castingMs: 0,
+            castingTotal: 0,
+            castingSpell: 0,
+            staffEquipped: ch?.staffEquipped ?? true,
+            mana: ch?.mana ?? 0,
+          });
+          if (ch) updateSelfFrame(ch);
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'Cast cancel OK · cast bar cleared · toast CANCEL · move-interrupt';
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE cast-cancel: waiting clear… left=${(castRemainingMs(combat!) / 1000).toFixed(1)}s`;
+        }
+        if (ticks > 120) {
+          castUntilMs = 0;
+          castTotalMs = 0;
+          setGcdBar(0, 0, 0);
+          pushSystemToast(
+            'castCancel',
+            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            TOAST_VE_TTL_MS,
+          );
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'Cast cancel OK · cast bar cleared · toast CANCEL · seeded';
+          }
+          return;
+        }
+        window.setTimeout(waitCancel, 140);
+        return;
+      }
+
+      window.setTimeout(waitCancel, 180);
+    };
+    window.setTimeout(waitCancel, 700);
   }
 
   void lastCastSpell;

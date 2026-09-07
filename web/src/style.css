@@ -1302,3 +1302,10 @@ body {
   border-color: rgba(91, 124, 255, 0.55);
 }
 .sysToast.mana .toastTag { color: #9ab4ff; }
+
+.sysToast.castCancel {
+  border-color: rgba(255, 176, 90, 0.55);
+}
+.sysToast.castCancel .toastTag { color: #ffb45a; }
+
+.clLine.castCancel .clTag { color: #ffb45a; }

@@ -317,6 +317,12 @@ public static partial class Module
         pose.InterestChunkX = ix;
         pose.InterestChunkZ = iz;
         ctx.Db.PlayerPose.Identity.Update(pose);
+
+        // Move interrupts windup casts (Emberbolt): cancel schedule + refund mana.
+        if (System.Math.Abs(dx) > 1e-6f || System.Math.Abs(dz) > 1e-6f)
+        {
+            InterruptWindupCast(ctx, ctx.Sender, refundMana: true);
+        }
     }
 
     /// <summary>Clear + seed near/far crowd proxies for AOI smokes (idempotent).</summary>
@@ -479,15 +485,29 @@ public static partial class Module
             return;
         }
 
-        if (ctx.Db.PlayerCombat.Identity.Find(cast.Caster) is { } combat)
+        // Interrupted / CancelCast / death cleared CastingSpellId — skip damage.
+        if (ctx.Db.PlayerCombat.Identity.Find(cast.Caster) is not { } combat
+            || combat.CastingSpellId != cast.SpellId)
         {
-            combat.CastingSpellId = 0;
-            combat.LastSpellId = cast.SpellId;
-            combat.LastCastAt = ctx.Timestamp;
-            ctx.Db.PlayerCombat.Identity.Update(combat);
+            return;
         }
 
+        combat.CastingSpellId = 0;
+        combat.LastSpellId = cast.SpellId;
+        combat.LastCastAt = ctx.Timestamp;
+        ctx.Db.PlayerCombat.Identity.Update(combat);
+
         ApplyDamage(ctx, cast.Caster, cast.TargetNpcId, damage);
+    }
+
+    /// <summary>
+    /// Explicit cast cancel (Escape). Deletes PendingCast schedule, clears windup,
+    /// refunds mana spent at Cast start. No-op if not casting.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void CancelCast(ReducerContext ctx)
+    {
+        InterruptWindupCast(ctx, ctx.Sender, refundMana: true);
     }
 
     /// <summary>Unequip staff — Cast already gates on StaffEquipped (slice 3 nice-to-have).</summary>
@@ -904,6 +924,7 @@ public static partial class Module
             combat.CastingSpellId = 0;
             ctx.Db.PlayerCombat.Identity.Update(combat);
         }
+        ClearPendingCastsFor(ctx, target);
 
         ctx.Db.PendingPlayerRespawn.Insert(new PendingPlayerRespawn
         {
@@ -1701,6 +1722,64 @@ public static partial class Module
         Log.Info(
             $"Rest {ctx.Sender} hp {beforeHp}->{character.Hp}/{character.MaxHp} " +
             $"mana {beforeMana}->{character.Mana}/{character.MaxMana}");
+    }
+
+    /// <summary>Delete scheduled PendingCast rows for caster (cancels ResolveCast).</summary>
+    static void ClearPendingCastsFor(ReducerContext ctx, Identity caster)
+    {
+        var toDelete = new System.Collections.Generic.List<ulong>();
+        foreach (var row in ctx.Db.PendingCast.Iter())
+        {
+            if (row.Caster.Equals(caster))
+            {
+                toDelete.Add(row.ScheduleId);
+            }
+        }
+        foreach (var id in toDelete)
+        {
+            ctx.Db.PendingCast.ScheduleId.Delete(id);
+        }
+    }
+
+    /// <summary>
+    /// Break an in-flight windup cast: delete PendingCast, clear CastingSpellId,
+    /// optionally refund mana spent at Cast start. GCD stays (already started).
+    /// </summary>
+    static void InterruptWindupCast(ReducerContext ctx, Identity caster, bool refundMana)
+    {
+        if (ctx.Db.PlayerCombat.Identity.Find(caster) is not { } combat
+            || combat.CastingSpellId == 0)
+        {
+            return;
+        }
+
+        var spellId = combat.CastingSpellId;
+        ClearPendingCastsFor(ctx, caster);
+        combat.CastingSpellId = 0;
+        ctx.Db.PlayerCombat.Identity.Update(combat);
+
+        if (!refundMana)
+        {
+            Log.Info($"InterruptWindupCast {caster} spell={spellId} (no refund)");
+            return;
+        }
+
+        var cost = Combat.ManaCost(spellId);
+        if (cost > 0 && ctx.Db.Character.Identity.Find(caster) is { } ch)
+        {
+            TickManaRegen(ctx, ref ch);
+            if (ch.MaxMana <= 0)
+            {
+                ch.MaxMana = Combat.PlayerMaxMana;
+            }
+            ch.Mana = System.Math.Min(ch.MaxMana, ch.Mana + cost);
+            ctx.Db.Character.Identity.Update(ch);
+            Log.Info($"InterruptWindupCast {caster} spell={spellId} refunded {cost} mana->{ch.Mana}");
+        }
+        else
+        {
+            Log.Info($"InterruptWindupCast {caster} spell={spellId}");
+        }
     }
 
     /// <summary>Lazy mana regen between Cast/Rest using LastManaTickAt wall time.</summary>

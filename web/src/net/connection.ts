@@ -206,6 +206,8 @@ export type GameNet = {
   seedCrowdProxies: () => void;
   setTarget: (npcId: bigint) => void;
   cast: (spellId: number) => void;
+  /** Cancel in-flight windup cast (refunds mana spent at Cast start). */
+  cancelCast: () => Promise<void>;
   unequipStaff: () => void;
   equipStaff: () => void;
   unequipRobes: () => void;
@@ -1515,6 +1517,7 @@ export async function connectToSpacetime(
                 void conn.reducers.setTarget({ npcId });
                 emitStatus(identityHex);
               },
+              cancelCast: () => conn.reducers.cancelCast({}),
               cast: (spellId: number) => {
                 const name =
                   spellId === SPELL_SPARK
