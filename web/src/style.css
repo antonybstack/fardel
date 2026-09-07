@@ -858,15 +858,19 @@ body {
   color: #8aa0c8;
 }
 
-/* Party-frame HP bar (Character.Hp / MaxHp for You + mates). */
+/* Party-frame HP bar — dark track + saturated fill punch over cyan fog (#67). */
 .pfHpBar {
   position: relative;
   margin-top: 3px;
   height: 12px;
-  background: rgba(12, 12, 16, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(3, 5, 9, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.88);
   border-radius: 4px;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.45);
 }
 .pfHpFill {
   position: absolute;
@@ -874,17 +878,20 @@ body {
   top: 0;
   bottom: 0;
   width: 100%;
-  background: linear-gradient(90deg, #2f8f5a, #5ed68a);
+  background: linear-gradient(90deg, #178a42, #3ce072);
   transition: width 80ms linear, background 120ms ease;
 }
+/* Self row: same saturated green at full (frame chrome distinguishes You — not fog-cyan). */
 .pfRow.self .pfHpFill {
-  background: linear-gradient(90deg, #2f6f8f, #5eb8d6);
+  background: linear-gradient(90deg, #178a42, #3ce072);
 }
-.pfHpFill.mid {
-  background: linear-gradient(90deg, #a87a12, #e6be37);
+.pfHpFill.mid,
+.pfRow.self .pfHpFill.mid {
+  background: linear-gradient(90deg, #c4860c, #f0c22e);
 }
-.pfHpFill.low {
-  background: linear-gradient(90deg, #a02820, #dc463c);
+.pfHpFill.low,
+.pfRow.self .pfHpFill.low {
+  background: linear-gradient(90deg, #b41c14, #f04836);
 }
 .pfHpLabel {
   position: relative;
@@ -893,8 +900,12 @@ body {
   padding: 0 6px;
   font-size: 9px;
   line-height: 12px;
-  color: #e8eefc;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.98),
+    0 1px 3px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -1454,15 +1465,19 @@ body {
 }
 
 
-/* Self-frame player HP bar (Character.Hp / MaxHp). */
+/* Self-frame HP bar — saturated green vs dark track; mid amber / low red (#67). */
 .sfHpBar {
   position: relative;
   margin-top: 6px;
   height: 14px;
-  background: rgba(12, 12, 16, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(3, 5, 9, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.88);
   border-radius: 5px;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.45);
 }
 .sfHpFill {
   position: absolute;
@@ -1470,14 +1485,14 @@ body {
   top: 0;
   bottom: 0;
   width: 100%;
-  background: linear-gradient(90deg, #2f6f8f, #5eb8d6);
+  background: linear-gradient(90deg, #178a42, #3ce072);
   transition: width 80ms linear, background 120ms ease;
 }
 .sfHpFill.mid {
-  background: linear-gradient(90deg, #a87a12, #e6be37);
+  background: linear-gradient(90deg, #c4860c, #f0c22e);
 }
 .sfHpFill.low {
-  background: linear-gradient(90deg, #a02820, #dc463c);
+  background: linear-gradient(90deg, #b41c14, #f04836);
 }
 .sfHpLabel {
   position: relative;
@@ -1486,8 +1501,12 @@ body {
   padding: 0 8px;
   font-size: 10px;
   line-height: 14px;
-  color: #e8eefc;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.98),
+    0 1px 3px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
