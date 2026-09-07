@@ -69,6 +69,14 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Do **not** change fog dens / fogColor / hemi / sun lock; procedural DIY only
 - VE: `?ve=sky-horizon`
 
+### Loot sparkle / pickup readability targets (Issue #56)
+
+- Ground loot bags/sparkles read clearly at play-cam (8–20m) under #39 fog without neon bloom
+- Warm amber markers contrast vs cyan fog; distinct from path/grass; low emissive (0.03–0.04 range)
+- Keep locked #39 atmosphere (fog dens/color, hemi, sun) intact
+- Procedural DIY only; preserve existing pickup UX
+- VE: `?ve=loot-sparkle`
+
 ### Forest targets (Issue #34)
 
 - More mid-tree variety + stronger hero silhouettes; LOD/instancing discipline (see Principles)

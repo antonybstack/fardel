@@ -201,7 +201,7 @@ See `web/README.md` for exact commands.
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- **World loot / pickup (invent):** `WorldLoot` + `SeedLoot` / dummy-death drop + `Pickup` (nearest in range → XP + `HasEmberShard`); sparkle meshes, **F** pickup, toast/combat-log; `tools/LootSmoke`; `?ve=loot` (`ve/babylon-loot.png`)
+- **World loot / pickup (invent):** `WorldLoot` + `SeedLoot` / dummy-death drop + `Pickup` (nearest in range → XP + `HasEmberShard`); sparkle meshes, **F** pickup, toast/combat-log; `tools/LootSmoke`; `?ve=loot` (`ve/babylon-loot.png`); readability polish #56 (warm amber markers at 8–20m under #39 fog); `?ve=loot-sparkle` (`ve/babylon-loot-sparkle.png`)
 - **Player trade (invent):** `TradeOffer` + `OfferTrade` / `AcceptTrade` / `CancelTrade` (range check; transfer `HasEmberShard` and/or small XP); **T** offer/accept nearest remote, **Y** cancel; toast/bag; `tools/TradeSmoke` / `tools/TradeMate`; `?ve=trade` (`ve/babylon-trade.png`)
 - **Yard vendor shop (invent):** `YardVendor` + `BuyFromVendor` / `SellToVendor` (range check; XP↔`HasEmberShard`); green/gold stall mesh + **E** buy/sell; toast/bag; `tools/VendorSmoke`; `?ve=vendor` (`ve/babylon-vendor.png`)
 - **Yard tonic use (invent):** `HasYardTonic` + `TonicExpiresAt` on Character; `BuyYardTonic` / `UseYardTonic` (consume → move-speed buff); bag/loadout + **V** use, toast/VFX, self-frame buff timer; `tools/TonicSmoke`; `?ve=tonic` (`ve/babylon-tonic.png`)
