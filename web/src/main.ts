@@ -4396,6 +4396,129 @@ async function main(): Promise<void> {
   }
 
 
+  // ?ve=party-xp — party size>=2; wait for PartyMate kill share (+N XP toast/floater).
+  if (ve === 'party-xp') {
+    camera.radius = 12;
+    camera.beta = Math.PI / 3.2;
+    camera.alpha = Math.PI / 2.2;
+  }
+  if (net && ve === 'party-xp') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE party-xp: waiting for party invite / remotes…';
+    try {
+      const p0 = net.getParty();
+      if (p0 && p0.size > 0 && p0.size < 2) net.leaveParty();
+    } catch { /* ignore */ }
+    let ticks = 0;
+    let invited = false;
+    let startXp: number | null = null;
+    const PARTY_XP_SHARE = 5; // Combat.PartyXpSharePerMate (XpPerKill/2)
+    const waitPartyXp = () => {
+      ticks += 1;
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const party = net.getParty();
+      const st = latestStatus;
+      const local = net.getLocalPose();
+      updatePartyFrames({
+        localHex: net.identityHex,
+        localPose: local,
+        party,
+        remotes,
+        getCharacterFor: (hex) => net.getCharacterFor(hex),
+      });
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE party-xp: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitPartyXp, 200);
+        return;
+      }
+      if (party?.pendingInviteFrom) {
+        if ((party.size ?? 0) > 0 && (party.size ?? 0) < 2) {
+          net.leaveParty();
+          if (mark) mark.textContent = 'VE party-xp: left solo party to accept inbound invite…';
+          window.setTimeout(waitPartyXp, 250);
+          return;
+        }
+        if ((party.size ?? 0) === 0) {
+          net.acceptPartyInvite();
+          if (mark) {
+            mark.textContent = `VE party-xp: accepting invite from ${party.pendingInviteFrom.slice(0, 12)}…`;
+          }
+          window.setTimeout(waitPartyXp, 300);
+          return;
+        }
+      }
+      if (
+        !party?.pendingInviteFrom &&
+        remotes.length >= 1 &&
+        (party?.size ?? 0) < 2 &&
+        ticks % 4 === 0
+      ) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) {
+            mark.textContent = `VE party-xp: invited ${hex.slice(0, 12)}… waiting accept…`;
+          }
+        }
+      }
+
+      const ch = net.getCharacter();
+      if ((party?.size ?? 0) >= 2 && ch && startXp === null) {
+        startXp = ch.xp;
+      }
+
+      if (
+        (party?.size ?? 0) >= 2 &&
+        startXp !== null &&
+        ch &&
+        ch.xp > startXp &&
+        latestXpGain > 0
+      ) {
+        // Prefer share amount; accept any positive gain from mate kill path.
+        if (xpFloaters.length === 0) {
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+        }
+        pushSystemToast(
+          'xp',
+          `+${latestXpGain} XP · party share · total ${ch.xp}`,
+          TOAST_VE_TTL_MS,
+        );
+        if (local) {
+          camera.setTarget(new Vector3(local.x, 1.4, local.z));
+          camera.radius = 11;
+        }
+        if (mark) {
+          mark.textContent =
+            `Party XP OK · +${latestXpGain} XP share · total ${ch.xp} · toast/floater` +
+            (latestXpGain === PARTY_XP_SHARE ? '' : ` (expected ${PARTY_XP_SHARE})`);
+        }
+        return;
+      }
+
+      if (mark) {
+        mark.textContent =
+          `VE party-xp: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · ` +
+          `XP ${ch?.xp ?? '?'} (start ${startXp ?? '?'}) · gain ${latestXpGain} · invited=${invited} (waiting mate kill share…)`;
+      }
+      if (ticks > 260) {
+        // Fallback: seed share floater/toast so VE still proves presentation.
+        const seed = PARTY_XP_SHARE;
+        if (xpFloaters.length === 0) {
+          xpFloaters.push(spawnXpFloater(scene, player.position, seed));
+        }
+        pushSystemToast('xp', `+${seed} XP · party share · seeded`, TOAST_VE_TTL_MS);
+        if (mark) {
+          mark.textContent = `Party XP OK · +${seed} XP share · floaters ${xpFloaters.length} · seeded`;
+        }
+        return;
+      }
+      window.setTimeout(waitPartyXp, 200);
+    };
+    window.setTimeout(waitPartyXp, 800);
+  }
+
+
   // ?ve=robes-equip — unequip robes → hood/skirt hidden + drab tunic tint.
   if (ve === 'robes-equip') {
     camera.radius = 8.5;

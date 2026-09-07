@@ -16,6 +16,13 @@ public static class Combat
     public const int DummyMaxHp = 50;
     public const int XpPerKill = 10;
 
+    /// <summary>
+    /// Always-relevant party share: each other PartyMember mate gets this much
+    /// Character.Xp when the killer earns <see cref="XpPerKill"/> (50% of kill XP).
+    /// Killer still receives full XpPerKill so CombatSmoke stays green.
+    /// </summary>
+    public const int PartyXpSharePerMate = XpPerKill / 2;
+
     public const float DummySpawnX = 5f;
     public const float DummySpawnY = 0f;
     public const float DummySpawnZ = 0f;

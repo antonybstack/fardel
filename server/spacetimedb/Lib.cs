@@ -790,6 +790,7 @@ public static partial class Module
             character.Xp += Combat.XpPerKill;
             ctx.Db.Character.Identity.Update(character);
             Log.Info($"Dummy killed by {caster}, xp={character.Xp}");
+            SharePartyKillXp(ctx, caster);
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
         }
 
@@ -876,6 +877,35 @@ public static partial class Module
         Log.Info($"Player {pending.Player} respawned at yard origin");
     }
 
+
+    /// <summary>
+    /// Grant <see cref="Combat.PartyXpSharePerMate"/> to each other PartyMember
+    /// mate of the killer (always-relevant party — no distance gate).
+    /// </summary>
+    static void SharePartyKillXp(ReducerContext ctx, Identity killer)
+    {
+        if (ctx.Db.PartyMember.Identity.Find(killer) is not { } self)
+        {
+            return;
+        }
+
+        foreach (var m in ctx.Db.PartyMember.Iter())
+        {
+            if (m.PartyId != self.PartyId || m.Identity.Equals(killer))
+            {
+                continue;
+            }
+
+            if (ctx.Db.Character.Identity.Find(m.Identity) is not { } mate)
+            {
+                continue;
+            }
+
+            mate.Xp += Combat.PartyXpSharePerMate;
+            ctx.Db.Character.Identity.Update(mate);
+            Log.Info($"Party XP share +{Combat.PartyXpSharePerMate} to {m.Identity} (killer {killer}, total={mate.Xp})");
+        }
+    }
 
     static void ClearPartyStateFor(ReducerContext ctx, Identity id)
     {

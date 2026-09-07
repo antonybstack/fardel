@@ -2,9 +2,10 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// Long-lived party mate for browser ?ve=party / ?ve=party-hp / ?ve=party-frames:
+// Long-lived party mate for browser ?ve=party / ?ve=party-hp / ?ve=party-frames / ?ve=party-xp:
 // invite online identities (skip stale no-accept), wait for party size>=2,
-// take a few dummy-thorn Sparks (mate HP mid for party-hp frames), move far, hold.
+// kill dummy once (party XP share to mates), take a few dummy-thorn Sparks
+// (mate HP mid for party-hp frames), move far, hold.
 const string uri = "http://127.0.0.1:3000";
 const string db = "fardel";
 const float farX = 120f;
@@ -49,6 +50,7 @@ try
     Console.WriteLine("READY waiting for other PlayerPose to invite…");
 
     var moved = false;
+    var shareKillDone = false;
     var thornsTaken = false;
     var skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     var soloSince = DateTime.UtcNow;
@@ -135,6 +137,54 @@ try
             {
                 if (m.PartyId == self.PartyId) partyCount++;
             }
+        }
+
+        if (self is not null && partyCount >= 2 && !shareKillDone)
+        {
+            // Kill dummy so browser mate receives Combat.PartyXpSharePerMate (+ toast/floater).
+            Console.WriteLine($"Party size {partyCount} — killing dummy for party-xp share…");
+            var chK = conn.Db.Character.Identity.Find(identity);
+            if (chK is not null && !chK.StaffEquipped)
+            {
+                conn.Reducers.EquipStaff();
+                await Frame(conn, 200);
+            }
+            try { conn.Reducers.EnsureTrainingDummy(); } catch { /* ignore */ }
+            await Frame(conn, 150);
+            for (var guard = 0; guard < 40; guard++)
+            {
+                Npc? dummyK = null;
+                foreach (var n in conn.Db.Npc.Iter())
+                {
+                    if (n.Hp > 0) { dummyK = n; break; }
+                }
+                if (dummyK is null)
+                {
+                    try { conn.Reducers.EnsureTrainingDummy(); } catch { /* ignore */ }
+                    await Frame(conn, 200);
+                    continue;
+                }
+                if (dummyK.Hp <= 0) break;
+                try
+                {
+                    conn.Reducers.SetTarget(dummyK.NpcId);
+                    await Frame(conn, 60);
+                    conn.Reducers.Cast(Combat.SpellSpark);
+                }
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine("share kill cast: " + e.Message);
+                }
+                await Frame(conn, Combat.GcdMs + 40);
+                var still = false;
+                foreach (var n in conn.Db.Npc.Iter())
+                {
+                    if (n.NpcId == dummyK.NpcId && n.Hp > 0) { still = true; break; }
+                }
+                if (!still) break;
+            }
+            shareKillDone = true;
+            Console.WriteLine("share kill done (mates should have +PartyXpSharePerMate)");
         }
 
         if (self is not null && partyCount >= 2 && !thornsTaken)

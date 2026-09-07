@@ -158,6 +158,7 @@ See `web/README.md` for exact commands.
 - **Player self-frame + bag/loadout strip (presentation):** bottom-left **You** + XP self-frame; compact staff/Spark/Emberbolt loadout chips from Character; **B** toggles bag panel; self-frame includes Character.Hp bar; `?ve=bag` (`ve/babylon-bag.png`)
 - **Party member frames HUD (presentation):** compact left-column roster from `PartyMember` + remotes — You/hex, leader tag, distance + pose hint; `?ve=party-frames` + PartyMate/SecondClient (`ve/babylon-party-frames.png`)
 - **Party frames HP (invent/presentation):** wire `Character.Hp`/`MaxHp` into party member frames for You + mates (wholesale Character cache / `getCharacterFor`); PartyMate takes dummy thorns so mate bar is mid; `?ve=party-hp` (`ve/babylon-party-hp.png`)
+- **Party XP share (invent):** kill grants `XpPerKill` to killer + `PartyXpSharePerMate` to always-relevant `PartyMember` mates; `tools/PartyXpSmoke`; mate toast/floater; `?ve=party-xp` (`ve/babylon-party-xp.png`)
 - **Combat log strip (presentation):** client-only scrolling right-column log — Cast start, HP-delta damage, staff/robes equip, party join; `?ve=combat-log` (`ve/babylon-combat-log.png`)
 - **FPS / performance overlay (presentation):** live `engine.getFps()` HUD (green ≥ 30 floor / 60 target on box reference) + near/far crowd proxies, remotes, NPCs; `?ve=fps` seeds crowd for AOI proof (`ve/babylon-fps.png`)
 - **System toast banner (presentation):** client-only transient top-center toasts — Connected / identity restore, party invite received / accepted, XP gain, short staff/robes equip feedback; `?ve=toasts` (`ve/babylon-toasts.png`)
@@ -181,3 +182,4 @@ See `web/README.md` for exact commands.
 - **Yard tonic use (invent):** `HasYardTonic` + `TonicExpiresAt` on Character; `BuyYardTonic` / `UseYardTonic` (consume → move-speed buff); bag/loadout + **V** use, toast/VFX, self-frame buff timer; `tools/TonicSmoke`; `?ve=tonic` (`ve/babylon-tonic.png`)
 - **Player HP / death-respawn (invent):** `Character.Hp`/`MaxHp`; dummy thorns on Spark/Emberbolt apply; death clears target + schedules yard respawn; Babylon self-frame HP bar + death greyout/toast; self thorns damage floaters + local ghost tint while dead; `tools/PlayerHpSmoke`; `?ve=player-hp` (`ve/babylon-player-hp.png`)
 - **Party frames HP (follow-on):** party roster HP bars from same Character rows; `?ve=party-hp` (`ve/babylon-party-hp.png`)
+- **Party XP share (follow-on):** always-relevant mate share on kill; `?ve=party-xp` (`ve/babylon-party-xp.png`)
