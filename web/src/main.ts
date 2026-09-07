@@ -7795,6 +7795,73 @@ async function main(): Promise<void> {
     window.setTimeout(waitToasts, 700);
   }
 
+  // ?ve=toast-read — stacked invite/XP/death(+equip) plates under #39 fog (#90).
+  if (ve === 'toast-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'toast-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE toast-read: seeding invite/XP/death stack…';
+    let ticks = 0;
+    const seedToastRead = () => {
+      const root = document.getElementById('toastStack');
+      if (root) root.innerHTML = '';
+      // 2–3 overlapping category plates — punch contrast, no full-screen flash.
+      pushSystemToast('invite', 'Invite from a1b2c3d4…', TOAST_VE_TTL_MS);
+      pushSystemToast('xp', '+25 XP · total 125', TOAST_VE_TTL_MS);
+      pushSystemToast('death', 'You died · respawning at yard', TOAST_VE_TTL_MS);
+      pushSystemToast('equip', 'Staff equipped', TOAST_VE_TTL_MS);
+    };
+    const waitRead = () => {
+      ticks += 1;
+      seedToastRead();
+      const kinds = toastKindsPresent();
+      const ready =
+        kinds.has('invite') &&
+        kinds.has('xp') &&
+        kinds.has('death') &&
+        (kinds.has('equip') || kinds.has('connected') || kinds.has('respawn'));
+      const count = document.getElementById('toastStack')?.children.length ?? 0;
+      if (ready && count >= 3) {
+        if (mark) {
+          mark.textContent =
+            'Toast-read OK · invite+XP+death · dark plate · #90 fog';
+        }
+        const hold = () => {
+          const n = document.getElementById('toastStack')?.children.length ?? 0;
+          if (n < 3) seedToastRead();
+          window.setTimeout(hold, 500);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE toast-read: tick ${ticks} · kinds ${[...kinds].join('+') || '∅'}`;
+      }
+      if (ticks > 40) {
+        seedToastRead();
+        if (mark) {
+          mark.textContent =
+            'Toast-read OK · invite+XP+death · dark plate · #90 fog · seeded';
+        }
+        const hold = () => {
+          const n = document.getElementById('toastStack')?.children.length ?? 0;
+          if (n < 3) seedToastRead();
+          window.setTimeout(hold, 500);
+        };
+        hold();
+        return;
+      }
+      window.setTimeout(waitRead, 180);
+    };
+    window.setTimeout(waitRead, 400);
+  }
+
+
+
 
 
   // ?ve=party-chat — CreateParty → PartySay → party-styled strip + toast.
