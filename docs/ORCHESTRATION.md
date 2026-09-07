@@ -15,9 +15,10 @@ Related docs: [TEAM_SEATS.md](TEAM_SEATS.md) · [BACKLOG.md](BACKLOG.md) · [DEV
 - Headless C# smokes as the first proof of Done-when
 - Visual evidence (`ve/*.png`) on every user-facing PR
 
-**Unbound Team Lead** (parent) coordinates a fixed roster of Devs, QA, Reviewer, and Release. The Lead:
+**Unbound Team Lead** (parent) coordinates Devs, QA, Reviewer, Release, and **Art**. The Lead:
 
 - Assigns work **only from GitHub Issues** (not ad-hoc chat wishlists)
+- **Never leaves seats idle** while the project has open gaps — if the board is thin, file Issues (or have Art file visual ones) and assign immediately
 - Merges to `develop` only after Reviewer feedback is addressed
 - Greenlights Release cuts (`develop` → `main` → Mac smoke → Pages)
 - Does **not** solo-invent features on `main` while the team is live
@@ -36,6 +37,7 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 | **QA Feel** | Feel / UX playtests; `feel`-labeled Issues; Mac/Pages FPS truth (not box SwiftShader) | Feature invent |
 | **Reviewer** | Review PRs targeting `develop`: correctness, smoke coverage, schema-collision risk, lane conflicts; concrete feedback | Own features; push merges |
 | **Release** | On Lead greenlight: promote pinned `develop` SHA → `main`, Mac smoke, Cloudflare Pages deploy, VE + release beat | Cut without greenlight; expand tip silently; invent features; run two cuts at once |
+| **Art** | Visual north star vs [ASSETS.md](ASSETS.md); art-direction briefs; license-safe pack **shortlists**; break visual work into Issues for Devs; look-language coherence | Invent gameplay systems; **buy** third-party art packs without Antony/Lead greenlight; leave Devs idle on visuals |
 
 ### Seat map (shared computer)
 
@@ -54,7 +56,7 @@ Canonical file: [`tools/scripts/fardel-seats.env`](../tools/scripts/fardel-seats
 
 Per-seat Spacetime data: `$HOME/.local/share/fardel-wt/<slug>`.
 
-Reviewer and Release do not need a dedicated Spacetime stack (Release uses Mac Studio `/Users/antbly/dev/fardel` for smokes + Pages).
+Reviewer, Release, and Art do not need a dedicated Spacetime stack by default (Release uses Mac Studio `/Users/antbly/dev/fardel` for smokes + Pages; Art mostly briefs + docs + VE reviews). Art may borrow a Dev seat worktree for presentation spikes when Lead agrees.
 
 ---
 
@@ -65,7 +67,8 @@ Grok Bot / Grok CLI agents talk through channels and 1:1 messages. Hard constrai
 | Channel | Members | Purpose |
 |---------|---------|---------|
 | **Fardel** | Lead + Dev1–5 | Assignments, tip broadcasts, Dev blockers |
-| **Fardel QA** | Lead + QA Bugs + QA Feel + Reviewer + Release | Review nudges, feel/smoke reports, release coordination |
+| **Fardel QA** | Lead + QA Bugs + QA Feel + Reviewer + Release + Art | Review nudges, feel/smoke reports, release coordination, visual gate notes |
+| **Fardel Art** | Lead + Art + QA Feel + Dev3–5 (example seating) | Art briefs, visual wave coordination, look-language reviews |
 
 **Assignment message shape** (1:1 or short channel post):
 
@@ -89,7 +92,7 @@ Do not re-ping Reviewer or Lead about a PR that is already merged — check `gh 
 | `main` | **Release** / production tip. No feature PRs. |
 | `develop` | **Integration** — every day-to-day PR targets this. |
 | `seats/<slug>` | Long-lived worktree tips (optional); feature work still ships on short-lived branches. |
-| `devN/<slug>`, `client/<slug>`, `qa/<slug>`, `chore/<slug>` | Feature / fix / docs branches. |
+| `devN/<slug>`, `client/<slug>`, `qa/<slug>`, `art/<slug>`, `chore/<slug>` | Feature / fix / art / docs branches. |
 | `checkpoint/unity-webgl` | Frozen Unity client (not active). Active client is Babylon. |
 
 ### PR rules
@@ -149,7 +152,7 @@ Lead defaults match historical single-instance docs in [DEV_BOX.md](DEV_BOX.md) 
 ### Backlog
 
 - Board: https://github.com/antonybstack/fardel/issues
-- Labels: `P0` / `P1` / `P2`, `lane:server` | `lane:client` | `lane:qa` | `lane:release`, `feel`, `flake`, `wave`
+- Labels: `P0` / `P1` / `P2`, `lane:server` | `lane:client` | `lane:qa` | `lane:release` | `lane:art`, `feel`, `flake`, `wave`
 - Templates: `.github/ISSUE_TEMPLATE/` (bug, feature, feel)
 - Team Lead assigns waves from Issues / milestones, not chat lists
 
@@ -243,7 +246,9 @@ Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as
 3. Prefer cloud coding agents for heavy edits when available; otherwise seat-local work.
 4. Tell Antony only on real merges / blockers / release candidates (with screenshot when VE lands).
 5. Stay quiet if nothing changed.
-6. Never wipe non-local DBs. Art packs remain out of scope until unblocked in SCOPE.
+6. Never wipe non-local DBs.
+7. **No idle seats:** if open Issues < idle Devs, file or ask Art to file the next visual/feel tickets and assign.
+8. Third-party **art pack purchases** (paid itch/store kits) need Antony/Lead greenlight — shortlists and procedural polish do not.
 
 ---
 
@@ -273,7 +278,9 @@ Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specif
 | Solo executor invents on `main` while a Dev has a `develop` PR (race) | Forbid solo invent while team loop is live; Lead stops duplicate streams |
 | Agents re-ping already-merged PRs | Always `gh pr view` before nudge; Lead says STOP when looping |
 | Auto-review / approval blocks merges or elevated Shell | Escalate honestly to Antony; never credential workarounds |
-| Channel 6-member cap | Split **Fardel** vs **Fardel QA** |
+| Channel 6-member cap | Split **Fardel** vs **Fardel QA**; add **Fardel Art** when visuals need a standing room |
+| Idle Devs + empty Issues board | Lead/Art must file Issues and assign — never “wait for inspiration” |
+| Visual gap vs hordes/RS/WoW mood | Art owns north star (#31-style); Devs implement presentation Issues; pack **buy** is a human gate |
 | Tip moves mid-rebase | `git fetch origin develop` before rebase; Lead broadcasts SHA after every merge |
 | VE missing from PR (gitignore) | `git add -f ve/...` + embed in body as Done-when |
 | Stale GitHub `CONFLICTING` / mergeable noise | Re-fetch base; rebase; reopen PR if GitHub lies |
@@ -295,11 +302,11 @@ Goal: same loop, **no Grok Bot box**. Parent agent + subagents; Mac Studio files
 | Bot world | Mac / Grok CLI world |
 |-----------|----------------------|
 | Unbound Team Lead chat | Parent Grok CLI agent (Team Lead persona) |
-| CreateAgent teammates | Parent-created **subagents** (Dev1–5, QA Bugs, QA Feel, Reviewer, Release) with the same charters as §2 |
+| CreateAgent teammates | Parent-created **subagents** (Dev1–5, QA Bugs, QA Feel, Reviewer, Release, Art) with the same charters as §2 |
 | Shared Linux box `/workspace` | Mac Studio disk (e.g. under `/Users/antbly/dev/`) |
 | `/workspace/fardel` | `/Users/antbly/dev/fardel` |
 | `/workspace/wt/<seat>` | `/Users/antbly/dev/fardel-wt/<seat>` (suggested) |
-| Channels Fardel / Fardel QA | Parent group threads or CLI-equivalent rooms (respect 6-member style caps if any) |
+| Channels Fardel / Fardel QA / Fardel Art | Parent group threads or CLI-equivalent rooms (respect 6-member style caps if any) |
 | `@every 15m` Bot routine | Parent schedule / cron tick with the continuous-iterate prompt |
 | Box VE / SwiftShader | Mac screenshots + Pages VEs |
 
@@ -346,24 +353,38 @@ done
 
 ### Labels
 
-`P0` `P1` `P2` · `lane:server` `lane:client` `lane:qa` `lane:release` · `feel` · `flake` · `wave`
+`P0` `P1` `P2` · `lane:server` `lane:client` `lane:qa` `lane:release` `lane:art` · `feel` · `flake` · `wave`
 
 ### Branch prefixes
 
-`dev1/`…`dev5/` · `client/` · `qa/` · `chore/` · Release: `develop`→`main`
+`dev1/`…`dev5/` · `client/` · `qa/` · `art/` · `chore/` · Release: `develop`→`main`
 
 ### Do not
 
 - Invent without an Issue assign
+- Leave Devs idle while the game still has open gaps (file Issues first)
 - Open feature PRs to `main`
 - Wipe non-local DBs
 - Re-ping merged PRs
 - Expand a release past the greenlit tip
 - Treat box SwiftShader FPS as ship feel
+- Purchase third-party art packs without Antony/Lead greenlight (shortlist only)
 
 ---
 
-## 13. Minimal assign template (copy/paste)
+## 13. Art packs vs “purchases”
+
+In this runbook, **purchase** means buying a **third-party art/asset pack** (itch.io, Unity/store kits, paid CC commercial packs) to replace procedural kitbash — see [ASSETS.md](ASSETS.md).
+
+It does **not** mean shopping, subscriptions, or unrelated spend. Flow:
+
+1. **Art** shortlists 1 env + 1 character pack (license + URL + web-budget fit) on an Issue.
+2. **Antony or Lead** greenlights the buy (human gate).
+3. Import + credits ledger land in the same PR as the assets.
+4. Until then: procedural / kitbash presentation Issues (`lane:art` + `lane:client`) keep shipping.
+
+## 14. Minimal assign template (copy/paste)
+
 
 ```text
 Assign: #<N> <title>
@@ -378,4 +399,4 @@ No invent past this Issue. Rebase if tip moves.
 
 ---
 
-*This document describes the live Bot team loop as of 2026-09-07 and the intended Mac Studio / Grok CLI recreation. When process drifts, update this file in the same PR as the process change.*
+*This document describes the live Bot team loop as of 2026-09-07 (includes Fardel Art + no-idle rule) and the intended Mac Studio / Grok CLI recreation. When process drifts, update this file in the same PR as the process change.*
