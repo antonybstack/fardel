@@ -123,4 +123,8 @@ See `web/README.md` for exact commands.
   identity + Character XP + starter loadout (staff/robes + Spark/Emberbolt);
   HUD shows XP/loadout + restore proof (`ve/babylon-persist.png`);
   `tools/PersistSmoke` green
-- Next: AOI presentation (chunk neighborhood + crowd proxies)
+- **AOI (presentation):** Moore-neighborhood SQL subscribe (ADR 0001) for
+  `player_pose` + `crowd_proxy`; `SeedCrowdProxies`; amber instanced capsules
+  distinct from local blue player; HUD interest chunk + near/far proxy counts
+  (`ve/babylon-aoi.png`); `tools/AoiSmoke` green
+- Next (north-star): forest kitbash / Pages deploy of Vite `dist` / second-client proof

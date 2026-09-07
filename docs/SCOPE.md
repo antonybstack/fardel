@@ -113,8 +113,8 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 4 (AOI) proven** via `tools/AoiSmoke` (headless); browser FPS floor tracked with Babylon presentation
+- **Phase:** **slice 4 (AOI) presentation green** — headless `tools/AoiSmoke` + Babylon neighborhood subscribe / CrowdProxy instances (`ve/babylon-aoi.png`)
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
-- **Babylon presentation:** Connect green; Move green; Combat green; **Persist** token restore + XP/loadout HUD (see `ve/babylon-persist.png`)
-- **POC north-star:** not started (next presentation: AOI)
+- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green (chunk neighborhood SQL + amber crowd proxies; far proxies excluded)
+- **POC north-star:** closer — remaining invent: forest kitbash + mountains, Pages deploy of Vite `dist`, second-client shared-yard proof

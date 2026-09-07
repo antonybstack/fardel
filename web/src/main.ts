@@ -5,6 +5,7 @@ import {
   Color4,
   Engine,
   HemisphericLight,
+  InstancedMesh,
   Mesh,
   MeshBuilder,
   Scene,
@@ -18,7 +19,9 @@ import {
   SPELL_SPARK,
   EMBERBOLT_CAST_MS,
   NPC_KIND_DUMMY,
+  CROWD_NEAR_COUNT,
   type ConnectionStatus,
+  type CrowdProxyView,
   type GameNet,
   type NpcView,
 } from './net/connection';
@@ -101,12 +104,17 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       ? 'persist: restored token (same identity)'
       : 'persist: new token saved';
     const xpLine = s.character ? formatLoadout(s.character) : 'XP/loadout: —';
+    const aoi = s.aoi;
+    const aoiLine = aoi
+      ? `AOI: interest (${aoi.interestChunkX},${aoi.interestChunkZ}) · pose chunk (${aoi.poseChunkX},${aoi.poseChunkZ}) · proxies ${aoi.proxyCount} (near ${aoi.nearCount} / far ${aoi.farCount})${aoi.neighborhoodSql ? ' · neigh-SQL' : ''}`
+      : 'AOI: —';
     return [
       'Connected',
       `identity: ${s.identityHex}`,
       xpLine,
       persistLine,
       poseLine,
+      aoiLine,
       targetLine,
       gcdLine,
       castLine,
@@ -129,6 +137,7 @@ function createScene(engine: Engine): {
   scene: Scene;
   camera: ArcRotateCamera;
   player: Mesh;
+  proxySource: Mesh;
 } {
   const scene = new Scene(engine);
   scene.clearColor = new Color4(0.05, 0.07, 0.12, 1);
@@ -164,7 +173,7 @@ function createScene(engine: Engine): {
   light.intensity = 0.95;
   light.groundColor = new Color3(0.15, 0.18, 0.22);
 
-  const ground = MeshBuilder.CreateGround('ground', { width: 40, height: 40 }, scene);
+  const ground = MeshBuilder.CreateGround('ground', { width: 64, height: 64 }, scene);
   const groundMat = new StandardMaterial('groundMat', scene);
   groundMat.diffuseColor = new Color3(0.18, 0.28, 0.2);
   groundMat.specularColor = new Color3(0.05, 0.05, 0.05);
@@ -180,7 +189,22 @@ function createScene(engine: Engine): {
   playerMat.diffuseColor = new Color3(0.55, 0.7, 0.95);
   player.material = playerMat;
 
-  return { scene, camera, player };
+  // CrowdProxy source mesh (hidden) — instances are amber, distinct from local blue player.
+  const proxySource = MeshBuilder.CreateCapsule(
+    'crowdProxySource',
+    { height: 1.5, radius: 0.28 },
+    scene,
+  );
+  proxySource.position = new Vector3(0, -100, 0);
+  proxySource.isVisible = false;
+  proxySource.setEnabled(false);
+  const proxyMat = new StandardMaterial('crowdProxyMat', scene);
+  proxyMat.diffuseColor = new Color3(0.95, 0.55, 0.15);
+  proxyMat.specularColor = new Color3(0.08, 0.05, 0.02);
+  proxyMat.emissiveColor = new Color3(0.18, 0.08, 0.02);
+  proxySource.material = proxyMat;
+
+  return { scene, camera, player, proxySource };
 }
 
 function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
@@ -317,21 +341,48 @@ async function main(): Promise<void> {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  const { scene, camera, player } = createScene(engine);
+  const { scene, camera, player, proxySource } = createScene(engine);
 
   let net: GameNet | null = null;
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
     database: '…',
+    restoredToken: false,
   };
   let selectedTargetId: bigint = 0n;
   let castUntilMs = 0;
   let castTotalMs = 0;
   let lastCastSpell = 0;
   const npcMeshes = new Map<string, NpcMesh>();
+  const proxyInstances = new Map<string, InstancedMesh>();
   let moveAccumulator = 0;
   const MOVE_SEND_HZ = 20;
+
+  const syncProxyMeshes = (proxies: CrowdProxyView[]) => {
+    const seen = new Set<string>();
+    for (const p of proxies) {
+      // Neighborhood SQL should exclude far proxies; skip any that leak.
+      if (p.far) continue;
+      const key = p.proxyId.toString();
+      seen.add(key);
+      let inst = proxyInstances.get(key);
+      if (!inst) {
+        inst = proxySource.createInstance(`proxy_${key}`);
+        proxyInstances.set(key, inst);
+      }
+      inst.position.x = p.x;
+      inst.position.y = p.y + 0.75;
+      inst.position.z = p.z;
+      inst.setEnabled(true);
+    }
+    for (const [key, inst] of proxyInstances) {
+      if (!seen.has(key)) {
+        inst.dispose();
+        proxyInstances.delete(key);
+      }
+    }
+  };
 
   const { keys } = bindInput({
     onCycleTarget: () => {
@@ -462,6 +513,7 @@ async function main(): Promise<void> {
       const c = net.getCombat();
       if (c) selectedTargetId = c.targetNpcId;
       syncNpcMeshes(net.getNpcs());
+      syncProxyMeshes(net.getProxies());
     }
 
     const gcdLeft = gcdRemainingMs(
@@ -504,6 +556,9 @@ async function main(): Promise<void> {
     },
     (_character) => {
       /* HUD refreshed via onStatus */
+    },
+    (proxies) => {
+      syncProxyMeshes(proxies);
     },
   );
 
@@ -594,6 +649,34 @@ async function main(): Promise<void> {
       }, 400);
     };
     window.setTimeout(tryCast, 600);
+  }
+
+  // ?ve=aoi — seed crowd, wait for near proxies in neighborhood, HUD mark.
+  if (net && ve === 'aoi') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE AOI: seeding crowd proxies…';
+    // Pull camera back so amber instances + blue local player are visible.
+    camera.radius = 22;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.4;
+    const tryAoi = () => {
+      if (!net) return;
+      net.seedCrowdProxies();
+      const aoi = net.getAoi();
+      const proxies = net.getProxies().filter((p) => !p.far);
+      syncProxyMeshes(net.getProxies());
+      if (aoi && proxies.length >= CROWD_NEAR_COUNT && aoi.farCount === 0) {
+        if (mark) {
+          mark.textContent = `AOI OK · interest (${aoi.interestChunkX},${aoi.interestChunkZ}) · near proxies ${aoi.nearCount} · far ${aoi.farCount} (neigh-SQL)`;
+        }
+        return;
+      }
+      if (mark && aoi) {
+        mark.textContent = `VE AOI: waiting… proxies ${aoi.proxyCount} near ${aoi.nearCount} far ${aoi.farCount}`;
+      }
+      window.setTimeout(tryAoi, 300);
+    };
+    window.setTimeout(tryAoi, 700);
   }
 
   void lastCastSpell;

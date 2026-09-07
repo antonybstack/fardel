@@ -1,8 +1,12 @@
 /**
- * SpacetimeDB connection for the Babylon client (Connect + Move + Combat + Persist).
+ * SpacetimeDB connection for the Babylon client
+ * (Connect + Move + Combat + Persist + AOI).
+ *
+ * Subscriptions follow ADR 0001: Moore neighborhood filters on hot tables
+ * (player_pose, crowd_proxy); cold/small tables (character, combat, npc) wholesale.
  */
 
-import { DbConnection, type EventContext } from '../module_bindings';
+import { DbConnection, type EventContext, type SubscriptionHandle } from '../module_bindings';
 import type { Identity, Timestamp } from 'spacetimedb';
 
 export const SPELL_SPARK = 1;
@@ -11,10 +15,24 @@ export const GCD_MS = 1200;
 export const EMBERBOLT_CAST_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
 
+/** Match shared/Fardel.Shared Movement.ChunkSizeMeters / Aoi constants. */
+export const CHUNK_SIZE_METERS = 32;
+export const CROWD_NEAR_COUNT = 8;
+export const CROWD_FAR_COUNT = 32;
+
 /** localStorage key for SpacetimeDB auth token (Persist slice). */
 export const AUTH_TOKEN_KEY = 'fardel.spacetime.token';
 
-export type Pose = { x: number; y: number; z: number; yaw: number };
+export type Pose = {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  chunkX: number;
+  chunkZ: number;
+  interestChunkX: number;
+  interestChunkZ: number;
+};
 
 export type NpcView = {
   npcId: bigint;
@@ -24,6 +42,27 @@ export type NpcView = {
   z: number;
   hp: number;
   maxHp: number;
+};
+
+export type CrowdProxyView = {
+  proxyId: bigint;
+  x: number;
+  y: number;
+  z: number;
+  chunkX: number;
+  chunkZ: number;
+  far: boolean;
+};
+
+export type AoiView = {
+  interestChunkX: number;
+  interestChunkZ: number;
+  poseChunkX: number;
+  poseChunkZ: number;
+  proxyCount: number;
+  nearCount: number;
+  farCount: number;
+  neighborhoodSql: boolean;
 };
 
 export type CombatView = {
@@ -51,6 +90,7 @@ export type ConnectionStatus =
       combat?: CombatView;
       targetNpc?: NpcView | null;
       character?: CharacterView;
+      aoi?: AoiView;
       castFeedback?: string;
       restoredToken: boolean;
     }
@@ -60,6 +100,7 @@ export type ConnectionStatus =
 export type StatusListener = (status: ConnectionStatus) => void;
 export type PoseListener = (pose: Pose) => void;
 export type NpcsListener = (npcs: NpcView[]) => void;
+export type ProxiesListener = (proxies: CrowdProxyView[]) => void;
 export type CombatListener = (combat: CombatView | null) => void;
 export type CharacterListener = (character: CharacterView | null) => void;
 
@@ -68,12 +109,15 @@ export type GameNet = {
   identity: Identity;
   sendMove: (dx: number, dz: number) => void;
   ensureTrainingDummy: () => void;
+  seedCrowdProxies: () => void;
   setTarget: (npcId: bigint) => void;
   cast: (spellId: number) => void;
   getLocalPose: () => Pose | null;
   getCombat: () => CombatView | null;
   getCharacter: () => CharacterView | null;
   getNpcs: () => NpcView[];
+  getProxies: () => CrowdProxyView[];
+  getAoi: () => AoiView | null;
   /** Sorted target cycle list (alive NPCs, dummy first). */
   getTargetCycle: () => NpcView[];
   cycleTarget: () => bigint | null;
@@ -118,12 +162,45 @@ export function clearAuthToken(): void {
   }
 }
 
+/** Fill Moore neighborhood (center + 8) — matches Fardel.Shared.Aoi.FillMooreNeighborhood. */
+export function fillMooreNeighborhood(
+  cx: number,
+  cz: number,
+): Array<{ x: number; z: number }> {
+  const out: Array<{ x: number; z: number }> = [];
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      out.push({ x: cx + dx, z: cz + dz });
+    }
+  }
+  return out;
+}
+
+/** Build ADR 0001 neighborhood SQL set (hot tables filtered by chunk). */
+export function buildNeighborhoodSqls(interestCx: number, interestCz: number): string[] {
+  const sqls: string[] = [
+    // Cold / small — never on AOI hot path for inventory, but OK wholesale for yard MVP
+    'SELECT * FROM character',
+    'SELECT * FROM player_combat',
+    'SELECT * FROM npc',
+  ];
+  for (const { x: cx, z: cz } of fillMooreNeighborhood(interestCx, interestCz)) {
+    sqls.push(`SELECT * FROM crowd_proxy WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
+    sqls.push(`SELECT * FROM player_pose WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
+  }
+  return sqls;
+}
+
 type PoseRow = {
   identity: Identity;
   x: number;
   y: number;
   z: number;
   yaw: number;
+  chunkX: number;
+  chunkZ: number;
+  interestChunkX: number;
+  interestChunkZ: number;
 };
 
 type CombatRow = {
@@ -151,8 +228,27 @@ type CharacterRow = {
   robesEquipped: boolean;
 };
 
+type CrowdProxyRow = {
+  proxyId: bigint;
+  x: number;
+  y: number;
+  z: number;
+  chunkX: number;
+  chunkZ: number;
+  far: boolean;
+};
+
 function poseView(row: PoseRow): Pose {
-  return { x: row.x, y: row.y, z: row.z, yaw: row.yaw };
+  return {
+    x: row.x,
+    y: row.y,
+    z: row.z,
+    yaw: row.yaw,
+    chunkX: row.chunkX,
+    chunkZ: row.chunkZ,
+    interestChunkX: row.interestChunkX,
+    interestChunkZ: row.interestChunkZ,
+  };
 }
 
 function npcView(row: NpcRow): NpcView {
@@ -164,6 +260,18 @@ function npcView(row: NpcRow): NpcView {
     z: row.z,
     hp: row.hp,
     maxHp: row.maxHp,
+  };
+}
+
+function proxyView(row: CrowdProxyRow): CrowdProxyView {
+  return {
+    proxyId: asBigInt(row.proxyId),
+    x: row.x,
+    y: row.y,
+    z: row.z,
+    chunkX: row.chunkX,
+    chunkZ: row.chunkZ,
+    far: row.far,
   };
 }
 
@@ -190,7 +298,8 @@ function asBigInt(v: bigint | number | string): bigint {
 }
 
 /**
- * Connect, subscribe to all tables, ensure training dummy, return net handle.
+ * Connect, subscribe to Moore neighborhood (ADR 0001), seed crowd proxies,
+ * ensure training dummy, return net handle.
  * Reuses localStorage auth token when present so refresh restores identity + Character.
  */
 export async function connectToSpacetime(
@@ -199,6 +308,7 @@ export async function connectToSpacetime(
   onNpcs?: NpcsListener,
   onCombat?: CombatListener,
   onCharacter?: CharacterListener,
+  onProxies?: ProxiesListener,
 ): Promise<GameNet | null> {
   const uri = resolveUri();
   const database = resolveDatabaseName();
@@ -216,6 +326,12 @@ export async function connectToSpacetime(
     let latestCharacter: CharacterView | null = null;
     let castFeedback = '';
     const npcMap = new Map<string, NpcView>();
+    const proxyMap = new Map<string, CrowdProxyView>();
+    let subHandle: SubscriptionHandle | null = null;
+    let subscribedInterestX = 0;
+    let subscribedInterestZ = 0;
+    let resubInFlight = false;
+    let neighborhoodSql = true;
 
     const finishError = (message: string) => {
       if (settled) return;
@@ -225,10 +341,31 @@ export async function connectToSpacetime(
     };
 
     const listNpcs = (): NpcView[] => Array.from(npcMap.values());
+    const listProxies = (): CrowdProxyView[] => Array.from(proxyMap.values());
 
     const findNpc = (id: bigint): NpcView | null => {
       if (id === 0n) return null;
       return npcMap.get(id.toString()) ?? null;
+    };
+
+    const buildAoi = (): AoiView | null => {
+      if (!latestPose) return null;
+      let near = 0;
+      let far = 0;
+      for (const p of proxyMap.values()) {
+        if (p.far) far += 1;
+        else near += 1;
+      }
+      return {
+        interestChunkX: latestPose.interestChunkX,
+        interestChunkZ: latestPose.interestChunkZ,
+        poseChunkX: latestPose.chunkX,
+        poseChunkZ: latestPose.chunkZ,
+        proxyCount: proxyMap.size,
+        nearCount: near,
+        farCount: far,
+        neighborhoodSql,
+      };
     };
 
     const targetCycle = (): NpcView[] => {
@@ -253,6 +390,7 @@ export async function connectToSpacetime(
           ? findNpc(latestCombat.targetNpcId)
           : null,
         character: latestCharacter ?? undefined,
+        aoi: buildAoi() ?? undefined,
         castFeedback: castFeedback || undefined,
         restoredToken,
       });
@@ -260,6 +398,10 @@ export async function connectToSpacetime(
 
     const emitNpcs = () => {
       onNpcs?.(listNpcs());
+    };
+
+    const emitProxies = () => {
+      onProxies?.(listProxies());
     };
 
     try {
@@ -283,6 +425,17 @@ export async function connectToSpacetime(
             if (!localIdentity || !row.identity.isEqual(localIdentity)) return;
             latestPose = poseView(row);
             onLocalPose?.(latestPose);
+            // Resubscribe when hysteresis-stable interest center moves.
+            if (
+              latestPose.interestChunkX !== subscribedInterestX ||
+              latestPose.interestChunkZ !== subscribedInterestZ
+            ) {
+              scheduleResubscribe(
+                identityHex,
+                latestPose.interestChunkX,
+                latestPose.interestChunkZ,
+              );
+            }
             emitStatus(identityHex);
           };
 
@@ -311,6 +464,102 @@ export async function connectToSpacetime(
             npcMap.delete(asBigInt(row.npcId).toString());
             emitNpcs();
             emitStatus(identityHex);
+          };
+
+          const upsertProxy = (row: CrowdProxyRow) => {
+            const view = proxyView(row);
+            proxyMap.set(view.proxyId.toString(), view);
+            emitProxies();
+            emitStatus(identityHex);
+          };
+
+          const removeProxy = (row: CrowdProxyRow) => {
+            proxyMap.delete(asBigInt(row.proxyId).toString());
+            emitProxies();
+            emitStatus(identityHex);
+          };
+
+          const syncCachesFromDb = () => {
+            for (const row of conn.db.playerPose.iter()) {
+              emitPose(row as PoseRow);
+            }
+            for (const row of conn.db.playerCombat.iter()) {
+              emitCombatRow(row as CombatRow);
+            }
+            for (const row of conn.db.character.iter()) {
+              emitCharacterRow(row as CharacterRow);
+            }
+            npcMap.clear();
+            for (const row of conn.db.npc.iter()) {
+              upsertNpc(row as NpcRow);
+            }
+            proxyMap.clear();
+            for (const row of conn.db.crowdProxy.iter()) {
+              upsertProxy(row as CrowdProxyRow);
+            }
+          };
+
+          const applySubscription = (
+            ix: number,
+            iz: number,
+            afterApplied?: () => void,
+          ) => {
+            subscribedInterestX = ix;
+            subscribedInterestZ = iz;
+            const sqls = buildNeighborhoodSqls(ix, iz);
+            neighborhoodSql = true;
+            subHandle = conn
+              .subscriptionBuilder()
+              .onApplied(() => {
+                syncCachesFromDb();
+                try {
+                  void conn.reducers.ensureTrainingDummy({});
+                } catch {
+                  /* ignore */
+                }
+                try {
+                  void conn.reducers.seedCrowdProxies({});
+                } catch {
+                  /* ignore */
+                }
+                if (!latestPose) {
+                  emitStatus(identityHex);
+                }
+                afterApplied?.();
+              })
+              .onError((ctx) => {
+                const err = (ctx as { event?: unknown }).event;
+                finishError(
+                  err instanceof Error
+                    ? err.message
+                    : String(err ?? 'subscribe error'),
+                );
+              })
+              .subscribe(sqls);
+          };
+
+          const scheduleResubscribe = (
+            hex: string,
+            ix: number,
+            iz: number,
+          ) => {
+            if (resubInFlight) return;
+            if (ix === subscribedInterestX && iz === subscribedInterestZ) return;
+            resubInFlight = true;
+            const prev = subHandle;
+            subHandle = null;
+            try {
+              prev?.unsubscribe();
+            } catch {
+              /* ignore */
+            }
+            // Clear hot caches that leave the set; cold tables stay.
+            proxyMap.clear();
+            emitProxies();
+            applySubscription(ix, iz, () => {
+              resubInFlight = false;
+              emitStatus(hex);
+            });
           };
 
           conn.db.playerPose.onInsert((_ctx: EventContext, row) => {
@@ -344,38 +593,18 @@ export async function connectToSpacetime(
             removeNpc(row as NpcRow);
           });
 
-          conn
-            .subscriptionBuilder()
-            .onApplied(() => {
-              for (const row of conn.db.playerPose.iter()) {
-                emitPose(row as PoseRow);
-              }
-              for (const row of conn.db.playerCombat.iter()) {
-                emitCombatRow(row as CombatRow);
-              }
-              for (const row of conn.db.character.iter()) {
-                emitCharacterRow(row as CharacterRow);
-              }
-              for (const row of conn.db.npc.iter()) {
-                upsertNpc(row as NpcRow);
-              }
-              // Ensure dummy exists / reset HP for presentation slice.
-              try {
-                void conn.reducers.ensureTrainingDummy({});
-              } catch {
-                /* ignore */
-              }
-              if (!latestPose) {
-                emitStatus(identityHex);
-              }
-            })
-            .onError((ctx) => {
-              const err = (ctx as { event?: unknown }).event;
-              finishError(
-                err instanceof Error ? err.message : String(err ?? 'subscribe error'),
-              );
-            })
-            .subscribeToAllTables();
+          conn.db.crowdProxy.onInsert((_ctx: EventContext, row) => {
+            upsertProxy(row as CrowdProxyRow);
+          });
+          conn.db.crowdProxy.onUpdate((_ctx: EventContext, _old, row) => {
+            upsertProxy(row as CrowdProxyRow);
+          });
+          conn.db.crowdProxy.onDelete((_ctx: EventContext, row) => {
+            removeProxy(row as CrowdProxyRow);
+          });
+
+          // Spawn interest is (0,0) until pose arrives / hysteresis adopts.
+          applySubscription(0, 0);
 
           if (!settled) {
             settled = true;
@@ -388,6 +617,9 @@ export async function connectToSpacetime(
               },
               ensureTrainingDummy: () => {
                 void conn.reducers.ensureTrainingDummy({});
+              },
+              seedCrowdProxies: () => {
+                void conn.reducers.seedCrowdProxies({});
               },
               setTarget: (npcId: bigint) => {
                 castFeedback = npcId === 0n ? 'Cleared target' : `Target ${npcId}`;
@@ -409,6 +641,8 @@ export async function connectToSpacetime(
               getCombat: () => latestCombat,
               getCharacter: () => latestCharacter,
               getNpcs: () => listNpcs(),
+              getProxies: () => listProxies(),
+              getAoi: () => buildAoi(),
               getTargetCycle: () => targetCycle(),
               cycleTarget: () => {
                 const cycle = targetCycle();
@@ -423,6 +657,11 @@ export async function connectToSpacetime(
                 return next;
               },
               disconnect: () => {
+                try {
+                  subHandle?.unsubscribe();
+                } catch {
+                  /* ignore */
+                }
                 try {
                   conn.disconnect();
                 } catch {
