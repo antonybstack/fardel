@@ -275,7 +275,7 @@ static void Fail(string msg)
     Environment.ExitCode = 1;
 }
 
-static async Task<(DbConnection conn, Identity id)> ConnectAsync()
+async Task<(DbConnection conn, Identity id)> ConnectAsync()
 {
     var connected = new TaskCompletionSource<Identity>();
     var c = DbConnection.Builder()
