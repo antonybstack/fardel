@@ -68,6 +68,19 @@
       <div class="clHead">Combat log</div>
       <div id="combatLogLines" class="clLines"></div>
     </div>
+    <div id="fpsHud" aria-label="FPS performance overlay">
+      <div class="fpsRow">
+        <span class="fpsLabel">FPS</span>
+        <span id="fpsValue" class="fpsValue">—</span>
+        <span id="fpsFloor" class="fpsFloor">floor 30 · target 60</span>
+      </div>
+      <div class="fpsCounts">
+        near <span id="fpsNear">0</span>
+        · far <span id="fpsFar">0</span>
+        · remotes <span id="fpsRemotes">0</span>
+        · npcs <span id="fpsNpcs">0</span>
+      </div>
+    </div>
     <div id="hud">
       <div id="status">Booting…</div>
       <div id="persistMark" class="persistMark"></div>

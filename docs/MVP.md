@@ -83,9 +83,9 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - AOI chunk-neighborhood subscriptions per [ADR 0001](adr/0001-aoi-interest.md) documented and enforced
 - InterestChunk hysteresis on `PlayerPose`; `CrowdProxy` seed; Moore SQL subscribe
 - **Headless gate:** `tools/AoiSmoke` — hysteresis + neighborhood subscribe excludes far proxies
-- Browser FPS floor: track with Babylon presentation (not a headless blocker)
+- Browser FPS floor: **tracked** via Babylon FPS overlay (`engine.getFps()`, green ≥ 30 / target 60 on box reference; `?ve=fps`) — not a headless blocker
 
-**Done when:** headless neighborhood subscribe proven; N proxies on-screen with a stated FPS floor on a reference machine; clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
+**Done when:** headless neighborhood subscribe proven; N proxies on-screen with a stated FPS floor on a reference machine (**box:** 30 fps floor / 60 target via FPS HUD + `ve/babylon-fps.png`); clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
 
 ## Out of MVP
 

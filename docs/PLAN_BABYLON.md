@@ -158,6 +158,7 @@ See `web/README.md` for exact commands.
 - **Player self-frame + bag/loadout strip (presentation):** bottom-left **You** + XP self-frame; compact staff/Spark/Emberbolt loadout chips from Character; **B** toggles bag panel; client-only (no player HP table yet); `?ve=bag` (`ve/babylon-bag.png`)
 - **Party member frames HUD (presentation):** compact left-column roster from `PartyMember` + remotes — You/hex, leader tag, distance + pose hint; `?ve=party-frames` + PartyMate/SecondClient (`ve/babylon-party-frames.png`)
 - **Combat log strip (presentation):** client-only scrolling right-column log — Cast start, HP-delta damage, staff/robes equip, party join; `?ve=combat-log` (`ve/babylon-combat-log.png`)
+- **FPS / performance overlay (presentation):** live `engine.getFps()` HUD (green ≥ 30 floor / 60 target on box reference) + near/far crowd proxies, remotes, NPCs; `?ve=fps` seeds crowd for AOI proof (`ve/babylon-fps.png`)
 - **Robes mesh visual (presentation):** `EquipRobes`/`UnequipRobes`; hotkeys **J/K**; hood/skirt/shoulders hide + drab tunic tint follow `Character.robesEquipped` (mirrors staff U/I); `tools/RobesEquipSmoke`; `?ve=robes-equip` (`ve/babylon-robes-equip.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
@@ -165,4 +166,4 @@ See `web/README.md` for exact commands.
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- Next (north-star): credited art packs when licenses land; Pages redeploy after combat-log (art packs still blocked)
+- Next (north-star): credited art packs when licenses land; Pages redeploy after FPS overlay (art packs still blocked)

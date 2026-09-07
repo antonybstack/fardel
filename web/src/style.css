@@ -650,3 +650,76 @@ body {
   font-size: 10px;
   font-weight: 700;
 }
+
+
+/* FPS / AOI performance overlay — left of minimap (client-only). */
+#fpsHud {
+  position: absolute;
+  right: 184px;
+  top: 12px;
+  z-index: 12;
+  pointer-events: none;
+  min-width: 168px;
+  padding: 7px 10px 8px;
+  border-radius: 8px;
+  background: rgba(8, 12, 24, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  color: #e8eefc;
+  font-variant-numeric: tabular-nums;
+}
+
+#fpsHud .fpsRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+#fpsHud .fpsLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8aa0c8;
+}
+
+#fpsHud .fpsValue {
+  font-size: 22px;
+  font-weight: 750;
+  line-height: 1;
+  min-width: 2ch;
+}
+
+#fpsHud .fpsFloor {
+  font-size: 10px;
+  color: #8ab89a;
+  margin-left: auto;
+}
+
+#fpsHud .fpsCounts {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #c8d6f0;
+}
+
+#fpsHud.fps-green {
+  border-color: rgba(94, 214, 138, 0.45);
+}
+#fpsHud.fps-green .fpsValue {
+  color: #5ed68a;
+}
+
+#fpsHud.fps-amber {
+  border-color: rgba(255, 179, 71, 0.5);
+}
+#fpsHud.fps-amber .fpsValue {
+  color: #ffb347;
+}
+
+#fpsHud.fps-red {
+  border-color: rgba(220, 80, 80, 0.55);
+}
+#fpsHud.fps-red .fpsValue {
+  color: #f07070;
+}

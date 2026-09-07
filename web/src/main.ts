@@ -34,6 +34,11 @@ import {
   remoteRobeColor,
   type HumanoidParts,
 } from './world/humanoid';
+import {
+  FPS_FLOOR,
+  FPS_TARGET,
+  updateFpsHud,
+} from './world/fpsHud';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -602,7 +607,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · combat log right',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · combat log right · FPS overlay top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1077,6 +1082,8 @@ async function main(): Promise<void> {
   let prevPartySize = 0;
   let prevPartyMemberKey = '';
   const proxyInstances = new Map<string, InstancedMesh>();
+  let fpsHudAccum = 0;
+
   const remoteMeshes = new Map<string, HumanoidParts>();
   const remoteNameplates = new Map<string, Nameplate>();
   const remoteFx = new Map<string, RemoteFx>();
@@ -1706,6 +1713,26 @@ async function main(): Promise<void> {
       npcs: net?.getNpcs() ?? [],
       proxies: net?.getProxies() ?? [],
     });
+
+    // FPS / AOI overlay ~4Hz (Babylon engine.getFps).
+    fpsHudAccum += dt;
+    if (fpsHudAccum >= 0.25) {
+      fpsHudAccum = 0;
+      const proxies = net?.getProxies() ?? [];
+      let near = 0;
+      let far = 0;
+      for (const p of proxies) {
+        if (p.far) far += 1;
+        else near += 1;
+      }
+      const npcsAlive = (net?.getNpcs() ?? []).filter((n) => n.hp > 0).length;
+      updateFpsHud(engine.getFps(), {
+        nearProxies: near,
+        farProxies: far,
+        remotes: (net?.getRemotes() ?? []).length,
+        npcs: npcsAlive,
+      });
+    }
 
     camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
     scene.render();
@@ -2729,6 +2756,59 @@ async function main(): Promise<void> {
     window.setTimeout(waitRobes, 600);
   }
 
+
+
+  // ?ve=fps — seed crowd proxies; prove FPS HUD visible + near proxies > 0.
+  if (ve === 'fps') {
+    camera.radius = 22;
+    camera.alpha = Math.PI / 2.5;
+    camera.beta = Math.PI / 3.55;
+  }
+  if (net && ve === 'fps') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE fps: waiting for Connected…';
+    let ticks = 0;
+    const waitFps = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE fps: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitFps, 200);
+        return;
+      }
+      net.seedCrowdProxies();
+      syncProxyMeshes(net.getProxies());
+      const proxies = net.getProxies();
+      const near = proxies.filter((p) => !p.far);
+      const far = proxies.filter((p) => p.far);
+      const hud = document.getElementById('fpsHud');
+      const fpsVal = document.getElementById('fpsValue')?.textContent ?? '—';
+      const hudVisible = !!hud && hud.offsetWidth > 0;
+      const fpsNum = Number.parseInt(fpsVal, 10);
+      const fpsOk = Number.isFinite(fpsNum) && fpsNum > 0;
+      if (hudVisible && near.length > 0 && fpsOk) {
+        if (mark) {
+          mark.textContent =
+            `FPS OK · ${fpsNum} fps (floor ${FPS_FLOOR} / target ${FPS_TARGET}) · near ${near.length} · far ${far.length} · remotes ${(net.getRemotes() ?? []).length} · box ref`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE fps: Connected · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} · near ${near.length} (waiting…)`;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          mark.textContent =
+            `VE fps: timed out · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} · near ${near.length}`;
+        }
+        return;
+      }
+      window.setTimeout(waitFps, 220);
+    };
+    window.setTimeout(waitFps, 700);
+  }
 
   // ?ve=combat-log — seed cast/damage/equip/party lines into scrolling combat log.
   if (ve === 'combat-log') {
