@@ -89,6 +89,7 @@ import {
   syncGroundSparkles,
   type GroundSparkle,
 } from './world/sparkles';
+import { createVendorStall } from './world/vendorStall';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -1777,26 +1778,15 @@ function makeVendorMesh(scene: Scene, vendor: VendorView): { root: Mesh; mat: St
   const root = new Mesh(`vendor_${vendor.vendorId}`, scene);
   root.position = new Vector3(vendor.x, 0, vendor.z);
 
-  const body = MeshBuilder.CreateBox(`vendorBody_${vendor.vendorId}`, { width: 0.9, height: 1.4, depth: 0.7 }, scene);
-  body.parent = root;
-  body.position.y = 0.7;
-  const mat = new StandardMaterial(`vendorMat_${vendor.vendorId}`, scene);
-  mat.diffuseColor = new Color3(0.25, 0.75, 0.45);
-  mat.emissiveColor = new Color3(0.05, 0.18, 0.1);
-  mat.specularColor = new Color3(0.1, 0.15, 0.1);
-  body.material = mat;
-
-  const awning = MeshBuilder.CreateBox(`vendorAwning_${vendor.vendorId}`, { width: 1.2, height: 0.12, depth: 1.0 }, scene);
-  awning.parent = root;
-  awning.position.y = 1.55;
-  const awningMat = new StandardMaterial(`vendorAwningMat_${vendor.vendorId}`, scene);
-  awningMat.diffuseColor = new Color3(0.85, 0.55, 0.2);
-  awningMat.emissiveColor = new Color3(0.15, 0.08, 0.02);
-  awning.material = awningMat;
+  // Procedural shop stall — posts + counter + cloth awning (#58). Warm wood /
+  // desaturated canvas under locked #39 fog/sun; readable at 8–20m play cam.
+  const stall = createVendorStall(scene, `vendorStall_${vendor.vendorId}`);
+  stall.body.parent = root;
+  const mat = stall.mat;
 
   const nameplate = createNameplate(scene, `vendor_${vendor.vendorId}`);
   nameplate.mesh.parent = root;
-  nameplate.mesh.position.set(0, 2.05, 0);
+  nameplate.mesh.position.set(0, 2.45, 0);
   paintNameplate(nameplate, vendor.label || 'Vendor', '#7dffb5', 1);
 
   return { root, mat, nameplate };
@@ -4195,11 +4185,15 @@ async function main(): Promise<void> {
     // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
     // radius from current cam position → target; walking forward increases that
     // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
+    // Skip follow for ?ve=vendor-stall so the shop silhouette stays framed.
     {
-      const follow = player.position.add(new Vector3(0, 1.35, 0));
-      const radius = camera.radius;
-      camera.setTarget(follow);
-      camera.radius = radius;
+      const veFollow = new URLSearchParams(window.location.search).get('ve');
+      if (veFollow !== 'vendor-stall') {
+        const follow = player.position.add(new Vector3(0, 1.35, 0));
+        const radius = camera.radius;
+        camera.setTarget(follow);
+        camera.radius = radius;
+      }
     }
     scene.render();
   });
@@ -7819,6 +7813,53 @@ async function main(): Promise<void> {
 
 
 
+
+  // ?ve=vendor-stall — play-cam frame of shop silhouette (posts+counter+awning) under #39 fog (#58).
+  if (ve === 'vendor-stall') {
+    // Face stall front (counter/-Z); play-cam height so awning+counter read.
+    camera.radius = 11;
+    camera.alpha = -Math.PI / 2.15;
+    camera.beta = Math.PI / 2.35;
+    // Presentation preview at known YardVendor spawn — independent of syncVendorMeshes
+    // so empty yard_vendor sub cannot dispose it mid-shot.
+    const STALL_X = -2.5;
+    const STALL_Z = 2.0;
+    const preview = createVendorStall(scene, 'veVendorStall');
+    preview.body.position.set(STALL_X, 0, STALL_Z);
+    const plate = createNameplate(scene, 'veVendorStall');
+    plate.mesh.parent = preview.body;
+    plate.mesh.position.set(0, 2.45, 0);
+    paintNameplate(plate, 'Vendor', '#7dffb5', 1);
+    camera.setTarget(new Vector3(STALL_X, 1.1, STALL_Z));
+  }
+  if (net && ve === 'vendor-stall') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE vendor-stall: waiting for Connected…';
+    const STALL_X = -2.5;
+    const STALL_Z = 2.0;
+    const waitStall = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE vendor-stall: ${st.state}…`;
+        window.setTimeout(waitStall, 300);
+        return;
+      }
+      // Prefer live YardVendor pose if subscribed; else keep spawn frame.
+      const live = net.getVendors()[0];
+      const x = live?.x ?? STALL_X;
+      const z = live?.z ?? STALL_Z;
+      camera.setTarget(new Vector3(x, 1.1, z));
+      camera.radius = 11;
+      camera.alpha = -Math.PI / 2.15;
+      camera.beta = Math.PI / 2.35;
+      if (mark) {
+        mark.textContent =
+          'Vendor-stall OK · shop silhouette · Connected';
+      }
+    };
+    window.setTimeout(waitStall, 600);
+  }
 
   // ?ve=vendor — approach YardVendor, BuyFromVendor (XP→shard) or Sell, toast/bag proof.
   if (ve === 'vendor') {

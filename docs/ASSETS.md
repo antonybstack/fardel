@@ -77,6 +77,13 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Procedural DIY only; preserve existing pickup UX
 - VE: `?ve=loot-sparkle`
 
+### Vendor stall targets (Issue #58)
+
+- Yard vendor reads as a **shop** at play cam under locked #39 fog — upright posts + counter + cloth awning (not green block, not scarecrow)
+- Warm wood posts/counter (dirt-path warmth family); desaturated canvas/stripe awning (mid value, pops in cyan fog without neon); matte / low specular
+- Footprint on path/clearing edge; readable vs lush grass at 8–20m; procedural DIY only; do **not** touch fog/sun/hemi
+- VE: `?ve=vendor-stall`
+
 ### Forest targets (Issue #34)
 
 - More mid-tree variety + stronger hero silhouettes; LOD/instancing discipline (see Principles)
@@ -121,6 +128,7 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
 |---|---|---|
 | Player | Simple humanoid + **staff** + **wizard robes** | RS-default readability; one skinned mesh or simple modular set; idle/walk/cast enough |
 | Dummy | Obvious training dummy / scarecrow | Readable target, low cost |
+| Vendor / stall | Shop silhouette: posts + counter + cloth awning | Warm wood + canvas; buy cue, not attack |
 | Ground | Flat or gentle clearing | Dirt/grass material; no full open-world terrain system yet |
 | Forest | **Huge** tree hero meshes (few uniques) + instanced mid trees | Scale sells grandeur; don’t place 10k unique high-poly trunks |
 | Mountains | Distant **mesh or skybox + silhouette** range | Overwhelming backdrop; not a hikeable alpine sim in MVP |
@@ -135,6 +143,8 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
   Procedural fallback keeps post-#40 ThinInstance density + LOD if the pack fails to load.
 - `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
   silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy is procedural scarecrow (wood post + crossbeam + canvas/sack; `web/src/world/dummy.ts`, #45).
+- `web/src/world/vendorStall.ts` — procedural yard **shop stall** (posts + counter + cloth awning +
+  crate/goods hints); warm wood / desaturated canvas under locked #39 fog (#58).
 
 Vendored under `web/public/third-party/quaternius-stylized-nature/` (see ledger). Visual north star remains Issue #31 / mood brief above.
 
