@@ -2121,9 +2121,19 @@ function disposeNameplate(np: Nameplate | null | undefined): void {
 }
 
 /** Vertical gap between stacked floaters near the same anchor. */
-const FLOATER_STACK_DY = 0.5;
+const FLOATER_STACK_DY = 0.58;
 /** XZ radius (m) for counting live floaters toward a stack slot. */
 const FLOATER_NEAR_XZ = 2.8;
+/** Dim unlit emissive so digits stay readable without neon bloom over #39 fog. */
+const FLOATER_EMISSIVE = 0.72;
+
+/** Tuned fills for cyan fog + lush grass (matte, not neon). */
+const FLOATER_TINT_SPARK = new Color3(1.0, 0.9, 0.48);
+const FLOATER_TINT_EMBER = new Color3(1.0, 0.58, 0.22);
+const FLOATER_TINT_THORNS = new Color3(0.96, 0.4, 0.36);
+const FLOATER_TINT_HEAL = new Color3(0.7, 0.96, 0.86);
+const FLOATER_TINT_XP = new Color3(1.0, 0.86, 0.4);
+const FLOATER_TINT_LEVEL = new Color3(0.72, 0.9, 1.0);
 
 /** Count still-visible floaters near `at` across one or more live lists. */
 function countNearbyLiveFloaters(
@@ -2166,34 +2176,48 @@ function spawnWorldFloater(
 ): DamageFloater {
   const slot = countNearbyLiveFloaters(opts?.stackWith, at);
   const lifeMs = opts?.lifeMs ?? 1250;
-  const yLift = (opts?.yLift ?? 1.85) + slot * FLOATER_STACK_DY;
-  const planeW = opts?.planeW ?? 1.7;
-  const planeH = opts?.planeH ?? 0.85;
+  const yLift = (opts?.yLift ?? 1.9) + slot * FLOATER_STACK_DY;
+  const planeW = opts?.planeW ?? 1.85;
+  const planeH = opts?.planeH ?? 0.95;
   const laneX = opts?.laneX ?? 0;
+  const texW = 320;
+  const texH = 160;
   const tex = new DynamicTexture(
     `fltTex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    { width: 256, height: 128 },
+    { width: texW, height: texH },
     scene,
     false,
   );
   tex.hasAlpha = true;
   const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
-  ctx.clearRect(0, 0, 256, 128);
-  const fontPx = label.length > 6 ? 64 : 84;
+  ctx.clearRect(0, 0, texW, texH);
+  const cx = texW / 2;
+  const cy = texH / 2;
+  const fontPx = label.length > 6 ? 72 : 96;
   ctx.font = `bold ${fontPx}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 12;
-  ctx.strokeStyle = 'rgba(0,0,0,0.92)';
-  ctx.strokeText(label, 128, 64);
+  // Soft drop shadow + thick dark outline so digits read over grass / cyan fog.
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillText(label, cx + 3, cy + 4);
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.lineWidth = 18;
+  ctx.strokeStyle = 'rgba(0,0,0,0.88)';
+  ctx.strokeText(label, cx, cy);
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = 'rgba(8,10,14,0.98)';
+  ctx.strokeText(label, cx, cy);
   ctx.fillStyle = `rgb(${Math.round(tint.r * 255)},${Math.round(tint.g * 255)},${Math.round(tint.b * 255)})`;
-  ctx.fillText(label, 128, 64);
+  ctx.fillText(label, cx, cy);
   tex.update();
 
   const mat = new StandardMaterial(`fltMat_${label}_${Date.now()}`, scene);
   mat.diffuseTexture = tex;
   mat.emissiveTexture = tex;
   mat.opacityTexture = tex;
+  // Cap emissive so floaters stay matte/readable (no neon bloom under #39 fog).
+  mat.emissiveColor = new Color3(FLOATER_EMISSIVE, FLOATER_EMISSIVE, FLOATER_EMISSIVE);
   mat.disableLighting = true;
   mat.useAlphaFromDiffuseTexture = true;
   mat.backFaceCulling = false;
@@ -2209,7 +2233,7 @@ function spawnWorldFloater(
   mesh.position = at.clone();
   mesh.position.y += yLift;
   // Deterministic lane + tiny per-slot zigzag (no random horizontal wander).
-  mesh.position.x += laneX + (slot % 2 === 0 ? -1 : 1) * 0.04 * Math.min(slot, 3);
+  mesh.position.x += laneX + (slot % 2 === 0 ? -1 : 1) * 0.05 * Math.min(slot, 3);
   mesh.isPickable = false;
 
   return {
@@ -2248,12 +2272,12 @@ function spawnXpFloater(
     scene,
     at,
     `+${gained} XP`,
-    new Color3(1, 0.82, 0.28),
+    FLOATER_TINT_XP,
     {
       lifeMs: 1500,
-      yLift: 2.15,
-      planeW: 2.2,
-      planeH: 0.95,
+      yLift: 2.2,
+      planeW: 2.35,
+      planeH: 1.0,
       laneX: 0.34,
       stackWith,
     },
@@ -2271,12 +2295,12 @@ function spawnLevelFloater(
     scene,
     at,
     `Level ${level}!`,
-    new Color3(0.55, 0.95, 1),
+    FLOATER_TINT_LEVEL,
     {
       lifeMs: 1900,
-      yLift: 2.45,
-      planeW: 2.6,
-      planeH: 1.05,
+      yLift: 2.5,
+      planeW: 2.7,
+      planeH: 1.1,
       laneX: 0.06,
       stackWith,
     },
@@ -3096,8 +3120,8 @@ async function main(): Promise<void> {
             scene,
             player.position,
             `+${healed}`,
-            new Color3(0.45, 0.95, 0.7),
-            { lifeMs: 1400, yLift: 2.05 },
+            FLOATER_TINT_HEAL,
+            { lifeMs: 1400, yLift: 2.05, laneX: 0.16 },
           ),
         );
       }).catch((err: unknown) => {
@@ -3343,9 +3367,7 @@ async function main(): Promise<void> {
         if (prevHp != null && npc.hp < prevHp) {
           const delta = prevHp - npc.hp;
           const ember = delta >= 20;
-          const tint = ember
-            ? new Color3(1, 0.55, 0.15)
-            : new Color3(1, 0.95, 0.45);
+          const tint = ember ? FLOATER_TINT_EMBER : FLOATER_TINT_SPARK;
           damageFloaters.push(
             spawnDamageFloater(
               scene,
@@ -3943,7 +3965,7 @@ async function main(): Promise<void> {
                   scene,
                   player.position,
                   dmg,
-                  new Color3(1.0, 0.35, 0.45),
+                  FLOATER_TINT_THORNS,
                   [damageFloaters, xpFloaters],
                 ),
               );
@@ -3956,12 +3978,12 @@ async function main(): Promise<void> {
                   scene,
                   player.position,
                   `+${healed}`,
-                  new Color3(0.35, 1.0, 0.55),
+                  FLOATER_TINT_HEAL,
                   {
                     lifeMs: 1350,
-                    yLift: 2.0,
-                    planeW: 1.55,
-                    planeH: 0.8,
+                    yLift: 2.05,
+                    planeW: 1.7,
+                    planeH: 0.88,
                     laneX: 0.16,
                     stackWith: [damageFloaters, xpFloaters],
                   },
@@ -4250,7 +4272,7 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '-12',
-              new Color3(1, 0.35, 0.4),
+              FLOATER_TINT_THORNS,
               { lifeMs: 2400, laneX: -0.28, stackWith: lists },
             ),
           );
@@ -4259,7 +4281,7 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '-8',
-              new Color3(1, 0.9, 0.4),
+              FLOATER_TINT_SPARK,
               { lifeMs: 2400, laneX: -0.28, stackWith: lists },
             ),
           );
@@ -4268,12 +4290,12 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '+25',
-              new Color3(0.35, 1.0, 0.55),
+              FLOATER_TINT_HEAL,
               {
                 lifeMs: 2400,
-                yLift: 2.0,
-                planeW: 1.55,
-                planeH: 0.8,
+                yLift: 2.05,
+                planeW: 1.7,
+                planeH: 0.88,
                 laneX: 0.18,
                 stackWith: lists,
               },
@@ -4284,12 +4306,12 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '+10 XP',
-              new Color3(1, 0.82, 0.28),
+              FLOATER_TINT_XP,
               {
                 lifeMs: 2400,
-                yLift: 2.15,
-                planeW: 2.2,
-                planeH: 0.95,
+                yLift: 2.2,
+                planeW: 2.35,
+                planeH: 1.0,
                 laneX: 0.42,
                 stackWith: lists,
               },
@@ -4305,6 +4327,95 @@ async function main(): Promise<void> {
         if (ticks < 50) window.setTimeout(pulse, 320);
       };
       window.setTimeout(pulse, 250);
+    }
+
+    // ?ve=floater-read — readability proof under #39 fog (outline + matte tints).
+    if (earlyVe === 'floater-read') {
+      camera.radius = 9.5;
+      camera.alpha = Math.PI / 2.2;
+      camera.beta = Math.PI / 3.0;
+      camera.setTarget(player.position.clone().add(new Vector3(0, 1.4, 0)));
+      const mark = document.getElementById('persistMark');
+      if (mark) mark.textContent = 'VE floater-read: seeding…';
+      let ticks = 0;
+      const pulseRead = () => {
+        ticks += 1;
+        camera.setTarget(player.position.clone().add(new Vector3(0, 1.4, 0)));
+        const lists = [damageFloaters, xpFloaters] as DamageFloater[][];
+        const liveNow =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (liveNow < 5) {
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-14',
+              FLOATER_TINT_THORNS,
+              { lifeMs: 3200, laneX: -0.3, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-9',
+              FLOATER_TINT_SPARK,
+              { lifeMs: 3200, laneX: -0.3, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-22',
+              FLOATER_TINT_EMBER,
+              { lifeMs: 3200, laneX: -0.3, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+30',
+              FLOATER_TINT_HEAL,
+              {
+                lifeMs: 3200,
+                yLift: 2.05,
+                planeW: 1.75,
+                planeH: 0.9,
+                laneX: 0.16,
+                stackWith: lists,
+              },
+            ),
+          );
+          xpFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+10 XP',
+              FLOATER_TINT_XP,
+              {
+                lifeMs: 3200,
+                yLift: 2.25,
+                planeW: 2.4,
+                planeH: 1.05,
+                laneX: 0.44,
+                stackWith: lists,
+              },
+            ),
+          );
+        }
+        const live =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (mark) {
+          mark.textContent =
+            `Floater-read OK · outline · damage/heal/XP · #39 fog · live ${live}`;
+        }
+        if (ticks < 55) window.setTimeout(pulseRead, 340);
+      };
+      window.setTimeout(pulseRead, 220);
     }
   }
 
@@ -8162,8 +8273,8 @@ async function main(): Promise<void> {
               scene,
               player.position,
               `+${healed}`,
-              new Color3(0.45, 0.95, 0.7),
-              { lifeMs: 1400, yLift: 2.05 },
+              FLOATER_TINT_HEAL,
+              { lifeMs: 1400, yLift: 2.05, laneX: 0.16 },
             ),
           );
         }).catch((err: unknown) => {
@@ -8201,8 +8312,8 @@ async function main(): Promise<void> {
             scene,
             player.position,
             `+${BANDAGE_HEAL_AMOUNT}`,
-            new Color3(0.45, 0.95, 0.7),
-            { lifeMs: 1400, yLift: 2.05 },
+            FLOATER_TINT_HEAL,
+            { lifeMs: 1400, yLift: 2.05, laneX: 0.16 },
           ),
         );
         const fillEl = document.getElementById('sfHpFill');
@@ -8983,7 +9094,7 @@ async function main(): Promise<void> {
               scene,
               player.position,
               `+${REST_HEAL_AMOUNT}`,
-              new Color3(0.35, 1.0, 0.55),
+              FLOATER_TINT_HEAL,
               {
                 lifeMs: 1400,
                 yLift: 2.05,
@@ -9017,11 +9128,16 @@ async function main(): Promise<void> {
 
 
 
-  // ?ve=floaters post-connect: early pre-connect seed owns the mark/stack.
+  // ?ve=floaters / floater-read post-connect: early pre-connect seed owns the mark/stack.
   if (ve === 'floaters') {
     camera.radius = 9.2;
     camera.alpha = Math.PI / 2.25;
     camera.beta = Math.PI / 3.05;
+  }
+  if (ve === 'floater-read') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.0;
   }
 
   // ?ve=mana — drain Spark until low mana; show self-frame mana bar + dim hotbar + toast.
