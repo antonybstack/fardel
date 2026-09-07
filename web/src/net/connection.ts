@@ -4,7 +4,7 @@
  *
  * Subscriptions follow ADR 0001: Moore neighborhood filters on hot tables
  * (player_pose, crowd_proxy); cold/small tables (character, combat, npc,
- * party_member, party_invite, chat_message, party_chat_message, whisper_message) wholesale; always-relevant party identity poses.
+ * party_member, party_invite, chat_message, party_chat_message, whisper_message, trade_offer) wholesale; always-relevant party identity poses.
  */
 
 import { DbConnection, type EventContext, type SubscriptionHandle } from '../module_bindings';
@@ -113,6 +113,15 @@ export type PartyView = {
   pendingInviteFrom: string | null;
 };
 
+export type TradeView = {
+  /** Hex of who offered a pending trade to local player (inbound). */
+  pendingFrom: string | null;
+  offeredHasEmberShard: boolean;
+  offeredXp: number;
+  /** Hex of outbound offer recipient, if any. */
+  pendingTo: string | null;
+};
+
 export type GroundItemView = {
   lootId: bigint;
   x: number;
@@ -189,6 +198,12 @@ export type GameNet = {
   seedLoot: () => void;
   pickup: () => Promise<void>;
   getGroundItems: () => GroundItemView[];
+  offerTrade: (to: Identity, offeredHasEmberShard: boolean, offeredXp: number) => Promise<void>;
+  acceptTrade: () => Promise<void>;
+  cancelTrade: () => Promise<void>;
+  /** Offer shard (if held) or small XP to nearest remote in range; returns partner hex or null. */
+  offerTradeNearestRemote: () => Promise<string | null>;
+  getTrade: () => TradeView;
   /** Resolve live PlayerPose identity by hex prefix (case-insensitive); null if ambiguous/missing. */
   findIdentityByHexPrefix: (prefix: string) => Identity | null;
   getRecentChat: () => ChatMessageView[];
@@ -294,6 +309,7 @@ export function buildNeighborhoodSqls(
     'SELECT * FROM party_invite',
     'SELECT * FROM chat_message',
     'SELECT * FROM world_loot',
+    'SELECT * FROM trade_offer',
   ];
   for (const { x: cx, z: cz } of fillMooreNeighborhood(interestCx, interestCz)) {
     sqls.push(`SELECT * FROM crowd_proxy WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
@@ -542,6 +558,10 @@ export async function connectToSpacetime(
     const chatMessageMap = new Map<string, ChatMessageView>();
     const groundMap = new Map<string, GroundItemView>();
     let pendingInviteFrom: string | null = null;
+    let pendingTradeFrom: string | null = null;
+    let pendingTradeShard = false;
+    let pendingTradeXp = 0;
+    let pendingTradeTo: string | null = null;
     /** Hex set currently included as always-relevant pose filters in the active sub. */
     let subscribedAlwaysHexes = new Set<string>();
     let subHandle: SubscriptionHandle | null = null;
@@ -838,8 +858,30 @@ export async function connectToSpacetime(
               upsertPartyMember(row as PartyMemberRow);
             }
             pendingInviteFrom = null;
+            pendingTradeFrom = null;
+            pendingTradeShard = false;
+            pendingTradeXp = 0;
+            pendingTradeTo = null;
             for (const row of conn.db.partyInvite.iter()) {
               upsertPartyInvite(row as PartyInviteRow);
+            }
+            if ((conn.db as any).tradeOffer) {
+              for (const row of (conn.db as any).tradeOffer.iter()) {
+                const r = row as {
+                  to: Identity;
+                  from: Identity;
+                  offeredHasEmberShard: boolean;
+                  offeredXp: number;
+                };
+                if (localIdentity && r.to.isEqual(localIdentity)) {
+                  pendingTradeFrom = r.from.toHexString();
+                  pendingTradeShard = r.offeredHasEmberShard;
+                  pendingTradeXp = r.offeredXp;
+                }
+                if (localIdentity && r.from.isEqual(localIdentity)) {
+                  pendingTradeTo = r.to.toHexString();
+                }
+              }
             }
             remotePoseMap.clear();
             for (const row of conn.db.playerPose.iter()) {
@@ -1044,6 +1086,42 @@ export async function connectToSpacetime(
             }
           };
 
+          type TradeOfferRow = {
+            to: Identity;
+            from: Identity;
+            offeredHasEmberShard: boolean;
+            offeredXp: number;
+          };
+
+          const refreshTradeView = () => {
+            pendingTradeFrom = null;
+            pendingTradeShard = false;
+            pendingTradeXp = 0;
+            pendingTradeTo = null;
+            if (!localIdentity) return;
+            for (const row of conn.db.tradeOffer.iter()) {
+              const r = row as TradeOfferRow;
+              if (r.to.isEqual(localIdentity)) {
+                pendingTradeFrom = r.from.toHexString();
+                pendingTradeShard = r.offeredHasEmberShard;
+                pendingTradeXp = r.offeredXp;
+              }
+              if (r.from.isEqual(localIdentity)) {
+                pendingTradeTo = r.to.toHexString();
+              }
+            }
+          };
+
+          const upsertTradeOffer = (_row: TradeOfferRow) => {
+            refreshTradeView();
+            emitStatus(identityHex);
+          };
+
+          const removeTradeOffer = (_row: TradeOfferRow) => {
+            refreshTradeView();
+            emitStatus(identityHex);
+          };
+
           conn.db.playerPose.onInsert((_ctx: EventContext, row) => {
             emitPose(row as PoseRow);
           });
@@ -1122,6 +1200,16 @@ export async function connectToSpacetime(
           });
           conn.db.partyInvite.onDelete((_ctx: EventContext, row) => {
             removePartyInvite(row as PartyInviteRow);
+          });
+
+          conn.db.tradeOffer.onInsert((_ctx: EventContext, row) => {
+            upsertTradeOffer(row as TradeOfferRow);
+          });
+          conn.db.tradeOffer.onUpdate((_ctx: EventContext, _old, row) => {
+            upsertTradeOffer(row as TradeOfferRow);
+          });
+          conn.db.tradeOffer.onDelete((_ctx: EventContext, row) => {
+            removeTradeOffer(row as TradeOfferRow);
           });
 
           const upsertChat = (row: ChatMessageRow) => {
@@ -1254,6 +1342,65 @@ export async function connectToSpacetime(
               },
               pickup: () => conn.reducers.pickup({}),
               getGroundItems: () => listGround(),
+              offerTrade: (to, offeredHasEmberShard, offeredXp) =>
+                conn.reducers.offerTrade({ to, offeredHasEmberShard, offeredXp }),
+              acceptTrade: () => conn.reducers.acceptTrade({}),
+              cancelTrade: () => conn.reducers.cancelTrade({}),
+              offerTradeNearestRemote: async () => {
+                const remotes = listRemotes();
+                const local = latestPose;
+                if (!local || remotes.length === 0) {
+                  castFeedback = 'No remote to trade';
+                  emitStatus(identityHex);
+                  return null;
+                }
+                let best = remotes[0]!;
+                let bestD = Number.POSITIVE_INFINITY;
+                for (const r of remotes) {
+                  const dx = r.x - local.x;
+                  const dz = r.z - local.z;
+                  const d = dx * dx + dz * dz;
+                  if (d < bestD) {
+                    bestD = d;
+                    best = r;
+                  }
+                }
+                let partner: Identity | null = null;
+                for (const row of conn.db.playerPose.iter()) {
+                  const hex = (row as PoseRow).identity.toHexString();
+                  if (hex === best.identityHex) {
+                    partner = (row as PoseRow).identity;
+                    break;
+                  }
+                }
+                if (!partner) {
+                  castFeedback = 'Trade partner pose missing';
+                  emitStatus(identityHex);
+                  return null;
+                }
+                const ch = latestCharacter;
+                const offerShard = !!ch?.hasEmberShard;
+                const offerXp = offerShard ? 0 : 5;
+                if (!offerShard && (ch?.xp ?? 0) < offerXp) {
+                  castFeedback = 'Nothing to offer (need shard or XP)';
+                  emitStatus(identityHex);
+                  return null;
+                }
+                castFeedback = `Offering trade to ${best.identityHex.slice(0, 8)}…`;
+                emitStatus(identityHex);
+                await conn.reducers.offerTrade({
+                  to: partner,
+                  offeredHasEmberShard: offerShard,
+                  offeredXp: offerXp,
+                });
+                return best.identityHex;
+              },
+              getTrade: () => ({
+                pendingFrom: pendingTradeFrom,
+                offeredHasEmberShard: pendingTradeShard,
+                offeredXp: pendingTradeXp,
+                pendingTo: pendingTradeTo,
+              }),
               setTarget: (npcId: bigint) => {
                 castFeedback = npcId === 0n ? 'Cleared target' : `Target ${npcId}`;
                 void conn.reducers.setTarget({ npcId });

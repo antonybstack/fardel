@@ -1051,9 +1051,11 @@ body {
 }
 .sysToast.whisper .toastTag { color: #c9a6ff; }
 
+.sysToast.trade,
 .sysToast.loot {
   border-color: rgba(255, 160, 70, 0.55);
 }
 .sysToast.loot .toastTag { color: #ffb04a; }
 
+.clLine.trade,
 .clLine.loot .clTag { color: #ffb04a; }

@@ -175,4 +175,5 @@ See `web/README.md` for exact commands.
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
 - **World loot / pickup (invent):** `WorldLoot` + `SeedLoot` / dummy-death drop + `Pickup` (nearest in range → XP + `HasEmberShard`); sparkle meshes, **F** pickup, toast/combat-log; `tools/LootSmoke`; `?ve=loot` (`ve/babylon-loot.png`)
-- Next (north-star): credited art packs when licenses land (still blocked); optional trade invent later
+- **Player trade (invent):** `TradeOffer` + `OfferTrade` / `AcceptTrade` / `CancelTrade` (range check; transfer `HasEmberShard` and/or small XP); **T** offer/accept nearest remote, **Y** cancel; toast/bag; `tools/TradeSmoke` / `tools/TradeMate`; `?ve=trade` (`ve/babylon-trade.png`)
+- Next (north-star): credited art packs when licenses land (still blocked)

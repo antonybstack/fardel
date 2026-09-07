@@ -107,6 +107,14 @@ export const PlayerPose = __t.object("PlayerPose", {
 });
 export type PlayerPose = __Infer<typeof PlayerPose>;
 
+export const TradeOffer = __t.object("TradeOffer", {
+  to: __t.identity(),
+  from: __t.identity(),
+  offeredHasEmberShard: __t.bool(),
+  offeredXp: __t.i32(),
+});
+export type TradeOffer = __Infer<typeof TradeOffer>;
+
 export const WhisperMessage = __t.object("WhisperMessage", {
   messageId: __t.u64(),
   sender: __t.identity(),

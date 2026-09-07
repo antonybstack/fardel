@@ -36,6 +36,7 @@ namespace SpacetimeDB.Types
             AddTable(PartyMember = new(conn));
             AddTable(PlayerCombat = new(conn));
             AddTable(PlayerPose = new(conn));
+            AddTable(TradeOffer = new(conn));
             AddTable(WhisperMessage = new(conn));
             AddTable(WorldLoot = new(conn));
         }
@@ -543,6 +544,7 @@ namespace SpacetimeDB.Types
             new QueryBuilder().From.PartyMember().ToSql(),
             new QueryBuilder().From.PlayerCombat().ToSql(),
             new QueryBuilder().From.PlayerPose().ToSql(),
+            new QueryBuilder().From.TradeOffer().ToSql(),
             new QueryBuilder().From.WhisperMessage().ToSql(),
             new QueryBuilder().From.WorldLoot().ToSql(),
         }
@@ -560,6 +562,7 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Table<PartyMember, PartyMemberCols, PartyMemberIxCols> PartyMember() => new("party_member", new PartyMemberCols("party_member"), new PartyMemberIxCols("party_member"));
         public global::SpacetimeDB.Table<PlayerCombat, PlayerCombatCols, PlayerCombatIxCols> PlayerCombat() => new("player_combat", new PlayerCombatCols("player_combat"), new PlayerCombatIxCols("player_combat"));
         public global::SpacetimeDB.Table<PlayerPose, PlayerPoseCols, PlayerPoseIxCols> PlayerPose() => new("player_pose", new PlayerPoseCols("player_pose"), new PlayerPoseIxCols("player_pose"));
+        public global::SpacetimeDB.Table<TradeOffer, TradeOfferCols, TradeOfferIxCols> TradeOffer() => new("trade_offer", new TradeOfferCols("trade_offer"), new TradeOfferIxCols("trade_offer"));
         public global::SpacetimeDB.Table<WhisperMessage, WhisperMessageCols, WhisperMessageIxCols> WhisperMessage() => new("whisper_message", new WhisperMessageCols("whisper_message"), new WhisperMessageIxCols("whisper_message"));
         public global::SpacetimeDB.Table<WorldLoot, WorldLootCols, WorldLootIxCols> WorldLoot() => new("world_loot", new WorldLootCols("world_loot"), new WorldLootIxCols("world_loot"));
     }
@@ -644,6 +647,8 @@ namespace SpacetimeDB.Types
             return reducer switch
             {
                 Reducer.AcceptPartyInvite args => Reducers.InvokeAcceptPartyInvite(eventContext, args),
+                Reducer.AcceptTrade args => Reducers.InvokeAcceptTrade(eventContext, args),
+                Reducer.CancelTrade args => Reducers.InvokeCancelTrade(eventContext, args),
                 Reducer.Cast args => Reducers.InvokeCast(eventContext, args),
                 Reducer.CreateParty args => Reducers.InvokeCreateParty(eventContext, args),
                 Reducer.EnsureTrainingDummy args => Reducers.InvokeEnsureTrainingDummy(eventContext, args),
@@ -652,6 +657,7 @@ namespace SpacetimeDB.Types
                 Reducer.InviteToParty args => Reducers.InvokeInviteToParty(eventContext, args),
                 Reducer.LeaveParty args => Reducers.InvokeLeaveParty(eventContext, args),
                 Reducer.Move args => Reducers.InvokeMove(eventContext, args),
+                Reducer.OfferTrade args => Reducers.InvokeOfferTrade(eventContext, args),
                 Reducer.PartySay args => Reducers.InvokePartySay(eventContext, args),
                 Reducer.Pickup args => Reducers.InvokePickup(eventContext, args),
                 Reducer.Say args => Reducers.InvokeSay(eventContext, args),

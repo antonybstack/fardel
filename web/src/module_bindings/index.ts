@@ -35,6 +35,8 @@ import {
 
 // Import all reducer arg schemas
 import AcceptPartyInviteReducer from "./accept_party_invite_reducer";
+import AcceptTradeReducer from "./accept_trade_reducer";
+import CancelTradeReducer from "./cancel_trade_reducer";
 import CastReducer from "./cast_reducer";
 import CreatePartyReducer from "./create_party_reducer";
 import EnsureTrainingDummyReducer from "./ensure_training_dummy_reducer";
@@ -43,6 +45,7 @@ import EquipStaffReducer from "./equip_staff_reducer";
 import InviteToPartyReducer from "./invite_to_party_reducer";
 import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
+import OfferTradeReducer from "./offer_trade_reducer";
 import PartySayReducer from "./party_say_reducer";
 import PickupReducer from "./pickup_reducer";
 import SayReducer from "./say_reducer";
@@ -65,6 +68,7 @@ import PartyInviteRow from "./party_invite_table";
 import PartyMemberRow from "./party_member_table";
 import PlayerCombatRow from "./player_combat_table";
 import PlayerPoseRow from "./player_pose_table";
+import TradeOfferRow from "./trade_offer_table";
 import WhisperMessageRow from "./whisper_message_table";
 import WorldLootRow from "./world_loot_table";
 
@@ -177,6 +181,17 @@ const tablesSchema = __schema({
       { name: 'player_pose_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, PlayerPoseRow),
+  tradeOffer: __table({
+    name: 'trade_offer',
+    indexes: [
+      { accessor: 'To', name: 'trade_offer_to_idx_btree', algorithm: 'btree', columns: [
+        'to',
+      ] },
+    ],
+    constraints: [
+      { name: 'trade_offer_to_key', constraint: 'unique', columns: ['to'] },
+    ],
+  }, TradeOfferRow),
   whisperMessage: __table({
     name: 'whisper_message',
     indexes: [
@@ -210,6 +225,8 @@ const tablesSchema = __schema({
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("accept_party_invite", AcceptPartyInviteReducer),
+  __reducerSchema("accept_trade", AcceptTradeReducer),
+  __reducerSchema("cancel_trade", CancelTradeReducer),
   __reducerSchema("cast", CastReducer),
   __reducerSchema("create_party", CreatePartyReducer),
   __reducerSchema("ensure_training_dummy", EnsureTrainingDummyReducer),
@@ -218,6 +235,7 @@ const reducersSchema = __reducers(
   __reducerSchema("invite_to_party", InviteToPartyReducer),
   __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
+  __reducerSchema("offer_trade", OfferTradeReducer),
   __reducerSchema("party_say", PartySayReducer),
   __reducerSchema("pickup", PickupReducer),
   __reducerSchema("say", SayReducer),
@@ -253,6 +271,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "PlayerCombat": Omit<typeof tablesSchema.schemaType.tables["playerCombat"], "accessorName"> & { readonly accessorName: "PlayerCombat" };
     /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
     readonly "PlayerPose": Omit<typeof tablesSchema.schemaType.tables["playerPose"], "accessorName"> & { readonly accessorName: "PlayerPose" };
+    /** @deprecated Use `tradeOffer` instead. This alias will be removed in the next major version. */
+    readonly "TradeOffer": Omit<typeof tablesSchema.schemaType.tables["tradeOffer"], "accessorName"> & { readonly accessorName: "TradeOffer" };
     /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
     readonly "WhisperMessage": Omit<typeof tablesSchema.schemaType.tables["whisperMessage"], "accessorName"> & { readonly accessorName: "WhisperMessage" };
     /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
@@ -284,6 +304,7 @@ const tableAccessorAliases = {
   "PartyMember": "partyMember",
   "PlayerCombat": "playerCombat",
   "PlayerPose": "playerPose",
+  "TradeOffer": "tradeOffer",
   "WhisperMessage": "whisperMessage",
   "WorldLoot": "worldLoot",
 } as const;
@@ -324,6 +345,8 @@ export type DbView = __DbViewBase & {
   readonly "PlayerCombat": __DbViewBase["playerCombat"];
   /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
   readonly "PlayerPose": __DbViewBase["playerPose"];
+  /** @deprecated Use `tradeOffer` instead. This alias will be removed in the next major version. */
+  readonly "TradeOffer": __DbViewBase["tradeOffer"];
   /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
   readonly "WhisperMessage": __DbViewBase["whisperMessage"];
   /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
@@ -350,6 +373,8 @@ export type Tables = __TablesBase & {
   readonly "PlayerCombat": __TablesBase["playerCombat"];
   /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
   readonly "PlayerPose": __TablesBase["playerPose"];
+  /** @deprecated Use `tradeOffer` instead. This alias will be removed in the next major version. */
+  readonly "TradeOffer": __TablesBase["tradeOffer"];
   /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
   readonly "WhisperMessage": __TablesBase["whisperMessage"];
   /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */

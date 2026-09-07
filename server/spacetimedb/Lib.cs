@@ -117,6 +117,20 @@ public static partial class Module
         public string ItemId;
     }
 
+
+    /// <summary>Pending player trade — one outstanding offer per recipient (To).</summary>
+    [SpacetimeDB.Table(Accessor = "TradeOffer", Public = true)]
+    public partial struct TradeOffer
+    {
+        [SpacetimeDB.PrimaryKey]
+        public Identity To;
+        public Identity From;
+        /// <summary>When true, Accept transfers Character.HasEmberShard From→To.</summary>
+        public bool OfferedHasEmberShard;
+        /// <summary>When > 0, Accept transfers this much Character.Xp From→To.</summary>
+        public int OfferedXp;
+    }
+
     /// <summary>Public yard chat — Say reducer inserts; clients wholesale-subscribe.</summary>
     [SpacetimeDB.Table(Accessor = "ChatMessage", Public = true)]
     public partial struct ChatMessage
@@ -212,6 +226,7 @@ public static partial class Module
         }
 
         ClearPartyStateFor(ctx, ctx.Sender);
+        ClearTradeStateFor(ctx, ctx.Sender);
     }
 
     [SpacetimeDB.Reducer]
@@ -996,6 +1011,187 @@ public static partial class Module
         }
 
         Log.Info($"Whisper {ctx.Sender} -> {recipient}: {trimmed}");
+    }
+
+
+    /// <summary>Offer a pending trade to another online identity (shard and/or small XP).</summary>
+    [SpacetimeDB.Reducer]
+    public static void OfferTrade(ReducerContext ctx, Identity to, bool offeredHasEmberShard, int offeredXp)
+    {
+        if (to == ctx.Sender)
+        {
+            throw new Exception("Cannot trade with self");
+        }
+
+        if (ctx.Db.PlayerPose.Identity.Find(to) is null)
+        {
+            throw new Exception("Trade partner not online");
+        }
+
+        if (!offeredHasEmberShard && offeredXp <= 0)
+        {
+            throw new Exception("Offer empty");
+        }
+
+        if (offeredXp < 0 || offeredXp > Trade.MaxOfferXp)
+        {
+            throw new Exception("Invalid XP offer");
+        }
+
+        var fromPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        var toPose = ctx.Db.PlayerPose.Identity.Find(to)
+            ?? throw new Exception("Trade partner not online");
+        EnsureInTradeRange(fromPose, toPose);
+
+        var fromChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
+        if (offeredHasEmberShard && !fromChar.HasEmberShard)
+        {
+            throw new Exception("No ember shard");
+        }
+
+        if (offeredXp > 0 && fromChar.Xp < offeredXp)
+        {
+            throw new Exception("Not enough XP");
+        }
+
+        // One outstanding offer per recipient; also replace any prior offer from sender.
+        if (ctx.Db.TradeOffer.To.Find(to) is { } existing)
+        {
+            ctx.Db.TradeOffer.To.Delete(existing.To);
+        }
+        var stale = new System.Collections.Generic.List<Identity>();
+        foreach (var row in ctx.Db.TradeOffer.Iter())
+        {
+            if (row.From == ctx.Sender)
+            {
+                stale.Add(row.To);
+            }
+        }
+        foreach (var id in stale)
+        {
+            ctx.Db.TradeOffer.To.Delete(id);
+        }
+
+        ctx.Db.TradeOffer.Insert(new TradeOffer
+        {
+            To = to,
+            From = ctx.Sender,
+            OfferedHasEmberShard = offeredHasEmberShard,
+            OfferedXp = offeredXp,
+        });
+        Log.Info($"TradeOffer {ctx.Sender} -> {to} shard={offeredHasEmberShard} xp={offeredXp}");
+    }
+
+    /// <summary>Accept the outstanding TradeOffer targeting sender — range + transfer.</summary>
+    [SpacetimeDB.Reducer]
+    public static void AcceptTrade(ReducerContext ctx)
+    {
+        var offer = ctx.Db.TradeOffer.To.Find(ctx.Sender)
+            ?? throw new Exception("No pending trade");
+
+        var fromPose = ctx.Db.PlayerPose.Identity.Find(offer.From)
+            ?? throw new Exception("Trade partner not online");
+        var toPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        EnsureInTradeRange(fromPose, toPose);
+
+        var fromChar = ctx.Db.Character.Identity.Find(offer.From)
+            ?? throw new Exception("Offer character missing");
+        var toChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
+        if (offer.OfferedHasEmberShard)
+        {
+            if (!fromChar.HasEmberShard)
+            {
+                ctx.Db.TradeOffer.To.Delete(offer.To);
+                throw new Exception("No ember shard");
+            }
+            fromChar.HasEmberShard = false;
+            toChar.HasEmberShard = true;
+        }
+
+        if (offer.OfferedXp > 0)
+        {
+            if (fromChar.Xp < offer.OfferedXp)
+            {
+                ctx.Db.TradeOffer.To.Delete(offer.To);
+                throw new Exception("Not enough XP");
+            }
+            fromChar.Xp -= offer.OfferedXp;
+            toChar.Xp += offer.OfferedXp;
+        }
+
+        ctx.Db.Character.Identity.Update(fromChar);
+        ctx.Db.Character.Identity.Update(toChar);
+        ctx.Db.TradeOffer.To.Delete(offer.To);
+        Log.Info($"AcceptTrade {ctx.Sender} from {offer.From} shard={offer.OfferedHasEmberShard} xp={offer.OfferedXp}");
+    }
+
+    /// <summary>Cancel outgoing or decline inbound TradeOffer involving sender.</summary>
+    [SpacetimeDB.Reducer]
+    public static void CancelTrade(ReducerContext ctx)
+    {
+        var removed = false;
+        if (ctx.Db.TradeOffer.To.Find(ctx.Sender) is { } inbound)
+        {
+            ctx.Db.TradeOffer.To.Delete(inbound.To);
+            removed = true;
+        }
+
+        var outs = new System.Collections.Generic.List<Identity>();
+        foreach (var row in ctx.Db.TradeOffer.Iter())
+        {
+            if (row.From == ctx.Sender)
+            {
+                outs.Add(row.To);
+            }
+        }
+        foreach (var id in outs)
+        {
+            ctx.Db.TradeOffer.To.Delete(id);
+            removed = true;
+        }
+
+        if (!removed)
+        {
+            throw new Exception("No trade to cancel");
+        }
+        Log.Info($"CancelTrade by {ctx.Sender}");
+    }
+
+    static void EnsureInTradeRange(PlayerPose a, PlayerPose b)
+    {
+        var dx = a.X - b.X;
+        var dz = a.Z - b.Z;
+        var range = Trade.RangeMeters;
+        if (dx * dx + dz * dz > range * range)
+        {
+            throw new Exception("Out of range");
+        }
+    }
+
+    static void ClearTradeStateFor(ReducerContext ctx, Identity id)
+    {
+        if (ctx.Db.TradeOffer.To.Find(id) is { } inbound)
+        {
+            ctx.Db.TradeOffer.To.Delete(inbound.To);
+        }
+        var outs = new System.Collections.Generic.List<Identity>();
+        foreach (var row in ctx.Db.TradeOffer.Iter())
+        {
+            if (row.From == id)
+            {
+                outs.Add(row.To);
+            }
+        }
+        foreach (var to in outs)
+        {
+            ctx.Db.TradeOffer.To.Delete(to);
+        }
     }
 
     /// <summary>Clear + seed one ember_shard near yard spawn (idempotent smoke helper).</summary>

@@ -103,6 +103,7 @@ Prove authority with headless smokes first; Babylon presentation follows:
 - `tools/AoiSmoke` (slice 4)
 - `tools/PartySmoke` (party / always-relevant invent)
 - `tools/LootSmoke` (world loot / pickup invent)
+- `tools/TradeSmoke` (player trade invent)
 
 Browser Connect / yard art lives in `web/` (Vite + Babylon). Unity is not required for slice gates.
 
@@ -120,4 +121,4 @@ Before starting work, answer:
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
 - **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (`ve/babylon-forest.png`); **humanoid+staff**; **second-client shared yard** green (`ve/babylon-two-client.png`); **remote cast/target telegraphs** (`ve/babylon-remote-cast.png`); **floating damage numbers** (`ve/babylon-damage-text.png`); **party / always-relevant** (`ve/babylon-party.png`); **staff unequip gates casts** (`ve/babylon-staff-equip.png`); **minimap / compass HUD** (`ve/babylon-minimap.png`); **world nameplates** (`ve/babylon-nameplates.png`); **selected-target frame HUD** (`ve/babylon-target-frame.png`); **spell hotbar** (`ve/babylon-hotbar.png`); **self-frame + bag/loadout** (`ve/babylon-bag.png`); **party member frames** (`ve/babylon-party-frames.png`); **robes mesh visual** (`ve/babylon-robes-equip.png`); **combat log strip** (`ve/babylon-combat-log.png`); **FPS / perf overlay** (`ve/babylon-fps.png` — 30 fps floor stated on box ref); **system toast banner** (`ve/babylon-toasts.png`); **dummy death / respawn VFX** (`ve/babylon-death.png`); **chat / public Say** (`ve/babylon-say.png`); **Say rate-limit** (1s/identity + toast `rate`); **XP floater** (`ve/babylon-xp-float.png`); **party/whisper chat channels** (`ve/babylon-party-chat.png` / `ve/babylon-whisper.png`); **world loot / pickup** (`ve/babylon-loot.png`)
-- **POC north-star:** closer — remaining invent: credited art packs for humanoid (loot/pickup invent done; art packs still blocked)
+- **POC north-star:** closer — remaining invent: credited art packs for humanoid (loot/pickup + player trade invent done; art packs still blocked)

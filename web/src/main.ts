@@ -425,7 +425,7 @@ function updatePartyFrames(opts: {
 
 const COMBAT_LOG_MAX = 14;
 
-type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot';
+type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot' | 'trade';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -447,7 +447,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
               ? 'KILL'
               : kind === 'loot'
                 ? 'LOOT'
-                : 'RESPAWN';
+                : kind === 'trade'
+                  ? 'TRADE'
+                  : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -489,7 +491,8 @@ type SystemToastKind =
   | 'partySay'
   | 'whisper'
   | 'rate'
-  | 'loot';
+  | 'loot'
+  | 'trade';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -526,7 +529,9 @@ function pushSystemToast(
                         ? 'WHISPER'
                         : kind === 'loot'
                           ? 'LOOT'
-                          : 'SAY';
+                          : kind === 'trade'
+                            ? 'TRADE'
+                            : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -957,7 +962,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · F pickup · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · F pickup · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1104,6 +1109,8 @@ function bindInput(opts: {
   onCast: (spellId: number) => void;
   onPartyInviteOrAccept: () => void;
   onPartyLeave: () => void;
+  onTradeOfferOrAccept: () => void;
+  onTradeCancel: () => void;
   onUnequipStaff: () => void;
   onEquipStaff: () => void;
   onUnequipRobes: () => void;
@@ -1144,6 +1151,16 @@ function bindInput(opts: {
     if (k === 'o') {
       e.preventDefault();
       opts.onPartyLeave();
+      return;
+    }
+    if (k === 't') {
+      e.preventDefault();
+      opts.onTradeOfferOrAccept();
+      return;
+    }
+    if (k === 'y') {
+      e.preventDefault();
+      opts.onTradeCancel();
       return;
     }
     if (k === 'u') {
@@ -1575,6 +1592,8 @@ async function main(): Promise<void> {
   let prevPendingInvite: string | null = null;
   let toastedConnected = false;
   let toastedInviteAcceptKey = '';
+  let toastedTradeKey = '';
+  let lastTradePendingFrom: string | null = null;
   const proxyInstances = new Map<string, InstancedMesh>();
   let fpsHudAccum = 0;
 
@@ -1923,6 +1942,55 @@ async function main(): Promise<void> {
     onPartyLeave: () => {
       if (!net) return;
       net.leaveParty();
+    },
+    onTradeOfferOrAccept: () => {
+      const g = net;
+      if (!g) return;
+      const trade = g.getTrade();
+      if (trade.pendingFrom) {
+        void g.acceptTrade().then(() => {
+          const bits: string[] = [];
+          if (trade.offeredHasEmberShard) bits.push('ember_shard');
+          if (trade.offeredXp > 0) bits.push(`+${trade.offeredXp} XP`);
+          pushCombatLog('trade', `Accepted trade (${bits.join(' · ') || 'ok'})`);
+          pushSystemToast('trade', `Trade accepted · ${bits.join(' · ') || 'done'}`, TOAST_VE_TTL_MS);
+          bagOpen = true;
+          setBagPanelOpen(true);
+          const ch = g.getCharacter();
+          if (ch) updateBagPanel(ch);
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          pushSystemToast('rate', msg.slice(0, 96) || 'Accept trade failed');
+        });
+        return;
+      }
+      void g.offerTradeNearestRemote().then((hex) => {
+        if (!hex) {
+          pushSystemToast('rate', 'No nearby player to trade');
+          return;
+        }
+        const ch = g.getCharacter();
+        const what = ch?.hasEmberShard ? 'ember_shard' : '+5 XP';
+        pushCombatLog('trade', `Offered ${what} → ${hex.slice(0, 8)}…`);
+        pushSystemToast('trade', `Trade offered · ${what} · T waits accept`, TOAST_VE_TTL_MS);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/out of range/i.test(msg)) {
+          pushSystemToast('rate', 'Too far to trade');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Offer trade failed');
+        }
+      });
+    },
+    onTradeCancel: () => {
+      if (!net) return;
+      void net.cancelTrade().then(() => {
+        pushCombatLog('trade', 'Trade cancelled');
+        pushSystemToast('trade', 'Trade cancelled');
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Cancel trade failed');
+      });
     },
     onUnequipStaff: () => {
       if (!net) return;
@@ -2432,6 +2500,39 @@ async function main(): Promise<void> {
           }
         }
         prevPendingInvite = pending;
+        // Inbound trade offer toast + bag refresh when transfer lands.
+        const tr = net?.getTrade();
+        const tradePending = tr?.pendingFrom ?? null;
+        if (tradePending && tradePending !== lastTradePendingFrom) {
+          const bits: string[] = [];
+          if (tr?.offeredHasEmberShard) bits.push('ember_shard');
+          if ((tr?.offeredXp ?? 0) > 0) bits.push(`+${tr!.offeredXp} XP`);
+          pushSystemToast(
+            'trade',
+            `Trade from ${tradePending.slice(0, 8)}… · ${bits.join(' · ') || 'offer'} · T accept`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'trade',
+            `Offer from ${tradePending.slice(0, 8)}… (${bits.join(' · ') || 'offer'})`,
+          );
+        }
+        if (
+          !tradePending &&
+          lastTradePendingFrom &&
+          tr?.pendingTo == null
+        ) {
+          const doneKey = `done:${lastTradePendingFrom}`;
+          if (doneKey !== toastedTradeKey) {
+            toastedTradeKey = doneKey;
+            bagOpen = true;
+            setBagPanelOpen(true);
+            const chNow = net?.getCharacter();
+            if (chNow) updateBagPanel(chNow);
+            pushSystemToast('trade', 'Trade complete · bag updated', TOAST_VE_TTL_MS);
+          }
+        }
+        lastTradePendingFrom = tradePending;
         if (size > prevPartySize && size >= 1) {
           if (prevPartySize === 0) {
             pushCombatLog(
@@ -4606,6 +4707,147 @@ async function main(): Promise<void> {
     window.setTimeout(waitLoot, 700);
   }
 
+
+
+
+  // ?ve=trade — SeedLoot+Pickup → OfferTrade to TradeMate remote → Accept → toast + bag.
+  if (ve === 'trade') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'trade') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE trade: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let picked = false;
+    let offered = false;
+    let bagShown = false;
+    const waitTrade = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE trade: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitTrade, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0.8, 1.0, 0.3)));
+      camera.radius = 11;
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      if (!bagShown) {
+        bagShown = true;
+        bagOpen = true;
+        setBagPanelOpen(true);
+      }
+      const ch = net.getCharacter();
+      if (ch) updateBagPanel(ch);
+      const trade = net.getTrade();
+      const toastOk = toastKindsPresent().has('trade');
+      const logOk = combatLogKindsPresent().has('trade');
+      const shard = !!ch?.hasEmberShard;
+
+      if (!seeded) {
+        seeded = true;
+        if (mark) mark.textContent = 'VE trade: seeding ember_shard…';
+        net.seedLoot();
+        window.setTimeout(waitTrade, 350);
+        return;
+      }
+      if (!picked) {
+        if (net.getGroundItems().length < 1) {
+          if (mark) mark.textContent = 'VE trade: waiting ground shard…';
+          if (ticks < 240) window.setTimeout(waitTrade, 220);
+          return;
+        }
+        picked = true;
+        if (mark) mark.textContent = 'VE trade: picking up shard…';
+        void net.pickup().then(() => {
+          pushCombatLog('loot', 'Picked up ember_shard for trade');
+        }).catch(() => undefined);
+        window.setTimeout(waitTrade, 400);
+        return;
+      }
+      if (!shard && !offered) {
+        // wait for pickup grant
+        if (mark) mark.textContent = 'VE trade: waiting bag shard flag…';
+        if (ticks < 260) window.setTimeout(waitTrade, 220);
+        return;
+      }
+      if (remotes.length < 1) {
+        if (mark) {
+          mark.textContent =
+            'VE trade: Connected · remotes 0 (start tools/TradeMate)…';
+        }
+        if (ticks < 280) window.setTimeout(waitTrade, 250);
+        return;
+      }
+      if (shard && !offered && !trade.pendingTo) {
+        // Prefer TradeMate hold pose (~2, 0.5) over stale remotes at spawn.
+        const ranked = [...remotes].sort((a, b) => {
+          const da = Math.hypot(a.x - 2, a.z - 0.5);
+          const db = Math.hypot(b.x - 2, b.z - 0.5);
+          return da - db;
+        });
+        const target = ranked[0]!;
+        const partner = net.findIdentityByHexPrefix(target.identityHex.slice(0, 16));
+        if (!partner) {
+          if (mark) mark.textContent = 'VE trade: partner identity missing…';
+          if (ticks < 280) window.setTimeout(waitTrade, 220);
+          return;
+        }
+        offered = true;
+        if (mark) {
+          mark.textContent =
+            `VE trade: OfferTrade → ${target.identityHex.slice(0, 8)}… @(${target.x.toFixed(1)},${target.z.toFixed(1)})`;
+        }
+        // Nudge toward mate so range check passes.
+        for (let i = 0; i < 6; i++) {
+          net.sendMove(target.x - (net.getLocalPose()?.x ?? 0), target.z - (net.getLocalPose()?.z ?? 0));
+        }
+        void net
+          .offerTrade(partner, true, 0)
+          .then(() => {
+            pushCombatLog('trade', `Offered ember_shard → ${target.identityHex.slice(0, 8)}…`);
+            pushSystemToast(
+              'trade',
+              `Trade offered · ember_shard · waiting accept`,
+              TOAST_VE_TTL_MS,
+            );
+          })
+          .catch(() => {
+            offered = false;
+          });
+        window.setTimeout(waitTrade, 400);
+        return;
+      }
+      // Success: shard gone after accept, toast/log present, bag open.
+      if (!shard && offered && (toastOk || logOk)) {
+        setBagPanelOpen(true);
+        if (ch) updateBagPanel(ch);
+        if (mark) {
+          mark.textContent =
+            `Trade OK · ember_shard transferred · T offer · bag empty · toast/log`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE trade: shard ${shard ? 'y' : 'n'} · remotes ${remotes.length} · pendingTo ${trade.pendingTo?.slice(0, 8) ?? '—'} · toast ${toastOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 320) {
+        if (mark) {
+          mark.textContent =
+            `VE trade: timed out · shard ${shard ? 'y' : 'n'} · toast ${toastOk ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitTrade, 220);
+    };
+    window.setTimeout(waitTrade, 700);
+  }
 
 
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.

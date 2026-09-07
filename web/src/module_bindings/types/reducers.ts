@@ -7,6 +7,8 @@ import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
 import AcceptPartyInviteReducer from "../accept_party_invite_reducer";
+import AcceptTradeReducer from "../accept_trade_reducer";
+import CancelTradeReducer from "../cancel_trade_reducer";
 import CastReducer from "../cast_reducer";
 import CreatePartyReducer from "../create_party_reducer";
 import EnsureTrainingDummyReducer from "../ensure_training_dummy_reducer";
@@ -15,6 +17,7 @@ import EquipStaffReducer from "../equip_staff_reducer";
 import InviteToPartyReducer from "../invite_to_party_reducer";
 import LeavePartyReducer from "../leave_party_reducer";
 import MoveReducer from "../move_reducer";
+import OfferTradeReducer from "../offer_trade_reducer";
 import PartySayReducer from "../party_say_reducer";
 import PickupReducer from "../pickup_reducer";
 import SayReducer from "../say_reducer";
@@ -26,6 +29,8 @@ import UnequipStaffReducer from "../unequip_staff_reducer";
 import WhisperReducer from "../whisper_reducer";
 
 export type AcceptPartyInviteParams = __Infer<typeof AcceptPartyInviteReducer>;
+export type AcceptTradeParams = __Infer<typeof AcceptTradeReducer>;
+export type CancelTradeParams = __Infer<typeof CancelTradeReducer>;
 export type CastParams = __Infer<typeof CastReducer>;
 export type CreatePartyParams = __Infer<typeof CreatePartyReducer>;
 export type EnsureTrainingDummyParams = __Infer<typeof EnsureTrainingDummyReducer>;
@@ -34,6 +39,7 @@ export type EquipStaffParams = __Infer<typeof EquipStaffReducer>;
 export type InviteToPartyParams = __Infer<typeof InviteToPartyReducer>;
 export type LeavePartyParams = __Infer<typeof LeavePartyReducer>;
 export type MoveParams = __Infer<typeof MoveReducer>;
+export type OfferTradeParams = __Infer<typeof OfferTradeReducer>;
 export type PartySayParams = __Infer<typeof PartySayReducer>;
 export type PickupParams = __Infer<typeof PickupReducer>;
 export type SayParams = __Infer<typeof SayReducer>;
