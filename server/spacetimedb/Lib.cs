@@ -16,6 +16,23 @@ public static partial class Module
         public float Yaw;
         public int ChunkX;
         public int ChunkZ;
+        /// <summary>Hysteresis-stable AOI center (ADR 0001).</summary>
+        public int InterestChunkX;
+        public int InterestChunkZ;
+    }
+
+    /// <summary>Slice-4 crowd proxies for AOI / alloc scaffold (not real players).</summary>
+    [SpacetimeDB.Table(Accessor = "CrowdProxy", Public = true)]
+    public partial struct CrowdProxy
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong ProxyId;
+        public float X;
+        public float Y;
+        public float Z;
+        public int ChunkX;
+        public int ChunkZ;
+        public bool Far;
     }
 
     /// <summary>Durable traveler row — survives disconnect (slice 3).</summary>
@@ -102,7 +119,64 @@ public static partial class Module
         pose.Z = z;
         pose.ChunkX = cx;
         pose.ChunkZ = cz;
+        var ix = pose.InterestChunkX;
+        var iz = pose.InterestChunkZ;
+        Aoi.UpdateInterest(x, z, cx, cz, ref ix, ref iz);
+        pose.InterestChunkX = ix;
+        pose.InterestChunkZ = iz;
         ctx.Db.PlayerPose.Identity.Update(pose);
+    }
+
+    /// <summary>Clear + seed near/far crowd proxies for AOI smokes (idempotent).</summary>
+    [SpacetimeDB.Reducer]
+    public static void SeedCrowdProxies(ReducerContext ctx)
+    {
+        // Collect ids first — do not mutate while iterating.
+        var toDelete = new System.Collections.Generic.List<ulong>();
+        foreach (var row in ctx.Db.CrowdProxy.Iter())
+        {
+            toDelete.Add(row.ProxyId);
+        }
+
+        foreach (var id in toDelete)
+        {
+            ctx.Db.CrowdProxy.ProxyId.Delete(id);
+        }
+
+        // Near: around spawn chunk (0,0) neighborhood
+        for (var i = 0; i < Aoi.CrowdNearCount; i++)
+        {
+            var x = (i % 3) * 4f;
+            var z = (i / 3) * 4f;
+            Movement.ChunkCoords(x, z, out var cx, out var cz);
+            ctx.Db.CrowdProxy.Insert(new CrowdProxy
+            {
+                X = x,
+                Y = 0f,
+                Z = z,
+                ChunkX = cx,
+                ChunkZ = cz,
+                Far = false,
+            });
+        }
+
+        // Far: offset chunks outside Moore of spawn interest
+        var farBase = Aoi.FarChunkOffset * Movement.ChunkSizeMeters;
+        for (var i = 0; i < Aoi.CrowdFarCount; i++)
+        {
+            var x = farBase + (i % 4) * 2f;
+            var z = farBase + (i / 4) * 2f;
+            Movement.ChunkCoords(x, z, out var cx, out var cz);
+            ctx.Db.CrowdProxy.Insert(new CrowdProxy
+            {
+                X = x,
+                Y = 0f,
+                Z = z,
+                ChunkX = cx,
+                ChunkZ = cz,
+                Far = true,
+            });
+        }
     }
 
     [SpacetimeDB.Reducer]
@@ -242,6 +316,8 @@ public static partial class Module
                 Yaw = 0f,
                 ChunkX = cx,
                 ChunkZ = cz,
+                InterestChunkX = cx,
+                InterestChunkZ = cz,
             });
         }
 

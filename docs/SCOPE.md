@@ -99,7 +99,7 @@ Keep [ADR 0002](adr/0002-client-host-webgpu.md): Unity remains the **v1 ship cli
 - `tools/MoveSmoke` (slice 1)
 - `tools/CombatSmoke` (slice 2)
 - `tools/PersistSmoke` (slice 3)
-- later AOI / alloc smokes (slice 4)
+- `tools/AoiSmoke` (slice 4)
 
 Unity Connect scene / forest art resume when those gates pass (presentation, not net learning).
 
@@ -113,5 +113,5 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 3 (Persist) proven** via `tools/PersistSmoke`; next **slice 4 (Perf / AOI)**
+- **Phase:** **slice 4 (AOI) proven** via `tools/AoiSmoke` (headless); Unity FPS floor still deferred with Editor
 - **POC north-star:** not started

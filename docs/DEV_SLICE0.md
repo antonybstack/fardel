@@ -38,3 +38,15 @@ dotnet run --project tools/ConnectSmoke
 Expect: `OK: connected identity …`
 
 Unity Play on `Assets/Scenes/Connect` is the visual check; the smoke is the slice gate.
+
+## Local SpacetimeDB keepalive
+
+Do **not** start `spacetime` as a bare background job inside an agent shell (`spacetime start &`). Those shells get aborted and take the DB with them (connection refused, empty crash log).
+
+Use:
+
+```bash
+./tools/scripts/ensure-local-spacetime.sh
+```
+
+It pings first, disables corrupting Homebrew `wasm-opt`, and starts with a detached session (`setsid` / `nohup`+`disown`) plus `--non-interactive`.

@@ -79,8 +79,11 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - Instanced crowd proxy (capsules OK)
 - Alloc budget check in a smoke path
 - AOI chunk-neighborhood subscriptions per [ADR 0001](adr/0001-aoi-interest.md) documented and enforced
+- InterestChunk hysteresis on `PlayerPose`; `CrowdProxy` seed; Moore SQL subscribe
+- **Headless gate:** `tools/AoiSmoke` — hysteresis + neighborhood subscribe excludes far proxies
+- Unity FPS floor: deferred with Editor (presentation), not a headless blocker
 
-**Done when:** N proxies on-screen with a stated FPS floor on a reference machine; clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
+**Done when:** headless neighborhood subscribe proven; N proxies on-screen with a stated FPS floor on a reference machine when Editor resumes; clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
 
 ## Out of MVP
 

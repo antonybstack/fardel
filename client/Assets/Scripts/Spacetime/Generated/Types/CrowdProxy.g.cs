@@ -11,51 +11,43 @@ namespace SpacetimeDB.Types
 {
     [SpacetimeDB.Type]
     [DataContract]
-    public sealed partial class PlayerPose
+    public sealed partial class CrowdProxy
     {
-        [DataMember(Name = "identity")]
-        public SpacetimeDB.Identity Identity;
+        [DataMember(Name = "proxy_id")]
+        public ulong ProxyId;
         [DataMember(Name = "x")]
         public float X;
         [DataMember(Name = "y")]
         public float Y;
         [DataMember(Name = "z")]
         public float Z;
-        [DataMember(Name = "yaw")]
-        public float Yaw;
         [DataMember(Name = "chunk_x")]
         public int ChunkX;
         [DataMember(Name = "chunk_z")]
         public int ChunkZ;
-        [DataMember(Name = "interest_chunk_x")]
-        public int InterestChunkX;
-        [DataMember(Name = "interest_chunk_z")]
-        public int InterestChunkZ;
+        [DataMember(Name = "far")]
+        public bool Far;
 
-        public PlayerPose(
-            SpacetimeDB.Identity Identity,
+        public CrowdProxy(
+            ulong ProxyId,
             float X,
             float Y,
             float Z,
-            float Yaw,
             int ChunkX,
             int ChunkZ,
-            int InterestChunkX,
-            int InterestChunkZ
+            bool Far
         )
         {
-            this.Identity = Identity;
+            this.ProxyId = ProxyId;
             this.X = X;
             this.Y = Y;
             this.Z = Z;
-            this.Yaw = Yaw;
             this.ChunkX = ChunkX;
             this.ChunkZ = ChunkZ;
-            this.InterestChunkX = InterestChunkX;
-            this.InterestChunkZ = InterestChunkZ;
+            this.Far = Far;
         }
 
-        public PlayerPose()
+        public CrowdProxy()
         {
         }
     }
