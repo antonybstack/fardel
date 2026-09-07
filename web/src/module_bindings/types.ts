@@ -18,6 +18,7 @@ export const Character = __t.object("Character", {
   staffEquipped: __t.bool(),
   robesEquipped: __t.bool(),
   hasEmberShard: __t.bool(),
+  hasYardTonic: __t.bool(),
 });
 export type Character = __Infer<typeof Character>;
 
@@ -114,6 +115,14 @@ export const TradeOffer = __t.object("TradeOffer", {
   offeredXp: __t.i32(),
 });
 export type TradeOffer = __Infer<typeof TradeOffer>;
+
+export const VendorStock = __t.object("VendorStock", {
+  itemId: __t.string(),
+  qty: __t.i32(),
+  buyXpCost: __t.i32(),
+  sellShardXp: __t.i32(),
+});
+export type VendorStock = __Infer<typeof VendorStock>;
 
 export const WhisperMessage = __t.object("WhisperMessage", {
   messageId: __t.u64(),

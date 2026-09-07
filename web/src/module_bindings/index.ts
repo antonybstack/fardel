@@ -41,6 +41,7 @@ import CancelTradeReducer from "./cancel_trade_reducer";
 import CastReducer from "./cast_reducer";
 import CreatePartyReducer from "./create_party_reducer";
 import EnsureTrainingDummyReducer from "./ensure_training_dummy_reducer";
+import EnsureVendorReducer from "./ensure_vendor_reducer";
 import EquipRobesReducer from "./equip_robes_reducer";
 import EquipStaffReducer from "./equip_staff_reducer";
 import InviteToPartyReducer from "./invite_to_party_reducer";
@@ -71,6 +72,7 @@ import PartyMemberRow from "./party_member_table";
 import PlayerCombatRow from "./player_combat_table";
 import PlayerPoseRow from "./player_pose_table";
 import TradeOfferRow from "./trade_offer_table";
+import VendorStockRow from "./vendor_stock_table";
 import WhisperMessageRow from "./whisper_message_table";
 import WorldLootRow from "./world_loot_table";
 import YardVendorRow from "./yard_vendor_table";
@@ -195,6 +197,17 @@ const tablesSchema = __schema({
       { name: 'trade_offer_to_key', constraint: 'unique', columns: ['to'] },
     ],
   }, TradeOfferRow),
+  vendorStock: __table({
+    name: 'vendor_stock',
+    indexes: [
+      { accessor: 'ItemId', name: 'vendor_stock_item_id_idx_btree', algorithm: 'btree', columns: [
+        'itemId',
+      ] },
+    ],
+    constraints: [
+      { name: 'vendor_stock_item_id_key', constraint: 'unique', columns: ['itemId'] },
+    ],
+  }, VendorStockRow),
   whisperMessage: __table({
     name: 'whisper_message',
     indexes: [
@@ -245,6 +258,7 @@ const reducersSchema = __reducers(
   __reducerSchema("cast", CastReducer),
   __reducerSchema("create_party", CreatePartyReducer),
   __reducerSchema("ensure_training_dummy", EnsureTrainingDummyReducer),
+  __reducerSchema("ensure_vendor", EnsureVendorReducer),
   __reducerSchema("equip_robes", EquipRobesReducer),
   __reducerSchema("equip_staff", EquipStaffReducer),
   __reducerSchema("invite_to_party", InviteToPartyReducer),
@@ -289,6 +303,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "PlayerPose": Omit<typeof tablesSchema.schemaType.tables["playerPose"], "accessorName"> & { readonly accessorName: "PlayerPose" };
     /** @deprecated Use `tradeOffer` instead. This alias will be removed in the next major version. */
     readonly "TradeOffer": Omit<typeof tablesSchema.schemaType.tables["tradeOffer"], "accessorName"> & { readonly accessorName: "TradeOffer" };
+    /** @deprecated Use `vendorStock` instead. This alias will be removed in the next major version. */
+    readonly "VendorStock": Omit<typeof tablesSchema.schemaType.tables["vendorStock"], "accessorName"> & { readonly accessorName: "VendorStock" };
     /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
     readonly "WhisperMessage": Omit<typeof tablesSchema.schemaType.tables["whisperMessage"], "accessorName"> & { readonly accessorName: "WhisperMessage" };
     /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
@@ -323,6 +339,7 @@ const tableAccessorAliases = {
   "PlayerCombat": "playerCombat",
   "PlayerPose": "playerPose",
   "TradeOffer": "tradeOffer",
+  "VendorStock": "vendorStock",
   "WhisperMessage": "whisperMessage",
   "WorldLoot": "worldLoot",
   "YardVendor": "yardVendor",
@@ -366,6 +383,8 @@ export type DbView = __DbViewBase & {
   readonly "PlayerPose": __DbViewBase["playerPose"];
   /** @deprecated Use `tradeOffer` instead. This alias will be removed in the next major version. */
   readonly "TradeOffer": __DbViewBase["tradeOffer"];
+  /** @deprecated Use `vendorStock` instead. This alias will be removed in the next major version. */
+  readonly "VendorStock": __DbViewBase["vendorStock"];
   /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
   readonly "WhisperMessage": __DbViewBase["whisperMessage"];
   /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
@@ -396,6 +415,8 @@ export type Tables = __TablesBase & {
   readonly "PlayerPose": __TablesBase["playerPose"];
   /** @deprecated Use `tradeOffer` instead. This alias will be removed in the next major version. */
   readonly "TradeOffer": __TablesBase["tradeOffer"];
+  /** @deprecated Use `vendorStock` instead. This alias will be removed in the next major version. */
+  readonly "VendorStock": __TablesBase["vendorStock"];
   /** @deprecated Use `whisperMessage` instead. This alias will be removed in the next major version. */
   readonly "WhisperMessage": __TablesBase["whisperMessage"];
   /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
