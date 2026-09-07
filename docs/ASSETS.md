@@ -55,6 +55,7 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Combat floater readability (#59): thick outline + matte tints under #39 fog; `?ve=floater-read` (`ve/babylon-floater-read.png`)
 - Hotbar affordance polish (#63): empty vs STAFF vs OOM clarity; `?ve=hotbar-afford` (`ve/babylon-hotbar-afford.png`)
 - Target frame / reticule contrast (#69): gold select chrome crisp vs #39 cyan fog; `?ve=target-contrast` (`ve/babylon-target-contrast.png`)
+- Party/self HP bar readability (#67): dark track + saturated green→amber→red fills; `?ve=frame-hp` (`ve/babylon-frame-hp.png`)
 
 ### Path / ground targets (Issue #44)
 

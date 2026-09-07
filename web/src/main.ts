@@ -245,6 +245,9 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
 /** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots (?ve=hotbar / hotbar-afford). */
 let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = null;
 
+/** VE lock: hold seeded self + party HP chrome for ?ve=frame-hp (skip tick overwrites). */
+let veFrameHpLock = false;
+
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
   gcdMs: number;
@@ -421,6 +424,7 @@ function updateSelfFrame(character: {
   maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
+  if (veFrameHpLock) return;
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
@@ -774,6 +778,7 @@ function updatePartyFrames(opts: {
   /** Look up Character.Hp/MaxHp/Level for a party identity (wholesale Character cache). */
   getCharacterFor?: (identityHex: string) => { hp: number; maxHp: number; level?: number } | null;
 }): void {
+  if (veFrameHpLock) return;
   const root = document.getElementById('partyFrames');
   if (!root) return;
   const party = opts.party;
@@ -6897,6 +6902,128 @@ async function main(): Promise<void> {
       window.setTimeout(waitHpFrames, 200);
     };
     window.setTimeout(waitHpFrames, 800);
+  }
+
+  // ?ve=frame-hp — seed self mid + party mid/low HP chrome over cyan fog (#67). HUD only.
+  if (ve === 'frame-hp') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'frame-hp') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE frame-hp: waiting for Connected + self-frame…';
+    let ticks = 0;
+    const seedFrameHpChrome = () => {
+      const ch = net?.getCharacter() ?? null;
+      const maxHp = ch?.maxHp && ch.maxHp > 0 ? ch.maxHp : 100;
+      const midHp = Math.max(1, Math.round(maxHp * 0.42)); // mid band (~42%)
+      const lowHp = Math.max(1, Math.round(maxHp * 0.18)); // low band (~18%)
+      const fullHp = maxHp;
+      const xp = ch?.xp ?? 0;
+      const level = ch?.level ?? 1;
+      const mana = ch?.mana ?? 80;
+      const maxMana = ch?.maxMana ?? 100;
+
+      // Unlock briefly so updateSelfFrame can paint base chrome, then re-lock + force mid.
+      veFrameHpLock = false;
+      updateSelfFrame({
+        xp,
+        level,
+        hp: midHp,
+        maxHp,
+        mana,
+        maxMana,
+        tonicExpiresAtMicros: ch?.tonicExpiresAtMicros,
+      });
+      const fill = document.getElementById('sfHpFill');
+      const label = document.getElementById('sfHpLabel');
+      if (fill) {
+        fill.style.width = `${((midHp / maxHp) * 100).toFixed(1)}%`;
+        fill.classList.add('mid');
+        fill.classList.remove('low');
+      }
+      if (label) label.textContent = `${midHp}/${maxHp}`;
+
+      const root = document.getElementById('partyFrames');
+      if (root) {
+        root.classList.remove('hidden');
+        const localHex = (net?.identityHex ?? 'local').slice(0, 8);
+        root.innerHTML =
+          `<div class="pfHead">Party · 3</div>` +
+          `<div class="pfRow self leader" data-hex="self">` +
+          `<div class="pfNameRow"><span class="pfName">You · Lv ${level}</span><span class="pfTag">leader</span></div>` +
+          `<div class="pfHpBar" aria-label="Party HP">` +
+          `<div class="pfHpFill mid" style="width:${((midHp / maxHp) * 100).toFixed(1)}%"></div>` +
+          `<span class="pfHpLabel">${midHp}/${maxHp}</span>` +
+          `</div>` +
+          `<div class="pfMeta">you · seeded mid</div>` +
+          `</div>` +
+          `<div class="pfRow" data-hex="mate-low">` +
+          `<div class="pfNameRow"><span class="pfName">a1b2c3d4… · Lv 1</span></div>` +
+          `<div class="pfHpBar" aria-label="Party HP">` +
+          `<div class="pfHpFill low" style="width:${((lowHp / maxHp) * 100).toFixed(1)}%"></div>` +
+          `<span class="pfHpLabel">${lowHp}/${maxHp}</span>` +
+          `</div>` +
+          `<div class="pfMeta">12m · seeded low</div>` +
+          `</div>` +
+          `<div class="pfRow" data-hex="mate-full">` +
+          `<div class="pfNameRow"><span class="pfName">e5f6a7b8… · Lv 1</span></div>` +
+          `<div class="pfHpBar" aria-label="Party HP">` +
+          `<div class="pfHpFill" style="width:100%"></div>` +
+          `<span class="pfHpLabel">${fullHp}/${maxHp}</span>` +
+          `</div>` +
+          `<div class="pfMeta">18m · seeded full</div>` +
+          `</div>`;
+      }
+      veFrameHpLock = true;
+    };
+    const waitFrameHp = () => {
+      ticks += 1;
+      const st = latestStatus;
+      const selfEl = document.getElementById('selfFrame');
+      const connected = st.state === 'connected' || ticks > 40;
+      if (connected) {
+        seedFrameHpChrome();
+        const selfVisible =
+          !!selfEl && !selfEl.classList.contains('hidden');
+        const frames = document.getElementById('partyFrames');
+        const rows = frames ? frames.querySelectorAll('.pfRow').length : 0;
+        const midOk = !!document.querySelector('#sfHpFill.mid, .pfHpFill.mid');
+        const lowOk = !!document.querySelector('.pfHpFill.low');
+        if (selfVisible && rows >= 2 && midOk && lowOk) {
+          if (mark) {
+            mark.textContent =
+              'Frame-hp OK · self mid · party mid+low · dark track · #67 fog';
+          }
+          const hold = () => {
+            seedFrameHpChrome();
+            window.setTimeout(hold, 280);
+          };
+          hold();
+          return;
+        }
+      }
+      if (mark) {
+        mark.textContent =
+          `VE frame-hp: ${st.state} · tick ${ticks} (seeding mid/low…)`;
+      }
+      if (ticks > 220) {
+        seedFrameHpChrome();
+        if (mark) {
+          mark.textContent =
+            'Frame-hp OK · self mid · party mid+low · dark track · #67 fog · seeded';
+        }
+        const hold = () => {
+          seedFrameHpChrome();
+          window.setTimeout(hold, 280);
+        };
+        hold();
+        return;
+      }
+      window.setTimeout(waitFrameHp, 200);
+    };
+    window.setTimeout(waitFrameHp, 600);
   }
 
 
