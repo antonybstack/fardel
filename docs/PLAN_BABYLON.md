@@ -111,6 +111,9 @@ See `web/README.md` for exact commands.
 
 ## Status
 
-- Docs + Unity removal from `main`: this plan
-- Scaffold: `web/` Vite + Babylon 9 + connection stub
-- Next: wire generated bindings → Connect HUD green in browser
+- Docs + Unity removal from `main`: done
+- Scaffold: `web/` Vite + Babylon 9 + generated TS bindings
+- **Connect (presentation):** green in browser (HUD Connected + identity)
+- **Move (presentation):** WASD → `Move` reducer; RMB ArcRotate look; capsule
+  reconciles to `PlayerPose`; HUD shows Connected + `pos`
+- Next: Combat presentation (tab-target dummy, Spark/Emberbolt, GCD UI)

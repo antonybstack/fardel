@@ -74,3 +74,5 @@ docker-module-build.log
 connect-smoke*.log
 combat-smoke.log
 move-smoke.log
+
+vite.log
