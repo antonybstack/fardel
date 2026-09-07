@@ -1162,6 +1162,13 @@ body {
   border-color: rgba(125, 255, 181, 0.55);
 }
 .sysToast.tonic .toastTag { color: #7dffb5; }
+
+.sysToast.rest {
+  border-color: rgba(90, 220, 140, 0.55);
+}
+.sysToast.rest .toastTag { color: #7dffb5; }
+
+.clLine.rest,
 .clLine.tonic .clTag { color: #7dffb5; }
 .sysToast.vendor,
 .clLine.vendor .clTag { color: #6dffb0; }

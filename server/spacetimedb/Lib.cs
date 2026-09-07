@@ -87,6 +87,10 @@ public static partial class Module
         /// <summary>Persisted level (high-water from cumulative XP). Party/self share the same number.</summary>
         [SpacetimeDB.Default(1)]
         public int Level;
+        /// <summary>Last time ApplyPlayerDamage hit this character (0 = never). Gates Rest.</summary>
+        public Timestamp LastDamagedAt;
+        /// <summary>Earliest time Rest may succeed again (cooldown after heal).</summary>
+        public Timestamp RestReadyAt;
     }
 
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
@@ -766,6 +770,8 @@ public static partial class Module
             TonicExpiresAt = ctx.Timestamp,
             Hp = Combat.PlayerMaxHp,
             MaxHp = Combat.PlayerMaxHp,
+            LastDamagedAt = default,
+            RestReadyAt = ctx.Timestamp,
         });
     }
 
@@ -862,6 +868,7 @@ public static partial class Module
         }
 
         ch.Hp = Math.Max(0, ch.Hp - damage);
+        ch.LastDamagedAt = ctx.Timestamp;
         ctx.Db.Character.Identity.Update(ch);
         if (ch.Hp > 0)
         {
@@ -1594,6 +1601,53 @@ public static partial class Module
         AddCharacterXp(ref character, Fardel.Shared.Vendor.SellPriceXp);
         ctx.Db.Character.Identity.Update(character);
         Log.Info($"SellToVendor {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
+    }
+
+
+    /// <summary>
+    /// Out-of-combat Rest (bandage): restore HealAmount HP toward MaxHp.
+    /// Rejects while dead, casting, recently damaged, on cooldown, or already full.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void Rest(ReducerContext ctx)
+    {
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (character.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+        if (character.MaxHp <= 0)
+        {
+            character.MaxHp = Combat.PlayerMaxHp;
+        }
+        if (character.Hp >= character.MaxHp)
+        {
+            throw new Exception("Already full HP");
+        }
+
+        if (ctx.Db.PlayerCombat.Identity.Find(ctx.Sender) is { } combat
+            && combat.CastingSpellId != 0)
+        {
+            throw new Exception("Casting");
+        }
+
+        if (character.LastDamagedAt.MicrosecondsSinceUnixEpoch > 0
+            && ctx.Timestamp < character.LastDamagedAt + Ms(Fardel.Shared.Rest.CombatLockMs))
+        {
+            throw new Exception("Recently damaged");
+        }
+
+        if (ctx.Timestamp < character.RestReadyAt)
+        {
+            throw new Exception("Rest on cooldown");
+        }
+
+        var before = character.Hp;
+        character.Hp = Math.Min(character.MaxHp, character.Hp + Fardel.Shared.Rest.HealAmount);
+        character.RestReadyAt = ctx.Timestamp + Ms(Fardel.Shared.Rest.CooldownMs);
+        ctx.Db.Character.Identity.Update(character);
+        Log.Info($"Rest {ctx.Sender} hp {before}->{character.Hp}/{character.MaxHp}");
     }
 
     /// <summary>Spend XP at a nearby YardVendor to gain HasYardTonic.</summary>

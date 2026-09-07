@@ -103,6 +103,8 @@ export type CharacterView = {
   tonicExpiresAtMicros: bigint;
   hp: number;
   maxHp: number;
+  lastDamagedAtMicros: bigint;
+  restReadyAtMicros: bigint;
 };
 
 export type PartyMemberView = {
@@ -223,6 +225,7 @@ export type GameNet = {
   sellToVendor: () => Promise<void>;
   buyYardTonic: () => Promise<void>;
   useYardTonic: () => Promise<void>;
+  rest: () => Promise<void>;
   getVendors: () => VendorView[];
   /** Nearest YardVendor within interact range, or null. */
   nearestVendor: (rangeMeters?: number) => VendorView | null;
@@ -395,6 +398,8 @@ type CharacterRow = {
   hp: number;
   maxHp: number;
   level: number;
+  lastDamagedAt: Timestamp;
+  restReadyAt: Timestamp;
 };
 
 type CrowdProxyRow = {
@@ -511,6 +516,8 @@ function characterView(row: CharacterRow): CharacterView {
     tonicExpiresAtMicros: row.tonicExpiresAt.microsSinceUnixEpoch,
     hp: row.hp ?? 0,
     maxHp: row.maxHp ?? 0,
+    lastDamagedAtMicros: row.lastDamagedAt?.microsSinceUnixEpoch ?? 0n,
+    restReadyAtMicros: row.restReadyAt?.microsSinceUnixEpoch ?? 0n,
   };
 }
 
@@ -1442,6 +1449,7 @@ export async function connectToSpacetime(
               sellToVendor: () => conn.reducers.sellToVendor({}),
               buyYardTonic: () => conn.reducers.buyYardTonic({}),
               useYardTonic: () => conn.reducers.useYardTonic({}),
+              rest: () => conn.reducers.rest({}),
               getVendors: () => {
                 const out: VendorView[] = [];
                 const table = (conn.db as any).yardVendor;

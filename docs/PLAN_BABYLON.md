@@ -161,6 +161,7 @@ See `web/README.md` for exact commands.
 - **Party XP share (invent):** kill grants `XpPerKill` to killer + `PartyXpSharePerMate` to always-relevant `PartyMember` mates; `tools/PartyXpSmoke`; mate toast/floater; `?ve=party-xp` (`ve/babylon-party-xp.png`)
 - **Party loot share (invent):** death drop + extra `ember_shard` WorldLoot near each in-range mate (`Loot.PartyShareRangeMeters`); `tools/PartyLootSmoke`; toast; `?ve=party-loot` (`ve/babylon-party-loot.png`)
 - **Character level from XP (invent):** shared `Progression.LevelFromXp` curve; persist `Character.Level` (high-water on XP grants); self/nameplate/party/bag `Lv N` + toast `level` + floater; `tools/LevelSmoke`; `?ve=level` (`ve/babylon-level.png`)
+- **Out-of-combat Rest / bandage heal (invent):** `Rest` reducer restores `Character.Hp` toward `MaxHp` (`Rest.HealAmount`) with cooldown; rejects while casting / recently damaged / full / dead; tracks `LastDamagedAt` + `RestReadyAt`; hotkey **R**, heal VFX/toast, HP bar fill; `tools/RestSmoke`; `?ve=rest` (`ve/babylon-rest.png`)
 - **Minimap party blips (invent/presentation):** client-only — always-relevant party remote poses already green on compass; distinct halo + rim chevron when beyond minimap range; `?ve=minimap-party` + PartyMate far pose (`ve/babylon-minimap-party.png`)
 - **Combat log strip (presentation):** client-only scrolling right-column log — Cast start, HP-delta damage, staff/robes equip, party join; `?ve=combat-log` (`ve/babylon-combat-log.png`)
 - **FPS / performance overlay (presentation):** live `engine.getFps()` HUD (green ≥ 30 floor / 60 target on box reference) + near/far crowd proxies, remotes, NPCs; `?ve=fps` seeds crowd for AOI proof (`ve/babylon-fps.png`)
@@ -189,3 +190,4 @@ See `web/README.md` for exact commands.
 - **Party loot share (invent):** dummy-death WorldLoot + extra `ember_shard` near in-range `PartyMember` mates; `tools/PartyLootSmoke`; mate toast; `?ve=party-loot` (`ve/babylon-party-loot.png`)
 - **Minimap party blips (follow-on):** far always-relevant mate green rim blip; `?ve=minimap-party` (`ve/babylon-minimap-party.png`)
 - **Character level from XP (follow-on):** kill XP crosses thresholds → `Character.Level`; `?ve=level` (`ve/babylon-level.png`)
+- **Out-of-combat Rest (follow-on):** hotkey R heal; `?ve=rest` (`ve/babylon-rest.png`)

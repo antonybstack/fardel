@@ -665,6 +665,7 @@ namespace SpacetimeDB.Types
                 Reducer.OfferTrade args => Reducers.InvokeOfferTrade(eventContext, args),
                 Reducer.PartySay args => Reducers.InvokePartySay(eventContext, args),
                 Reducer.Pickup args => Reducers.InvokePickup(eventContext, args),
+                Reducer.Rest args => Reducers.InvokeRest(eventContext, args),
                 Reducer.Say args => Reducers.InvokeSay(eventContext, args),
                 Reducer.SeedCrowdProxies args => Reducers.InvokeSeedCrowdProxies(eventContext, args),
                 Reducer.SeedLoot args => Reducers.InvokeSeedLoot(eventContext, args),

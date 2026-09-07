@@ -51,6 +51,8 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<Character, int> Hp { get; }
         public global::SpacetimeDB.Col<Character, int> MaxHp { get; }
         public global::SpacetimeDB.Col<Character, int> Level { get; }
+        public global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp> LastDamagedAt { get; }
+        public global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp> RestReadyAt { get; }
 
         public CharacterCols(string tableName)
         {
@@ -66,6 +68,8 @@ namespace SpacetimeDB.Types
             Hp = new global::SpacetimeDB.Col<Character, int>(tableName, "hp");
             MaxHp = new global::SpacetimeDB.Col<Character, int>(tableName, "max_hp");
             Level = new global::SpacetimeDB.Col<Character, int>(tableName, "level");
+            LastDamagedAt = new global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp>(tableName, "last_damaged_at");
+            RestReadyAt = new global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp>(tableName, "rest_ready_at");
         }
     }
 

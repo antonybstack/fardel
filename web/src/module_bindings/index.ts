@@ -50,6 +50,7 @@ import MoveReducer from "./move_reducer";
 import OfferTradeReducer from "./offer_trade_reducer";
 import PartySayReducer from "./party_say_reducer";
 import PickupReducer from "./pickup_reducer";
+import RestReducer from "./rest_reducer";
 import SayReducer from "./say_reducer";
 import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
 import SeedLootReducer from "./seed_loot_reducer";
@@ -256,6 +257,7 @@ const reducersSchema = __reducers(
   __reducerSchema("offer_trade", OfferTradeReducer),
   __reducerSchema("party_say", PartySayReducer),
   __reducerSchema("pickup", PickupReducer),
+  __reducerSchema("rest", RestReducer),
   __reducerSchema("say", SayReducer),
   __reducerSchema("seed_crowd_proxies", SeedCrowdProxiesReducer),
   __reducerSchema("seed_loot", SeedLootReducer),

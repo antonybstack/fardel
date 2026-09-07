@@ -23,4 +23,6 @@ export default __t.row({
   hp: __t.i32(),
   maxHp: __t.i32().name("max_hp"),
   level: __t.i32(),
+  lastDamagedAt: __t.timestamp().name("last_damaged_at"),
+  restReadyAt: __t.timestamp().name("rest_ready_at"),
 });

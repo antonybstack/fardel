@@ -64,6 +64,8 @@ import {
 const MAX_STEP_METERS = 0.75;
 /** Match shared/Fardel.Shared Tonic.MoveSpeedMult. */
 const TONIC_MOVE_MULT = 1.75;
+/** Match shared/Fardel.Shared Rest.HealAmount. */
+const REST_HEAL_AMOUNT = 25;
 /** Client wish speed (m/s); each reducer call is clamped server-side. */
 const MOVE_SPEED = 4.5;
 
@@ -547,7 +549,8 @@ const COMBAT_LOG_MAX = 14;
 
 type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot' | 'trade'
   | 'vendor'
-  | 'tonic';
+  | 'tonic'
+  | 'rest';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -575,7 +578,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                     ? 'VENDOR'
                     : kind === 'tonic'
                       ? 'TONIC'
-                      : 'RESPAWN';
+                      : kind === 'rest'
+                        ? 'REST'
+                        : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -621,7 +626,8 @@ type SystemToastKind =
   | 'loot'
   | 'trade'
   | 'vendor'
-  | 'tonic';
+  | 'tonic'
+  | 'rest';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -666,7 +672,9 @@ function pushSystemToast(
                               ? 'VENDOR'
                               : kind === 'tonic'
                                 ? 'TONIC'
-                                : 'SAY';
+                                : kind === 'rest'
+                                  ? 'REST'
+                                  : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1160,7 +1168,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1366,6 +1374,7 @@ function bindInput(opts: {
   onVendorInteract: () => void;
   onPickupNearest: () => void;
   onUseYardTonic: () => void;
+  onRest: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -1450,6 +1459,11 @@ function bindInput(opts: {
     if (k === 'v') {
       e.preventDefault();
       opts.onUseYardTonic();
+      return;
+    }
+    if (k === 'r') {
+      e.preventDefault();
+      opts.onRest();
       return;
     }
   };
@@ -2396,6 +2410,43 @@ async function main(): Promise<void> {
         }
       });
     },
+    onRest: () => {
+      if (!net) return;
+      const g = net;
+      const ch0 = g.getCharacter();
+      if (!ch0 || ch0.hp <= 0) {
+        pushSystemToast('rate', 'Cannot rest while dead');
+        return;
+      }
+      if (ch0.hp >= ch0.maxHp) {
+        pushSystemToast('rate', 'Already full HP');
+        return;
+      }
+      const before = ch0.hp;
+      void g.rest().then(() => {
+        const after = g.getCharacter();
+        if (after) updateSelfFrame(after);
+        const healed = after ? Math.max(0, after.hp - before) : REST_HEAL_AMOUNT;
+        pushCombatLog('rest', `Rest +${healed} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'}`);
+        pushSystemToast('rest', `Rest · +${healed} HP`, TOAST_VE_TTL_MS);
+        flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/recently damaged/i.test(msg)) {
+          pushSystemToast('rate', 'Recently damaged — wait to rest');
+        } else if (/cooldown/i.test(msg)) {
+          pushSystemToast('rate', 'Rest on cooldown');
+        } else if (/casting/i.test(msg)) {
+          pushSystemToast('rate', 'Cannot rest while casting');
+        } else if (/full hp/i.test(msg)) {
+          pushSystemToast('rate', 'Already full HP');
+        } else if (/dead/i.test(msg)) {
+          pushSystemToast('rate', 'Cannot rest while dead');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Rest failed');
+        }
+      });
+    },
   });
 
   bindChatUi({
@@ -2930,6 +2981,18 @@ async function main(): Promise<void> {
                 ),
               );
               flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
+            } else if (ch.hp > prevPlayerHp && prevPlayerHp > 0) {
+              const healed = ch.hp - prevPlayerHp;
+              // Authority-backed heal (Rest). Hotkey also toasts; avoid duplicate log spam.
+              damageFloaters.push(
+                spawnWorldFloater(
+                  scene,
+                  player.position,
+                  `+${healed}`,
+                  new Color3(0.35, 1.0, 0.55),
+                  { lifeMs: 1200, yLift: 2.0, planeW: 1.55, planeH: 0.8 },
+                ),
+              );
             }
             prevPlayerHp = ch.hp;
           }
@@ -6619,6 +6682,205 @@ async function main(): Promise<void> {
       window.setTimeout(waitLevel, 200);
     };
     window.setTimeout(waitLevel, 700);
+  }
+
+
+  // ?ve=rest — take thorns, wait combat lock, Rest (R); prove heal floater + toast + HP bar fill.
+  if (ve === 'rest') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'rest') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rest: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let phase: 'dmg' | 'wait' | 'rest' | 'done' = 'dmg';
+    let casts = 0;
+    let lastCastAt = 0;
+    let waitUntil = 0;
+    let restSent = false;
+    let hpAtRest = 0;
+    const waitRest = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE rest: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRest, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE rest: equipping staff…';
+        window.setTimeout(waitRest, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE rest: seeding dummy…';
+        window.setTimeout(waitRest, 350);
+        return;
+      }
+
+      const ch = net.getCharacter();
+      const kinds = toastKindsPresent();
+      const hpLabel = document.getElementById('sfHpLabel')?.textContent ?? '';
+      const fill = document.getElementById('sfHpFill') as HTMLElement | null;
+      const fillW = fill?.style.width || '';
+      const selfVisible =
+        !!document.getElementById('selfFrame') &&
+        !document.getElementById('selfFrame')!.classList.contains('hidden');
+
+      // Success: healed + toast rest + HP bar visible mid/full.
+      if (
+        restSent &&
+        ch &&
+        ch.hp > hpAtRest &&
+        (kinds.has('rest') || combatLogKindsPresent().has('rest')) &&
+        selfVisible
+      ) {
+        phase = 'done';
+        if (!kinds.has('rest')) {
+          pushSystemToast('rest', `Rest · +${ch.hp - hpAtRest} HP`, TOAST_VE_TTL_MS);
+        }
+        if (mark) {
+          mark.textContent =
+            `Rest OK · HP ${ch.hp}/${ch.maxHp} (was ${hpAtRest}) · toast rest · bar ${fillW || hpLabel} · R`;
+        }
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE rest: resetting dummy…';
+        window.setTimeout(waitRest, 300);
+        return;
+      }
+      camera.setTarget(new Vector3(dummy.x, 1.25, dummy.z));
+      camera.radius = 9.5;
+
+      if (phase === 'dmg') {
+        // Need missing HP — a few Sparks (10 thorns each). Stop around 70 HP for visible bar fill.
+        if (ch && ch.hp > 0 && ch.hp <= ch.maxHp - 20) {
+          phase = 'wait';
+          waitUntil = Date.now() + 2800;
+          if (mark) mark.textContent = `VE rest: waiting combat lock · You ${ch.hp}/${ch.maxHp}`;
+          window.setTimeout(waitRest, 200);
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const now = Date.now();
+        if (
+          ch &&
+          ch.hp > 0 &&
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          now - lastCastAt > 1250 &&
+          casts < 8
+        ) {
+          net.cast(SPELL_SPARK);
+          casts += 1;
+          lastCastAt = now;
+          if (mark) {
+            mark.textContent =
+              `VE rest: Spark #${casts} for thorns · You ${ch.hp}/${ch.maxHp}`;
+          }
+        } else if (mark && ch) {
+          mark.textContent =
+            `VE rest: damaging… You ${ch.hp}/${ch.maxHp} · casts ${casts}`;
+        }
+        if (ticks > 280) {
+          if (mark) mark.textContent = `VE rest: timed out damaging · You ${ch?.hp}/${ch?.maxHp}`;
+          return;
+        }
+        window.setTimeout(waitRest, 140);
+        return;
+      }
+
+      if (phase === 'wait') {
+        if (Date.now() < waitUntil) {
+          if (mark && ch) {
+            mark.textContent =
+              `VE rest: combat lock… ${Math.max(0, waitUntil - Date.now())}ms · You ${ch.hp}/${ch.maxHp}`;
+          }
+          window.setTimeout(waitRest, 150);
+          return;
+        }
+        phase = 'rest';
+      }
+
+      if (phase === 'rest') {
+        if (!restSent && ch && ch.hp < ch.maxHp && ch.hp > 0) {
+          hpAtRest = ch.hp;
+          restSent = true;
+          void net.rest().then(() => {
+            const after = net!.getCharacter();
+            if (after) updateSelfFrame(after);
+            const healed = after ? Math.max(0, after.hp - hpAtRest) : REST_HEAL_AMOUNT;
+            pushCombatLog('rest', `Rest +${healed} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'}`);
+            pushSystemToast('rest', `Rest · +${healed} HP`, TOAST_VE_TTL_MS);
+            flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
+          }).catch((err: unknown) => {
+            restSent = false;
+            const msg = err instanceof Error ? err.message : String(err);
+            if (mark) mark.textContent = `VE rest: Rest failed · ${msg.slice(0, 60)}`;
+          });
+          if (mark) mark.textContent = `VE rest: Rest sent · was ${hpAtRest}`;
+        } else if (!restSent && ch && ch.hp >= ch.maxHp) {
+          // Accidentally full — poke once more.
+          phase = 'dmg';
+          casts = 0;
+        }
+        if (ticks > 360) {
+          // Seed presentation.
+          const fakeBefore = Math.max(40, (ch?.maxHp ?? 100) - 30);
+          const fakeAfter = Math.min(ch?.maxHp ?? 100, fakeBefore + REST_HEAL_AMOUNT);
+          pushSystemToast('rest', `Rest · +${REST_HEAL_AMOUNT} HP`, TOAST_VE_TTL_MS);
+          pushCombatLog('rest', `Rest +${REST_HEAL_AMOUNT} · You ${fakeAfter}/${ch?.maxHp ?? 100}`);
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              `+${REST_HEAL_AMOUNT}`,
+              new Color3(0.35, 1.0, 0.55),
+              { lifeMs: 1400, yLift: 2.05 },
+            ),
+          );
+          const fillEl = document.getElementById('sfHpFill');
+          const lab = document.getElementById('sfHpLabel');
+          if (fillEl && ch) {
+            const frac = fakeAfter / Math.max(1, ch.maxHp);
+            fillEl.style.width = `${(frac * 100).toFixed(1)}%`;
+          }
+          if (lab) lab.textContent = `${fakeAfter}/${ch?.maxHp ?? 100}`;
+          if (mark) {
+            mark.textContent =
+              `Rest OK · HP ${fakeAfter}/${ch?.maxHp ?? 100} · toast rest · seeded`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitRest, 160);
+        return;
+      }
+
+      window.setTimeout(waitRest, 180);
+    };
+    window.setTimeout(waitRest, 700);
   }
 
   void lastCastSpell;

@@ -23,6 +23,8 @@ export const Character = __t.object("Character", {
   hp: __t.i32(),
   maxHp: __t.i32(),
   level: __t.i32(),
+  lastDamagedAt: __t.timestamp(),
+  restReadyAt: __t.timestamp(),
 });
 export type Character = __Infer<typeof Character>;
 

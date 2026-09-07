@@ -37,6 +37,10 @@ namespace SpacetimeDB.Types
         public int MaxHp;
         [DataMember(Name = "level")]
         public int Level;
+        [DataMember(Name = "last_damaged_at")]
+        public SpacetimeDB.Timestamp LastDamagedAt;
+        [DataMember(Name = "rest_ready_at")]
+        public SpacetimeDB.Timestamp RestReadyAt;
 
         public Character(
             SpacetimeDB.Identity Identity,
@@ -50,7 +54,9 @@ namespace SpacetimeDB.Types
             SpacetimeDB.Timestamp TonicExpiresAt,
             int Hp,
             int MaxHp,
-            int Level
+            int Level,
+            SpacetimeDB.Timestamp LastDamagedAt,
+            SpacetimeDB.Timestamp RestReadyAt
         )
         {
             this.Identity = Identity;
@@ -65,6 +71,8 @@ namespace SpacetimeDB.Types
             this.Hp = Hp;
             this.MaxHp = MaxHp;
             this.Level = Level;
+            this.LastDamagedAt = LastDamagedAt;
+            this.RestReadyAt = RestReadyAt;
         }
 
         public Character()
