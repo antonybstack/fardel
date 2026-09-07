@@ -5,8 +5,8 @@ using SpacetimeDB.Types;
 // ADR 0001 always-relevant: after party-up, B moves outside A's Moore
 // neighborhood; A rebuilds to neighborhood SQL + party identity pose filters
 // and still sees B's PlayerPose.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 45000;
 // Chunk = 32m; Moore = ±1 → need ≥ ~96m from spawn interest (0,0).
 const float farTargetX = 120f;

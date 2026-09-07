@@ -3,8 +3,8 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Mana pool: Spark/Emberbolt spend; Insufficient mana reject; Rest restores; lazy regen.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
 
 DbConnection? conn = null;

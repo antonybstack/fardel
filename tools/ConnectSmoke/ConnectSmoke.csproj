@@ -8,6 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="SpacetimeDB.ClientSDK" Version="2.10.*" />
+    <ProjectReference Include="../../shared/Fardel.Shared/Fardel.Shared.csproj" />
     <Compile Include="../../client/Assets/Scripts/Spacetime/Generated/**/*.cs" Link="Generated/%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

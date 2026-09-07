@@ -5,8 +5,8 @@ using SpacetimeDB.Types;
 // Cast rejects "out of range" when PlayerPose is farther than Combat.CastRangeMeters
 // from the targeted NPC. Spawn↔dummy (~5m) is IN range; Move far then Cast fails;
 // Move back then Cast succeeds.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
 
 DbConnection? conn = null;

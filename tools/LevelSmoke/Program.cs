@@ -4,8 +4,8 @@ using SpacetimeDB.Types;
 
 // Fresh identity at Level 1 / Xp 0; one kill (XpPerKill) crosses Progression L2;
 // reconnect Persist still has Level.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 45000;
 
 var tokenDir = Path.Combine(Path.GetTempPath(), "fardel-level-smoke-" + Guid.NewGuid().ToString("N"));

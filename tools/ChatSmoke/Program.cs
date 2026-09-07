@@ -6,8 +6,8 @@ using SpacetimeDB.Types;
 // Also proves per-identity Say rate-limit rejects a second immediate Say.
 // PartySay: A+B party, C outsider — B sees PartyChatMessage; C must not.
 // Whisper: A→B private; C outsider must not see WhisperMessage.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 30000;
 const string sayText = "hello yard";
 const string sayText2 = "rate ok";

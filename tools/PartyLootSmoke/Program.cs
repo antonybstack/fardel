@@ -4,8 +4,8 @@ using SpacetimeDB.Types;
 
 // On dummy death: primary WorldLoot drop + extra ember_shard near each in-range
 // PartyMember mate. Far mates and solo kills invent no share loot.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 45000;
 
 DbConnection? connA = null;
