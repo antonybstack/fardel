@@ -110,6 +110,8 @@ Prove authority with headless smokes first; Babylon presentation follows:
 - `tools/PartyLootSmoke` (party loot share invent)
 - `tools/RestSmoke` (out-of-combat Rest / bandage heal invent)
 - `tools/ManaSmoke` (mana / focus pool invent)
+- `tools/CastCancelSmoke` (Emberbolt cancel / move-interrupt invent)
+- `tools/CastPushbackSmoke` (dummy-thorns windup pushback invent)
 
 Browser Connect / yard art lives in `web/` (Vite + Babylon). Unity is not required for slice gates.
 

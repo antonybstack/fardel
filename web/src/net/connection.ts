@@ -15,6 +15,8 @@ export const SPELL_SPARK = 1;
 export const SPELL_EMBERBOLT = 2;
 export const GCD_MS = 1200;
 export const EMBERBOLT_CAST_MS = 1500;
+/** Match shared Combat.CastPushbackMs — windup delay on hit. */
+export const CAST_PUSHBACK_MS = 500;
 export const NPC_KIND_DUMMY = 1;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
@@ -208,6 +210,8 @@ export type GameNet = {
   cast: (spellId: number) => void;
   /** Cancel in-flight windup cast (refunds mana spent at Cast start). */
   cancelCast: () => Promise<void>;
+  /** Opt-in dummy thorns poke — delays windup CastEndsAt if casting. */
+  dummyStrike: () => Promise<void>;
   unequipStaff: () => void;
   equipStaff: () => void;
   unequipRobes: () => void;
@@ -1518,6 +1522,7 @@ export async function connectToSpacetime(
                 emitStatus(identityHex);
               },
               cancelCast: () => conn.reducers.cancelCast({}),
+              dummyStrike: () => conn.reducers.dummyStrike({}),
               cast: (spellId: number) => {
                 const name =
                   spellId === SPELL_SPARK

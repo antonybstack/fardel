@@ -42,6 +42,7 @@ import CancelCastReducer from "./cancel_cast_reducer";
 import CancelTradeReducer from "./cancel_trade_reducer";
 import CastReducer from "./cast_reducer";
 import CreatePartyReducer from "./create_party_reducer";
+import DummyStrikeReducer from "./dummy_strike_reducer";
 import EnsureTrainingDummyReducer from "./ensure_training_dummy_reducer";
 import EquipRobesReducer from "./equip_robes_reducer";
 import EquipStaffReducer from "./equip_staff_reducer";
@@ -250,6 +251,7 @@ const reducersSchema = __reducers(
   __reducerSchema("cancel_trade", CancelTradeReducer),
   __reducerSchema("cast", CastReducer),
   __reducerSchema("create_party", CreatePartyReducer),
+  __reducerSchema("dummy_strike", DummyStrikeReducer),
   __reducerSchema("ensure_training_dummy", EnsureTrainingDummyReducer),
   __reducerSchema("equip_robes", EquipRobesReducer),
   __reducerSchema("equip_staff", EquipStaffReducer),

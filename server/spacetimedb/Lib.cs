@@ -510,6 +510,35 @@ public static partial class Module
         InterruptWindupCast(ctx, ctx.Sender, refundMana: true);
     }
 
+    /// <summary>
+    /// Training-dummy thorns poke (opt-in). Applies DummyThornsDamage to the
+    /// caller. If they are mid-windup, ApplyPlayerDamage delays CastEndsAt
+    /// without cancel/refund. CombatSmoke / ManaSmoke do not call this.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void DummyStrike(ReducerContext ctx)
+    {
+        Npc? dummy = null;
+        foreach (var n in ctx.Db.Npc.Iter())
+        {
+            if (n.Kind == NpcKindDummy)
+            {
+                dummy = n;
+                break;
+            }
+        }
+        if (dummy is null)
+        {
+            throw new Exception("No dummy");
+        }
+        if (dummy.Value.Hp <= 0)
+        {
+            throw new Exception("Dummy dead");
+        }
+
+        ApplyPlayerDamage(ctx, ctx.Sender, Combat.DummyThornsDamage);
+    }
+
     /// <summary>Unequip staff — Cast already gates on StaffEquipped (slice 3 nice-to-have).</summary>
     [SpacetimeDB.Reducer]
     public static void UnequipStaff(ReducerContext ctx)
@@ -915,6 +944,8 @@ public static partial class Module
         ctx.Db.Character.Identity.Update(ch);
         if (ch.Hp > 0)
         {
+            // Partial interrupt: delay remaining windup, keep mana spent.
+            PushbackWindupCast(ctx, target);
             return;
         }
 
@@ -1780,6 +1811,46 @@ public static partial class Module
         {
             Log.Info($"InterruptWindupCast {caster} spell={spellId}");
         }
+    }
+
+    /// <summary>
+    /// Delay an in-flight windup: bump CastEndsAt, reschedule PendingCast.
+    /// CastingSpellId stays; mana is not refunded. No-op if not casting.
+    /// </summary>
+    static void PushbackWindupCast(ReducerContext ctx, Identity caster)
+    {
+        if (ctx.Db.PlayerCombat.Identity.Find(caster) is not { } combat
+            || combat.CastingSpellId == 0)
+        {
+            return;
+        }
+
+        var spellId = combat.CastingSpellId;
+        var targetNpcId = combat.TargetNpcId;
+        foreach (var row in ctx.Db.PendingCast.Iter())
+        {
+            if (row.Caster.Equals(caster) && row.SpellId == spellId)
+            {
+                targetNpcId = row.TargetNpcId;
+                break;
+            }
+        }
+
+        var baseEnd = combat.CastEndsAt.MicrosecondsSinceUnixEpoch > ctx.Timestamp.MicrosecondsSinceUnixEpoch
+            ? combat.CastEndsAt
+            : ctx.Timestamp;
+        combat.CastEndsAt = baseEnd + Ms(Combat.CastPushbackMs);
+        ctx.Db.PlayerCombat.Identity.Update(combat);
+
+        ClearPendingCastsFor(ctx, caster);
+        ctx.Db.PendingCast.Insert(new PendingCast
+        {
+            ScheduledAt = new ScheduleAt.Time(combat.CastEndsAt),
+            Caster = caster,
+            SpellId = spellId,
+            TargetNpcId = targetNpcId,
+        });
+        Log.Info($"PushbackWindupCast {caster} spell={spellId} +{Combat.CastPushbackMs}ms");
     }
 
     /// <summary>Lazy mana regen between Cast/Rest using LastManaTickAt wall time.</summary>

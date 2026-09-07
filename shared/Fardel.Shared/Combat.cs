@@ -52,6 +52,14 @@ public static class Combat
     /// </summary>
     public const int DummyThornsDamage = 10;
 
+    /// <summary>
+    /// Non-lethal damage during a windup delays CastEndsAt by this much and
+    /// reschedules PendingCast. No cancel, no mana refund (partial interrupt).
+    /// DummyStrike is opt-in so CombatSmoke / ManaSmoke Emberbolt timing stays
+    /// the unpushed 1500ms land.
+    /// </summary>
+    public const int CastPushbackMs = 500;
+
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
 

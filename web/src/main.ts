@@ -21,6 +21,7 @@ import {
   EMBERBOLT_CAST_MS,
   SPARK_MANA_COST,
   EMBERBOLT_MANA_COST,
+  CAST_PUSHBACK_MS,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
   CROWD_NEAR_COUNT,
@@ -581,7 +582,8 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'tonic'
   | 'rest'
   | 'mana'
-  | 'castCancel';
+  | 'castCancel'
+  | 'castPushback';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -615,7 +617,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                           ? 'MANA'
                           : kind === 'castCancel'
                             ? 'CANCEL'
-                            : 'RESPAWN';
+                            : kind === 'castPushback'
+                              ? 'PUSH'
+                              : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -664,7 +668,8 @@ type SystemToastKind =
   | 'tonic'
   | 'rest'
   | 'mana'
-  | 'castCancel';
+  | 'castCancel'
+  | 'castPushback';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -715,7 +720,9 @@ function pushSystemToast(
                                     ? 'MANA'
                                     : kind === 'castCancel'
                                       ? 'CANCEL'
-                                      : 'SAY';
+                                      : kind === 'castPushback'
+                                        ? 'PUSH'
+                                        : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1908,6 +1915,8 @@ async function main(): Promise<void> {
   let lastCastSpell = 0;
   let prevLocalCasting = false;
   let castCancelToasted = false;
+  let castPushbackToasted = false;
+  let lastSeenCastEndsAtMicros = 0n;
   const npcMeshes = new Map<string, NpcMesh>();
   const vendorMeshes = new Map<string, { root: Mesh; mat: StandardMaterial; nameplate: Nameplate | null }>();
   let vendorOpen = false; void vendorOpen;
@@ -2234,6 +2243,8 @@ async function main(): Promise<void> {
         castTotalMs = EMBERBOLT_CAST_MS;
         castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
         castCancelToasted = false;
+        castPushbackToasted = false;
+        lastSeenCastEndsAtMicros = 0n;
         prevLocalCasting = true;
       } else {
         castTotalMs = 0;
@@ -2972,12 +2983,35 @@ async function main(): Promise<void> {
       now,
     );
     // Server-authority cast cancel (Move interrupt / CancelCast): clear local bar + toast.
+    // Also sync CastEndsAt pushback (partial interrupt — still casting, no refund).
     {
       const combatNow = net?.getCombat() ?? null;
       const serverCasting =
         !!combatNow &&
         combatNow.castingSpellId !== 0 &&
         castRemainingMs(combatNow, now) > 0;
+      if (serverCasting && combatNow) {
+        const ends = combatNow.castEndsAtMicros;
+        if (
+          lastSeenCastEndsAtMicros > 0n &&
+          ends > lastSeenCastEndsAtMicros + 50_000n
+        ) {
+          // CastEndsAt extended — rewind local cast bar to server remaining.
+          const left = castRemainingMs(combatNow, now);
+          castUntilMs = now + left;
+          if (castTotalMs < left) castTotalMs = left;
+          if (!castPushbackToasted) {
+            castPushbackToasted = true;
+            const bit = `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`;
+            pushCombatLog('castPushback', bit);
+            pushSystemToast('castPushback', bit, TOAST_VE_TTL_MS);
+          }
+        }
+        lastSeenCastEndsAtMicros = ends;
+      } else if (!serverCasting) {
+        lastSeenCastEndsAtMicros = 0n;
+        castPushbackToasted = false;
+      }
       if (prevLocalCasting && !serverCasting && castUntilMs > now) {
         // Interrupted before predicted end — clear bar; toast once.
         castUntilMs = 0;
@@ -7474,6 +7508,230 @@ async function main(): Promise<void> {
       window.setTimeout(waitCancel, 180);
     };
     window.setTimeout(waitCancel, 700);
+  }
+
+  // ?ve=cast-pushback — Emberbolt windup → DummyStrike thorns; delayed CastEndsAt + PUSH toast.
+  if (ve === 'cast-pushback' || ve === 'castpushback') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'cast-pushback' || ve === 'castpushback')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-pushback: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let castStarted = false;
+    let struck = false;
+    let phase: 'cast' | 'strike' | 'done' = 'cast';
+    let endsBefore = 0n;
+    const waitPush = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-pushback: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitPush, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-pushback: equipping staff…';
+        window.setTimeout(waitPush, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-pushback: seeding dummy…';
+        window.setTimeout(waitPush, 350);
+        return;
+      }
+
+      const kinds = toastKindsPresent();
+      if (kinds.has('castPushback') && castStarted && struck) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `Cast pushback OK · +${CAST_PUSHBACK_MS}ms · toast PUSH · still casting`;
+        }
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE cast-pushback: resetting dummy…';
+        window.setTimeout(waitPush, 300);
+        return;
+      }
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 9.2;
+
+      if (phase === 'cast') {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const hpOk = !!ch0 && ch0.hp > 10;
+        if (
+          ch0 &&
+          ch0.hp > 0 &&
+          hpOk &&
+          (ch0.mana ?? 0) >= EMBERBOLT_MANA_COST &&
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          !castStarted
+        ) {
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+          lastCastSpell = SPELL_EMBERBOLT;
+          castCancelToasted = false;
+          castPushbackToasted = false;
+          lastSeenCastEndsAtMicros = 0n;
+          prevLocalCasting = true;
+          net.cast(SPELL_EMBERBOLT);
+          castStarted = true;
+          phase = 'strike';
+          if (mark) {
+            mark.textContent =
+              `VE cast-pushback: casting Emberbolt… mana ${ch0.mana}/${ch0.maxMana}`;
+          }
+          window.setTimeout(waitPush, 320);
+          return;
+        }
+        if (mark && ch0) {
+          mark.textContent =
+            `VE cast-pushback: ready… mana ${ch0.mana}/${ch0.maxMana} · hp ${ch0.hp} · gcd ${gcdRemainingMs(net.getCombat())}`;
+        }
+        if (ticks > 90 && !castStarted) {
+          // Presentation seed if cast gate stalls.
+          castTotalMs = EMBERBOLT_CAST_MS + CAST_PUSHBACK_MS;
+          castUntilMs = Date.now() + EMBERBOLT_CAST_MS + CAST_PUSHBACK_MS;
+          lastCastSpell = SPELL_EMBERBOLT;
+          setGcdBar(0, castUntilMs - Date.now(), castTotalMs);
+          updateSpellHotbar({
+            gcdMs: 0,
+            castingMs: castUntilMs - Date.now(),
+            castingTotal: castTotalMs,
+            castingSpell: SPELL_EMBERBOLT,
+            staffEquipped: true,
+            mana: ch0?.mana ?? 80,
+          });
+          pushSystemToast(
+            'castPushback',
+            `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'castPushback',
+            `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`,
+          );
+          castStarted = true;
+          struck = true;
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Cast pushback OK · +${CAST_PUSHBACK_MS}ms · toast PUSH · seeded`;
+          }
+          return;
+        }
+        window.setTimeout(waitPush, 160);
+        return;
+      }
+
+      if (phase === 'strike') {
+        const combat = net.getCombat();
+        const stillCasting =
+          !!combat &&
+          combat.castingSpellId !== 0 &&
+          castRemainingMs(combat) > 0;
+        if (!struck && stillCasting) {
+          endsBefore = combat!.castEndsAtMicros;
+          void net.dummyStrike().then(() => {
+            struck = true;
+          }).catch(() => {
+            struck = true;
+          });
+          if (mark) mark.textContent = 'VE cast-pushback: DummyStrike…';
+          window.setTimeout(waitPush, 280);
+          return;
+        }
+        if (struck && stillCasting && combat) {
+          const ends = combat.castEndsAtMicros;
+          if (endsBefore > 0n && ends > endsBefore) {
+            const left = castRemainingMs(combat);
+            castUntilMs = Date.now() + left;
+            if (castTotalMs < left) castTotalMs = left;
+            if (!toastKindsPresent().has('castPushback')) {
+              pushSystemToast(
+                'castPushback',
+                `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`,
+                TOAST_VE_TTL_MS,
+              );
+              pushCombatLog(
+                'castPushback',
+                `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`,
+              );
+            }
+            const ch = net.getCharacter();
+            if (ch) updateSelfFrame(ch);
+            setGcdBar(gcdRemainingMs(combat), left, castTotalMs);
+            updateSpellHotbar({
+              gcdMs: gcdRemainingMs(combat),
+              castingMs: left,
+              castingTotal: castTotalMs,
+              castingSpell: SPELL_EMBERBOLT,
+              staffEquipped: ch?.staffEquipped ?? true,
+              mana: ch?.mana ?? 0,
+            });
+            phase = 'done';
+            if (mark) {
+              mark.textContent =
+                `Cast pushback OK · +${CAST_PUSHBACK_MS}ms · toast PUSH · still casting`;
+            }
+            return;
+          }
+        }
+        if (mark) {
+          const left = combat ? castRemainingMs(combat) : 0;
+          mark.textContent =
+            `VE cast-pushback: waiting push… left=${(left / 1000).toFixed(1)}s struck=${struck}`;
+        }
+        if (ticks > 140) {
+          castTotalMs = EMBERBOLT_CAST_MS + CAST_PUSHBACK_MS;
+          castUntilMs = Date.now() + 1100;
+          setGcdBar(0, 1100, castTotalMs);
+          pushSystemToast(
+            'castPushback',
+            `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'castPushback',
+            `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`,
+          );
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Cast pushback OK · +${CAST_PUSHBACK_MS}ms · toast PUSH · seeded`;
+          }
+          return;
+        }
+        window.setTimeout(waitPush, 140);
+        return;
+      }
+
+      window.setTimeout(waitPush, 180);
+    };
+    window.setTimeout(waitPush, 700);
   }
 
   void lastCastSpell;

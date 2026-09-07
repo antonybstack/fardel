@@ -1309,3 +1309,10 @@ body {
 .sysToast.castCancel .toastTag { color: #ffb45a; }
 
 .clLine.castCancel .clTag { color: #ffb45a; }
+
+.sysToast.castPushback {
+  border-color: rgba(255, 120, 90, 0.55);
+}
+.sysToast.castPushback .toastTag { color: #ff7860; }
+
+.clLine.castPushback .clTag { color: #ff7860; }
