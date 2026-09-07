@@ -57,6 +57,7 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Target frame / reticule contrast (#69): gold select chrome crisp vs #39 cyan fog; `?ve=target-contrast` (`ve/babylon-target-contrast.png`)
 - Party/self HP bar readability (#67): dark track + saturated green→amber→red fills; `?ve=frame-hp` (`ve/babylon-frame-hp.png`)
 - Combat log strip readability (#78): dark plate + damage/heal/kill/system distinct (no neon); `?ve=combat-log-read` (`ve/babylon-combat-log-read.png`)
+- Cast bar chrome readability (#74): Emberbolt/`#castBar` + CANCEL≠LOCKOUT toast chrome crisp vs #39 cyan fog; `?ve=castbar-read` (`ve/babylon-castbar-read.png`)
 
 ### Path / ground targets (Issue #44)
 
