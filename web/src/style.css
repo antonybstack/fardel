@@ -27,6 +27,10 @@ body {
   gap: 8px;
 }
 
+#status.hidden {
+  display: none;
+}
+
 #status {
   color: #e8eefc;
   background: rgba(8, 12, 24, 0.72);
@@ -888,7 +892,11 @@ body {
 }
 
 
-/* FPS / AOI performance overlay — left of minimap (client-only). */
+/* FPS / AOI performance overlay — left of minimap (client-only; debug HUD). */
+#fpsHud.hidden {
+  display: none;
+}
+
 #fpsHud {
   position: absolute;
   right: 184px;

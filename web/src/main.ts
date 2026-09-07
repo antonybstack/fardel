@@ -643,6 +643,14 @@ function setKeysLegendOpen(open: boolean): void {
   panel.classList.toggle('hidden', !open);
 }
 
+/** Identity/AOI/keys #status wall + #fpsHud — hidden by default; F3 / ?debug=1. */
+function setDebugHudVisible(open: boolean): void {
+  const status = document.getElementById('status');
+  const fps = document.getElementById('fpsHud');
+  if (status) status.classList.toggle('hidden', !open);
+  if (fps) fps.classList.toggle('hidden', !open);
+}
+
 /** Compact party member frames: hex + leader tag + distance / pose hint. */
 function setVendorPanelOpen(open: boolean): void {
   const panel = document.getElementById('vendorPanel');
@@ -1713,6 +1721,7 @@ function bindInput(opts: {
   onEquipRobes: () => void;
   onToggleBag: () => void;
   onToggleKeysLegend: () => void;
+  onToggleDebugHud: () => void;
   onVendorInteract: () => void;
   onPickupNearest: () => void;
   onUseYardTonic: () => void;
@@ -1804,6 +1813,14 @@ function bindInput(opts: {
     if (k === 'h') {
       e.preventDefault();
       opts.onToggleKeysLegend();
+      return;
+    }
+    if (e.key === 'F3' || e.code === 'F3') {
+      // Ignore when chat compose has focus (chatComposing early-return covers most cases).
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && ae.id === 'chatInput') return;
+      e.preventDefault();
+      opts.onToggleDebugHud();
       return;
     }
     if (k === 'e') {
@@ -2217,6 +2234,10 @@ async function main(): Promise<void> {
   let net: GameNet | null = null;
   let bagOpen = false;
   let keysLegendOpen = false;
+  const bootParams = new URLSearchParams(window.location.search);
+  const debugParam = (bootParams.get('debug') || '').toLowerCase();
+  let debugHudVisible = debugParam === '1' || debugParam === 'true';
+  setDebugHudVisible(debugHudVisible);
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
@@ -2761,6 +2782,10 @@ async function main(): Promise<void> {
     onToggleKeysLegend: () => {
       keysLegendOpen = !keysLegendOpen;
       setKeysLegendOpen(keysLegendOpen);
+    },
+    onToggleDebugHud: () => {
+      debugHudVisible = !debugHudVisible;
+      setDebugHudVisible(debugHudVisible);
     },
     onVendorInteract: () => {
       if (!net) return;
@@ -5213,6 +5238,50 @@ async function main(): Promise<void> {
     window.setTimeout(waitReticule, 700);
   }
 
+  // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
+  if (ve === 'debug-hud') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    debugHudVisible = true;
+    setDebugHudVisible(true);
+  }
+  if (net && ve === 'debug-hud') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE debug-hud: waiting for Connected…';
+    let ticks = 0;
+    const waitDebug = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      const statusEl = document.getElementById('status');
+      const fpsEl = document.getElementById('fpsHud');
+      const statusVisible = !!(statusEl && !statusEl.classList.contains('hidden') && statusEl.offsetWidth > 0);
+      const fpsVisible = !!(fpsEl && !fpsEl.classList.contains('hidden') && fpsEl.offsetWidth > 0);
+      const statusTxt = (statusEl?.textContent || '').trim();
+      if (st.state === 'connected' && statusVisible && fpsVisible && statusTxt.length > 0) {
+        if (mark) {
+          mark.textContent =
+            'Debug HUD OK · status visible · F3/?debug=1';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE debug-hud: ${st.state} · status ${statusVisible ? 'on' : 'off'} · fps ${fpsVisible ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `VE debug-hud: timed out · status ${statusVisible ? 'on' : 'off'} · fps ${fpsVisible ? 'on' : 'off'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitDebug, 200);
+    };
+    window.setTimeout(waitDebug, 600);
+  }
+
   // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.
   if (ve === 'keys') {
     camera.radius = 14;
@@ -5956,6 +6025,8 @@ async function main(): Promise<void> {
     camera.radius = 22;
     camera.alpha = Math.PI / 2.5;
     camera.beta = Math.PI / 3.55;
+    debugHudVisible = true;
+    setDebugHudVisible(true);
   }
   if (net && ve === 'fps') {
     const mark = document.getElementById('persistMark');
