@@ -19,16 +19,16 @@ function hash01(n: number): number {
 function makeTrunkMat(scene: Scene, name: string, tint: Color3): StandardMaterial {
   const m = new StandardMaterial(name, scene);
   m.diffuseColor = tint;
-  m.specularColor = new Color3(0.04, 0.03, 0.02);
-  m.emissiveColor = tint.scale(0.05);
+  m.specularColor = new Color3(0.015, 0.012, 0.01);
+  m.emissiveColor = tint.scale(0.04);
   return m;
 }
 
 function makeFoliageMat(scene: Scene, name: string, tint: Color3): StandardMaterial {
   const m = new StandardMaterial(name, scene);
   m.diffuseColor = tint;
-  m.specularColor = new Color3(0.02, 0.04, 0.02);
-  m.emissiveColor = tint.scale(0.08);
+  m.specularColor = new Color3(0.008, 0.012, 0.008);
+  m.emissiveColor = tint.scale(0.06);
   return m;
 }
 
@@ -235,36 +235,42 @@ function buildSkyDome(scene: Scene): void {
   const skyMat = new StandardMaterial('skyMat', scene);
   skyMat.backFaceCulling = false;
   skyMat.disableLighting = true;
-  skyMat.emissiveColor = new Color3(0.35, 0.48, 0.68);
+  // Soft blue-cyan haze dome — matches atmospheric fog depth.
+  skyMat.emissiveColor = new Color3(0.36, 0.54, 0.68);
   skyMat.diffuseColor = new Color3(0, 0, 0);
   sky.material = skyMat;
 }
 
 /**
  * Procedural / kitbash forest clearing: huge hero trunks, instanced mid trees,
- * distant mountain silhouettes, mood lighting. Web-cheap (StandardMaterial + instances).
+ * distant mountain silhouettes, denser fog + warm sun/hemi, lush ground. Web-cheap (StandardMaterial + instances).
  */
 export function buildForestClearing(scene: Scene): {
   ground: Mesh;
   hemi: HemisphericLight;
   sun: DirectionalLight;
 } {
-  scene.clearColor = new Color4(0.22, 0.32, 0.48, 1);
+  // Atmosphere pass (#32): blue/cyan fog mid→far, warm sun + cool hemi, lush ground.
+  // Mood > volumetric soup — StandardMaterial + EXP2 fog only (web-cheap).
+  // Hemi/sun locked for Dev4 (#33) robe mats — report finals in PR; do not flip casually.
+  scene.clearColor = new Color4(0.24, 0.36, 0.46, 1);
   scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.008;
-  scene.fogColor = new Color3(0.35, 0.42, 0.52);
+  scene.fogDensity = 0.015;
+  scene.fogColor = new Color3(0.34, 0.55, 0.7);
 
-  const hemi = new HemisphericLight('hemiForest', new Vector3(0.15, 1, 0.25), scene);
-  hemi.intensity = 0.72;
-  hemi.diffuse = new Color3(0.75, 0.82, 0.9);
-  hemi.groundColor = new Color3(0.12, 0.18, 0.1);
-  hemi.specular = new Color3(0.2, 0.22, 0.18);
+  const hemi = new HemisphericLight('hemiForest', new Vector3(0.12, 1, 0.22), scene);
+  hemi.intensity = 0.78;
+  // Cool canopy-filtered fill (stable for #33) + green ground bounce.
+  hemi.diffuse = new Color3(0.68, 0.78, 0.86);
+  hemi.groundColor = new Color3(0.16, 0.26, 0.14);
+  hemi.specular = new Color3(0.1, 0.12, 0.14);
 
-  const sun = new DirectionalLight('sunForest', new Vector3(-0.45, -0.75, -0.35), scene);
-  sun.position = new Vector3(40, 60, 30);
-  sun.intensity = 0.85;
-  sun.diffuse = new Color3(1.0, 0.88, 0.65);
-  sun.specular = new Color3(0.35, 0.3, 0.2);
+  const sun = new DirectionalLight('sunForest', new Vector3(-0.5, -0.68, -0.4), scene);
+  sun.position = new Vector3(48, 55, 28);
+  sun.intensity = 0.98;
+  // Warmer golden-hour key for fantasy clearing readability.
+  sun.diffuse = new Color3(1.0, 0.82, 0.52);
+  sun.specular = new Color3(0.42, 0.32, 0.18);
 
   const ground = MeshBuilder.CreateGround(
     'clearing',
@@ -272,24 +278,37 @@ export function buildForestClearing(scene: Scene): {
     scene,
   );
   const groundMat = new StandardMaterial('clearingMat', scene);
-  groundMat.diffuseColor = new Color3(0.22, 0.38, 0.18);
-  groundMat.specularColor = new Color3(0.03, 0.04, 0.02);
-  groundMat.emissiveColor = new Color3(0.02, 0.04, 0.015);
+  // Richer saturated grass albedo vs cyan fog.
+  groundMat.diffuseColor = new Color3(0.26, 0.52, 0.18);
+  groundMat.specularColor = new Color3(0.012, 0.018, 0.01);
+  groundMat.emissiveColor = new Color3(0.035, 0.07, 0.022);
   ground.material = groundMat;
+
+  // Soft moss ring around the dirt clearing — dirt/grass transition without new packs.
+  const moss = MeshBuilder.CreateDisc('mossRing', { radius: 14, tessellation: 32 }, scene);
+  moss.rotation.x = Math.PI / 2;
+  moss.position.y = 0.015;
+  const mossMat = new StandardMaterial('mossMat', scene);
+  mossMat.diffuseColor = new Color3(0.22, 0.48, 0.16);
+  mossMat.specularColor = new Color3(0.01, 0.016, 0.008);
+  mossMat.emissiveColor = new Color3(0.03, 0.065, 0.02);
+  moss.material = mossMat;
 
   const dirt = MeshBuilder.CreateDisc('dirtPatch', { radius: 9, tessellation: 28 }, scene);
   dirt.rotation.x = Math.PI / 2;
-  dirt.position.y = 0.02;
+  dirt.position.y = 0.03;
   const dirtMat = new StandardMaterial('dirtMat', scene);
-  dirtMat.diffuseColor = new Color3(0.32, 0.26, 0.16);
-  dirtMat.specularColor = new Color3(0.02, 0.02, 0.01);
+  // Grey-brown packed path — clearer contrast vs lush grass.
+  dirtMat.diffuseColor = new Color3(0.42, 0.36, 0.26);
+  dirtMat.specularColor = new Color3(0.02, 0.018, 0.012);
+  dirtMat.emissiveColor = new Color3(0.04, 0.032, 0.02);
   dirt.material = dirtMat;
 
   const trunkMatA = makeTrunkMat(scene, 'trunkMatA', new Color3(0.28, 0.18, 0.1));
   const trunkMatB = makeTrunkMat(scene, 'trunkMatB', new Color3(0.22, 0.14, 0.08));
-  const foliageA = makeFoliageMat(scene, 'foliageA', new Color3(0.14, 0.36, 0.16));
-  const foliageB = makeFoliageMat(scene, 'foliageB', new Color3(0.1, 0.28, 0.14));
-  const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.18, 0.4, 0.2));
+  const foliageA = makeFoliageMat(scene, 'foliageA', new Color3(0.12, 0.4, 0.16));
+  const foliageB = makeFoliageMat(scene, 'foliageB', new Color3(0.08, 0.3, 0.14));
+  const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.16, 0.44, 0.18));
 
   placeHeroTree(scene, 'heroTreeNE', 22, -18, 1.35, 0.4, trunkMatA, foliageA);
   placeHeroTree(scene, 'heroTreeNW', -24, -16, 1.55, -0.6, trunkMatB, foliageB);
