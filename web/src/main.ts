@@ -2385,16 +2385,32 @@ function paintNameplate(
     const by = 62;
     const bw = 152;
     const bh = 14;
-    ctx.fillStyle = 'rgba(12,12,14,0.85)';
-    ctx.fillRect(bx, by, bw, bh);
     const fill = Math.max(0, Math.min(1, hpFrac));
-    ctx.fillStyle =
-      fill > 0.4
-        ? 'rgb(72,205,110)'
-        : fill > 0.18
-          ? 'rgb(230,190,55)'
-          : 'rgb(220,70,60)';
-    ctx.fillRect(bx + 2, by + 2, (bw - 4) * fill, bh - 4);
+    const isDummy = label === 'Dummy';
+    if (isDummy) {
+      ctx.fillStyle = 'rgba(8,10,12,0.92)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = 'rgba(0,0,0,0.95)';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.fillStyle =
+        fill > 0.35
+          ? 'rgb(55,230,95)'
+          : fill > 0.15
+            ? 'rgb(245,180,40)'
+            : 'rgb(235,55,50)';
+      ctx.fillRect(bx + 3, by + 3, (bw - 6) * fill, bh - 6);
+    } else {
+      ctx.fillStyle = 'rgba(12,12,14,0.85)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle =
+        fill > 0.4
+          ? 'rgb(72,205,110)'
+          : fill > 0.18
+            ? 'rgb(230,190,55)'
+            : 'rgb(220,70,60)';
+      ctx.fillRect(bx + 2, by + 2, (bw - 4) * fill, bh - 4);
+    }
   }
   np.tex.update();
 }
@@ -6597,6 +6613,75 @@ async function main(): Promise<void> {
       window.setTimeout(waitNameplateRead, 200);
     };
     window.setTimeout(waitNameplateRead, 700);
+  }
+
+  // ?ve=dummy-hp — Dummy HP bar readability at play cam (8–20m) under #39 fog.
+  if (ve === 'dummy-hp') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.25;
+  }
+  if (net && ve === 'dummy-hp') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE dummy-hp: waiting for Connected + Dummy…';
+    let ticks = 0;
+    const waitDummyHp = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      syncNpcMeshes(npcs);
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 11 || dist > 16) {
+          const targetDist = 13;
+          const step = Math.min(MAX_STEP_METERS, Math.abs(dist - targetDist));
+          if (dist < targetDist) {
+            net.sendMove(-(dx / dist) * step, -(dz / dist) * step);
+          } else {
+            net.sendMove((dx / dist) * step, (dz / dist) * step);
+          }
+        }
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.15,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+      }
+      const dummyMesh = dummy
+        ? npcMeshes.get(dummy.npcId.toString())
+        : undefined;
+      const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
+      const goodDist =
+        !!dummy &&
+        Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z);
+      const inRange = goodDist >= 11 && goodDist <= 16;
+      if (
+        st.state === 'connected' &&
+        hasDummyPlate &&
+        inRange
+      ) {
+        if (mark) {
+          mark.textContent = `Dummy HP bar OK · at ${goodDist.toFixed(1)}m · HP ${dummy.hp}/${dummy.maxHp} · bar legible under fog`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE dummy-hp: Connected · dummy ${dummy ? 'yes' : 'no'} · dist ${goodDist ? goodDist.toFixed(1) : '?'}m (target 11–16m) (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE dummy-hp: timed out';
+        return;
+      }
+      window.setTimeout(waitDummyHp, 200);
+    };
+    window.setTimeout(waitDummyHp, 700);
   }
 
   // ?ve=hotbar / ?ve=hotbar-afford / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
