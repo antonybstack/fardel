@@ -27,6 +27,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/adr/0002-client-host-webgpu.md](docs/adr/0002-client-host-webgpu.md) | Historical Unity host (superseded for active host) |
 | [docs/adr/0003-babylon-web-client.md](docs/adr/0003-babylon-web-client.md) | Active client: Babylon.js + TypeScript |
 | [docs/DEV_BOX.md](docs/DEV_BOX.md) | Linux box self-reliant loop (no Mac) |
+| [docs/TEAM_SEATS.md](docs/TEAM_SEATS.md) | Agent seat worktrees, ports, develop workflow |
 
 ## Quick start (local)
 
