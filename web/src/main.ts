@@ -13,6 +13,7 @@ import {
 import {
   connectToSpacetime,
   gcdRemainingMs,
+  castRemainingMs,
   SPELL_EMBERBOLT,
   SPELL_SPARK,
   EMBERBOLT_CAST_MS,
@@ -22,6 +23,7 @@ import {
   type CrowdProxyView,
   type GameNet,
   type NpcView,
+  type RemoteCombat,
   type RemotePose,
 } from './net/connection';
 import { buildForestClearing } from './world/forest';
@@ -40,8 +42,18 @@ type NpcMesh = {
   root: Mesh;
   body: Mesh;
   ring: Mesh;
+  remoteRing: Mesh;
   mat: StandardMaterial;
   ringMat: StandardMaterial;
+  remoteRingMat: StandardMaterial;
+};
+
+type RemoteFx = {
+  beam: Mesh;
+  beamMat: StandardMaterial;
+  bar: Mesh;
+  barMat: StandardMaterial;
+  lastCastAtMicros: bigint;
 };
 
 function setStatus(text: string): void {
@@ -123,6 +135,36 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
                 `${r.identityHex.slice(0, 8)}… @(${r.x.toFixed(1)},${r.z.toFixed(1)})`,
             )
             .join(' · ')}`;
+    const rCombats = s.remoteCombats ?? [];
+    const remoteTargetBits: string[] = [];
+    const remoteCastBits: string[] = [];
+    for (const rc of rCombats) {
+      if (rc.targetNpcId !== 0n) {
+        remoteTargetBits.push(
+          `${rc.identityHex.slice(0, 8)}…→npc#${rc.targetNpcId}`,
+        );
+      }
+      const wind = castRemainingMs(rc, nowMs);
+      if (rc.castingSpellId !== 0 && wind > 0) {
+        const name =
+          rc.castingSpellId === SPELL_EMBERBOLT
+            ? 'Emberbolt'
+            : rc.castingSpellId === SPELL_SPARK
+              ? 'Spark'
+              : `Spell${rc.castingSpellId}`;
+        remoteCastBits.push(
+          `${rc.identityHex.slice(0, 8)}… ${name} ${(wind / 1000).toFixed(1)}s`,
+        );
+      }
+    }
+    const remoteTargetLine =
+      remoteTargetBits.length === 0
+        ? 'remote-target: (none)'
+        : `remote-target: ${remoteTargetBits.join(' · ')}`;
+    const remoteCastLine =
+      remoteCastBits.length === 0
+        ? 'remote-cast: (none)'
+        : `remote-cast: ${remoteCastBits.join(' · ')}`;
     return [
       'Connected',
       `identity: ${s.identityHex}`,
@@ -132,6 +174,8 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remotesLine,
       aoiLine,
       targetLine,
+      remoteTargetLine,
+      remoteCastLine,
       gcdLine,
       castLine,
       'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt',
@@ -250,7 +294,21 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   ring.material = ringMat;
   ring.setEnabled(false);
 
-  return { root, body, ring, mat, ringMat };
+  const remoteRing = MeshBuilder.CreateTorus(
+    `npcRemoteRing_${npc.npcId}`,
+    { diameter: 1.7, thickness: 0.05, tessellation: 32 },
+    scene,
+  );
+  remoteRing.parent = root;
+  remoteRing.position.y = 0.04;
+  remoteRing.rotation.x = Math.PI / 2;
+  const remoteRingMat = new StandardMaterial(`npcRemoteRingMat_${npc.npcId}`, scene);
+  remoteRingMat.diffuseColor = new Color3(0.2, 0.85, 0.95);
+  remoteRingMat.emissiveColor = new Color3(0.05, 0.35, 0.45);
+  remoteRing.material = remoteRingMat;
+  remoteRing.setEnabled(false);
+
+  return { root, body, ring, remoteRing, mat, ringMat, remoteRingMat };
 }
 
 function bindInput(opts: {
@@ -360,8 +418,137 @@ async function main(): Promise<void> {
   const npcMeshes = new Map<string, NpcMesh>();
   const proxyInstances = new Map<string, InstancedMesh>();
   const remoteMeshes = new Map<string, HumanoidParts>();
+  const remoteFx = new Map<string, RemoteFx>();
+  let latestRemoteCombats: RemoteCombat[] = [];
   let moveAccumulator = 0;
   const MOVE_SEND_HZ = 20;
+
+  const ensureRemoteFx = (key: string): RemoteFx => {
+    let fx = remoteFx.get(key);
+    if (fx) return fx;
+    const beamMat = new StandardMaterial(`remoteBeamMat_${key.slice(0, 10)}`, scene);
+    beamMat.diffuseColor = new Color3(1, 0.55, 0.1);
+    beamMat.emissiveColor = new Color3(1.2, 0.45, 0.05);
+    beamMat.disableLighting = true;
+    beamMat.specularColor = new Color3(0.2, 0.1, 0.05);
+    const beam = MeshBuilder.CreateCylinder(
+      `remoteBeam_${key.slice(0, 10)}`,
+      { height: 1, diameter: 0.18, tessellation: 10 },
+      scene,
+    );
+    beam.material = beamMat;
+    beam.setEnabled(false);
+
+    const barMat = new StandardMaterial(`remoteBarMat_${key.slice(0, 10)}`, scene);
+    barMat.diffuseColor = new Color3(1, 0.7, 0.2);
+    barMat.emissiveColor = new Color3(1.1, 0.45, 0.08);
+    barMat.disableLighting = true;
+    const bar = MeshBuilder.CreateBox(
+      `remoteBar_${key.slice(0, 10)}`,
+      { width: 1.2, height: 0.16, depth: 0.16 },
+      scene,
+    );
+    bar.material = barMat;
+    bar.setEnabled(false);
+
+    fx = { beam, beamMat, bar, barMat, lastCastAtMicros: 0n };
+    remoteFx.set(key, fx);
+    return fx;
+  };
+
+  const placeBeam = (beam: Mesh, from: Vector3, to: Vector3): void => {
+    const dir = to.subtract(from);
+    const len = dir.length();
+    if (len < 0.05) {
+      beam.setEnabled(false);
+      return;
+    }
+    beam.setEnabled(true);
+    beam.position.copyFrom(from.add(to).scale(0.5));
+    beam.scaling.set(1, len, 1);
+    // Cylinder default axis is +Y — pitch/yaw so +Y aligns with dir.
+    const nx = dir.x / len;
+    const ny = dir.y / len;
+    const nz = dir.z / len;
+    beam.rotation.x = Math.acos(Math.max(-1, Math.min(1, ny)));
+    beam.rotation.y = Math.atan2(nx, nz);
+    beam.rotation.z = 0;
+  };
+
+  const syncRemoteCastFx = (combats: RemoteCombat[]) => {
+    latestRemoteCombats = combats;
+    const seen = new Set<string>();
+    const now = Date.now();
+    for (const rc of combats) {
+      const key = rc.identityHex;
+      seen.add(key);
+      const parts = remoteMeshes.get(key);
+      const fx = ensureRemoteFx(key);
+      const wind = castRemainingMs(rc, now);
+      const casting = rc.castingSpellId !== 0 && wind > 0;
+
+      // Impact / Spark flash when LastCastAt advances.
+      if (
+        rc.lastCastAtMicros > 0n &&
+        rc.lastCastAtMicros !== fx.lastCastAtMicros &&
+        fx.lastCastAtMicros !== 0n
+      ) {
+        const spark = rc.lastSpellId === SPELL_SPARK;
+        const color = spark
+          ? new Color3(0.4, 0.75, 1)
+          : new Color3(1, 0.4, 0.1);
+        if (parts) flashMesh(parts.mat, color, spark ? 220 : 380);
+        const mesh = npcMeshes.get(rc.targetNpcId.toString());
+        if (mesh) {
+          flashMesh(
+            mesh.mat,
+            spark ? new Color3(0.55, 0.85, 1) : new Color3(1, 0.3, 0.05),
+            spark ? 260 : 450,
+          );
+        }
+      }
+      if (rc.lastCastAtMicros > 0n) {
+        fx.lastCastAtMicros = rc.lastCastAtMicros;
+      }
+
+      if (!parts || !casting) {
+        fx.beam.setEnabled(false);
+        fx.bar.setEnabled(false);
+        if (parts && !casting) {
+          // Restore robe emissive after windup (match createPlayerHumanoid scale).
+          parts.mat.emissiveColor = parts.mat.diffuseColor.scale(0.08);
+        }
+        continue;
+      }
+
+      // Windup: orange pulse on remote + beam to target + head bar.
+      const pulse = 0.35 + 0.25 * Math.sin(now / 90);
+      parts.mat.emissiveColor = new Color3(pulse, pulse * 0.35, 0.05);
+      const total =
+        rc.castingSpellId === SPELL_EMBERBOLT ? EMBERBOLT_CAST_MS : 1000;
+      const progress = Math.min(1, Math.max(0, 1 - wind / total));
+      fx.bar.setEnabled(true);
+      fx.bar.position.copyFrom(parts.root.position);
+      fx.bar.position.y += 2.05;
+      fx.bar.scaling.x = 0.25 + progress * 0.75;
+
+      const tgt = npcMeshes.get(rc.targetNpcId.toString());
+      if (tgt) {
+        const from = parts.root.position.add(new Vector3(0.4, 1.4, 0.1));
+        const to = tgt.root.position.add(new Vector3(0, 0.9, 0));
+        placeBeam(fx.beam, from, to);
+      } else {
+        fx.beam.setEnabled(false);
+      }
+    }
+    for (const [key, fx] of remoteFx) {
+      if (!seen.has(key)) {
+        fx.beam.dispose();
+        fx.bar.dispose();
+        remoteFx.delete(key);
+      }
+    }
+  };
 
   const syncProxyMeshes = (proxies: CrowdProxyView[]) => {
     const seen = new Set<string>();
@@ -491,11 +678,24 @@ async function main(): Promise<void> {
       mesh.root.position.z = npc.z;
       mesh.root.setEnabled(npc.hp > 0);
       const selected = selectedTargetId === npc.npcId;
+      const remoteSelected = latestRemoteCombats.some(
+        (rc) => rc.targetNpcId === npc.npcId,
+      );
       mesh.ring.setEnabled(selected);
+      mesh.remoteRing.setEnabled(remoteSelected && !selected);
       if (selected) {
         mesh.ringMat.emissiveColor = new Color3(0.95, 0.75, 0.2);
         mesh.ringMat.diffuseColor = new Color3(0.95, 0.75, 0.2);
         mesh.mat.emissiveColor = new Color3(0.15, 0.1, 0.02);
+        // Local gold wins; still hint remote interest with outer cyan.
+        mesh.remoteRing.setEnabled(remoteSelected);
+        if (remoteSelected) {
+          mesh.remoteRingMat.emissiveColor = new Color3(0.1, 0.55, 0.65);
+        }
+      } else if (remoteSelected) {
+        mesh.remoteRingMat.emissiveColor = new Color3(0.15, 0.7, 0.85);
+        mesh.remoteRingMat.diffuseColor = new Color3(0.2, 0.85, 0.95);
+        mesh.mat.emissiveColor = new Color3(0.02, 0.08, 0.12);
       } else {
         mesh.ringMat.emissiveColor = new Color3(0, 0, 0);
         mesh.mat.emissiveColor = new Color3(0, 0, 0);
@@ -546,6 +746,7 @@ async function main(): Promise<void> {
       syncNpcMeshes(net.getNpcs());
       syncProxyMeshes(net.getProxies());
       syncRemoteMeshes(net.getRemotes());
+      syncRemoteCastFx(net.getRemoteCombats());
     }
 
     const gcdLeft = gcdRemainingMs(
@@ -594,6 +795,9 @@ async function main(): Promise<void> {
     },
     (remotes) => {
       syncRemoteMeshes(remotes);
+    },
+    (combats) => {
+      syncRemoteCastFx(combats);
     },
   );
 
@@ -816,6 +1020,89 @@ async function main(): Promise<void> {
       window.setTimeout(waitTwo, 250);
     };
     window.setTimeout(waitTwo, 700);
+  }
+
+  // ?ve=remote-cast — wait for remote PlayerCombat target + Emberbolt windup telegraph.
+  if (ve === 'remote-cast') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.15;
+  }
+
+  if (net && ve === 'remote-cast') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-cast: waiting for remote + cast telegraph…';
+    let ticks = 0;
+    let nudged = false;
+    const waitRemoteCast = () => {
+      if (!net) return;
+      ticks += 1;
+      if (!nudged && latestStatus.state === 'connected') {
+        nudged = true;
+        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0);
+      }
+      const remotes = net.getRemotes();
+      const combats = net.getRemoteCombats();
+      syncRemoteMeshes(remotes);
+      syncRemoteCastFx(combats);
+      syncNpcMeshes(net.getNpcs());
+
+      const local = net.getLocalPose();
+      const casting = combats.find(
+        (c) => c.castingSpellId !== 0 && castRemainingMs(c) > 0,
+      );
+      const targeting = combats.find((c) => c.targetNpcId !== 0n);
+      const preferred =
+        remotes.find((r) => {
+          if (!local) return true;
+          return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
+        }) ?? remotes[0];
+
+      if (preferred) {
+        const dummy =
+          net.getNpcs().find((n) => n.kind === NPC_KIND_DUMMY) ??
+          net.getNpcs()[0];
+        const focus = dummy
+          ? new Vector3(
+              (player.position.x + preferred.x + dummy.x) / 3,
+              1.1,
+              (player.position.z + preferred.z + dummy.z) / 3,
+            )
+          : player.position.add(
+              new Vector3(preferred.x, preferred.y, preferred.z)
+                .subtract(player.position)
+                .scale(0.5)
+                .add(new Vector3(0, 1.2, 0)),
+            );
+        camera.setTarget(focus);
+        camera.radius = 18;
+      }
+
+      const st = latestStatus;
+      if (st.state === 'connected' && preferred && casting) {
+        const bit = `cast spell=${casting.castingSpellId} left=${(castRemainingMs(casting) / 1000).toFixed(1)}s · target npc#${casting.targetNpcId}`;
+        if (mark) {
+          mark.textContent = `Remote-cast OK · remotes ${remotes.length} · ${bit} · remote ${preferred.identityHex.slice(0, 12)}… · local ${st.identityHex.slice(0, 12)}…`;
+        }
+        // Hold OK while windup is visible so the screenshot catches the beam/bar.
+        if (castRemainingMs(casting) > 200 && ticks < 160) {
+          window.setTimeout(waitRemoteCast, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        const tip = targeting
+          ? `target npc#${targeting.targetNpcId} (waiting cast…)`
+          : 'waiting for target/cast…';
+        mark.textContent = `VE remote-cast: Connected · remotes ${remotes.length} · remoteCombats ${combats.length} · ${tip}`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE remote-cast: timed out waiting for remote cast/target';
+        return;
+      }
+      window.setTimeout(waitRemoteCast, 250);
+    };
+    window.setTimeout(waitRemoteCast, 700);
   }
 
   void lastCastSpell;

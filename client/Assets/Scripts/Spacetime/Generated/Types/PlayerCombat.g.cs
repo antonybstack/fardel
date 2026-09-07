@@ -19,16 +19,32 @@ namespace SpacetimeDB.Types
         public ulong TargetNpcId;
         [DataMember(Name = "gcd_ready_at")]
         public SpacetimeDB.Timestamp GcdReadyAt;
+        [DataMember(Name = "casting_spell_id")]
+        public int CastingSpellId;
+        [DataMember(Name = "cast_ends_at")]
+        public SpacetimeDB.Timestamp CastEndsAt;
+        [DataMember(Name = "last_spell_id")]
+        public int LastSpellId;
+        [DataMember(Name = "last_cast_at")]
+        public SpacetimeDB.Timestamp LastCastAt;
 
         public PlayerCombat(
             SpacetimeDB.Identity Identity,
             ulong TargetNpcId,
-            SpacetimeDB.Timestamp GcdReadyAt
+            SpacetimeDB.Timestamp GcdReadyAt,
+            int CastingSpellId,
+            SpacetimeDB.Timestamp CastEndsAt,
+            int LastSpellId,
+            SpacetimeDB.Timestamp LastCastAt
         )
         {
             this.Identity = Identity;
             this.TargetNpcId = TargetNpcId;
             this.GcdReadyAt = GcdReadyAt;
+            this.CastingSpellId = CastingSpellId;
+            this.CastEndsAt = CastEndsAt;
+            this.LastSpellId = LastSpellId;
+            this.LastCastAt = LastCastAt;
         }
 
         public PlayerCombat()

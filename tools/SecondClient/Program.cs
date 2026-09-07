@@ -2,7 +2,7 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// Long-lived second identity for shared-yard VE proof.
+// Long-lived second identity for shared-yard VE proof (pose + remote cast telegraphs).
 const string uri = "http://127.0.0.1:3000";
 const string db = "fardel";
 const float targetX = 4.0f;
@@ -13,7 +13,6 @@ var connected = new TaskCompletionSource<Identity>();
 var subscribed = new TaskCompletionSource();
 
 DbConnection? conn = null;
-Identity? me = null;
 
 try
 {
@@ -22,7 +21,6 @@ try
         .WithDatabaseName(db)
         .OnConnect((c, identity, _) =>
         {
-            me = identity;
             connected.TrySetResult(identity);
         })
         .OnConnectError(e => connected.TrySetException(e))
@@ -60,7 +58,6 @@ try
 
     Console.WriteLine($"spawn ({pose.X}, {pose.Z})");
 
-    // Walk toward offset in clamped steps.
     for (var i = 0; i < 80; i++)
     {
         if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
@@ -88,10 +85,65 @@ try
         Console.WriteLine($"READY remotes-visible-at ({finalPose.X:F2}, {finalPose.Z:F2}) identity={identity}");
     }
 
-    // Hold connection indefinitely (VE screenshot script kills us).
+    conn.Reducers.EnsureTrainingDummy();
+    await Frame(conn, 200);
+
+    var castRound = 0;
     while (true)
     {
-        await Frame(conn, 200);
+        conn.Reducers.EnsureTrainingDummy();
+        await Frame(conn, 100);
+
+        var dummy = FindDummy(conn);
+        if (dummy is null || dummy.Hp <= 0)
+        {
+            await Frame(conn, 200);
+            continue;
+        }
+
+        var combat = conn.Db.PlayerCombat.Identity.Find(identity);
+        if (combat is null)
+        {
+            await Frame(conn, 100);
+            continue;
+        }
+
+        if (combat.TargetNpcId != dummy.NpcId)
+        {
+            conn.Reducers.SetTarget(dummy.NpcId);
+            Console.WriteLine($"SetTarget dummy #{dummy.NpcId}");
+            await Frame(conn, 150);
+            continue;
+        }
+
+        if (conn.Db.PlayerCombat.Identity.Find(identity) is { } c2)
+        {
+            if (c2.CastingSpellId != 0)
+            {
+                await Frame(conn, 100);
+                continue;
+            }
+
+            var nowMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+            if (c2.GcdReadyAt.MicrosecondsSinceUnixEpoch > nowMicros)
+            {
+                await Frame(conn, 80);
+                continue;
+            }
+        }
+
+        castRound++;
+        Console.WriteLine($"Cast Emberbolt #{castRound} → dummy hp={dummy.Hp}");
+        try
+        {
+            conn.Reducers.Cast(Combat.SpellEmberbolt);
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine("cast error: " + e.Message);
+        }
+
+        await Frame(conn, Combat.EmberboltCastMs + Combat.GcdMs + 200);
     }
 }
 catch (Exception e)
@@ -101,6 +153,18 @@ catch (Exception e)
 finally
 {
     try { conn?.Disconnect(); } catch { /* ignore */ }
+}
+
+static Npc? FindDummy(DbConnection conn)
+{
+    foreach (var n in conn.Db.Npc.Iter())
+    {
+        if (n.Kind == 1)
+        {
+            return n;
+        }
+    }
+    return null;
 }
 
 static void Fail(string msg)

@@ -14,4 +14,8 @@ export default __t.row({
   identity: __t.identity().primaryKey(),
   targetNpcId: __t.u64().name("target_npc_id"),
   gcdReadyAt: __t.timestamp().name("gcd_ready_at"),
+  castingSpellId: __t.i32().name("casting_spell_id"),
+  castEndsAt: __t.timestamp().name("cast_ends_at"),
+  lastSpellId: __t.i32().name("last_spell_id"),
+  lastCastAt: __t.timestamp().name("last_cast_at"),
 });

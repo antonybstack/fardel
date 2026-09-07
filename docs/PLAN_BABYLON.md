@@ -137,8 +137,13 @@ See `web/README.md` for exact commands.
 - **Second-client shared yard (presentation):** remote `PlayerPose` identities
   render as distinct tinted humanoids; HUD `remotes:` line; `?ve=two-client` +
   `tools/SecondClient` headless mover (`ve/babylon-two-client.png`)
+- **Remote cast / target (presentation):** `PlayerCombat` carries `CastingSpellId`
+  / `CastEndsAt` / `LastSpellId` / `LastCastAt`; remotes show Emberbolt windup
+  beam+bar, Spark/impact flash, cyan target rings on NPCs selected by others;
+  HUD `remote-target` / `remote-cast`; `?ve=remote-cast` + SecondClient cast loop
+  (`ve/babylon-remote-cast.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)
-- Next (north-star): credited art packs when licenses land; optional cast/target
-  state on remotes; party / always-relevant polish
+- Next (north-star): credited art packs when licenses land; party / always-relevant
+  polish; optional damage numbers / floating combat text

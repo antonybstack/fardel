@@ -74,6 +74,17 @@ export type CombatView = {
   targetNpcId: bigint;
   /** Micros since Unix epoch when GCD is ready (server Timestamp). */
   gcdReadyAtMicros: bigint;
+  /** Non-zero while a windup cast is in progress (e.g. Emberbolt). */
+  castingSpellId: number;
+  castEndsAtMicros: bigint;
+  /** Last spell that actually fired (instant or resolve) — remotes flash on change. */
+  lastSpellId: number;
+  lastCastAtMicros: bigint;
+};
+
+/** Other identity's combat row (shared-yard target rings + cast telegraphs). */
+export type RemoteCombat = CombatView & {
+  identityHex: string;
 };
 
 export type CharacterView = {
@@ -97,6 +108,7 @@ export type ConnectionStatus =
       character?: CharacterView;
       aoi?: AoiView;
       remotes?: RemotePose[];
+      remoteCombats?: RemoteCombat[];
       castFeedback?: string;
       restoredToken: boolean;
     }
@@ -106,6 +118,7 @@ export type ConnectionStatus =
 export type StatusListener = (status: ConnectionStatus) => void;
 export type PoseListener = (pose: Pose) => void;
 export type RemotesListener = (remotes: RemotePose[]) => void;
+export type RemoteCombatsListener = (combats: RemoteCombat[]) => void;
 export type NpcsListener = (npcs: NpcView[]) => void;
 export type ProxiesListener = (proxies: CrowdProxyView[]) => void;
 export type CombatListener = (combat: CombatView | null) => void;
@@ -121,6 +134,7 @@ export type GameNet = {
   cast: (spellId: number) => void;
   getLocalPose: () => Pose | null;
   getRemotes: () => RemotePose[];
+  getRemoteCombats: () => RemoteCombat[];
   getCombat: () => CombatView | null;
   getCharacter: () => CharacterView | null;
   getNpcs: () => NpcView[];
@@ -229,6 +243,10 @@ type CombatRow = {
   identity: Identity;
   targetNpcId: bigint;
   gcdReadyAt: Timestamp;
+  castingSpellId: number;
+  castEndsAt: Timestamp;
+  lastSpellId: number;
+  lastCastAt: Timestamp;
 };
 
 type NpcRow = {
@@ -301,6 +319,10 @@ function combatView(row: CombatRow): CombatView {
   return {
     targetNpcId: row.targetNpcId,
     gcdReadyAtMicros: row.gcdReadyAt.microsSinceUnixEpoch,
+    castingSpellId: row.castingSpellId,
+    castEndsAtMicros: row.castEndsAt.microsSinceUnixEpoch,
+    lastSpellId: row.lastSpellId,
+    lastCastAtMicros: row.lastCastAt.microsSinceUnixEpoch,
   };
 }
 
@@ -332,6 +354,7 @@ export async function connectToSpacetime(
   onCharacter?: CharacterListener,
   onProxies?: ProxiesListener,
   onRemotes?: RemotesListener,
+  onRemoteCombats?: RemoteCombatsListener,
 ): Promise<GameNet | null> {
   const uri = resolveUri();
   const database = resolveDatabaseName();
@@ -351,6 +374,7 @@ export async function connectToSpacetime(
     const npcMap = new Map<string, NpcView>();
     const proxyMap = new Map<string, CrowdProxyView>();
     const remotePoseMap = new Map<string, RemotePose>();
+    const remoteCombatMap = new Map<string, RemoteCombat>();
     let subHandle: SubscriptionHandle | null = null;
     let subscribedInterestX = 0;
     let subscribedInterestZ = 0;
@@ -367,6 +391,7 @@ export async function connectToSpacetime(
     const listNpcs = (): NpcView[] => Array.from(npcMap.values());
     const listProxies = (): CrowdProxyView[] => Array.from(proxyMap.values());
     const listRemotes = (): RemotePose[] => Array.from(remotePoseMap.values());
+    const listRemoteCombats = (): RemoteCombat[] => Array.from(remoteCombatMap.values());
 
     const findNpc = (id: bigint): NpcView | null => {
       if (id === 0n) return null;
@@ -417,6 +442,7 @@ export async function connectToSpacetime(
         character: latestCharacter ?? undefined,
         aoi: buildAoi() ?? undefined,
         remotes: listRemotes(),
+        remoteCombats: listRemoteCombats(),
         castFeedback: castFeedback || undefined,
         restoredToken,
       });
@@ -483,9 +509,30 @@ export async function connectToSpacetime(
           };
 
           const emitCombatRow = (row: CombatRow) => {
-            if (!localIdentity || !row.identity.isEqual(localIdentity)) return;
-            latestCombat = combatView(row);
-            onCombat?.(latestCombat);
+            if (!localIdentity) return;
+            const view = combatView(row);
+            if (row.identity.isEqual(localIdentity)) {
+              latestCombat = view;
+              onCombat?.(latestCombat);
+            } else {
+              const hex = row.identity.toHexString();
+              remoteCombatMap.set(hex, { ...view, identityHex: hex });
+              onRemoteCombats?.(listRemoteCombats());
+            }
+            emitStatus(identityHex);
+          };
+
+          const removeCombatRow = (row: CombatRow) => {
+            if (!localIdentity) return;
+            if (row.identity.isEqual(localIdentity)) {
+              latestCombat = null;
+              onCombat?.(null);
+            } else {
+              const hex = row.identity.toHexString();
+              if (remoteCombatMap.delete(hex)) {
+                onRemoteCombats?.(listRemoteCombats());
+              }
+            }
             emitStatus(identityHex);
           };
 
@@ -528,9 +575,11 @@ export async function connectToSpacetime(
               emitPose(row as PoseRow);
             }
             onRemotes?.(listRemotes());
+            remoteCombatMap.clear();
             for (const row of conn.db.playerCombat.iter()) {
               emitCombatRow(row as CombatRow);
             }
+            onRemoteCombats?.(listRemoteCombats());
             for (const row of conn.db.character.iter()) {
               emitCharacterRow(row as CharacterRow);
             }
@@ -625,6 +674,9 @@ export async function connectToSpacetime(
           conn.db.playerCombat.onUpdate((_ctx: EventContext, _old, row) => {
             emitCombatRow(row as CombatRow);
           });
+          conn.db.playerCombat.onDelete((_ctx: EventContext, row) => {
+            removeCombatRow(row as CombatRow);
+          });
 
           conn.db.character.onInsert((_ctx: EventContext, row) => {
             emitCharacterRow(row as CharacterRow);
@@ -689,6 +741,7 @@ export async function connectToSpacetime(
               },
               getLocalPose: () => latestPose,
               getRemotes: () => listRemotes(),
+              getRemoteCombats: () => listRemoteCombats(),
               getCombat: () => latestCombat,
               getCharacter: () => latestCharacter,
               getNpcs: () => listNpcs(),
@@ -744,4 +797,11 @@ export function gcdRemainingMs(combat: CombatView | null | undefined, nowMs = Da
   if (!combat) return 0;
   const readyMs = Number(combat.gcdReadyAtMicros / 1000n);
   return Math.max(0, readyMs - nowMs);
+}
+
+/** Remaining windup ms from combat view (client clock). */
+export function castRemainingMs(combat: CombatView | null | undefined, nowMs = Date.now()): number {
+  if (!combat || combat.castingSpellId === 0) return 0;
+  const endsMs = Number(combat.castEndsAtMicros / 1000n);
+  return Math.max(0, endsMs - nowMs);
 }

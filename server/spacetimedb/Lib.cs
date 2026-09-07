@@ -55,6 +55,12 @@ public static partial class Module
         public Identity Identity;
         public ulong TargetNpcId;
         public Timestamp GcdReadyAt;
+        /// <summary>Non-zero while a windup cast (e.g. Emberbolt) is pending — remotes read this.</summary>
+        public int CastingSpellId;
+        public Timestamp CastEndsAt;
+        /// <summary>Last spell that actually fired (instant Cast or ResolveCast) for remote flash.</summary>
+        public int LastSpellId;
+        public Timestamp LastCastAt;
     }
 
     [SpacetimeDB.Table(Accessor = "Npc", Public = true)]
@@ -238,13 +244,20 @@ public static partial class Module
         }
 
         combat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
-        ctx.Db.PlayerCombat.Identity.Update(combat);
 
         if (castMs <= 0)
         {
+            combat.CastingSpellId = 0;
+            combat.LastSpellId = spellId;
+            combat.LastCastAt = ctx.Timestamp;
+            ctx.Db.PlayerCombat.Identity.Update(combat);
             ApplyDamage(ctx, ctx.Sender, npc.NpcId, damage);
             return;
         }
+
+        combat.CastingSpellId = spellId;
+        combat.CastEndsAt = ctx.Timestamp + Ms(castMs);
+        ctx.Db.PlayerCombat.Identity.Update(combat);
 
         ctx.Db.PendingCast.Insert(new PendingCast
         {
@@ -261,6 +274,14 @@ public static partial class Module
         if (!Combat.TryGetSpell(cast.SpellId, out _, out var damage))
         {
             return;
+        }
+
+        if (ctx.Db.PlayerCombat.Identity.Find(cast.Caster) is { } combat)
+        {
+            combat.CastingSpellId = 0;
+            combat.LastSpellId = cast.SpellId;
+            combat.LastCastAt = ctx.Timestamp;
+            ctx.Db.PlayerCombat.Identity.Update(combat);
         }
 
         ApplyDamage(ctx, cast.Caster, cast.TargetNpcId, damage);
@@ -328,6 +349,10 @@ public static partial class Module
                 Identity = id,
                 TargetNpcId = 0,
                 GcdReadyAt = ctx.Timestamp,
+                CastingSpellId = 0,
+                CastEndsAt = ctx.Timestamp,
+                LastSpellId = 0,
+                LastCastAt = ctx.Timestamp,
             });
         }
     }

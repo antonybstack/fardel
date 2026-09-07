@@ -42,12 +42,20 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Identity> Identity { get; }
         public global::SpacetimeDB.Col<PlayerCombat, ulong> TargetNpcId { get; }
         public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp> GcdReadyAt { get; }
+        public global::SpacetimeDB.Col<PlayerCombat, int> CastingSpellId { get; }
+        public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp> CastEndsAt { get; }
+        public global::SpacetimeDB.Col<PlayerCombat, int> LastSpellId { get; }
+        public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp> LastCastAt { get; }
 
         public PlayerCombatCols(string tableName)
         {
             Identity = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Identity>(tableName, "identity");
             TargetNpcId = new global::SpacetimeDB.Col<PlayerCombat, ulong>(tableName, "target_npc_id");
             GcdReadyAt = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp>(tableName, "gcd_ready_at");
+            CastingSpellId = new global::SpacetimeDB.Col<PlayerCombat, int>(tableName, "casting_spell_id");
+            CastEndsAt = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp>(tableName, "cast_ends_at");
+            LastSpellId = new global::SpacetimeDB.Col<PlayerCombat, int>(tableName, "last_spell_id");
+            LastCastAt = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp>(tableName, "last_cast_at");
         }
     }
 

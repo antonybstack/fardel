@@ -55,6 +55,10 @@ export const PlayerCombat = __t.object("PlayerCombat", {
   identity: __t.identity(),
   targetNpcId: __t.u64(),
   gcdReadyAt: __t.timestamp(),
+  castingSpellId: __t.i32(),
+  castEndsAt: __t.timestamp(),
+  lastSpellId: __t.i32(),
+  lastCastAt: __t.timestamp(),
 });
 export type PlayerCombat = __Infer<typeof PlayerCombat>;
 
