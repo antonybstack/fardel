@@ -152,10 +152,11 @@ See `web/README.md` for exact commands.
   mates outside Moore; green party remote tint; HUD `party: N`; hotkeys P/O;
   `?ve=party` + `tools/PartySmoke` / `tools/PartyMate` (`ve/babylon-party.png`)
 - **Minimap / compass HUD (presentation):** top-right 2D canvas minimap — local (blue), remotes (magenta / party green), training dummy (tan), crowd proxies (amber near / dim far); north-up; `?ve=minimap` (`ve/babylon-minimap.png`)
+- **World nameplates (presentation):** billboard labels — local **You**, remotes hex prefix (party green tint), training dummy **Dummy** + HP pip; `?ve=nameplates` (`ve/babylon-nameplates.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- Next (north-star): credited art packs when licenses land; redeploy Pages (party + staff-unequip done)
+- Next (north-star): credited art packs when licenses land; redeploy Pages (nameplates invent done)

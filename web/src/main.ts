@@ -48,6 +48,7 @@ type NpcMesh = {
   mat: StandardMaterial;
   ringMat: StandardMaterial;
   remoteRingMat: StandardMaterial;
+  nameplate: Nameplate | null;
 };
 
 type RemoteFx = {
@@ -65,6 +66,16 @@ type DamageFloater = {
   lifeMs: number;
   startY: number;
   driftX: number;
+};
+
+/** World-space billboard label above an entity (You / Dummy / remote hex). */
+type Nameplate = {
+  mesh: Mesh;
+  mat: StandardMaterial;
+  tex: DynamicTexture;
+  label: string;
+  /** <0 = no HP pip; else 0..1 fill. */
+  hpFrac: number;
 };
 
 function setStatus(text: string): void {
@@ -423,7 +434,15 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   remoteRing.material = remoteRingMat;
   remoteRing.setEnabled(false);
 
-  return { root, body, ring, remoteRing, mat, ringMat, remoteRingMat };
+  let nameplate: Nameplate | null = null;
+  if (isDummy) {
+    nameplate = createNameplate(scene, `npc_${npc.npcId}`);
+    nameplate.mesh.parent = root;
+    nameplate.mesh.position.set(0, 2.0, 0);
+    paintNameplate(nameplate, 'Dummy', '#e8c89a', npc.maxHp > 0 ? npc.hp / npc.maxHp : 1);
+  }
+
+  return { root, body, ring, remoteRing, mat, ringMat, remoteRingMat, nameplate };
 }
 
 function bindInput(opts: {
@@ -542,6 +561,99 @@ function flashMesh(mat: StandardMaterial, color: Color3, ms: number): void {
   }, ms);
 }
 
+/** Short readable billboard above feet-rooted entities. */
+function createNameplate(scene: Scene, key: string): Nameplate {
+  const tex = new DynamicTexture(
+    `npTex_${key}`,
+    { width: 256, height: 96 },
+    scene,
+    false,
+  );
+  tex.hasAlpha = true;
+  const mat = new StandardMaterial(`npMat_${key}`, scene);
+  mat.diffuseTexture = tex;
+  mat.emissiveTexture = tex;
+  mat.opacityTexture = tex;
+  mat.disableLighting = true;
+  mat.useAlphaFromDiffuseTexture = true;
+  mat.backFaceCulling = false;
+  mat.specularColor = new Color3(0, 0, 0);
+  const mesh = MeshBuilder.CreatePlane(
+    `np_${key}`,
+    { width: 1.5, height: 0.56 },
+    scene,
+  );
+  mesh.material = mat;
+  mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
+  mesh.isPickable = false;
+  mesh.position.y = 2.05;
+  return { mesh, mat, tex, label: '', hpFrac: -2 };
+}
+
+function paintNameplate(
+  np: Nameplate,
+  label: string,
+  fillCss: string,
+  hpFrac: number,
+): void {
+  if (np.label === label && Math.abs(np.hpFrac - hpFrac) < 0.02) return;
+  np.label = label;
+  np.hpFrac = hpFrac;
+  const ctx = np.tex.getContext() as unknown as CanvasRenderingContext2D;
+  const w = 256;
+  const h = 96;
+  ctx.clearRect(0, 0, w, h);
+  const showPip = hpFrac >= 0;
+  const textY = showPip ? 34 : 48;
+  // Soft dark pill so labels read over bright sky / trees.
+  const pillW = Math.min(236, 40 + label.length * 20);
+  const pillH = showPip ? 78 : 56;
+  const pillX = (w - pillW) / 2;
+  const pillY = showPip ? 8 : 20;
+  ctx.fillStyle = 'rgba(8,10,16,0.55)';
+  ctx.beginPath();
+  const r = 14;
+  ctx.moveTo(pillX + r, pillY);
+  ctx.arcTo(pillX + pillW, pillY, pillX + pillW, pillY + pillH, r);
+  ctx.arcTo(pillX + pillW, pillY + pillH, pillX, pillY + pillH, r);
+  ctx.arcTo(pillX, pillY + pillH, pillX, pillY, r);
+  ctx.arcTo(pillX, pillY, pillX + pillW, pillY, r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = 'bold 40px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 7;
+  ctx.strokeStyle = 'rgba(0,0,0,0.92)';
+  ctx.strokeText(label, w / 2, textY);
+  ctx.fillStyle = fillCss;
+  ctx.fillText(label, w / 2, textY);
+  if (showPip) {
+    const bx = 52;
+    const by = 62;
+    const bw = 152;
+    const bh = 14;
+    ctx.fillStyle = 'rgba(12,12,14,0.85)';
+    ctx.fillRect(bx, by, bw, bh);
+    const fill = Math.max(0, Math.min(1, hpFrac));
+    ctx.fillStyle =
+      fill > 0.4
+        ? 'rgb(72,205,110)'
+        : fill > 0.18
+          ? 'rgb(230,190,55)'
+          : 'rgb(220,70,60)';
+    ctx.fillRect(bx + 2, by + 2, (bw - 4) * fill, bh - 4);
+  }
+  np.tex.update();
+}
+
+function disposeNameplate(np: Nameplate | null | undefined): void {
+  if (!np) return;
+  np.mesh.dispose();
+  np.mat.dispose();
+  np.tex.dispose();
+}
+
 /** Rising combat text above an NPC — cosmetic only (HP delta from authority). */
 function spawnDamageFloater(
   scene: Scene,
@@ -629,8 +741,13 @@ async function main(): Promise<void> {
   let latestDamageAtMs = 0;
   const proxyInstances = new Map<string, InstancedMesh>();
   const remoteMeshes = new Map<string, HumanoidParts>();
+  const remoteNameplates = new Map<string, Nameplate>();
   const remoteFx = new Map<string, RemoteFx>();
   let latestRemoteCombats: RemoteCombat[] = [];
+  const localNameplate = createNameplate(scene, 'local');
+  localNameplate.mesh.parent = player;
+  localNameplate.mesh.position.set(0, 2.05, 0);
+  paintNameplate(localNameplate, 'You', '#b8d4ff', -1);
   let moveAccumulator = 0;
   const MOVE_SEND_HZ = 20;
 
@@ -801,6 +918,8 @@ async function main(): Promise<void> {
         if (parts) {
           parts.root.dispose();
           remoteMeshes.delete(key);
+          disposeNameplate(remoteNameplates.get(key));
+          remoteNameplates.delete(key);
         }
         parts = createPlayerHumanoid(scene, {
           name: `remote_${key.slice(0, 12)}`,
@@ -808,6 +927,26 @@ async function main(): Promise<void> {
         });
         remoteMeshes.set(key, parts);
         remotePartyTint.set(key, wantParty);
+        const np = createNameplate(scene, `remote_${key.slice(0, 12)}`);
+        np.mesh.parent = parts.root;
+        np.mesh.position.set(0, 2.05, 0);
+        paintNameplate(
+          np,
+          key.slice(0, 6),
+          wantParty ? '#9dffb0' : '#f0b8e8',
+          -1,
+        );
+        remoteNameplates.set(key, np);
+      } else {
+        const np = remoteNameplates.get(key);
+        if (np) {
+          paintNameplate(
+            np,
+            key.slice(0, 6),
+            wantParty ? '#9dffb0' : '#f0b8e8',
+            -1,
+          );
+        }
       }
       parts.root.position.x = r.x;
       parts.root.position.y = r.y;
@@ -820,6 +959,8 @@ async function main(): Promise<void> {
         parts.root.dispose();
         remoteMeshes.delete(key);
         remotePartyTint.delete(key);
+        disposeNameplate(remoteNameplates.get(key));
+        remoteNameplates.delete(key);
       }
     }
   };
@@ -949,6 +1090,15 @@ async function main(): Promise<void> {
       mesh.root.position.x = npc.x;
       mesh.root.position.z = npc.z;
       mesh.root.setEnabled(npc.hp > 0);
+      if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+        paintNameplate(
+          mesh.nameplate,
+          'Dummy',
+          '#e8c89a',
+          npc.maxHp > 0 ? npc.hp / npc.maxHp : 0,
+        );
+        mesh.nameplate.mesh.setEnabled(npc.hp > 0);
+      }
       const selected = selectedTargetId === npc.npcId;
       const remoteSelected = latestRemoteCombats.some(
         (rc) => rc.targetNpcId === npc.npcId,
@@ -975,6 +1125,7 @@ async function main(): Promise<void> {
     }
     for (const [key, mesh] of npcMeshes) {
       if (!seen.has(key)) {
+        disposeNameplate(mesh.nameplate);
         mesh.root.dispose();
         npcMeshes.delete(key);
         npcLastHp.delete(key);
@@ -1599,6 +1750,73 @@ async function main(): Promise<void> {
       window.setTimeout(waitMinimap, 250);
     };
     window.setTimeout(waitMinimap, 700);
+  }
+
+  // ?ve=nameplates — You + Dummy (+ remotes) billboard labels; dummy HP pip.
+  if (ve === 'nameplates') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.55;
+    camera.beta = Math.PI / 3.55;
+  }
+  if (net && ve === 'nameplates') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE nameplates: waiting for Connected + Dummy…';
+    let ticks = 0;
+    const waitPlates = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const remotes = net.getRemotes();
+      syncNpcMeshes(npcs);
+      syncRemoteMeshes(remotes);
+      if (dummy) {
+        // Nudge local toward dummy so both nameplates fit the frame.
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 4.5) {
+          const step = Math.min(MAX_STEP_METERS, dist - 3.2);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        const mid = new Vector3(
+          (player.position.x + dummy.x) * 0.5,
+          1.15,
+          (player.position.z + dummy.z) * 0.5,
+        );
+        camera.setTarget(mid);
+        camera.radius = dist > 8 ? Math.min(22, 8 + dist * 0.45) : 11;
+      }
+      const dummyMesh = dummy
+        ? npcMeshes.get(dummy.npcId.toString())
+        : undefined;
+      const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
+      const nearEnough =
+        !!dummy &&
+        Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z) < 7;
+      if (
+        st.state === 'connected' &&
+        hasDummyPlate &&
+        nearEnough &&
+        localNameplate.mesh.isEnabled()
+      ) {
+        if (mark) {
+          mark.textContent = `Nameplates OK · You + Dummy${dummy ? ` HP ${dummy.hp}/${dummy.maxHp}` : ''} · remotes ${remotes.length} · billboards`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE nameplates: Connected · dummy ${dummy ? 'yes' : 'no'} · remotes ${remotes.length} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE nameplates: timed out waiting for Dummy plate';
+        return;
+      }
+      window.setTimeout(waitPlates, 200);
+    };
+    window.setTimeout(waitPlates, 700);
   }
 
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).
