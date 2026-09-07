@@ -102,3 +102,6 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 - Web `/p ` (or `/party `) prefix routes compose to `partySay`; party lines use `[P]` + green styling; toast kind `partySay`. Solo `CreateParty` is enough for `?ve=party-chat` screenshot; outsider proof stays headless. Whisper VE needs `tools/SecondClient` for a remote target (`?ve=whisper`).
 - Minimal player trade: session-scoped `TradeOffer` (PK = recipient) mirrors `PartyInvite`; Offer/Accept re-check XZ range; transfer `HasEmberShard` and/or capped XP on `Character` — no new inventory table. Headless `TradeSmoke` proves range reject + cancel + shard/XP transfer; browser `?ve=trade` + `TradeMate` auto-accept for bag/toast shot.
 - Yard vendor: public `YardVendor` (seeded on connect) + range-checked `BuyFromVendor`/`SellToVendor` transferring XP↔`HasEmberShard` (no new inventory table); headless `VendorSmoke` proves out-of-range + buy/sell XP restore; Babylon **E** buy-or-sell from bag flag (`?ve=vendor`).
+
+- Yard tonic use: `Character.HasYardTonic` + `TonicExpiresAt`; `BuyYardTonic` (vendor XP) grants bag flag; `UseYardTonic` consumes it for a 15s move-speed buff (`Tonic.MoveSpeedMult` on Move clamp). Headless `TonicSmoke` proves empty/range reject + buffed step; Babylon **V** use + self-frame buff timer (`?ve=tonic`).
+

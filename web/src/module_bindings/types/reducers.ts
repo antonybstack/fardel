@@ -9,6 +9,7 @@ import { type Infer as __Infer } from "spacetimedb";
 import AcceptPartyInviteReducer from "../accept_party_invite_reducer";
 import AcceptTradeReducer from "../accept_trade_reducer";
 import BuyFromVendorReducer from "../buy_from_vendor_reducer";
+import BuyYardTonicReducer from "../buy_yard_tonic_reducer";
 import CancelTradeReducer from "../cancel_trade_reducer";
 import CastReducer from "../cast_reducer";
 import CreatePartyReducer from "../create_party_reducer";
@@ -28,11 +29,13 @@ import SellToVendorReducer from "../sell_to_vendor_reducer";
 import SetTargetReducer from "../set_target_reducer";
 import UnequipRobesReducer from "../unequip_robes_reducer";
 import UnequipStaffReducer from "../unequip_staff_reducer";
+import UseYardTonicReducer from "../use_yard_tonic_reducer";
 import WhisperReducer from "../whisper_reducer";
 
 export type AcceptPartyInviteParams = __Infer<typeof AcceptPartyInviteReducer>;
 export type AcceptTradeParams = __Infer<typeof AcceptTradeReducer>;
 export type BuyFromVendorParams = __Infer<typeof BuyFromVendorReducer>;
+export type BuyYardTonicParams = __Infer<typeof BuyYardTonicReducer>;
 export type CancelTradeParams = __Infer<typeof CancelTradeReducer>;
 export type CastParams = __Infer<typeof CastReducer>;
 export type CreatePartyParams = __Infer<typeof CreatePartyReducer>;
@@ -52,5 +55,6 @@ export type SellToVendorParams = __Infer<typeof SellToVendorReducer>;
 export type SetTargetParams = __Infer<typeof SetTargetReducer>;
 export type UnequipRobesParams = __Infer<typeof UnequipRobesReducer>;
 export type UnequipStaffParams = __Infer<typeof UnequipStaffReducer>;
+export type UseYardTonicParams = __Infer<typeof UseYardTonicReducer>;
 export type WhisperParams = __Infer<typeof WhisperReducer>;
 

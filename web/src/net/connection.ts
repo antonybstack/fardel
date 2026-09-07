@@ -97,6 +97,8 @@ export type CharacterView = {
   staffEquipped: boolean;
   robesEquipped: boolean;
   hasEmberShard: boolean;
+  hasYardTonic: boolean;
+  tonicExpiresAtMicros: bigint;
 };
 
 export type PartyMemberView = {
@@ -215,6 +217,8 @@ export type GameNet = {
   getTrade: () => TradeView;
   buyFromVendor: () => Promise<void>;
   sellToVendor: () => Promise<void>;
+  buyYardTonic: () => Promise<void>;
+  useYardTonic: () => Promise<void>;
   getVendors: () => VendorView[];
   /** Nearest YardVendor within interact range, or null. */
   nearestVendor: (rangeMeters?: number) => VendorView | null;
@@ -380,6 +384,8 @@ type CharacterRow = {
   staffEquipped: boolean;
   robesEquipped: boolean;
   hasEmberShard: boolean;
+  hasYardTonic: boolean;
+  tonicExpiresAt: Timestamp;
 };
 
 type CrowdProxyRow = {
@@ -491,6 +497,8 @@ function characterView(row: CharacterRow): CharacterView {
     staffEquipped: row.staffEquipped,
     robesEquipped: row.robesEquipped,
     hasEmberShard: !!row.hasEmberShard,
+    hasYardTonic: !!row.hasYardTonic,
+    tonicExpiresAtMicros: row.tonicExpiresAt.microsSinceUnixEpoch,
   };
 }
 
@@ -1412,6 +1420,8 @@ export async function connectToSpacetime(
               },
               buyFromVendor: () => conn.reducers.buyFromVendor({}),
               sellToVendor: () => conn.reducers.sellToVendor({}),
+              buyYardTonic: () => conn.reducers.buyYardTonic({}),
+              useYardTonic: () => conn.reducers.useYardTonic({}),
               getVendors: () => {
                 const out: VendorView[] = [];
                 const table = (conn.db as any).yardVendor;

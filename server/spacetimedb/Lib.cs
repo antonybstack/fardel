@@ -74,6 +74,11 @@ public static partial class Module
         public bool RobesEquipped;
         /// <summary>Bag flag — set when picking up ember_shard WorldLoot.</summary>
         public bool HasEmberShard;
+        /// <summary>Bag flag — yard_tonic bought via BuyYardTonic; consumed by UseYardTonic.</summary>
+        [SpacetimeDB.Default(false)]
+        public bool HasYardTonic;
+        /// <summary>Move-speed buff expiry (UseYardTonic). Inactive when &lt;= now.</summary>
+        public Timestamp TonicExpiresAt;
     }
 
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
@@ -248,7 +253,13 @@ public static partial class Module
     {
         var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
-        Movement.ClampWishStep(ref dx, ref dz);
+        var maxStep = Movement.MaxStepMeters;
+        if (ctx.Db.Character.Identity.Find(ctx.Sender) is { } mover
+            && ctx.Timestamp < mover.TonicExpiresAt)
+        {
+            maxStep *= Tonic.MoveSpeedMult;
+        }
+        Movement.ClampWishStep(ref dx, ref dz, maxStep);
         var x = pose.X + dx;
         var z = pose.Z + dz;
         Movement.ChunkCoords(x, z, out var cx, out var cz);
@@ -678,6 +689,8 @@ public static partial class Module
             StaffEquipped = true,
             RobesEquipped = true,
             HasEmberShard = false,
+            HasYardTonic = false,
+            TonicExpiresAt = ctx.Timestamp,
         });
     }
 
@@ -1338,6 +1351,52 @@ public static partial class Module
         character.Xp += Fardel.Shared.Vendor.SellPriceXp;
         ctx.Db.Character.Identity.Update(character);
         Log.Info($"SellToVendor {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
+    }
+
+    /// <summary>Spend XP at a nearby YardVendor to gain HasYardTonic.</summary>
+    [SpacetimeDB.Reducer]
+    public static void BuyYardTonic(ReducerContext ctx)
+    {
+        var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
+        var vendor = FindVendorInRange(ctx, pose)
+            ?? throw new Exception("Out of range");
+
+        if (character.HasYardTonic)
+        {
+            throw new Exception("Already have yard tonic");
+        }
+
+        if (character.Xp < Tonic.BuyXpCost)
+        {
+            throw new Exception("Not enough XP");
+        }
+
+        character.Xp -= Tonic.BuyXpCost;
+        character.HasYardTonic = true;
+        ctx.Db.Character.Identity.Update(character);
+        Log.Info($"BuyYardTonic {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
+    }
+
+    /// <summary>Consume HasYardTonic for a short move-speed buff (TonicExpiresAt).</summary>
+    [SpacetimeDB.Reducer]
+    public static void UseYardTonic(ReducerContext ctx)
+    {
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
+        if (!character.HasYardTonic)
+        {
+            throw new Exception("No yard tonic");
+        }
+
+        character.HasYardTonic = false;
+        character.TonicExpiresAt = ctx.Timestamp + Ms(Tonic.DurationMs);
+        ctx.Db.Character.Identity.Update(character);
+        Log.Info($"UseYardTonic {ctx.Sender} expires={character.TonicExpiresAt}");
     }
 
     static YardVendor? FindVendorInRange(ReducerContext ctx, PlayerPose pose)

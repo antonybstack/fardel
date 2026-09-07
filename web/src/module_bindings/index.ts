@@ -37,6 +37,7 @@ import {
 import AcceptPartyInviteReducer from "./accept_party_invite_reducer";
 import AcceptTradeReducer from "./accept_trade_reducer";
 import BuyFromVendorReducer from "./buy_from_vendor_reducer";
+import BuyYardTonicReducer from "./buy_yard_tonic_reducer";
 import CancelTradeReducer from "./cancel_trade_reducer";
 import CastReducer from "./cast_reducer";
 import CreatePartyReducer from "./create_party_reducer";
@@ -56,6 +57,7 @@ import SellToVendorReducer from "./sell_to_vendor_reducer";
 import SetTargetReducer from "./set_target_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
+import UseYardTonicReducer from "./use_yard_tonic_reducer";
 import WhisperReducer from "./whisper_reducer";
 
 // Import all procedure arg schemas
@@ -241,6 +243,7 @@ const reducersSchema = __reducers(
   __reducerSchema("accept_party_invite", AcceptPartyInviteReducer),
   __reducerSchema("accept_trade", AcceptTradeReducer),
   __reducerSchema("buy_from_vendor", BuyFromVendorReducer),
+  __reducerSchema("buy_yard_tonic", BuyYardTonicReducer),
   __reducerSchema("cancel_trade", CancelTradeReducer),
   __reducerSchema("cast", CastReducer),
   __reducerSchema("create_party", CreatePartyReducer),
@@ -260,6 +263,7 @@ const reducersSchema = __reducers(
   __reducerSchema("set_target", SetTargetReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
+  __reducerSchema("use_yard_tonic", UseYardTonicReducer),
   __reducerSchema("whisper", WhisperReducer),
 );
 

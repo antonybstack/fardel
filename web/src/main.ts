@@ -61,6 +61,8 @@ import {
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
+/** Match shared/Fardel.Shared Tonic.MoveSpeedMult. */
+const TONIC_MOVE_MULT = 1.75;
 /** Client wish speed (m/s); each reducer call is clamped server-side. */
 const MOVE_SPEED = 4.5;
 
@@ -223,9 +225,20 @@ function updateSpellHotbar(opts: {
   );
 }
 
-/** Player self-frame: You + XP (no player HP on Character yet). */
+function tonicRemainingMs(character: {
+  tonicExpiresAtMicros?: bigint;
+} | null | undefined): number {
+  if (!character?.tonicExpiresAtMicros) return 0;
+  const nowMicros = BigInt(Date.now()) * 1000n;
+  const left = character.tonicExpiresAtMicros - nowMicros;
+  if (left <= 0n) return 0;
+  return Number(left / 1000n);
+}
+
+/** Player self-frame: You + XP + tonic buff timer (no player HP on Character yet). */
 function updateSelfFrame(character: {
   xp: number;
+  tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
@@ -238,6 +251,20 @@ function updateSelfFrame(character: {
   const xpEl = document.getElementById('sfXp');
   if (nameEl) nameEl.textContent = 'You';
   if (xpEl) xpEl.textContent = `XP ${character.xp}`;
+  const buffEl = document.getElementById('sfBuff');
+  if (buffEl) {
+    const leftMs = tonicRemainingMs(character);
+    if (leftMs > 0) {
+      buffEl.classList.remove('hidden');
+      buffEl.classList.add('active');
+      const sec = (leftMs / 1000).toFixed(1);
+      buffEl.textContent = `Tonic ${sec}s · ×${TONIC_MOVE_MULT} move`;
+    } else {
+      buffEl.classList.add('hidden');
+      buffEl.classList.remove('active');
+      buffEl.textContent = 'Tonic —';
+    }
+  }
 }
 
 /** Compact loadout strip: staff/robes + Spark/Emberbolt known gates. */
@@ -247,6 +274,7 @@ function updateLoadoutStrip(character: {
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
+  hasYardTonic?: boolean;
 } | null | undefined): void {
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
@@ -301,6 +329,13 @@ function updateLoadoutStrip(character: {
     'held',
     'empty',
   );
+  setChip(
+    'loTonic',
+    'loTonicState',
+    !!character.hasYardTonic,
+    'held',
+    'empty',
+  );
 }
 
 /** Bag panel rows (Character loadout). Visibility controlled separately via B. */
@@ -311,6 +346,7 @@ function updateBagPanel(character: {
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
+  hasYardTonic?: boolean;
 } | null | undefined): void {
   const setRow = (id: string, text: string, ok: boolean | null) => {
     const el = document.getElementById(id);
@@ -326,6 +362,7 @@ function updateBagPanel(character: {
     setRow('bagEmber', '—', null);
     setRow('bagXp', '—', null);
     setRow('bagShard', '—', null);
+    setRow('bagTonic', '—', null);
     return;
   }
   setRow(
@@ -349,6 +386,11 @@ function updateBagPanel(character: {
     'bagShard',
     character.hasEmberShard ? 'held' : 'empty',
     !!character.hasEmberShard,
+  );
+  setRow(
+    'bagTonic',
+    character.hasYardTonic ? 'held' : 'empty',
+    !!character.hasYardTonic,
   );
 }
 
@@ -443,7 +485,8 @@ function updatePartyFrames(opts: {
 const COMBAT_LOG_MAX = 14;
 
 type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot' | 'trade'
-  | 'vendor';
+  | 'vendor'
+  | 'tonic';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -469,7 +512,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                   ? 'TRADE'
                   : kind === 'vendor'
                     ? 'VENDOR'
-                    : 'RESPAWN';
+                    : kind === 'tonic'
+                      ? 'TONIC'
+                      : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -513,7 +558,8 @@ type SystemToastKind =
   | 'rate'
   | 'loot'
   | 'trade'
-  | 'vendor';
+  | 'vendor'
+  | 'tonic';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -554,7 +600,9 @@ function pushSystemToast(
                             ? 'TRADE'
                             : kind === 'vendor'
                               ? 'VENDOR'
-                              : 'SAY';
+                              : kind === 'tonic'
+                                ? 'TONIC'
+                                : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -985,7 +1033,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1171,6 +1219,7 @@ function bindInput(opts: {
   onToggleBag: () => void;
   onVendorInteract: () => void;
   onPickupNearest: () => void;
+  onUseYardTonic: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -1250,6 +1299,11 @@ function bindInput(opts: {
     if (k === 'f') {
       e.preventDefault();
       opts.onPickupNearest();
+      return;
+    }
+    if (k === 'v') {
+      e.preventDefault();
+      opts.onUseYardTonic();
       return;
     }
   };
@@ -2135,6 +2189,36 @@ async function main(): Promise<void> {
         }
       });
     },
+    onUseYardTonic: () => {
+      if (!net) return;
+      const g = net;
+      const ch0 = g.getCharacter();
+      if (!ch0?.hasYardTonic) {
+        pushSystemToast('rate', 'No yard tonic in bag');
+        return;
+      }
+      void g.useYardTonic().then(() => {
+        const after = g.getCharacter();
+        if (after) {
+          updateBagPanel(after);
+          updateLoadoutStrip(after);
+          updateSelfFrame(after);
+        }
+        bagOpen = true;
+        setBagPanelOpen(true);
+        pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
+        pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
+        // Brief green flash VFX on local player
+        flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/no yard tonic/i.test(msg)) {
+          pushSystemToast('rate', 'No yard tonic in bag');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Use tonic failed');
+        }
+      });
+    },
   });
 
   bindChatUi({
@@ -2489,13 +2573,16 @@ async function main(): Promise<void> {
       if (wish.dx !== 0 || wish.dz !== 0) {
         moveAccumulator += dt;
         const interval = 1 / MOVE_SEND_HZ;
+        const tonicOn = tonicRemainingMs(net.getCharacter()) > 0;
+        const speed = tonicOn ? MOVE_SPEED * TONIC_MOVE_MULT : MOVE_SPEED;
+        const maxStep = tonicOn ? MAX_STEP_METERS * TONIC_MOVE_MULT : MAX_STEP_METERS;
         while (moveAccumulator >= interval) {
           moveAccumulator -= interval;
-          let dx = wish.dx * MOVE_SPEED * interval;
-          let dz = wish.dz * MOVE_SPEED * interval;
+          let dx = wish.dx * speed * interval;
+          let dz = wish.dz * speed * interval;
           const len = Math.hypot(dx, dz);
-          if (len > MAX_STEP_METERS) {
-            const s = MAX_STEP_METERS / len;
+          if (len > maxStep) {
+            const s = maxStep / len;
             dx *= s;
             dz *= s;
           }
@@ -2508,6 +2595,12 @@ async function main(): Promise<void> {
       }
     } else {
       moveAccumulator = 0;
+    }
+
+    // Refresh tonic buff timer on self-frame each frame.
+    if (net) {
+      const chTick = net.getCharacter();
+      if (chTick) updateSelfFrame(chTick);
     }
 
     // Keep highlight in sync with server combat target.
@@ -5149,6 +5242,172 @@ async function main(): Promise<void> {
       window.setTimeout(waitVendor, 220);
     };
     window.setTimeout(waitVendor, 700);
+  }
+
+
+
+
+  // ?ve=tonic — BuyYardTonic at vendor, UseYardTonic (V), toast + buff timer on self-frame.
+  if (ve === 'tonic') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'tonic') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tonic: waiting for Connected…';
+    let ticks = 0;
+    let approached = false;
+    let bought = false;
+    let used = false;
+    let bagShown = false;
+    const waitTonic = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE tonic: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitTonic, 200);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const vendors = net.getVendors();
+      const v0 = vendors[0] ?? null;
+      if (!v0) {
+        if (mark) mark.textContent = 'VE tonic: waiting YardVendor…';
+        if (ticks < 240) window.setTimeout(waitTonic, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(v0.x, 1.0, v0.z));
+      camera.radius = 10;
+      if (!approached) {
+        const pose = net.getLocalPose();
+        if (pose) {
+          for (let i = 0; i < 10; i++) {
+            const p = net.getLocalPose() ?? pose;
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z);
+          }
+        }
+        approached = true;
+        if (mark) mark.textContent = 'VE tonic: approaching vendor…';
+        window.setTimeout(waitTonic, 450);
+        return;
+      }
+      const near = net.nearestVendor(4.5);
+      if (!near) {
+        const pose = net.getLocalPose();
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
+        if (mark) mark.textContent = 'VE tonic: out of range, nudging…';
+        if (ticks < 280) window.setTimeout(waitTonic, 220);
+        return;
+      }
+      if (!bagShown) {
+        bagShown = true;
+        bagOpen = true;
+        setBagPanelOpen(true);
+        vendorOpen = true;
+        setVendorPanelOpen(true);
+        updateVendorPanel(near);
+      }
+      let ch = net.getCharacter();
+      if (ch) {
+        updateBagPanel(ch);
+        updateLoadoutStrip(ch);
+        updateSelfFrame(ch);
+      }
+
+      // Need XP to buy tonic.
+      if (!bought && ch && !ch.hasYardTonic && ch.xp < 5) {
+        if (mark) mark.textContent = `VE tonic: need XP (${ch.xp}/5) — loot…`;
+        const pose = net.getLocalPose();
+        const lootX = 1.5;
+        const lootZ = 1.2;
+        if (pose) {
+          net.sendMove(lootX - pose.x, lootZ - pose.z);
+        }
+        net.seedLoot();
+        void net.pickup().then(() => {
+          /* bag refresh via character listener */
+        }).catch(() => {});
+        if (ticks < 360) window.setTimeout(waitTonic, 280);
+        return;
+      }
+
+      if (!bought && ch && !ch.hasYardTonic) {
+        if (mark) mark.textContent = 'VE tonic: BuyYardTonic…';
+        void net.buyYardTonic().then(() => {
+          bought = true;
+          const after = net!.getCharacter();
+          if (after) {
+            updateBagPanel(after);
+            updateLoadoutStrip(after);
+          }
+          pushSystemToast('vendor', 'Bought yard_tonic · −5 XP', TOAST_VE_TTL_MS);
+          pushCombatLog('tonic', 'Bought yard_tonic');
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (mark) mark.textContent = `VE tonic: buy fail ${msg.slice(0, 48)}`;
+        });
+        window.setTimeout(waitTonic, 400);
+        return;
+      }
+
+      ch = net.getCharacter();
+      if (!used && ch?.hasYardTonic) {
+        if (mark) mark.textContent = 'VE tonic: UseYardTonic…';
+        void net.useYardTonic().then(() => {
+          used = true;
+          const after = net!.getCharacter();
+          if (after) {
+            updateBagPanel(after);
+            updateLoadoutStrip(after);
+            updateSelfFrame(after);
+          }
+          bagOpen = true;
+          setBagPanelOpen(true);
+          pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
+          pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
+          flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 900);
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (mark) mark.textContent = `VE tonic: use fail ${msg.slice(0, 48)}`;
+        });
+        window.setTimeout(waitTonic, 450);
+        return;
+      }
+
+      ch = net.getCharacter();
+      const toastOk = toastKindsPresent().has('tonic');
+      const buffLeft = tonicRemainingMs(ch);
+      const buffEl = document.getElementById('sfBuff');
+      const buffVisible = !!buffEl && !buffEl.classList.contains('hidden');
+      if (used && toastOk && buffLeft > 0 && buffVisible) {
+        // Nudge move so speed buff is "alive" in shot
+        net.sendMove(MAX_STEP_METERS * TONIC_MOVE_MULT * 0.6, 0);
+        if (ch) {
+          updateSelfFrame(ch);
+          updateBagPanel(ch);
+        }
+        if (mark) {
+          mark.textContent =
+            `Tonic OK · buff ${ (buffLeft / 1000).toFixed(1) }s · V use · toast/bag`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE tonic: used ${used ? 'y' : 'n'} · toast ${toastOk ? 'y' : 'n'} · buff ${buffLeft}ms`;
+      }
+      if (ticks > 400) {
+        if (mark) {
+          mark.textContent =
+            `VE tonic: timed out · used ${used ? 'y' : 'n'} · toast ${toastOk ? 'y' : 'n'} · buff ${buffLeft}`;
+        }
+        return;
+      }
+      window.setTimeout(waitTonic, 220);
+    };
+    window.setTimeout(waitTonic, 700);
   }
 
 

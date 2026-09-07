@@ -12,14 +12,21 @@ public static class Movement
     /// <summary>Clamp a wish displacement to MaxStepMeters (XZ). Y ignored for slice 1.</summary>
     public static void ClampWishStep(ref float dx, ref float dz)
     {
+        ClampWishStep(ref dx, ref dz, MaxStepMeters);
+    }
+
+    /// <summary>Clamp a wish displacement to an explicit max step (XZ).</summary>
+    public static void ClampWishStep(ref float dx, ref float dz, float maxStepMeters)
+    {
+        var max = maxStepMeters > 0f ? maxStepMeters : MaxStepMeters;
         var lenSq = dx * dx + dz * dz;
-        var maxSq = MaxStepMeters * MaxStepMeters;
+        var maxSq = max * max;
         if (lenSq <= maxSq || lenSq <= 1e-12f)
         {
             return;
         }
 
-        var inv = MaxStepMeters / MathF.Sqrt(lenSq);
+        var inv = max / MathF.Sqrt(lenSq);
         dx *= inv;
         dz *= inv;
     }

@@ -18,6 +18,8 @@ export const Character = __t.object("Character", {
   staffEquipped: __t.bool(),
   robesEquipped: __t.bool(),
   hasEmberShard: __t.bool(),
+  hasYardTonic: __t.bool(),
+  tonicExpiresAt: __t.timestamp(),
 });
 export type Character = __Infer<typeof Character>;
 
