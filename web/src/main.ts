@@ -6508,12 +6508,13 @@ async function main(): Promise<void> {
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
-  if (ve === 'bag') {
+  // ?ve=bag-chrome — prove bag/loadout chrome readability over cyan fog (#75).
+  if (ve === 'bag' || ve === 'bag-chrome') {
     camera.radius = 11;
     camera.alpha = Math.PI / 2.45;
     camera.beta = Math.PI / 3.15;
   }
-  if (net && ve === 'bag') {
+  if (net && (ve === 'bag' || ve === 'bag-chrome')) {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE bag: waiting for Connected + Character…';
     bagOpen = true;
@@ -6560,7 +6561,8 @@ async function main(): Promise<void> {
         emberOk
       ) {
         if (mark) {
-          mark.textContent = `Bag OK · You XP ${ch.xp} · staff ${ch.staffEquipped ? 'on' : 'off'} · Spark+Emberbolt known · B toggles bag`;
+          const label = ve === 'bag-chrome' ? 'Bag-chrome' : 'Bag';
+          mark.textContent = `${label} OK · You XP ${ch.xp} · staff ${ch.staffEquipped ? 'on' : 'off'} · Spark+Emberbolt known · B toggles bag`;
         }
         return;
       }
