@@ -82,3 +82,5 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
   exclusion. Identity SQL uses `0x` + `Identity.ToString()` hex.
 - Browser: wholesale `party_member` + resubscribe when the always-relevant hex
   set changes so far party mates keep arriving after interest moves.
+
+- Self-frame/bag HUD is client-only Cosmetics over Character (XP, staffEquipped, knowsSpark/Emberbolt); no player HP table yet — omit health rather than invent fake HP.

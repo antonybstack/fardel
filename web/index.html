@@ -23,6 +23,42 @@
         <span class="slotName">Emberbolt</span>
       </div>
     </div>
+    <div id="selfFrame" class="hidden" aria-label="Player self frame">
+      <div class="sfNameRow">
+        <span id="sfName">You</span>
+        <span id="sfXp" class="sfXp">XP —</span>
+      </div>
+      <div class="sfHint">GCD on hotbar · B bag</div>
+    </div>
+    <div id="loadoutStrip" class="hidden" aria-label="Loadout strip">
+      <div class="loChip" id="loStaff" data-kind="staff">
+        <span class="loIcon staff" aria-hidden="true">┃</span>
+        <span class="loLabel">Staff</span>
+        <span class="loState" id="loStaffState">—</span>
+      </div>
+      <div class="loChip" id="loSpark" data-kind="spark">
+        <span class="loIcon spark" aria-hidden="true">✦</span>
+        <span class="loLabel">Spark</span>
+        <span class="loState" id="loSparkState">—</span>
+      </div>
+      <div class="loChip" id="loEmber" data-kind="emberbolt">
+        <span class="loIcon ember" aria-hidden="true">✸</span>
+        <span class="loLabel">Emberbolt</span>
+        <span class="loState" id="loEmberState">—</span>
+      </div>
+    </div>
+    <div id="bagPanel" class="hidden" aria-label="Bag / loadout">
+      <div class="bagHead">
+        <span class="bagTitle">Bag / loadout</span>
+        <span class="bagKey">B</span>
+      </div>
+      <div class="bagRow"><span>Staff</span><span id="bagStaff">—</span></div>
+      <div class="bagRow"><span>Robes</span><span id="bagRobes">—</span></div>
+      <div class="bagRow"><span>Spark</span><span id="bagSpark">—</span></div>
+      <div class="bagRow"><span>Emberbolt</span><span id="bagEmber">—</span></div>
+      <div class="bagRow"><span>XP</span><span id="bagXp">—</span></div>
+      <div class="bagFoot">Casts need staff + known spell · U/I equip</div>
+    </div>
     <div id="hud">
       <div id="status">Booting…</div>
       <div id="persistMark" class="persistMark"></div>

@@ -180,6 +180,118 @@ function updateSpellHotbar(opts: {
   );
 }
 
+/** Player self-frame: You + XP (no player HP on Character yet). */
+function updateSelfFrame(character: {
+  xp: number;
+} | null | undefined): void {
+  const frame = document.getElementById('selfFrame');
+  if (!frame) return;
+  if (!character) {
+    frame.classList.add('hidden');
+    return;
+  }
+  frame.classList.remove('hidden');
+  const nameEl = document.getElementById('sfName');
+  const xpEl = document.getElementById('sfXp');
+  if (nameEl) nameEl.textContent = 'You';
+  if (xpEl) xpEl.textContent = `XP ${character.xp}`;
+}
+
+/** Compact loadout strip: staff + Spark/Emberbolt known gates. */
+function updateLoadoutStrip(character: {
+  staffEquipped: boolean;
+  knowsSpark: boolean;
+  knowsEmberbolt: boolean;
+} | null | undefined): void {
+  const strip = document.getElementById('loadoutStrip');
+  if (!strip) return;
+  if (!character) {
+    strip.classList.add('hidden');
+    return;
+  }
+  strip.classList.remove('hidden');
+
+  const setChip = (
+    chipId: string,
+    stateId: string,
+    on: boolean,
+    onLabel: string,
+    offLabel: string,
+  ) => {
+    const chip = document.getElementById(chipId);
+    const state = document.getElementById(stateId);
+    if (chip) {
+      chip.classList.toggle('on', on);
+      chip.classList.toggle('off', !on);
+    }
+    if (state) state.textContent = on ? onLabel : offLabel;
+  };
+
+  setChip(
+    'loStaff',
+    'loStaffState',
+    character.staffEquipped,
+    'equipped',
+    'unequipped',
+  );
+  setChip('loSpark', 'loSparkState', character.knowsSpark, 'known', 'unknown');
+  setChip(
+    'loEmber',
+    'loEmberState',
+    character.knowsEmberbolt,
+    'known',
+    'unknown',
+  );
+}
+
+/** Bag panel rows (Character loadout). Visibility controlled separately via B. */
+function updateBagPanel(character: {
+  xp: number;
+  staffEquipped: boolean;
+  robesEquipped: boolean;
+  knowsSpark: boolean;
+  knowsEmberbolt: boolean;
+} | null | undefined): void {
+  const setRow = (id: string, text: string, ok: boolean | null) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('ok', ok === true);
+    el.classList.toggle('bad', ok === false);
+  };
+  if (!character) {
+    setRow('bagStaff', '—', null);
+    setRow('bagRobes', '—', null);
+    setRow('bagSpark', '—', null);
+    setRow('bagEmber', '—', null);
+    setRow('bagXp', '—', null);
+    return;
+  }
+  setRow(
+    'bagStaff',
+    character.staffEquipped ? 'equipped' : 'unequipped',
+    character.staffEquipped,
+  );
+  setRow(
+    'bagRobes',
+    character.robesEquipped ? 'equipped' : 'unequipped',
+    character.robesEquipped,
+  );
+  setRow('bagSpark', character.knowsSpark ? 'known' : 'unknown', character.knowsSpark);
+  setRow(
+    'bagEmber',
+    character.knowsEmberbolt ? 'known' : 'unknown',
+    character.knowsEmberbolt,
+  );
+  setRow('bagXp', String(character.xp), null);
+}
+
+function setBagPanelOpen(open: boolean): void {
+  const panel = document.getElementById('bagPanel');
+  if (!panel) return;
+  panel.classList.toggle('hidden', !open);
+}
+
 /** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
 const MINIMAP_RANGE_M = 48;
 
@@ -371,7 +483,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · U unequip staff · I equip staff · P invite/accept · O leave',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U unequip staff · I equip staff · P invite/accept · O leave',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -520,6 +632,7 @@ function bindInput(opts: {
   onPartyLeave: () => void;
   onUnequipStaff: () => void;
   onEquipStaff: () => void;
+  onToggleBag: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -563,6 +676,11 @@ function bindInput(opts: {
     if (k === 'i') {
       e.preventDefault();
       opts.onEquipStaff();
+      return;
+    }
+    if (k === 'b') {
+      e.preventDefault();
+      opts.onToggleBag();
       return;
     }
   };
@@ -792,6 +910,7 @@ async function main(): Promise<void> {
   const { scene, camera, player, humanoid, proxySource } = createScene(engine);
 
   let net: GameNet | null = null;
+  let bagOpen = false;
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
@@ -1122,6 +1241,10 @@ async function main(): Promise<void> {
       if (!net) return;
       net.equipStaff();
     },
+    onToggleBag: () => {
+      bagOpen = !bagOpen;
+      setBagPanelOpen(bagOpen);
+    },
   });
 
   const syncNpcMeshes = (npcs: NpcView[]) => {
@@ -1283,6 +1406,11 @@ async function main(): Promise<void> {
         castingSpell: lastCastSpell,
         staffEquipped: equipped,
       });
+      const ch =
+        st.state === 'connected' ? st.character ?? null : null;
+      updateSelfFrame(ch);
+      updateLoadoutStrip(ch);
+      updateBagPanel(ch);
     }
     if (latestStatus.state === 'connected') {
       setStatus(formatStatus(latestStatus, now));
@@ -2000,6 +2128,75 @@ async function main(): Promise<void> {
       window.setTimeout(waitHotbar, 200);
     };
     window.setTimeout(waitHotbar, 700);
+  }
+
+  // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
+  if (ve === 'bag') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'bag') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE bag: waiting for Connected + Character…';
+    bagOpen = true;
+    setBagPanelOpen(true);
+    let ticks = 0;
+    const waitBag = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      const ch = net.getCharacter();
+      if (ch) {
+        updateSelfFrame(ch);
+        updateLoadoutStrip(ch);
+        updateBagPanel(ch);
+        setBagPanelOpen(true);
+        bagOpen = true;
+      }
+      const selfVisible = !!(
+        document.getElementById('selfFrame') &&
+        !document.getElementById('selfFrame')!.classList.contains('hidden')
+      );
+      const stripVisible = !!(
+        document.getElementById('loadoutStrip') &&
+        !document.getElementById('loadoutStrip')!.classList.contains('hidden')
+      );
+      const bagVisible = !!(
+        document.getElementById('bagPanel') &&
+        !document.getElementById('bagPanel')!.classList.contains('hidden')
+      );
+      const xpTxt = document.getElementById('sfXp')?.textContent || '';
+      const staffTxt = document.getElementById('loStaffState')?.textContent || '';
+      const sparkOk = document.getElementById('loSpark')?.classList.contains('on');
+      const emberOk = document.getElementById('loEmber')?.classList.contains('on');
+      if (
+        st.state === 'connected' &&
+        ch &&
+        selfVisible &&
+        stripVisible &&
+        bagVisible &&
+        xpTxt.startsWith('XP') &&
+        staffTxt.length > 0 &&
+        staffTxt !== '—' &&
+        sparkOk &&
+        emberOk
+      ) {
+        if (mark) {
+          mark.textContent = `Bag OK · You XP ${ch.xp} · staff ${ch.staffEquipped ? 'on' : 'off'} · Spark+Emberbolt known · B toggles bag`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE bag: Connected · self ${selfVisible ? 'on' : 'off'} · strip ${stripVisible ? 'on' : 'off'} · bag ${bagVisible ? 'on' : 'off'} · ch ${ch ? 'yes' : 'no'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE bag: timed out waiting for self-frame + loadout + bag';
+        return;
+      }
+      window.setTimeout(waitBag, 200);
+    };
+    window.setTimeout(waitBag, 700);
   }
 
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).
