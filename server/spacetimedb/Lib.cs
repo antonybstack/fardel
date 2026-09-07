@@ -116,6 +116,8 @@ public static partial class Module
         /// <summary>Pushbacks applied to the current windup; resets on cast start / clear.</summary>
         [SpacetimeDB.Default(0)]
         public int CastPushbackCount;
+        /// <summary>Cast rejects with "silenced" while Timestamp &lt; this (hard-interrupt lockout).</summary>
+        public Timestamp CastLockedUntil;
     }
 
     [SpacetimeDB.Table(Accessor = "Npc", Public = true)]
@@ -423,6 +425,13 @@ public static partial class Module
             throw new Exception("Staff required");
         }
 
+        var combatGate = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp < combatGate.CastLockedUntil)
+        {
+            throw new Exception("silenced");
+        }
+
         TickManaRegen(ctx, ref character);
         var manaCost = Combat.ManaCost(spellId);
         if (manaCost > 0 && character.Mana < manaCost)
@@ -517,8 +526,9 @@ public static partial class Module
 
     /// <summary>
     /// Training-dummy thorns poke (opt-in). Applies DummyThornsDamage to the
-    /// caller. Mid-windup: pushback CastEndsAt, or hard-interrupt (no refund)
-    /// after CastPushbackHardAfter / when remaining &lt; CastHardInterruptRemainMs.
+    /// caller. Mid-windup: pushback CastEndsAt, or hard-interrupt (no refund +
+    /// CastLockedUntil silence for CastSilenceMs) after CastPushbackHardAfter /
+    /// when remaining &lt; CastHardInterruptRemainMs.
     /// CombatSmoke / ManaSmoke do not call this.
     /// </summary>
     [SpacetimeDB.Reducer]
@@ -884,6 +894,7 @@ public static partial class Module
                 LastSpellId = 0,
                 LastCastAt = ctx.Timestamp,
                 CastPushbackCount = 0,
+                CastLockedUntil = ctx.Timestamp,
             });
         }
     }
@@ -1797,11 +1808,17 @@ public static partial class Module
         ClearPendingCastsFor(ctx, caster);
         combat.CastingSpellId = 0;
         combat.CastPushbackCount = 0;
+        if (!refundMana)
+        {
+            combat.CastLockedUntil = ctx.Timestamp + Ms(Combat.CastSilenceMs);
+        }
         ctx.Db.PlayerCombat.Identity.Update(combat);
 
         if (!refundMana)
         {
-            Log.Info($"InterruptWindupCast {caster} spell={spellId} (no refund / hard)");
+            Log.Info(
+                $"InterruptWindupCast {caster} spell={spellId} (no refund / hard) " +
+                $"silence={Combat.CastSilenceMs}ms");
             return;
         }
 

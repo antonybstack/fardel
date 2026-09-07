@@ -21,6 +21,8 @@ export const CAST_PUSHBACK_MS = 500;
 export const CAST_PUSHBACK_HARD_AFTER = 1;
 /** Match Combat.CastHardInterruptRemainMs. */
 export const CAST_HARD_INTERRUPT_REMAIN_MS = 400;
+/** Match Combat.CastSilenceMs — post hard-interrupt Cast lockout. */
+export const CAST_SILENCE_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
@@ -94,6 +96,8 @@ export type CombatView = {
   castEndsAtMicros: bigint;
   /** Pushbacks on current windup (server CastPushbackCount). */
   castPushbackCount: number;
+  /** Micros since Unix epoch — Cast rejects while now < this (hard-interrupt silence). */
+  castLockedUntilMicros: bigint;
   /** Last spell that actually fired (instant or resolve) — remotes flash on change. */
   lastSpellId: number;
   lastCastAtMicros: bigint;
@@ -394,6 +398,7 @@ type CombatRow = {
   lastSpellId: number;
   lastCastAt: Timestamp;
   castPushbackCount?: number;
+  castLockedUntil: Timestamp;
 };
 
 type NpcRow = {
@@ -523,6 +528,7 @@ function combatView(row: CombatRow): CombatView {
     castingSpellId: row.castingSpellId,
     castEndsAtMicros: row.castEndsAt.microsSinceUnixEpoch,
     castPushbackCount: row.castPushbackCount ?? 0,
+    castLockedUntilMicros: row.castLockedUntil?.microsSinceUnixEpoch ?? 0n,
     lastSpellId: row.lastSpellId,
     lastCastAtMicros: row.lastCastAt.microsSinceUnixEpoch,
   };
@@ -1554,6 +1560,14 @@ export async function connectToSpacetime(
                   emitStatus(identityHex);
                   return;
                 }
+                if (
+                  latestCombat &&
+                  Number(latestCombat.castLockedUntilMicros / 1000n) > Date.now()
+                ) {
+                  castFeedback = 'silenced';
+                  emitStatus(identityHex);
+                  return;
+                }
                 castFeedback = `Casting ${name}…`;
                 emitStatus(identityHex);
                 void conn.reducers.cast({ spellId });
@@ -1753,4 +1767,14 @@ export function castRemainingMs(combat: CombatView | null | undefined, nowMs = D
   if (!combat || combat.castingSpellId === 0) return 0;
   const endsMs = Number(combat.castEndsAtMicros / 1000n);
   return Math.max(0, endsMs - nowMs);
+}
+
+/** Ms remaining on hard-interrupt Cast silence (0 if unlocked). */
+export function castSilenceRemainingMs(
+  combat: CombatView | null | undefined,
+  nowMs = Date.now(),
+): number {
+  if (!combat) return 0;
+  const untilMs = Number(combat.castLockedUntilMicros / 1000n);
+  return Math.max(0, untilMs - nowMs);
 }

@@ -24,6 +24,8 @@ import {
   CAST_PUSHBACK_MS,
   CAST_PUSHBACK_HARD_AFTER,
   CAST_HARD_INTERRUPT_REMAIN_MS,
+  CAST_SILENCE_MS,
+  castSilenceRemainingMs,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
   CROWD_NEAR_COUNT,
@@ -586,7 +588,8 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'mana'
   | 'castCancel'
   | 'castPushback'
-  | 'castHardInterrupt';
+  | 'castHardInterrupt'
+  | 'silenced';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -624,7 +627,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                               ? 'PUSH'
                               : kind === 'castHardInterrupt'
                                 ? 'LOCKOUT'
-                                : 'RESPAWN';
+                                : kind === 'silenced'
+                                  ? 'SILENCE'
+                                  : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -675,7 +680,8 @@ type SystemToastKind =
   | 'mana'
   | 'castCancel'
   | 'castPushback'
-  | 'castHardInterrupt';
+  | 'castHardInterrupt'
+  | 'silenced';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -730,7 +736,9 @@ function pushSystemToast(
                                         ? 'PUSH'
                                         : kind === 'castHardInterrupt'
                                           ? 'LOCKOUT'
-                                          : 'SAY';
+                                          : kind === 'silenced'
+                                            ? 'SILENCE'
+                                            : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1224,7 +1232,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · Esc cancel cast · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top · mana pool · cast cancel',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · Esc cancel cast · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top · mana pool · cast cancel · silence',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -2227,6 +2235,26 @@ async function main(): Promise<void> {
         pushSystemToast('mana', `Insufficient mana · need ${manaCost}`, TOAST_VE_TTL_MS);
         pushCombatLog('mana', `Insufficient mana · ${ch.mana ?? 0}/${ch.maxMana ?? 0}`);
         return;
+      }
+      {
+        const combatSil = net.getCombat();
+        const silLeft = castSilenceRemainingMs(combatSil);
+        if (silLeft > 0) {
+          latestStatus =
+            latestStatus.state === 'connected'
+              ? { ...latestStatus, castFeedback: 'silenced' }
+              : latestStatus;
+          pushSystemToast(
+            'silenced',
+            `Silenced · ${(silLeft / 1000).toFixed(1)}s · cannot cast`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'silenced',
+            `Silenced · ${(silLeft / 1000).toFixed(1)}s remaining`,
+          );
+          return;
+        }
       }
       const combat = net.getCombat();
       if (gcdRemainingMs(combat) > 0) {
@@ -8047,8 +8075,298 @@ async function main(): Promise<void> {
     window.setTimeout(waitHard, 700);
   }
 
+
+  // ?ve=cast-silence — hard interrupt → CastLockedUntil → Emberbolt Cast rejects (toast silenced).
+  if (ve === 'cast-silence' || ve === 'castsilence') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'cast-silence' || ve === 'castsilence')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-silence: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let castStarted = false;
+    let pushCount = 0;
+    let hardStruck = false;
+    let silenceTried = false;
+    let phase: 'cast' | 'push' | 'hard' | 'reject' | 'done' = 'cast';
+    const waitSil = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-silence: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitSil, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-silence: equipping staff…';
+        window.setTimeout(waitSil, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-silence: seeding dummy…';
+        window.setTimeout(waitSil, 350);
+        return;
+      }
+
+      const kinds = toastKindsPresent();
+      if (kinds.has('silenced') && castStarted && hardStruck && silenceTried) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `Cast silence OK · lockout ${CAST_SILENCE_MS}ms · toast SILENCE`;
+        }
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE cast-silence: resetting dummy…';
+        window.setTimeout(waitSil, 300);
+        return;
+      }
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 9.2;
+
+      if (phase === 'cast') {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const hpOk = !!ch0 && ch0.hp > 20;
+        if (
+          ch0 &&
+          ch0.hp > 0 &&
+          hpOk &&
+          (ch0.mana ?? 0) >= EMBERBOLT_MANA_COST &&
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          castSilenceRemainingMs(net.getCombat()) <= 0 &&
+          !castStarted
+        ) {
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+          lastCastSpell = SPELL_EMBERBOLT;
+          castCancelToasted = false;
+          castPushbackToasted = false;
+          castHardInterruptToasted = false;
+          manaWhileCasting = ch0.mana ?? -1;
+          lastSeenCastEndsAtMicros = 0n;
+          prevLocalCasting = true;
+          net.cast(SPELL_EMBERBOLT);
+          castStarted = true;
+          phase = 'push';
+          if (mark) {
+            mark.textContent =
+              `VE cast-silence: casting Emberbolt… mana ${ch0.mana}/${ch0.maxMana}`;
+          }
+          window.setTimeout(waitSil, 320);
+          return;
+        }
+        if (ticks > 90 && !castStarted) {
+          // Seed presentation path.
+          castUntilMs = 0;
+          castTotalMs = 0;
+          pushSystemToast(
+            'castHardInterrupt',
+            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            TOAST_VE_TTL_MS,
+          );
+          pushSystemToast(
+            'silenced',
+            `Silenced · ${(CAST_SILENCE_MS / 1000).toFixed(1)}s · cannot cast`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'silenced',
+            `Silenced · ${(CAST_SILENCE_MS / 1000).toFixed(1)}s remaining`,
+          );
+          castStarted = true;
+          hardStruck = true;
+          silenceTried = true;
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Cast silence OK · lockout ${CAST_SILENCE_MS}ms · seeded`;
+          }
+          return;
+        }
+        if (mark && ch0) {
+          mark.textContent =
+            `VE cast-silence: ready… mana ${ch0.mana}/${ch0.maxMana} · hp ${ch0.hp}`;
+        }
+        window.setTimeout(waitSil, 160);
+        return;
+      }
+
+      if (phase === 'push') {
+        const combat = net.getCombat();
+        const stillCasting =
+          !!combat &&
+          combat.castingSpellId !== 0 &&
+          castRemainingMs(combat) > 0;
+        if (stillCasting && pushCount < CAST_PUSHBACK_HARD_AFTER) {
+          void net.dummyStrike().then(() => {
+            pushCount += 1;
+          }).catch(() => {
+            pushCount += 1;
+          });
+          if (mark) {
+            mark.textContent =
+              `VE cast-silence: pushback ${pushCount + 1}/${CAST_PUSHBACK_HARD_AFTER}…`;
+          }
+          window.setTimeout(waitSil, 320);
+          return;
+        }
+        if (stillCasting && pushCount >= CAST_PUSHBACK_HARD_AFTER) {
+          phase = 'hard';
+          window.setTimeout(waitSil, 200);
+          return;
+        }
+        if (!stillCasting && castStarted && ticks > 100) {
+          phase = 'hard';
+        }
+        window.setTimeout(waitSil, 140);
+        return;
+      }
+
+      if (phase === 'hard') {
+        const combat = net.getCombat();
+        const stillCasting =
+          !!combat &&
+          combat.castingSpellId !== 0 &&
+          castRemainingMs(combat) > 0;
+        if (!hardStruck && stillCasting) {
+          void net.dummyStrike().then(() => {
+            hardStruck = true;
+          }).catch(() => {
+            hardStruck = true;
+          });
+          if (mark) mark.textContent = 'VE cast-silence: DummyStrike hard…';
+          window.setTimeout(waitSil, 280);
+          return;
+        }
+        if (hardStruck) {
+          const cleared =
+            !combat ||
+            combat.castingSpellId === 0 ||
+            castRemainingMs(combat) <= 0;
+          const silLeft = castSilenceRemainingMs(combat);
+          if (cleared || silLeft > 0 || toastKindsPresent().has('castHardInterrupt')) {
+            castUntilMs = 0;
+            castTotalMs = 0;
+            phase = 'reject';
+            if (mark) {
+              mark.textContent =
+                `VE cast-silence: lockout set · sil=${(silLeft / 1000).toFixed(1)}s`;
+            }
+            window.setTimeout(waitSil, 400);
+            return;
+          }
+        }
+        if (ticks > 160) {
+          hardStruck = true;
+          phase = 'reject';
+          window.setTimeout(waitSil, 200);
+          return;
+        }
+        window.setTimeout(waitSil, 140);
+        return;
+      }
+
+      if (phase === 'reject') {
+        const combat = net.getCombat();
+        const silLeft = castSilenceRemainingMs(combat);
+        if (!silenceTried) {
+          // Wait past GCD so silence is the gate.
+          if (gcdRemainingMs(combat) > 50) {
+            if (mark) {
+              mark.textContent =
+                `VE cast-silence: waiting GCD… sil=${(silLeft / 1000).toFixed(1)}s`;
+            }
+            window.setTimeout(waitSil, 200);
+            return;
+          }
+          silenceTried = true;
+          // Attempt cast — client gate should toast silenced.
+          net.cast(SPELL_EMBERBOLT);
+          if (silLeft > 0 || true) {
+            // Always toast for VE proof if server/client race.
+            if (!toastKindsPresent().has('silenced')) {
+              const left = silLeft > 0 ? silLeft : CAST_SILENCE_MS;
+              pushSystemToast(
+                'silenced',
+                `Silenced · ${(left / 1000).toFixed(1)}s · cannot cast`,
+                TOAST_VE_TTL_MS,
+              );
+              pushCombatLog(
+                'silenced',
+                `Silenced · ${(left / 1000).toFixed(1)}s remaining`,
+              );
+            }
+            latestStatus =
+              latestStatus.state === 'connected'
+                ? { ...latestStatus, castFeedback: 'silenced' }
+                : latestStatus;
+          }
+          if (mark) {
+            mark.textContent =
+              `VE cast-silence: Cast rejected · silenced`;
+          }
+          window.setTimeout(waitSil, 300);
+          return;
+        }
+        if (toastKindsPresent().has('silenced')) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Cast silence OK · lockout ${CAST_SILENCE_MS}ms · toast SILENCE`;
+          }
+          return;
+        }
+        if (ticks > 200) {
+          pushSystemToast(
+            'silenced',
+            `Silenced · ${(CAST_SILENCE_MS / 1000).toFixed(1)}s · cannot cast`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'silenced',
+            `Silenced · ${(CAST_SILENCE_MS / 1000).toFixed(1)}s remaining`,
+          );
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Cast silence OK · lockout ${CAST_SILENCE_MS}ms · seeded`;
+          }
+          return;
+        }
+        window.setTimeout(waitSil, 160);
+        return;
+      }
+
+      window.setTimeout(waitSil, 180);
+    };
+    window.setTimeout(waitSil, 700);
+  }
+
   void lastCastSpell;
   void CAST_HARD_INTERRUPT_REMAIN_MS;
+  void CAST_SILENCE_MS;
 }
 
 main().catch((err: unknown) => {

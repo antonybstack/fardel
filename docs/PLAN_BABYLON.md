@@ -166,6 +166,7 @@ See `web/README.md` for exact commands.
 - **Cast cancel / move-interrupt (invent):** Move or Esc/`CancelCast` during Emberbolt windup deletes `PendingCast`, clears casting, refunds mana; Babylon clears cast bar + toast `castCancel`; `tools/CastCancelSmoke`; `?ve=cast-cancel` (`ve/babylon-cast-cancel.png`)
 - **Cast pushback (invent):** non-lethal hit during Emberbolt windup delays `CastEndsAt` by `Combat.CastPushbackMs` (reschedule `PendingCast`, no cancel/refund); opt-in `DummyStrike`; Babylon rewound cast bar + toast `castPushback`; `tools/CastPushbackSmoke`; `?ve=cast-pushback` (`ve/babylon-cast-pushback.png`)
 - **Hard interrupt threshold (invent):** after `Combat.CastPushbackHardAfter` pushbacks (or remain < `CastHardInterruptRemainMs`), next non-lethal hit fully cancels windup with **no mana refund**; Babylon clears cast bar + toast `castHardInterrupt` (LOCKOUT); `tools/HardInterruptSmoke`; `?ve=hard-interrupt` (`ve/babylon-hard-interrupt.png`)
+- **Post-interrupt silence (invent):** hard interrupt sets `PlayerCombat.CastLockedUntil` (`Combat.CastSilenceMs`); `Cast` rejects `"silenced"` until expiry; Babylon toast `silenced`; `tools/CastSilenceSmoke`; `?ve=cast-silence` (`ve/babylon-cast-silence.png`)
 - **Minimap party blips (invent/presentation):** client-only — always-relevant party remote poses already green on compass; distinct halo + rim chevron when beyond minimap range; `?ve=minimap-party` + PartyMate far pose (`ve/babylon-minimap-party.png`)
 - **Combat log strip (presentation):** client-only scrolling right-column log — Cast start, HP-delta damage, staff/robes equip, party join; `?ve=combat-log` (`ve/babylon-combat-log.png`)
 - **FPS / performance overlay (presentation):** live `engine.getFps()` HUD (green ≥ 30 floor / 60 target on box reference) + near/far crowd proxies, remotes, NPCs; `?ve=fps` seeds crowd for AOI proof (`ve/babylon-fps.png`)
@@ -199,3 +200,4 @@ See `web/README.md` for exact commands.
 - **Cast cancel (follow-on):** Esc/Move interrupt + refund toast; `?ve=cast-cancel` (`ve/babylon-cast-cancel.png`)
 - **Cast pushback (follow-on):** DummyStrike delays windup; `?ve=cast-pushback` (`ve/babylon-cast-pushback.png`)
 - **Hard interrupt (follow-on):** pushback threshold → lockout cancel; `?ve=hard-interrupt` (`ve/babylon-hard-interrupt.png`)
+- **Cast silence (follow-on):** CastLockedUntil gate + toast; `?ve=cast-silence` (`ve/babylon-cast-silence.png`)

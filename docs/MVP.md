@@ -68,6 +68,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - Cast cancel / move-interrupt: Move or Esc/`CancelCast` during Emberbolt windup refunds mana + clears cast bar (`CastCancelSmoke`, `?ve=cast-cancel`)
 - Cast pushback: dummy thorns (`DummyStrike`) during Emberbolt windup delays `CastEndsAt` without cancel/refund (`CastPushbackSmoke`, `?ve=cast-pushback`)
 - Hard interrupt threshold: after `CastPushbackHardAfter` pushbacks (or remain < `CastHardInterruptRemainMs`), next `DummyStrike` cancels windup with **no mana refund** (`HardInterruptSmoke`, `?ve=hard-interrupt`)
+- Post-interrupt silence: hard interrupt sets `CastLockedUntil`; Emberbolt `Cast` rejects with toast `silenced` until expiry (`CastSilenceSmoke`, `?ve=cast-silence`)
 
 **Done when:** both spells can kill the dummy under GCD rules; killing grants XP on the character row.
 

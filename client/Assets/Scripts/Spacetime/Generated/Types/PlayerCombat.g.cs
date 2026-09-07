@@ -29,6 +29,8 @@ namespace SpacetimeDB.Types
         public SpacetimeDB.Timestamp LastCastAt;
         [DataMember(Name = "cast_pushback_count")]
         public int CastPushbackCount;
+        [DataMember(Name = "cast_locked_until")]
+        public SpacetimeDB.Timestamp CastLockedUntil;
 
         public PlayerCombat(
             SpacetimeDB.Identity Identity,
@@ -38,7 +40,8 @@ namespace SpacetimeDB.Types
             SpacetimeDB.Timestamp CastEndsAt,
             int LastSpellId,
             SpacetimeDB.Timestamp LastCastAt,
-            int CastPushbackCount
+            int CastPushbackCount,
+            SpacetimeDB.Timestamp CastLockedUntil
         )
         {
             this.Identity = Identity;
@@ -49,6 +52,7 @@ namespace SpacetimeDB.Types
             this.LastSpellId = LastSpellId;
             this.LastCastAt = LastCastAt;
             this.CastPushbackCount = CastPushbackCount;
+            this.CastLockedUntil = CastLockedUntil;
         }
 
         public PlayerCombat()

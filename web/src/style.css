@@ -1323,3 +1323,10 @@ body {
 .sysToast.castHardInterrupt .toastTag { color: #ff465a; }
 
 .clLine.castHardInterrupt .clTag { color: #ff465a; }
+
+.sysToast.silenced {
+  border-color: rgba(180, 120, 255, 0.65);
+}
+.sysToast.silenced .toastTag { color: #c49bff; }
+
+.clLine.silenced .clTag { color: #c49bff; }

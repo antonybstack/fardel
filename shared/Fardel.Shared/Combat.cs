@@ -74,6 +74,13 @@ public static class Combat
     /// </summary>
     public const int CastHardInterruptRemainMs = 400;
 
+    /// <summary>
+    /// After a hard interrupt, Cast rejects with "silenced" until this many ms
+    /// after the interrupt (CastLockedUntil). Soft cancel/move-interrupt does
+    /// not apply silence.
+    /// </summary>
+    public const int CastSilenceMs = 1500;
+
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
 

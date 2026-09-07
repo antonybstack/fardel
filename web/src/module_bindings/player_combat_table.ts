@@ -19,4 +19,5 @@ export default __t.row({
   lastSpellId: __t.i32().name("last_spell_id"),
   lastCastAt: __t.timestamp().name("last_cast_at"),
   castPushbackCount: __t.i32().name("cast_pushback_count"),
+  castLockedUntil: __t.timestamp().name("cast_locked_until"),
 });
