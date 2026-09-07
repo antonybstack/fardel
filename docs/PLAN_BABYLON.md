@@ -176,5 +176,5 @@ See `web/README.md` for exact commands.
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
 - **World loot / pickup (invent):** `WorldLoot` + `SeedLoot` / dummy-death drop + `Pickup` (nearest in range → XP + `HasEmberShard`); sparkle meshes, **F** pickup, toast/combat-log; `tools/LootSmoke`; `?ve=loot` (`ve/babylon-loot.png`)
 - **Player trade (invent):** `TradeOffer` + `OfferTrade` / `AcceptTrade` / `CancelTrade` (range check; transfer `HasEmberShard` and/or small XP); **T** offer/accept nearest remote, **Y** cancel; toast/bag; `tools/TradeSmoke` / `tools/TradeMate`; `?ve=trade` (`ve/babylon-trade.png`)
-- **Yard vendor (invent):** `YardVendor` + `VendorStock` + `BuyFromVendor` / `SellToVendor` (XP or ember_shard → `HasYardTonic`; sell shard for XP); **E** panel; `tools/VendorSmoke`; `?ve=vendor` (`ve/babylon-vendor.png`)
+- **Yard vendor shop (invent):** `YardVendor` + `BuyFromVendor` / `SellToVendor` (range check; XP↔`HasEmberShard`); green/gold stall mesh + **E** buy/sell; toast/bag; `tools/VendorSmoke`; `?ve=vendor` (`ve/babylon-vendor.png`)
 - Next (north-star): credited art packs when licenses land (still blocked)

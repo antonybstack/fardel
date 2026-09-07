@@ -27,8 +27,6 @@ namespace SpacetimeDB.Types
         public bool RobesEquipped;
         [DataMember(Name = "has_ember_shard")]
         public bool HasEmberShard;
-        [DataMember(Name = "has_yard_tonic")]
-        public bool HasYardTonic;
 
         public Character(
             SpacetimeDB.Identity Identity,
@@ -37,8 +35,7 @@ namespace SpacetimeDB.Types
             bool KnowsEmberbolt,
             bool StaffEquipped,
             bool RobesEquipped,
-            bool HasEmberShard,
-            bool HasYardTonic
+            bool HasEmberShard
         )
         {
             this.Identity = Identity;
@@ -48,7 +45,6 @@ namespace SpacetimeDB.Types
             this.StaffEquipped = StaffEquipped;
             this.RobesEquipped = RobesEquipped;
             this.HasEmberShard = HasEmberShard;
-            this.HasYardTonic = HasYardTonic;
         }
 
         public Character()

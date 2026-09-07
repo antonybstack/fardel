@@ -74,8 +74,6 @@ public static partial class Module
         public bool RobesEquipped;
         /// <summary>Bag flag — set when picking up ember_shard WorldLoot.</summary>
         public bool HasEmberShard;
-        /// <summary>Consumable bag flag — bought from VendorStock (yard_tonic).</summary>
-        public bool HasYardTonic;
     }
 
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
@@ -134,7 +132,7 @@ public static partial class Module
     }
 
 
-    /// <summary>Stationary yard vendor marker — seeded on connect (mesh / range anchor).</summary>
+    /// <summary>Stationary yard vendor — seeded on connect; Buy/Sell ember shard for XP.</summary>
     [SpacetimeDB.Table(Accessor = "YardVendor", Public = true)]
     public partial struct YardVendor
     {
@@ -144,17 +142,6 @@ public static partial class Module
         public float Y;
         public float Z;
         public string Label;
-    }
-
-    /// <summary>Yard vendor catalog — EnsureVendor seeds yard_tonic stock.</summary>
-    [SpacetimeDB.Table(Accessor = "VendorStock", Public = true)]
-    public partial struct VendorStock
-    {
-        [SpacetimeDB.PrimaryKey]
-        public string ItemId;
-        public int Qty;
-        public int BuyXpCost;
-        public int SellShardXp;
     }
 
     /// <summary>Public yard chat — Say reducer inserts; clients wholesale-subscribe.</summary>
@@ -691,7 +678,6 @@ public static partial class Module
             StaffEquipped = true,
             RobesEquipped = true,
             HasEmberShard = false,
-            HasYardTonic = false,
         });
     }
 
@@ -1303,82 +1289,55 @@ public static partial class Module
     }
 
 
-    /// <summary>
-    /// Buy yard_tonic from VendorStock — spend XP or ember_shard; range-checked vs YardVendor.
-    /// </summary>
+    /// <summary>Spend XP at a nearby YardVendor to gain HasEmberShard.</summary>
     [SpacetimeDB.Reducer]
-    public static void BuyFromVendor(ReducerContext ctx, bool payWithShard)
+    public static void BuyFromVendor(ReducerContext ctx)
     {
-        EnsureVendor(ctx);
-
         var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
         var vendor = FindVendorInRange(ctx, pose)
             ?? throw new Exception("Out of range");
 
-        var stock = ctx.Db.VendorStock.ItemId.Find(Fardel.Shared.Vendor.TonicItemId)
-            ?? throw new Exception("Vendor stock missing");
-        if (stock.Qty <= 0)
+        if (character.HasEmberShard)
         {
-            throw new Exception("Out of stock");
+            throw new Exception("Already have ember shard");
         }
 
-        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
-            ?? throw new Exception("Character missing");
-        if (character.HasYardTonic)
+        if (character.Xp < Fardel.Shared.Vendor.BuyPriceXp)
         {
-            throw new Exception("Already have tonic");
+            throw new Exception("Not enough XP");
         }
 
-        if (payWithShard)
-        {
-            if (!character.HasEmberShard)
-            {
-                throw new Exception("No ember shard");
-            }
-            character.HasEmberShard = false;
-        }
-        else
-        {
-            if (character.Xp < stock.BuyXpCost)
-            {
-                throw new Exception("Not enough XP");
-            }
-            character.Xp -= stock.BuyXpCost;
-        }
-
-        character.HasYardTonic = true;
-        stock.Qty -= 1;
+        character.Xp -= Fardel.Shared.Vendor.BuyPriceXp;
+        character.HasEmberShard = true;
         ctx.Db.Character.Identity.Update(character);
-        ctx.Db.VendorStock.ItemId.Update(stock);
-        Log.Info($"BuyFromVendor {ctx.Sender} vendor={vendor.VendorId} payShard={payWithShard} xp={character.Xp} qty={stock.Qty}");
+        Log.Info($"BuyFromVendor {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
     }
 
-    /// <summary>Sell ember_shard to yard vendor for SellShardXp — range-checked.</summary>
+    /// <summary>Sell HasEmberShard to a nearby YardVendor for XP.</summary>
     [SpacetimeDB.Reducer]
     public static void SellToVendor(ReducerContext ctx)
     {
-        EnsureVendor(ctx);
-
         var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
         var vendor = FindVendorInRange(ctx, pose)
             ?? throw new Exception("Out of range");
 
-        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
-            ?? throw new Exception("Character missing");
         if (!character.HasEmberShard)
         {
             throw new Exception("No ember shard");
         }
 
-        var stock = ctx.Db.VendorStock.ItemId.Find(Fardel.Shared.Vendor.TonicItemId)
-            ?? throw new Exception("Vendor stock missing");
-
         character.HasEmberShard = false;
-        character.Xp += stock.SellShardXp;
+        character.Xp += Fardel.Shared.Vendor.SellPriceXp;
         ctx.Db.Character.Identity.Update(character);
-        Log.Info($"SellToVendor {ctx.Sender} vendor={vendor.VendorId} +{stock.SellShardXp} xp now={character.Xp}");
+        Log.Info($"SellToVendor {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
     }
 
     static YardVendor? FindVendorInRange(ReducerContext ctx, PlayerPose pose)
@@ -1401,39 +1360,22 @@ public static partial class Module
         return best;
     }
 
-    /// <summary>Idempotent YardVendor + VendorStock seed (also called on ClientConnected).</summary>
-    [SpacetimeDB.Reducer]
-    public static void EnsureVendor(ReducerContext ctx)
+    /// <summary>Idempotent YardVendor seed (also called on ClientConnected).</summary>
+    static void EnsureVendor(ReducerContext ctx)
     {
-        var hasVendor = false;
         foreach (var _ in ctx.Db.YardVendor.Iter())
         {
-            hasVendor = true;
-            break;
-        }
-        if (!hasVendor)
-        {
-            ctx.Db.YardVendor.Insert(new YardVendor
-            {
-                X = Fardel.Shared.Vendor.SpawnX,
-                Y = Fardel.Shared.Vendor.SpawnY,
-                Z = Fardel.Shared.Vendor.SpawnZ,
-                Label = Fardel.Shared.Vendor.DefaultLabel,
-            });
-            Log.Info($"Seeded YardVendor at ({Fardel.Shared.Vendor.SpawnX},{Fardel.Shared.Vendor.SpawnZ})");
+            return;
         }
 
-        if (ctx.Db.VendorStock.ItemId.Find(Fardel.Shared.Vendor.TonicItemId) is null)
+        ctx.Db.YardVendor.Insert(new YardVendor
         {
-            ctx.Db.VendorStock.Insert(new VendorStock
-            {
-                ItemId = Fardel.Shared.Vendor.TonicItemId,
-                Qty = Fardel.Shared.Vendor.InitialStock,
-                BuyXpCost = Fardel.Shared.Vendor.BuyXpCost,
-                SellShardXp = Fardel.Shared.Vendor.SellShardXp,
-            });
-            Log.Info($"Seeded VendorStock {Fardel.Shared.Vendor.TonicItemId} qty={Fardel.Shared.Vendor.InitialStock}");
-        }
+            X = Fardel.Shared.Vendor.SpawnX,
+            Y = Fardel.Shared.Vendor.SpawnY,
+            Z = Fardel.Shared.Vendor.SpawnZ,
+            Label = Fardel.Shared.Vendor.DefaultLabel,
+        });
+        Log.Info($"Seeded YardVendor at ({Fardel.Shared.Vendor.SpawnX},{Fardel.Shared.Vendor.SpawnZ})");
     }
 
     static ulong PartyIdFrom(Identity leader, Timestamp ts)

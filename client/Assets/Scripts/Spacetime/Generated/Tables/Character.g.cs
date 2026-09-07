@@ -46,7 +46,6 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<Character, bool> StaffEquipped { get; }
         public global::SpacetimeDB.Col<Character, bool> RobesEquipped { get; }
         public global::SpacetimeDB.Col<Character, bool> HasEmberShard { get; }
-        public global::SpacetimeDB.Col<Character, bool> HasYardTonic { get; }
 
         public CharacterCols(string tableName)
         {
@@ -57,7 +56,6 @@ namespace SpacetimeDB.Types
             StaffEquipped = new global::SpacetimeDB.Col<Character, bool>(tableName, "staff_equipped");
             RobesEquipped = new global::SpacetimeDB.Col<Character, bool>(tableName, "robes_equipped");
             HasEmberShard = new global::SpacetimeDB.Col<Character, bool>(tableName, "has_ember_shard");
-            HasYardTonic = new global::SpacetimeDB.Col<Character, bool>(tableName, "has_yard_tonic");
         }
     }
 

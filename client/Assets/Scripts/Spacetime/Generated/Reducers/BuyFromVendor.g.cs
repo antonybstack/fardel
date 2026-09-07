@@ -12,12 +12,12 @@ namespace SpacetimeDB.Types
 {
     public sealed partial class RemoteReducers : RemoteBase
     {
-        public delegate void BuyFromVendorHandler(ReducerEventContext ctx, bool payWithShard);
+        public delegate void BuyFromVendorHandler(ReducerEventContext ctx);
         public event BuyFromVendorHandler? OnBuyFromVendor;
 
-        public void BuyFromVendor(bool payWithShard)
+        public void BuyFromVendor()
         {
-            conn.InternalCallReducer(new Reducer.BuyFromVendor(payWithShard));
+            conn.InternalCallReducer(new Reducer.BuyFromVendor());
         }
 
         public bool InvokeBuyFromVendor(ReducerEventContext ctx, Reducer.BuyFromVendor args)
@@ -35,8 +35,7 @@ namespace SpacetimeDB.Types
                 return false;
             }
             OnBuyFromVendor(
-                ctx,
-                args.PayWithShard
+                ctx
             );
             return true;
         }
@@ -48,18 +47,6 @@ namespace SpacetimeDB.Types
         [DataContract]
         public sealed partial class BuyFromVendor : Reducer, IReducerArgs
         {
-            [DataMember(Name = "pay_with_shard")]
-            public bool PayWithShard;
-
-            public BuyFromVendor(bool PayWithShard)
-            {
-                this.PayWithShard = PayWithShard;
-            }
-
-            public BuyFromVendor()
-            {
-            }
-
             string IReducerArgs.ReducerName => "buy_from_vendor";
         }
     }

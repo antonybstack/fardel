@@ -311,7 +311,6 @@ function updateBagPanel(character: {
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
-  hasYardTonic?: boolean;
 } | null | undefined): void {
   const setRow = (id: string, text: string, ok: boolean | null) => {
     const el = document.getElementById(id);
@@ -327,7 +326,6 @@ function updateBagPanel(character: {
     setRow('bagEmber', '—', null);
     setRow('bagXp', '—', null);
     setRow('bagShard', '—', null);
-    setRow('bagTonic', '—', null);
     return;
   }
   setRow(
@@ -352,11 +350,6 @@ function updateBagPanel(character: {
     character.hasEmberShard ? 'held' : 'empty',
     !!character.hasEmberShard,
   );
-  setRow(
-    'bagTonic',
-    character.hasYardTonic ? 'held' : 'empty',
-    !!character.hasYardTonic,
-  );
 }
 
 function setBagPanelOpen(open: boolean): void {
@@ -372,18 +365,13 @@ function setVendorPanelOpen(open: boolean): void {
   panel.classList.toggle('hidden', !open);
 }
 
-function updateVendorPanel(
-  stock: { itemId: string; qty: number; buyXpCost: number; sellShardXp: number } | null,
-  vendor: { label: string } | null,
-): void {
-  const qty = document.getElementById('vendorStockQty');
+function updateVendorPanel(vendor: { label: string } | null): void {
   const buyXp = document.getElementById('vendorBuyXp');
   const sellXp = document.getElementById('vendorSellXp');
   const title = document.querySelector('#vendorPanel .bagTitle');
-  if (title && vendor) title.textContent = vendor.label || 'Vendor';
-  if (qty) qty.textContent = stock ? String(stock.qty) : '—';
-  if (buyXp) buyXp.textContent = stock ? `${stock.buyXpCost} XP` : '— XP';
-  if (sellXp) sellXp.textContent = stock ? `+${stock.sellShardXp} XP` : '+XP';
+  if (title) title.textContent = vendor?.label || 'Vendor';
+  if (buyXp) buyXp.textContent = '5 XP';
+  if (sellXp) sellXp.textContent = '+5 XP';
 }
 
 
@@ -1644,7 +1632,7 @@ async function main(): Promise<void> {
   let lastCastSpell = 0;
   const npcMeshes = new Map<string, NpcMesh>();
   const vendorMeshes = new Map<string, { root: Mesh; mat: StandardMaterial; nameplate: Nameplate | null }>();
-  let vendorOpen = false;
+  let vendorOpen = false; void vendorOpen;
   const groundSparkles = new Map<string, GroundSparkle>();
   let latestGround: GroundItemView[] = [];
   const npcLastHp = new Map<string, number>();
@@ -2036,65 +2024,6 @@ async function main(): Promise<void> {
           pushSystemToast('rate', msg.slice(0, 96) || 'Accept trade failed');
         });
 
-  const wireVendorButtons = () => {
-    const buyXp = document.getElementById('vendorBuyXpBtn');
-    const buyShard = document.getElementById('vendorBuyShardBtn');
-    const sell = document.getElementById('vendorSellBtn');
-    buyXp?.addEventListener('click', () => {
-      const g = net;
-      if (!g) return;
-      void g.buyFromVendor(false).then(() => {
-        const ch = g.getCharacter();
-        if (ch) updateBagPanel(ch);
-        const stocks = g.getVendorStock();
-        updateVendorPanel(stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null, g.nearestVendor(8));
-        pushCombatLog('vendor', 'Bought yard_tonic for XP');
-        pushSystemToast('vendor', 'Bought yard_tonic · bag updated', TOAST_VE_TTL_MS);
-        bagOpen = true;
-        setBagPanelOpen(true);
-      }).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        pushSystemToast('rate', msg.slice(0, 96) || 'Buy failed');
-      });
-    });
-    buyShard?.addEventListener('click', () => {
-      const g = net;
-      if (!g) return;
-      void g.buyFromVendor(true).then(() => {
-        const ch = g.getCharacter();
-        if (ch) updateBagPanel(ch);
-        const stocks = g.getVendorStock();
-        updateVendorPanel(stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null, g.nearestVendor(8));
-        pushCombatLog('vendor', 'Bought yard_tonic for ember_shard');
-        pushSystemToast('vendor', 'Bought yard_tonic · shard spent', TOAST_VE_TTL_MS);
-        bagOpen = true;
-        setBagPanelOpen(true);
-      }).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        pushSystemToast('rate', msg.slice(0, 96) || 'Buy failed');
-      });
-    });
-    sell?.addEventListener('click', () => {
-      const g = net;
-      if (!g) return;
-      void g.sellToVendor().then(() => {
-        const ch = g.getCharacter();
-        if (ch) updateBagPanel(ch);
-        const stocks = g.getVendorStock();
-        updateVendorPanel(stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null, g.nearestVendor(8));
-        pushCombatLog('vendor', 'Sold ember_shard to vendor');
-        pushSystemToast('vendor', 'Sold ember_shard · XP gained', TOAST_VE_TTL_MS);
-        bagOpen = true;
-        setBagPanelOpen(true);
-      }).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        pushSystemToast('rate', msg.slice(0, 96) || 'Sell failed');
-      });
-    });
-  };
-  wireVendorButtons();
-
-
         return;
       }
       void g.offerTradeNearestRemote().then((hex) => {
@@ -2147,27 +2076,41 @@ async function main(): Promise<void> {
     },
     onVendorInteract: () => {
       if (!net) return;
-      net.ensureVendor();
-      const near = net.nearestVendor(4);
+      const near = net.nearestVendor(4.5);
       if (!near) {
         vendorOpen = false;
         setVendorPanelOpen(false);
         pushSystemToast('rate', 'No vendor in range');
         return;
       }
-      vendorOpen = !vendorOpen;
-      setVendorPanelOpen(vendorOpen);
-      if (vendorOpen) {
-        const stocks = net.getVendorStock();
-        const stock = stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null;
-        updateVendorPanel(stock, near);
-        // Nudge toward vendor for VE / convenience
-        const pose = net.getLocalPose();
-        if (pose) {
-          net.sendMove(near.x - pose.x, near.z - pose.z);
-        }
-        pushCombatLog('vendor', `Opened ${near.label} · E closes`);
-        pushSystemToast('vendor', `${near.label} · Buy tonic / Sell shard`, 4000);
+      vendorOpen = true;
+      setVendorPanelOpen(true);
+      updateVendorPanel(near);
+      const ch = net.getCharacter();
+      const hasShard = !!ch?.hasEmberShard;
+      bagOpen = true;
+      setBagPanelOpen(true);
+      const g = net;
+      if (hasShard) {
+        void g.sellToVendor().then(() => {
+          const after = g.getCharacter();
+          if (after) updateBagPanel(after);
+          pushCombatLog('vendor', 'Sold ember_shard · +5 XP');
+          pushSystemToast('vendor', 'Sold ember_shard · +5 XP', TOAST_VE_TTL_MS);
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          pushSystemToast('rate', msg.slice(0, 96) || 'Sell failed');
+        });
+      } else {
+        void g.buyFromVendor().then(() => {
+          const after = g.getCharacter();
+          if (after) updateBagPanel(after);
+          pushCombatLog('vendor', 'Bought ember_shard · −5 XP');
+          pushSystemToast('vendor', 'Bought ember_shard · −5 XP', TOAST_VE_TTL_MS);
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          pushSystemToast('rate', msg.slice(0, 96) || 'Buy failed');
+        });
       }
     },
     onPickupNearest: () => {
@@ -2809,6 +2752,22 @@ async function main(): Promise<void> {
       const items = net?.getGroundItems() ?? latestGround;
       syncGroundSparkles(scene, items, groundSparkles, now / 1000);
     }
+
+    {
+      const nearV = net?.nearestVendor(4.5) ?? null;
+      if (nearV) {
+        updateVendorPanel(nearV);
+        // transient nearby chip via vendor panel peek without forcing open
+        const foot = document.querySelector('#vendorPanel .bagFoot');
+        if (foot) {
+          const ch = net?.getCharacter();
+          foot.textContent = ch?.hasEmberShard
+            ? 'Vendor nearby · E sell ember_shard (+5 XP)'
+            : 'Vendor nearby · E buy ember_shard (−5 XP)';
+        }
+      }
+    }
+
 
     camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
     scene.render();
@@ -5037,7 +4996,7 @@ async function main(): Promise<void> {
 
 
 
-  // ?ve=vendor — EnsureVendor → approach → open panel → BuyFromVendor(XP) → toast/bag tonic.
+  // ?ve=vendor — approach YardVendor, BuyFromVendor (XP→shard) or Sell, toast/bag proof.
   if (ve === 'vendor') {
     camera.radius = 11;
     camera.alpha = Math.PI / 2.4;
@@ -5047,9 +5006,8 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE vendor: waiting for Connected…';
     let ticks = 0;
-    let ensured = false;
     let approached = false;
-    let bought = false;
+    let acted = false;
     let bagShown = false;
     const waitVendor = () => {
       if (!net) return;
@@ -5058,13 +5016,6 @@ async function main(): Promise<void> {
       if (st.state !== 'connected') {
         if (mark) mark.textContent = `VE vendor: ${st.state}…`;
         if (ticks < 220) window.setTimeout(waitVendor, 200);
-        return;
-      }
-      if (!ensured) {
-        ensured = true;
-        net.ensureVendor();
-        if (mark) mark.textContent = 'VE vendor: EnsureVendor…';
-        window.setTimeout(waitVendor, 350);
         return;
       }
       syncVendorMeshes(net.getVendors());
@@ -5080,8 +5031,9 @@ async function main(): Promise<void> {
       if (!approached) {
         const pose = net.getLocalPose();
         if (pose) {
-          for (let i = 0; i < 8; i++) {
-            net.sendMove(v0.x + 0.9 - (net.getLocalPose()?.x ?? pose.x), v0.z + 0.4 - (net.getLocalPose()?.z ?? pose.z));
+          for (let i = 0; i < 10; i++) {
+            const p = net.getLocalPose() ?? pose;
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z);
           }
         }
         approached = true;
@@ -5089,9 +5041,8 @@ async function main(): Promise<void> {
         window.setTimeout(waitVendor, 450);
         return;
       }
-      const near = net.nearestVendor(5);
+      const near = net.nearestVendor(4.5);
       if (!near) {
-        // keep nudging
         const pose = net.getLocalPose();
         if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
         if (mark) mark.textContent = 'VE vendor: out of range, nudging…';
@@ -5104,62 +5055,102 @@ async function main(): Promise<void> {
         setBagPanelOpen(true);
         vendorOpen = true;
         setVendorPanelOpen(true);
+        updateVendorPanel(near);
       }
-      const stocks = net.getVendorStock();
-      const stock = stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null;
-      updateVendorPanel(stock, near);
       const ch = net.getCharacter();
       if (ch) updateBagPanel(ch);
       const toastOk = toastKindsPresent().has('vendor');
-      const tonic = !!ch?.hasYardTonic;
+      const shard = !!ch?.hasEmberShard;
 
-      if (!bought && ch && ch.xp >= 10 && !tonic) {
-        bought = true;
-        if (mark) mark.textContent = 'VE vendor: BuyFromVendor(XP)…';
-        void net.buyFromVendor(false).then(() => {
-          pushCombatLog('vendor', 'Bought yard_tonic for XP');
-          pushSystemToast('vendor', 'Vendor OK · yard_tonic · bag', TOAST_VE_TTL_MS);
-        }).catch(() => {
-          bought = false;
-        });
+      // Need XP to buy: walk to SeedLoot, Pickup (+5 XP), then return to vendor.
+      if (!acted && ch && !shard && ch.xp < 5) {
+        if (mark) mark.textContent = `VE vendor: need XP (${ch.xp}/5) — loot…`;
+        const pose = net.getLocalPose();
+        const lootX = 1.5;
+        const lootZ = 1.2;
+        if (pose) {
+          const dx = lootX - pose.x;
+          const dz = lootZ - pose.z;
+          if (dx * dx + dz * dz > 4) {
+            net.sendMove(dx, dz);
+            window.setTimeout(waitVendor, 280);
+            return;
+          }
+        }
+        net.seedLoot();
+        void net
+          .pickup()
+          .then(() => {
+            const p2 = net.getLocalPose();
+            if (p2) net.sendMove(v0.x - p2.x, v0.z - p2.z);
+          })
+          .catch(() => undefined);
+        window.setTimeout(waitVendor, 550);
+        return;
+      }
+
+      if (!acted && ch && !shard && ch.xp >= 5) {
+        acted = true;
+        if (mark) mark.textContent = 'VE vendor: BuyFromVendor…';
+        void net
+          .buyFromVendor()
+          .then(() => {
+            pushCombatLog('vendor', 'Bought ember_shard · −5 XP');
+            pushSystemToast('vendor', 'Vendor OK · ember_shard · bag', TOAST_VE_TTL_MS);
+            const after = net.getCharacter();
+            if (after) updateBagPanel(after);
+          })
+          .catch(() => {
+            acted = false;
+          });
         window.setTimeout(waitVendor, 400);
         return;
       }
-      // If not enough XP yet, seed via dummy kill quickly is heavy — grant by SeedLoot? XP from kill.
-      if (!bought && ch && ch.xp < 10) {
-        // Fast XP: SeedLoot + Pickup (+5) until BuyXpCost; keep vendor panel open.
-        if (mark) mark.textContent = `VE vendor: need XP (${ch.xp}/10) — SeedLoot/Pickup…`;
-        const pose = net.getLocalPose();
-        if (pose && (Math.abs(pose.x) > 1.5 || Math.abs(pose.z) > 1.5)) {
-          net.sendMove(-pose.x, -pose.z);
-        }
-        net.seedLoot();
-        void net.pickup().catch(() => undefined);
-        window.setTimeout(waitVendor, 500);
+
+      if (!acted && ch && shard) {
+        acted = true;
+        if (mark) mark.textContent = 'VE vendor: SellToVendor…';
+        void net
+          .sellToVendor()
+          .then(() => {
+            pushCombatLog('vendor', 'Sold ember_shard · +5 XP');
+            pushSystemToast('vendor', 'Vendor OK · sold shard · bag', TOAST_VE_TTL_MS);
+            const after = net.getCharacter();
+            if (after) updateBagPanel(after);
+          })
+          .catch(() => {
+            acted = false;
+          });
+        window.setTimeout(waitVendor, 400);
         return;
       }
-      if (tonic && (toastOk || bought)) {
+
+      if (toastOk || (acted && (shard || (ch?.xp ?? 0) >= 0))) {
         setVendorPanelOpen(true);
         setBagPanelOpen(true);
         if (ch) updateBagPanel(ch);
         if (mark) {
           mark.textContent =
-            `Vendor OK · yard_tonic · E panel · Buy XP/shard · Sell shard · toast/bag`;
+            `Vendor OK · stall · E buy/sell shard · toast/bag`;
         }
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE vendor: tonic ${tonic ? 'y' : 'n'} · stock ${stock?.qty ?? '—'} · toast ${toastOk ? 'y' : 'n'}`;
+          `VE vendor: shard ${shard ? 'y' : 'n'} · xp ${ch?.xp ?? '—'} · toast ${toastOk ? 'y' : 'n'}`;
       }
       if (ticks > 360) {
-        if (mark) mark.textContent = `VE vendor: timed out · tonic ${tonic ? 'y' : 'n'}`;
+        if (mark) {
+          mark.textContent =
+            `VE vendor: timed out · shard ${shard ? 'y' : 'n'} · toast ${toastOk ? 'y' : 'n'}`;
+        }
         return;
       }
       window.setTimeout(waitVendor, 220);
     };
     window.setTimeout(waitVendor, 700);
   }
+
 
 
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.

@@ -18,5 +18,4 @@ export default __t.row({
   staffEquipped: __t.bool().name("staff_equipped"),
   robesEquipped: __t.bool().name("robes_equipped"),
   hasEmberShard: __t.bool().name("has_ember_shard"),
-  hasYardTonic: __t.bool().name("has_yard_tonic"),
 });

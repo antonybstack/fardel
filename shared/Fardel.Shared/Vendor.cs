@@ -1,22 +1,16 @@
 namespace Fardel.Shared;
 
-/// <summary>Minimal yard vendor buy/sell tunables (vendor invent).</summary>
+/// <summary>Stationary yard vendor tunables (buy/sell ember shard for XP).</summary>
 public static class Vendor
 {
-    /// <summary>XZ interact radius (meters) for BuyFromVendor / SellToVendor.</summary>
-    public const float RangeMeters = 4f;
+    /// <summary>XZ interaction range (meters) from player pose to YardVendor.</summary>
+    public const float RangeMeters = 4.5f;
 
-    /// <summary>Consumable flag item sold from VendorStock.</summary>
-    public const string TonicItemId = "yard_tonic";
+    /// <summary>XP spent to buy an ember shard from the vendor.</summary>
+    public const int BuyPriceXp = 5;
 
-    /// <summary>XP spent when buying tonic without an ember shard.</summary>
-    public const int BuyXpCost = 10;
-
-    /// <summary>XP granted when selling an ember_shard to the vendor.</summary>
-    public const int SellShardXp = 8;
-
-    /// <summary>Initial VendorStock.Qty for yard_tonic.</summary>
-    public const int InitialStock = 20;
+    /// <summary>XP granted when selling an ember shard to the vendor.</summary>
+    public const int SellPriceXp = 5;
 
     /// <summary>Seed position near yard origin — offset from dummy at (5,0,0).</summary>
     public const float SpawnX = -2.5f;
