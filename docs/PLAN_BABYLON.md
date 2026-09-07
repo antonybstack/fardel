@@ -154,6 +154,9 @@ See `web/README.md` for exact commands.
 - **Combat floater stacking clarity (presentation):** nearby live floaters get
   stack-slot Y offsets + deterministic damage/heal/XP lanes (no random X drift);
   `?ve=floaters` (`ve/babylon-floaters.png`)
+- **Combat floater readability (presentation):** thicker outline/shadow + matte
+  damage/heal/XP fills under #39 fog/grass; capped emissive (no neon bloom); no
+  lighting lock edits; `?ve=floater-read` (`ve/babylon-floater-read.png`)
 - **Party / always-relevant (presentation):** `PartyMember` + `PartyInvite` tables;
   CreateParty / InviteToParty / AcceptPartyInvite / LeaveParty; neighborhood SQL
   also wholesale-subscribes `party_member` + per-identity `player_pose` for party
