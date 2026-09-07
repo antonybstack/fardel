@@ -16,8 +16,8 @@ import type { Node } from '@babylonjs/core/node';
 import '@babylonjs/loaders/glTF';
 
 /** Robe cloth emissive scale — keep restores in main.ts in sync. */
-/** Modest cloth fill — avoid neon under warmer #32 sun (~0.98). */
-export const ROBE_EMISSIVE_SCALE = 0.065;
+/** Modest cloth fill — mid-sat under #39 cyan fog; avoid neon/white-out. */
+export const ROBE_EMISSIVE_SCALE = 0.08;
 
 /** Public path to vendored Quaternius wizard (CC0). */
 export const QUATERNIUS_WIZARD_URL =
@@ -150,7 +150,7 @@ export function createPlayerHumanoid(
 ): HumanoidParts {
   const prefix = opts.name ?? 'player';
   // Mid-sat indigo cloth vs final #32/#39 lock (cool hemi + warm sun + cyan fog).
-  const robeDiffuse = opts.robeColor ?? new Color3(0.3, 0.4, 0.72);
+  const robeDiffuse = opts.robeColor ?? new Color3(0.34, 0.45, 0.78);
   const root = new Mesh(prefix, scene);
 
   const robeMat = mat(
@@ -251,40 +251,17 @@ export function createPlayerHumanoid(
   };
 
   // Body cloth → StandardMaterial so remote tint + cast flash work.
-  // Prefer albedo from PBR when the texture is ready; otherwise solid mid-sat cloth
-  // so the wizard never goes muddy-black under cyan fog.
-  let bodyTex: Texture | null = null;
-  for (const m of meshes) {
-    const matl = m.material;
-    if (matl && matl instanceof PBRMaterial && matl.albedoTexture) {
-      const tex = matl.albedoTexture as Texture;
-      if (tex && (tex.isReady?.() ?? true)) {
-        bodyTex = tex;
-        break;
-      }
-    }
-  }
-  // Readable mid-sat indigo (local) / caller tint (remotes) under #39 cyan fog.
+  // Skip Quaternius Wizard_Texture as diffuseTexture: navy atlas (~RGB 33,43,74)
+  // reads as a black cutout at 8–15m under #39 cyan fog. Solid mid-sat cloth.
   robeMat.diffuseColor = new Color3(
-    Math.min(1, robeDiffuse.r * 1.25 + 0.12),
-    Math.min(1, robeDiffuse.g * 1.2 + 0.1),
-    Math.min(1, robeDiffuse.b * 1.15 + 0.14),
+    Math.min(1, robeDiffuse.r * 1.05 + 0.14),
+    Math.min(1, robeDiffuse.g * 1.0 + 0.12),
+    Math.min(1, robeDiffuse.b * 0.95 + 0.1),
   );
-  robeMat.emissiveColor = robeDiffuse.scale(Math.max(ROBE_EMISSIVE_SCALE, 0.1));
+  // Keep emissive ≈ ROBE_EMISSIVE_SCALE * diffuse so equip restore in main.ts matches.
+  robeMat.emissiveColor = robeMat.diffuseColor.scale(ROBE_EMISSIVE_SCALE);
   robeMat.specularColor = new Color3(0.05, 0.06, 0.08);
-  robeMat.ambientColor = new Color3(0.45, 0.48, 0.55);
-  if (bodyTex) {
-    try {
-      robeMat.diffuseTexture = bodyTex;
-      robeMat.diffuseColor = new Color3(
-        Math.min(1, robeDiffuse.r + 0.35),
-        Math.min(1, robeDiffuse.g + 0.32),
-        Math.min(1, robeDiffuse.b + 0.28),
-      );
-    } catch {
-      /* solid color fallback already set */
-    }
-  }
+  robeMat.ambientColor = new Color3(0.42, 0.45, 0.55);
   for (const m of meshes) {
     const bare = bareName(m.name, prefix);
     if (m === staffMesh || /staff/i.test(bare)) continue;
