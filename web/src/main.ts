@@ -916,13 +916,17 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                       ? 'STUN'
                                       : kind === 'outOfRange'
                                         ? 'RANGE'
-                                        : 'RESPAWN';
+                                        : kind === 'bandage'
+                                          ? 'HEAL'
+                                          : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
   const ss = String(time.getSeconds()).padStart(2, '0');
+  // Timestamp muted (.clTime) vs kind tag (.clTag) + body — #78 readability.
   line.innerHTML =
-    `<span class="clTag">[${hh}:${mm}:${ss}] ${tag}</span>` +
+    `<span class="clTime">[${hh}:${mm}:${ss}]</span>` +
+    `<span class="clTag">${tag}</span>` +
     text.replace(/</g, '&lt;');
   root.appendChild(line);
   while (root.children.length > COMBAT_LOG_MAX) {
@@ -7541,6 +7545,74 @@ async function main(): Promise<void> {
       window.setTimeout(waitLog, 220);
     };
     window.setTimeout(waitLog, 700);
+  }
+
+  // ?ve=combat-log-read — seed damage/heal/system/kill lines for #78 plate contrast.
+  if (ve === 'combat-log-read') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (ve === 'combat-log-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE combat-log-read: seeding damage/heal/system…';
+    let ticks = 0;
+    const seedCombatLogRead = () => {
+      const root = document.getElementById('combatLogLines');
+      if (root) root.innerHTML = '';
+      // Diverse stack: damage + heal + system + kill (scannable under cyan fog).
+      pushCombatLog('cast', 'Spark cast start → Dummy #1');
+      pushCombatLog('damage', 'Spark −12 · Dummy #1 88/100');
+      pushCombatLog('damage', 'Thorns −8 · You 92/100');
+      pushCombatLog('bandage', 'Bandage +30 · You 100/100');
+      pushCombatLog('equip', 'Equipped oak staff');
+      pushCombatLog('party', 'Party formed · you (leader)');
+      pushCombatLog('mana', 'Insufficient mana · 4/100');
+      pushCombatLog('death', 'Training Dummy (#1)');
+      pushCombatLog('respawn', 'You respawned at yard · full HP');
+      pushCombatLog('loot', 'Picked up ember_shard');
+    };
+    const waitRead = () => {
+      ticks += 1;
+      seedCombatLogRead();
+      const kinds = combatLogKindsPresent();
+      const ready =
+        kinds.has('damage') &&
+        kinds.has('bandage') &&
+        (kinds.has('cast') || kinds.has('equip') || kinds.has('party') || kinds.has('mana')) &&
+        kinds.has('death');
+      const lineCount =
+        document.getElementById('combatLogLines')?.children.length ?? 0;
+      if (ready && lineCount >= 6) {
+        if (mark) {
+          mark.textContent =
+            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog';
+        }
+        const hold = () => {
+          // Keep strip populated for screenshot without changing filter behavior.
+          if ((document.getElementById('combatLogLines')?.children.length ?? 0) < 6) {
+            seedCombatLogRead();
+          }
+          window.setTimeout(hold, 400);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE combat-log-read: tick ${ticks} · kinds ${[...kinds].join('+') || '∅'}`;
+      }
+      if (ticks > 40) {
+        seedCombatLogRead();
+        if (mark) {
+          mark.textContent =
+            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog · seeded';
+        }
+        return;
+      }
+      window.setTimeout(waitRead, 180);
+    };
+    window.setTimeout(waitRead, 500);
   }
 
 

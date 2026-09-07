@@ -914,86 +914,129 @@ body {
   border-color: rgba(180, 80, 80, 0.45);
 }
 
-/* Scrolling combat log — right column under minimap (client-only). */
+/* Scrolling combat log — right column under minimap (client-only).
+   #78 readability: dark plate over cyan fog; damage/heal/kill/system distinct, no neon. */
 #combatLog {
   position: absolute;
   right: 12px;
   top: 184px;
   z-index: 12;
   pointer-events: none;
-  width: min(280px, 42vw);
-  max-height: min(280px, 42vh);
+  width: min(292px, 44vw);
+  max-height: min(300px, 44vh);
   display: flex;
   flex-direction: column;
-  background: rgba(8, 12, 24, 0.78);
-  border: 1px solid rgba(255, 179, 71, 0.28);
+  background: rgba(6, 10, 20, 0.88);
+  border: 1px solid rgba(150, 168, 196, 0.34);
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.52),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.045);
   overflow: hidden;
 }
 
 .clHead {
   padding: 5px 9px 3px;
-  color: #ffc48a;
+  color: #d2dae8;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(255, 179, 71, 0.18);
+  border-bottom: 1px solid rgba(150, 168, 196, 0.22);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 .clLines {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 9px 7px;
+  gap: 3px;
+  padding: 6px 9px 8px;
   overflow: hidden;
-  max-height: min(250px, 38vh);
+  max-height: min(268px, 40vh);
 }
 
 .clLine {
-  color: #c8d6f0;
-  font-size: 11px;
-  line-height: 1.35;
+  color: #c6ceda;
+  font-size: 12px;
+  line-height: 1.38;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.clLine.cast {
-  color: #9ec0ff;
-}
-
-.clLine.damage {
-  color: #ffb347;
-  font-weight: 650;
-}
-
-.clLine.equip {
-  color: #e8c89a;
-}
-
-.clLine.party {
-  color: #5ed68a;
-}
-
-.clLine.death {
-  color: #ff7a7a;
-  font-weight: 700;
-}
-
-.clLine.respawn {
-  color: #9ee6c4;
-  font-weight: 650;
+/* Timestamps muted vs message body (#78). */
+.clLine .clTime {
+  color: #7a8799;
+  opacity: 0.88;
+  margin-right: 5px;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .clLine .clTag {
-  opacity: 0.75;
-  margin-right: 4px;
+  opacity: 0.92;
+  margin-right: 5px;
   font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* System / misc — cool grey-white (default + cast/equip/party/mana/…). */
+.clLine.cast,
+.clLine.equip,
+.clLine.party,
+.clLine.mana,
+.clLine.castCancel,
+.clLine.castPushback,
+.clLine.castHardInterrupt,
+.clLine.silenced,
+.clLine.kick,
+.clLine.stun,
+.clLine.outOfRange {
+  color: #c6ceda;
+}
+
+/* Damage — warm orange→red, not neon. */
+.clLine.damage {
+  color: #e89048;
+  font-weight: 650;
+}
+.clLine.damage .clTag {
+  color: #e07038;
+}
+
+/* Heal — clear green (bandage / rest / tonic). */
+.clLine.bandage,
+.clLine.rest,
+.clLine.tonic {
+  color: #3ecf78;
+  font-weight: 650;
+}
+.clLine.bandage .clTag,
+.clLine.rest .clTag,
+.clLine.tonic .clTag {
+  color: #34c06c;
+}
+
+/* Critical / kill — brighter weight, no glow soup. */
+.clLine.death {
+  color: #f07870;
+  font-weight: 750;
+}
+.clLine.death .clTag {
+  color: #ee6860;
+}
+
+.clLine.respawn {
+  color: #7dcaa0;
+  font-weight: 650;
+}
+.clLine.respawn .clTag {
+  color: #6cbc90;
 }
 
 
@@ -1395,7 +1438,11 @@ body {
 .sysToast.loot .toastTag { color: #ffb04a; }
 
 .clLine.trade,
-.clLine.loot .clTag { color: #ffb04a; }
+.clLine.loot {
+  color: #d2b896;
+}
+.clLine.trade .clTag,
+.clLine.loot .clTag { color: #c9a878; }
 
 
 #vendorPanel {
@@ -1455,11 +1502,11 @@ body {
 }
 .sysToast.bandage .toastTag { color: #7dffc0; }
 
-.clLine.rest,
-.clLine.tonic .clTag,
-.clLine.bandage .clTag { color: #7dffb5; }
-.sysToast.vendor,
-.clLine.vendor .clTag { color: #6dffb0; }
+.clLine.vendor {
+  color: #c6ceda;
+}
+.clLine.vendor .clTag { color: #a8b4c4; }
+.sysToast.vendor .toastTag { color: #6dffb0; }
 .sysToast.vendor {
   border-color: rgba(80, 220, 160, 0.55);
 }
@@ -1699,14 +1746,14 @@ body {
   border: 1px solid rgba(255, 190, 100, 0.45);
 }
 
-.clLine.castCancel .clTag { color: #ffb45a; }
+.clLine.castCancel .clTag { color: #b8c0cc; }
 
 .sysToast.castPushback {
   border-color: rgba(255, 120, 90, 0.55);
 }
 .sysToast.castPushback .toastTag { color: #ff7860; }
 
-.clLine.castPushback .clTag { color: #ff7860; }
+.clLine.castPushback .clTag { color: #b8c0cc; }
 
 .sysToast.castHardInterrupt {
   border-color: rgba(255, 60, 90, 0.95);
@@ -1724,14 +1771,14 @@ body {
   letter-spacing: 0.08em;
 }
 
-.clLine.castHardInterrupt .clTag { color: #ff465a; }
+.clLine.castHardInterrupt .clTag { color: #b8c0cc; }
 
 .sysToast.silenced {
   border-color: rgba(180, 120, 255, 0.65);
 }
 .sysToast.silenced .toastTag { color: #c49bff; }
 
-.clLine.silenced .clTag { color: #c49bff; }
+.clLine.silenced .clTag { color: #b8c0cc; }
 
 .spellSlot.outOfRange {
   opacity: 0.42;
@@ -1746,11 +1793,11 @@ body {
 }
 .sysToast.outOfRange .toastTag { color: #ffb07a; }
 
-.clLine.outOfRange .clTag { color: #ffb07a; }
+.clLine.outOfRange .clTag { color: #b8c0cc; }
 
 .sysToast.kick { border-color: rgba(255, 160, 60, 0.7); }
 .sysToast.kick .toastTag { color: #ffb03c; }
-.clLine.kick .clTag { color: #ffb03c; }
+.clLine.kick .clTag { color: #b8c0cc; }
 .sysToast.stun { border-color: rgba(120, 200, 255, 0.75); }
 .sysToast.stun .toastTag { color: #7ec8ff; }
-.clLine.stun .clTag { color: #7ec8ff; }
+.clLine.stun .clTag { color: #b8c0cc; }
