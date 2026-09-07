@@ -72,3 +72,13 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 ## Floating damage text (web)
 
 - Prefer **NPC hp deltas** over a new damage-event table for combat floaters — server already mutates `npc.hp` on Spark/Emberbolt apply; client tracks `npcLastHp` and spawns billboard `DynamicTexture` planes. Keeps CombatSmoke / module unchanged.
+
+## Party / always-relevant (invent)
+
+- Session-scoped `PartyMember` (cleared on `ClientDisconnected`) keeps ADR 0001
+  always-relevant simple: no durable roster to reconcile after reconnect.
+- Prove always-relevant with **unsubscribe → neighborhood SQL + identity pose
+  filters**, not `SubscribeToAllTables` — otherwise the smoke cannot show Moore
+  exclusion. Identity SQL uses `0x` + `Identity.ToString()` hex.
+- Browser: wholesale `party_member` + resubscribe when the always-relevant hex
+  set changes so far party mates keep arriving after interest moves.

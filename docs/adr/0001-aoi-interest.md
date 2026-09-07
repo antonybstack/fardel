@@ -120,7 +120,7 @@ Unchanged: predict local WASD + cast windup only. No shooter-grade rollback for 
 ## Open follow-ups
 
 - Lock initial `ChunkSizeMeters` and pose publish Hz in code constants once the yard exists.
-- Party table + always-relevant wiring (post-MVP party is fine; leave the hook).
+- ~~Party table + always-relevant wiring~~ **done** (invent: `PartyMember` + identity pose filters; session-scoped on disconnect).
 - ADR or amendment for `PoseCoarse` if slice 4 metrics demand network LOD.
 - Debug: chunk boundary overlay + subscription-set HUD for QA.
 

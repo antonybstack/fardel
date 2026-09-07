@@ -3,7 +3,8 @@
  * (Connect + Move + Combat + Persist + AOI).
  *
  * Subscriptions follow ADR 0001: Moore neighborhood filters on hot tables
- * (player_pose, crowd_proxy); cold/small tables (character, combat, npc) wholesale.
+ * (player_pose, crowd_proxy); cold/small tables (character, combat, npc,
+ * party_member, party_invite) wholesale; always-relevant party identity poses.
  */
 
 import { DbConnection, type EventContext, type SubscriptionHandle } from '../module_bindings';
@@ -37,6 +38,8 @@ export type Pose = {
 /** Other identity's pose in the subscribed neighborhood (shared-yard). */
 export type RemotePose = Pose & {
   identityHex: string;
+  /** True when this remote shares the local player's party (always-relevant). */
+  party?: boolean;
 };
 
 export type NpcView = {
@@ -95,6 +98,20 @@ export type CharacterView = {
   robesEquipped: boolean;
 };
 
+export type PartyMemberView = {
+  identityHex: string;
+  partyId: string;
+  isLeader: boolean;
+};
+
+export type PartyView = {
+  partyId: string | null;
+  size: number;
+  isLeader: boolean;
+  members: PartyMemberView[];
+  pendingInviteFrom: string | null;
+};
+
 export type ConnectionStatus =
   | { state: 'connecting'; uri: string; database: string; restoredToken: boolean }
   | {
@@ -109,6 +126,7 @@ export type ConnectionStatus =
       aoi?: AoiView;
       remotes?: RemotePose[];
       remoteCombats?: RemoteCombat[];
+      party?: PartyView;
       castFeedback?: string;
       restoredToken: boolean;
     }
@@ -132,11 +150,18 @@ export type GameNet = {
   seedCrowdProxies: () => void;
   setTarget: (npcId: bigint) => void;
   cast: (spellId: number) => void;
+  createParty: () => void;
+  inviteToParty: (invitee: Identity) => void;
+  acceptPartyInvite: () => void;
+  leaveParty: () => void;
+  /** Invite nearest remote (create party if needed); auto-accept path is invitee-side. */
+  inviteNearestRemote: () => string | null;
   getLocalPose: () => Pose | null;
   getRemotes: () => RemotePose[];
   getRemoteCombats: () => RemoteCombat[];
   getCombat: () => CombatView | null;
   getCharacter: () => CharacterView | null;
+  getParty: () => PartyView | null;
   getNpcs: () => NpcView[];
   getProxies: () => CrowdProxyView[];
   getAoi: () => AoiView | null;
@@ -212,17 +237,33 @@ export function fillMooreNeighborhood(
   return out;
 }
 
-/** Build ADR 0001 neighborhood SQL set (hot tables filtered by chunk). */
-export function buildNeighborhoodSqls(interestCx: number, interestCz: number): string[] {
+/**
+ * Build ADR 0001 neighborhood SQL set (hot tables filtered by chunk) plus
+ * always-relevant party wholesale + per-identity player_pose filters.
+ */
+export function buildNeighborhoodSqls(
+  interestCx: number,
+  interestCz: number,
+  alwaysRelevantIdentityHexes: string[] = [],
+): string[] {
   const sqls: string[] = [
     // Cold / small — never on AOI hot path for inventory, but OK wholesale for yard MVP
     'SELECT * FROM character',
     'SELECT * FROM player_combat',
     'SELECT * FROM npc',
+    'SELECT * FROM party_member',
+    'SELECT * FROM party_invite',
   ];
   for (const { x: cx, z: cz } of fillMooreNeighborhood(interestCx, interestCz)) {
     sqls.push(`SELECT * FROM crowd_proxy WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
     sqls.push(`SELECT * FROM player_pose WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
+  }
+  const seen = new Set<string>();
+  for (const hex of alwaysRelevantIdentityHexes) {
+    const h = hex.toLowerCase();
+    if (!h || seen.has(h)) continue;
+    seen.add(h);
+    sqls.push(`SELECT * FROM player_pose WHERE identity = 0x${hex}`);
   }
   return sqls;
 }
@@ -276,6 +317,18 @@ type CrowdProxyRow = {
   chunkX: number;
   chunkZ: number;
   far: boolean;
+};
+
+type PartyMemberRow = {
+  identity: Identity;
+  partyId: bigint;
+  isLeader: boolean;
+};
+
+type PartyInviteRow = {
+  invitee: Identity;
+  partyId: bigint;
+  inviter: Identity;
 };
 
 function poseView(row: PoseRow): Pose {
@@ -375,10 +428,16 @@ export async function connectToSpacetime(
     const proxyMap = new Map<string, CrowdProxyView>();
     const remotePoseMap = new Map<string, RemotePose>();
     const remoteCombatMap = new Map<string, RemoteCombat>();
+    /** identityHex → PartyMemberView for wholesale party_member rows. */
+    const partyMemberMap = new Map<string, PartyMemberView>();
+    let pendingInviteFrom: string | null = null;
+    /** Hex set currently included as always-relevant pose filters in the active sub. */
+    let subscribedAlwaysHexes = new Set<string>();
     let subHandle: SubscriptionHandle | null = null;
     let subscribedInterestX = 0;
     let subscribedInterestZ = 0;
     let resubInFlight = false;
+    let syncingCaches = false;
     let neighborhoodSql = true;
 
     const finishError = (message: string) => {
@@ -392,6 +451,56 @@ export async function connectToSpacetime(
     const listProxies = (): CrowdProxyView[] => Array.from(proxyMap.values());
     const listRemotes = (): RemotePose[] => Array.from(remotePoseMap.values());
     const listRemoteCombats = (): RemoteCombat[] => Array.from(remoteCombatMap.values());
+
+    const localPartyId = (): string | null => {
+      if (!localIdentity) return null;
+      const self = partyMemberMap.get(localIdentity.toHexString());
+      return self?.partyId ?? null;
+    };
+
+    const buildPartyView = (): PartyView | null => {
+      if (!localIdentity) return null;
+      const selfHex = localIdentity.toHexString();
+      const self = partyMemberMap.get(selfHex);
+      const pid = self?.partyId ?? null;
+      const members =
+        pid == null
+          ? []
+          : Array.from(partyMemberMap.values()).filter((m) => m.partyId === pid);
+      return {
+        partyId: pid,
+        size: members.length,
+        isLeader: self?.isLeader ?? false,
+        members,
+        pendingInviteFrom,
+      };
+    };
+
+    const partyAlwaysRelevantHexes = (): string[] => {
+      if (!localIdentity) return [];
+      const selfHex = localIdentity.toHexString();
+      const out = new Set<string>([selfHex]);
+      const pid = localPartyId();
+      if (pid != null) {
+        for (const m of partyMemberMap.values()) {
+          if (m.partyId === pid) out.add(m.identityHex);
+        }
+      }
+      return Array.from(out);
+    };
+
+    const markRemotePartyFlags = () => {
+      const pid = localPartyId();
+      for (const [hex, remote] of remotePoseMap) {
+        const inParty =
+          pid != null && partyMemberMap.get(hex)?.partyId === pid;
+        if (!!remote.party !== inParty) {
+          remotePoseMap.set(hex, { ...remote, party: inParty });
+        } else if (remote.party !== inParty) {
+          remote.party = inParty;
+        }
+      }
+    };
 
     const findNpc = (id: bigint): NpcView | null => {
       if (id === 0n) return null;
@@ -429,6 +538,7 @@ export async function connectToSpacetime(
     };
 
     const emitStatus = (identityHex: string) => {
+      markRemotePartyFlags();
       onStatus({
         state: 'connected',
         uri,
@@ -443,6 +553,7 @@ export async function connectToSpacetime(
         aoi: buildAoi() ?? undefined,
         remotes: listRemotes(),
         remoteCombats: listRemoteCombats(),
+        party: buildPartyView() ?? undefined,
         castFeedback: castFeedback || undefined,
         restoredToken,
       });
@@ -477,7 +588,14 @@ export async function connectToSpacetime(
             if (!localIdentity) return;
             if (!row.identity.isEqual(localIdentity)) {
               const hex = row.identity.toHexString();
-              remotePoseMap.set(hex, { ...poseView(row), identityHex: hex });
+              const pid = localPartyId();
+              const inParty =
+                pid != null && partyMemberMap.get(hex)?.partyId === pid;
+              remotePoseMap.set(hex, {
+                ...poseView(row),
+                identityHex: hex,
+                party: inParty,
+              });
               onRemotes?.(listRemotes());
               emitStatus(identityHex);
               return;
@@ -570,6 +688,16 @@ export async function connectToSpacetime(
           };
 
           const syncCachesFromDb = () => {
+            syncingCaches = true;
+            try {
+            partyMemberMap.clear();
+            for (const row of conn.db.partyMember.iter()) {
+              upsertPartyMember(row as PartyMemberRow);
+            }
+            pendingInviteFrom = null;
+            for (const row of conn.db.partyInvite.iter()) {
+              upsertPartyInvite(row as PartyInviteRow);
+            }
             remotePoseMap.clear();
             for (const row of conn.db.playerPose.iter()) {
               emitPose(row as PoseRow);
@@ -591,6 +719,9 @@ export async function connectToSpacetime(
             for (const row of conn.db.crowdProxy.iter()) {
               upsertProxy(row as CrowdProxyRow);
             }
+            } finally {
+              syncingCaches = false;
+            }
           };
 
           const applySubscription = (
@@ -600,7 +731,9 @@ export async function connectToSpacetime(
           ) => {
             subscribedInterestX = ix;
             subscribedInterestZ = iz;
-            const sqls = buildNeighborhoodSqls(ix, iz);
+            const always = partyAlwaysRelevantHexes();
+            subscribedAlwaysHexes = new Set(always.map((h) => h.toLowerCase()));
+            const sqls = buildNeighborhoodSqls(ix, iz, always);
             neighborhoodSql = true;
             subHandle = conn
               .subscriptionBuilder()
@@ -632,13 +765,25 @@ export async function connectToSpacetime(
               .subscribe(sqls);
           };
 
+          const alwaysRelevantChanged = (): boolean => {
+            const next = partyAlwaysRelevantHexes().map((h) => h.toLowerCase());
+            if (next.length !== subscribedAlwaysHexes.size) return true;
+            for (const h of next) {
+              if (!subscribedAlwaysHexes.has(h)) return true;
+            }
+            return false;
+          };
+
           const scheduleResubscribe = (
             hex: string,
             ix: number,
             iz: number,
+            force = false,
           ) => {
             if (resubInFlight) return;
-            if (ix === subscribedInterestX && iz === subscribedInterestZ) return;
+            const interestMoved =
+              ix !== subscribedInterestX || iz !== subscribedInterestZ;
+            if (!force && !interestMoved && !alwaysRelevantChanged()) return;
             resubInFlight = true;
             const prev = subHandle;
             subHandle = null;
@@ -656,6 +801,52 @@ export async function connectToSpacetime(
               resubInFlight = false;
               emitStatus(hex);
             });
+          };
+
+          const maybeResubForParty = () => {
+            if (syncingCaches || resubInFlight || !localIdentity) return;
+            const ix = latestPose?.interestChunkX ?? subscribedInterestX;
+            const iz = latestPose?.interestChunkZ ?? subscribedInterestZ;
+            scheduleResubscribe(localIdentity.toHexString(), ix, iz, false);
+          };
+
+          const upsertPartyMember = (row: PartyMemberRow) => {
+            const hex = row.identity.toHexString();
+            partyMemberMap.set(hex, {
+              identityHex: hex,
+              partyId: row.partyId.toString(),
+              isLeader: row.isLeader,
+            });
+            markRemotePartyFlags();
+            onRemotes?.(listRemotes());
+            emitStatus(identityHex);
+            maybeResubForParty();
+          };
+
+          const removePartyMember = (row: PartyMemberRow) => {
+            const hex = row.identity.toHexString();
+            if (partyMemberMap.delete(hex)) {
+              markRemotePartyFlags();
+              onRemotes?.(listRemotes());
+              emitStatus(identityHex);
+              maybeResubForParty();
+            }
+          };
+
+          const upsertPartyInvite = (row: PartyInviteRow) => {
+            if (!localIdentity) return;
+            if (row.invitee.isEqual(localIdentity)) {
+              pendingInviteFrom = row.inviter.toHexString();
+              emitStatus(identityHex);
+            }
+          };
+
+          const removePartyInvite = (row: PartyInviteRow) => {
+            if (!localIdentity) return;
+            if (row.invitee.isEqual(localIdentity)) {
+              pendingInviteFrom = null;
+              emitStatus(identityHex);
+            }
           };
 
           conn.db.playerPose.onInsert((_ctx: EventContext, row) => {
@@ -705,6 +896,26 @@ export async function connectToSpacetime(
             removeProxy(row as CrowdProxyRow);
           });
 
+          conn.db.partyMember.onInsert((_ctx: EventContext, row) => {
+            upsertPartyMember(row as PartyMemberRow);
+          });
+          conn.db.partyMember.onUpdate((_ctx: EventContext, _old, row) => {
+            upsertPartyMember(row as PartyMemberRow);
+          });
+          conn.db.partyMember.onDelete((_ctx: EventContext, row) => {
+            removePartyMember(row as PartyMemberRow);
+          });
+
+          conn.db.partyInvite.onInsert((_ctx: EventContext, row) => {
+            upsertPartyInvite(row as PartyInviteRow);
+          });
+          conn.db.partyInvite.onUpdate((_ctx: EventContext, _old, row) => {
+            upsertPartyInvite(row as PartyInviteRow);
+          });
+          conn.db.partyInvite.onDelete((_ctx: EventContext, row) => {
+            removePartyInvite(row as PartyInviteRow);
+          });
+
           // Spawn interest is (0,0) until pose arrives / hysteresis adopts.
           applySubscription(0, 0);
 
@@ -739,11 +950,70 @@ export async function connectToSpacetime(
                 emitStatus(identityHex);
                 void conn.reducers.cast({ spellId });
               },
+              createParty: () => {
+                castFeedback = 'Creating party…';
+                emitStatus(identityHex);
+                void conn.reducers.createParty({});
+              },
+              inviteToParty: (invitee: Identity) => {
+                castFeedback = `Inviting ${invitee.toHexString().slice(0, 8)}…`;
+                emitStatus(identityHex);
+                void conn.reducers.inviteToParty({ invitee });
+              },
+              acceptPartyInvite: () => {
+                castFeedback = 'Accepting party invite…';
+                emitStatus(identityHex);
+                void conn.reducers.acceptPartyInvite({});
+              },
+              leaveParty: () => {
+                castFeedback = 'Leaving party…';
+                emitStatus(identityHex);
+                void conn.reducers.leaveParty({});
+              },
+              inviteNearestRemote: () => {
+                const remotes = listRemotes();
+                const local = latestPose;
+                if (!local || remotes.length === 0) {
+                  castFeedback = 'No remote to invite';
+                  emitStatus(identityHex);
+                  return null;
+                }
+                let best = remotes[0]!;
+                let bestD = Number.POSITIVE_INFINITY;
+                for (const r of remotes) {
+                  const dx = r.x - local.x;
+                  const dz = r.z - local.z;
+                  const d = dx * dx + dz * dz;
+                  if (d < bestD) {
+                    bestD = d;
+                    best = r;
+                  }
+                }
+                // Prefer Identity from live table row when available.
+                let invitee: Identity | null = null;
+                for (const row of conn.db.playerPose.iter()) {
+                  const hex = (row as PoseRow).identity.toHexString();
+                  if (hex === best.identityHex) {
+                    invitee = (row as PoseRow).identity;
+                    break;
+                  }
+                }
+                if (!invitee) {
+                  castFeedback = 'Invitee pose missing';
+                  emitStatus(identityHex);
+                  return null;
+                }
+                castFeedback = `Inviting nearest ${best.identityHex.slice(0, 8)}…`;
+                emitStatus(identityHex);
+                void conn.reducers.inviteToParty({ invitee });
+                return best.identityHex;
+              },
               getLocalPose: () => latestPose,
               getRemotes: () => listRemotes(),
               getRemoteCombats: () => listRemoteCombats(),
               getCombat: () => latestCombat,
               getCharacter: () => latestCharacter,
+              getParty: () => buildPartyView(),
               getNpcs: () => listNpcs(),
               getProxies: () => listProxies(),
               getAoi: () => buildAoi(),

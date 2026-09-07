@@ -217,3 +217,8 @@ export function remoteRobeColor(identityHex: string): Color3 {
   ];
   return palette[h % palette.length]!;
 }
+
+/** Bright green robe for always-relevant party remotes (distinct from local blue). */
+export function partyRobeColor(): Color3 {
+  return new Color3(0.15, 0.85, 0.28);
+}

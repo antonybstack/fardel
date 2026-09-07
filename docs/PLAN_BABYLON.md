@@ -146,8 +146,12 @@ See `web/README.md` for exact commands.
   rising billboard numbers above the target (Spark yellow / Emberbolt orange);
   cosmetic only — authority HP remains source of truth; `?ve=damage-text`
   (`ve/babylon-damage-text.png`)
+- **Party / always-relevant (presentation):** `PartyMember` + `PartyInvite` tables;
+  CreateParty / InviteToParty / AcceptPartyInvite / LeaveParty; neighborhood SQL
+  also wholesale-subscribes `party_member` + per-identity `player_pose` for party
+  mates outside Moore; green party remote tint; HUD `party: N`; hotkeys P/O;
+  `?ve=party` + `tools/PartySmoke` / `tools/PartyMate` (`ve/babylon-party.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)
-- Next (north-star): credited art packs when licenses land; party / always-relevant
-  polish; redeploy Pages with damage-text
+- Next (north-star): credited art packs when licenses land; redeploy Pages (party / always-relevant done)

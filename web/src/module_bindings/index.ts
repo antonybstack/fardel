@@ -34,8 +34,12 @@ import {
 } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AcceptPartyInviteReducer from "./accept_party_invite_reducer";
 import CastReducer from "./cast_reducer";
+import CreatePartyReducer from "./create_party_reducer";
 import EnsureTrainingDummyReducer from "./ensure_training_dummy_reducer";
+import InviteToPartyReducer from "./invite_to_party_reducer";
+import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
 import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
 import SetTargetReducer from "./set_target_reducer";
@@ -46,6 +50,8 @@ import SetTargetReducer from "./set_target_reducer";
 import CharacterRow from "./character_table";
 import CrowdProxyRow from "./crowd_proxy_table";
 import NpcRow from "./npc_table";
+import PartyInviteRow from "./party_invite_table";
+import PartyMemberRow from "./party_member_table";
 import PlayerCombatRow from "./player_combat_table";
 import PlayerPoseRow from "./player_pose_table";
 
@@ -86,6 +92,28 @@ const tablesSchema = __schema({
       { name: 'npc_npc_id_key', constraint: 'unique', columns: ['npcId'] },
     ],
   }, NpcRow),
+  partyInvite: __table({
+    name: 'party_invite',
+    indexes: [
+      { accessor: 'Invitee', name: 'party_invite_invitee_idx_btree', algorithm: 'btree', columns: [
+        'invitee',
+      ] },
+    ],
+    constraints: [
+      { name: 'party_invite_invitee_key', constraint: 'unique', columns: ['invitee'] },
+    ],
+  }, PartyInviteRow),
+  partyMember: __table({
+    name: 'party_member',
+    indexes: [
+      { accessor: 'Identity', name: 'party_member_identity_idx_btree', algorithm: 'btree', columns: [
+        'identity',
+      ] },
+    ],
+    constraints: [
+      { name: 'party_member_identity_key', constraint: 'unique', columns: ['identity'] },
+    ],
+  }, PartyMemberRow),
   playerCombat: __table({
     name: 'player_combat',
     indexes: [
@@ -112,8 +140,12 @@ const tablesSchema = __schema({
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
+  __reducerSchema("accept_party_invite", AcceptPartyInviteReducer),
   __reducerSchema("cast", CastReducer),
+  __reducerSchema("create_party", CreatePartyReducer),
   __reducerSchema("ensure_training_dummy", EnsureTrainingDummyReducer),
+  __reducerSchema("invite_to_party", InviteToPartyReducer),
+  __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
   __reducerSchema("seed_crowd_proxies", SeedCrowdProxiesReducer),
   __reducerSchema("set_target", SetTargetReducer),
@@ -131,6 +163,10 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "CrowdProxy": Omit<typeof tablesSchema.schemaType.tables["crowdProxy"], "accessorName"> & { readonly accessorName: "CrowdProxy" };
     /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
     readonly "Npc": Omit<typeof tablesSchema.schemaType.tables["npc"], "accessorName"> & { readonly accessorName: "Npc" };
+    /** @deprecated Use `partyInvite` instead. This alias will be removed in the next major version. */
+    readonly "PartyInvite": Omit<typeof tablesSchema.schemaType.tables["partyInvite"], "accessorName"> & { readonly accessorName: "PartyInvite" };
+    /** @deprecated Use `partyMember` instead. This alias will be removed in the next major version. */
+    readonly "PartyMember": Omit<typeof tablesSchema.schemaType.tables["partyMember"], "accessorName"> & { readonly accessorName: "PartyMember" };
     /** @deprecated Use `playerCombat` instead. This alias will be removed in the next major version. */
     readonly "PlayerCombat": Omit<typeof tablesSchema.schemaType.tables["playerCombat"], "accessorName"> & { readonly accessorName: "PlayerCombat" };
     /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
@@ -156,6 +192,8 @@ const tableAccessorAliases = {
   "Character": "character",
   "CrowdProxy": "crowdProxy",
   "Npc": "npc",
+  "PartyInvite": "partyInvite",
+  "PartyMember": "partyMember",
   "PlayerCombat": "playerCombat",
   "PlayerPose": "playerPose",
 } as const;
@@ -184,6 +222,10 @@ export type DbView = __DbViewBase & {
   readonly "CrowdProxy": __DbViewBase["crowdProxy"];
   /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
   readonly "Npc": __DbViewBase["npc"];
+  /** @deprecated Use `partyInvite` instead. This alias will be removed in the next major version. */
+  readonly "PartyInvite": __DbViewBase["partyInvite"];
+  /** @deprecated Use `partyMember` instead. This alias will be removed in the next major version. */
+  readonly "PartyMember": __DbViewBase["partyMember"];
   /** @deprecated Use `playerCombat` instead. This alias will be removed in the next major version. */
   readonly "PlayerCombat": __DbViewBase["playerCombat"];
   /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */
@@ -198,6 +240,10 @@ export type Tables = __TablesBase & {
   readonly "CrowdProxy": __TablesBase["crowdProxy"];
   /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
   readonly "Npc": __TablesBase["npc"];
+  /** @deprecated Use `partyInvite` instead. This alias will be removed in the next major version. */
+  readonly "PartyInvite": __TablesBase["partyInvite"];
+  /** @deprecated Use `partyMember` instead. This alias will be removed in the next major version. */
+  readonly "PartyMember": __TablesBase["partyMember"];
   /** @deprecated Use `playerCombat` instead. This alias will be removed in the next major version. */
   readonly "PlayerCombat": __TablesBase["playerCombat"];
   /** @deprecated Use `playerPose` instead. This alias will be removed in the next major version. */

@@ -30,6 +30,8 @@ namespace SpacetimeDB.Types
             AddTable(Character = new(conn));
             AddTable(CrowdProxy = new(conn));
             AddTable(Npc = new(conn));
+            AddTable(PartyInvite = new(conn));
+            AddTable(PartyMember = new(conn));
             AddTable(PlayerCombat = new(conn));
             AddTable(PlayerPose = new(conn));
         }
@@ -531,6 +533,8 @@ namespace SpacetimeDB.Types
             new QueryBuilder().From.Character().ToSql(),
             new QueryBuilder().From.CrowdProxy().ToSql(),
             new QueryBuilder().From.Npc().ToSql(),
+            new QueryBuilder().From.PartyInvite().ToSql(),
+            new QueryBuilder().From.PartyMember().ToSql(),
             new QueryBuilder().From.PlayerCombat().ToSql(),
             new QueryBuilder().From.PlayerPose().ToSql(),
         }
@@ -542,6 +546,8 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Table<Character, CharacterCols, CharacterIxCols> Character() => new("character", new CharacterCols("character"), new CharacterIxCols("character"));
         public global::SpacetimeDB.Table<CrowdProxy, CrowdProxyCols, CrowdProxyIxCols> CrowdProxy() => new("crowd_proxy", new CrowdProxyCols("crowd_proxy"), new CrowdProxyIxCols("crowd_proxy"));
         public global::SpacetimeDB.Table<Npc, NpcCols, NpcIxCols> Npc() => new("npc", new NpcCols("npc"), new NpcIxCols("npc"));
+        public global::SpacetimeDB.Table<PartyInvite, PartyInviteCols, PartyInviteIxCols> PartyInvite() => new("party_invite", new PartyInviteCols("party_invite"), new PartyInviteIxCols("party_invite"));
+        public global::SpacetimeDB.Table<PartyMember, PartyMemberCols, PartyMemberIxCols> PartyMember() => new("party_member", new PartyMemberCols("party_member"), new PartyMemberIxCols("party_member"));
         public global::SpacetimeDB.Table<PlayerCombat, PlayerCombatCols, PlayerCombatIxCols> PlayerCombat() => new("player_combat", new PlayerCombatCols("player_combat"), new PlayerCombatIxCols("player_combat"));
         public global::SpacetimeDB.Table<PlayerPose, PlayerPoseCols, PlayerPoseIxCols> PlayerPose() => new("player_pose", new PlayerPoseCols("player_pose"), new PlayerPoseIxCols("player_pose"));
     }
@@ -625,8 +631,12 @@ namespace SpacetimeDB.Types
             var eventContext = (ReducerEventContext)context;
             return reducer switch
             {
+                Reducer.AcceptPartyInvite args => Reducers.InvokeAcceptPartyInvite(eventContext, args),
                 Reducer.Cast args => Reducers.InvokeCast(eventContext, args),
+                Reducer.CreateParty args => Reducers.InvokeCreateParty(eventContext, args),
                 Reducer.EnsureTrainingDummy args => Reducers.InvokeEnsureTrainingDummy(eventContext, args),
+                Reducer.InviteToParty args => Reducers.InvokeInviteToParty(eventContext, args),
+                Reducer.LeaveParty args => Reducers.InvokeLeaveParty(eventContext, args),
                 Reducer.Move args => Reducers.InvokeMove(eventContext, args),
                 Reducer.SeedCrowdProxies args => Reducers.InvokeSeedCrowdProxies(eventContext, args),
                 Reducer.SetTarget args => Reducers.InvokeSetTarget(eventContext, args),

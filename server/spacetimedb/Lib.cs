@@ -35,6 +35,29 @@ public static partial class Module
         public bool Far;
     }
 
+    /// <summary>
+    /// Session-scoped party roster (ADR 0001 always-relevant hook).
+    /// Removed on ClientDisconnected — parties are not durable across disconnect.
+    /// </summary>
+    [SpacetimeDB.Table(Accessor = "PartyMember", Public = true)]
+    public partial struct PartyMember
+    {
+        [SpacetimeDB.PrimaryKey]
+        public Identity Identity;
+        public ulong PartyId;
+        public bool IsLeader;
+    }
+
+    /// <summary>Pending invite keyed by invitee (one outstanding invite at a time).</summary>
+    [SpacetimeDB.Table(Accessor = "PartyInvite", Public = true)]
+    public partial struct PartyInvite
+    {
+        [SpacetimeDB.PrimaryKey]
+        public Identity Invitee;
+        public ulong PartyId;
+        public Identity Inviter;
+    }
+
     /// <summary>Durable traveler row — survives disconnect (slice 3).</summary>
     [SpacetimeDB.Table(Accessor = "Character", Public = true)]
     public partial struct Character
@@ -101,6 +124,7 @@ public static partial class Module
     {
         Log.Info($"Client disconnected: {ctx.Sender}");
         // Character row is durable — do not delete.
+        // PartyMember / PartyInvite are session-scoped — clear on disconnect (ADR 0001 invent).
         if (ctx.Db.PlayerPose.Identity.Find(ctx.Sender) is { } pose)
         {
             ctx.Db.PlayerPose.Identity.Delete(pose.Identity);
@@ -110,6 +134,8 @@ public static partial class Module
         {
             ctx.Db.PlayerCombat.Identity.Delete(combat.Identity);
         }
+
+        ClearPartyStateFor(ctx, ctx.Sender);
     }
 
     [SpacetimeDB.Reducer]
@@ -287,6 +313,173 @@ public static partial class Module
         ApplyDamage(ctx, cast.Caster, cast.TargetNpcId, damage);
     }
 
+
+    /// <summary>Create a party with sender as sole leader. No-op if already in a party.</summary>
+    [SpacetimeDB.Reducer]
+    public static void CreateParty(ReducerContext ctx)
+    {
+        if (ctx.Db.PartyMember.Identity.Find(ctx.Sender) is not null)
+        {
+            throw new Exception("Already in a party");
+        }
+
+        // PartyId = leader identity hash mixed with timestamp micros (stable unique-ish without AutoInc table).
+        var partyId = PartyIdFrom(ctx.Sender, ctx.Timestamp);
+        ctx.Db.PartyMember.Insert(new PartyMember
+        {
+            Identity = ctx.Sender,
+            PartyId = partyId,
+            IsLeader = true,
+        });
+        Log.Info($"Party {partyId} created by {ctx.Sender}");
+    }
+
+    /// <summary>Invite another online identity into the sender's party (creates party if needed).</summary>
+    [SpacetimeDB.Reducer]
+    public static void InviteToParty(ReducerContext ctx, Identity invitee)
+    {
+        if (invitee == ctx.Sender)
+        {
+            throw new Exception("Cannot invite self");
+        }
+
+        if (ctx.Db.PlayerPose.Identity.Find(invitee) is null)
+        {
+            throw new Exception("Invitee not online");
+        }
+
+        if (ctx.Db.PartyMember.Identity.Find(invitee) is not null)
+        {
+            throw new Exception("Invitee already in a party");
+        }
+
+        ulong partyId;
+        if (ctx.Db.PartyMember.Identity.Find(ctx.Sender) is { } self)
+        {
+            if (!self.IsLeader)
+            {
+                throw new Exception("Only leader can invite");
+            }
+            partyId = self.PartyId;
+        }
+        else
+        {
+            partyId = PartyIdFrom(ctx.Sender, ctx.Timestamp);
+            ctx.Db.PartyMember.Insert(new PartyMember
+            {
+                Identity = ctx.Sender,
+                PartyId = partyId,
+                IsLeader = true,
+            });
+        }
+
+        if (ctx.Db.PartyInvite.Invitee.Find(invitee) is { } existing)
+        {
+            ctx.Db.PartyInvite.Invitee.Delete(existing.Invitee);
+        }
+
+        ctx.Db.PartyInvite.Insert(new PartyInvite
+        {
+            Invitee = invitee,
+            PartyId = partyId,
+            Inviter = ctx.Sender,
+        });
+        Log.Info($"Party {partyId}: {ctx.Sender} invited {invitee}");
+    }
+
+    /// <summary>Accept the outstanding invite for sender.</summary>
+    [SpacetimeDB.Reducer]
+    public static void AcceptPartyInvite(ReducerContext ctx)
+    {
+        if (ctx.Db.PartyMember.Identity.Find(ctx.Sender) is not null)
+        {
+            throw new Exception("Already in a party");
+        }
+
+        var invite = ctx.Db.PartyInvite.Invitee.Find(ctx.Sender)
+            ?? throw new Exception("No pending invite");
+
+        // Ensure party still exists (leader still online / in party).
+        var leaderAlive = false;
+        foreach (var m in ctx.Db.PartyMember.Iter())
+        {
+            if (m.PartyId == invite.PartyId)
+            {
+                leaderAlive = true;
+                break;
+            }
+        }
+        if (!leaderAlive)
+        {
+            ctx.Db.PartyInvite.Invitee.Delete(invite.Invitee);
+            throw new Exception("Party no longer exists");
+        }
+
+        ctx.Db.PartyInvite.Invitee.Delete(invite.Invitee);
+        ctx.Db.PartyMember.Insert(new PartyMember
+        {
+            Identity = ctx.Sender,
+            PartyId = invite.PartyId,
+            IsLeader = false,
+        });
+        Log.Info($"Party {invite.PartyId}: {ctx.Sender} joined");
+    }
+
+    /// <summary>Leave current party. If leader leaves, promote another member or dissolve.</summary>
+    [SpacetimeDB.Reducer]
+    public static void LeaveParty(ReducerContext ctx)
+    {
+        var self = ctx.Db.PartyMember.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Not in a party");
+
+        var partyId = self.PartyId;
+        var wasLeader = self.IsLeader;
+        ctx.Db.PartyMember.Identity.Delete(self.Identity);
+
+        // Drop invites targeting sender.
+        if (ctx.Db.PartyInvite.Invitee.Find(ctx.Sender) is { } inv)
+        {
+            ctx.Db.PartyInvite.Invitee.Delete(inv.Invitee);
+        }
+
+        // Collect remaining members without mutating while iterating.
+        var remaining = new System.Collections.Generic.List<PartyMember>();
+        foreach (var m in ctx.Db.PartyMember.Iter())
+        {
+            if (m.PartyId == partyId)
+            {
+                remaining.Add(m);
+            }
+        }
+
+        if (remaining.Count == 0)
+        {
+            // Dissolve: clear invites for this party.
+            var invites = new System.Collections.Generic.List<Identity>();
+            foreach (var i in ctx.Db.PartyInvite.Iter())
+            {
+                if (i.PartyId == partyId)
+                {
+                    invites.Add(i.Invitee);
+                }
+            }
+            foreach (var id in invites)
+            {
+                ctx.Db.PartyInvite.Invitee.Delete(id);
+            }
+            Log.Info($"Party {partyId} dissolved");
+            return;
+        }
+
+        if (wasLeader)
+        {
+            var next = remaining[0];
+            next.IsLeader = true;
+            ctx.Db.PartyMember.Identity.Update(next);
+            Log.Info($"Party {partyId}: promoted {next.Identity}");
+        }
+    }
+
     [SpacetimeDB.Reducer]
     public static void EnsureTrainingDummy(ReducerContext ctx)
     {
@@ -393,6 +586,69 @@ public static partial class Module
             character.Xp += Combat.XpPerKill;
             ctx.Db.Character.Identity.Update(character);
             Log.Info($"Dummy killed by {caster}, xp={character.Xp}");
+        }
+    }
+
+
+    static void ClearPartyStateFor(ReducerContext ctx, Identity id)
+    {
+        if (ctx.Db.PartyInvite.Invitee.Find(id) is { } invite)
+        {
+            ctx.Db.PartyInvite.Invitee.Delete(invite.Invitee);
+        }
+
+        if (ctx.Db.PartyMember.Identity.Find(id) is not { } self)
+        {
+            return;
+        }
+
+        var partyId = self.PartyId;
+        var wasLeader = self.IsLeader;
+        ctx.Db.PartyMember.Identity.Delete(self.Identity);
+
+        var remaining = new System.Collections.Generic.List<PartyMember>();
+        foreach (var m in ctx.Db.PartyMember.Iter())
+        {
+            if (m.PartyId == partyId)
+            {
+                remaining.Add(m);
+            }
+        }
+
+        if (remaining.Count == 0)
+        {
+            var invites = new System.Collections.Generic.List<Identity>();
+            foreach (var i in ctx.Db.PartyInvite.Iter())
+            {
+                if (i.PartyId == partyId)
+                {
+                    invites.Add(i.Invitee);
+                }
+            }
+            foreach (var invId in invites)
+            {
+                ctx.Db.PartyInvite.Invitee.Delete(invId);
+            }
+            return;
+        }
+
+        if (wasLeader)
+        {
+            var next = remaining[0];
+            next.IsLeader = true;
+            ctx.Db.PartyMember.Identity.Update(next);
+        }
+    }
+
+    static ulong PartyIdFrom(Identity leader, Timestamp ts)
+    {
+        // Mix identity hash with timestamp micros (no durable party table / AutoInc needed).
+        unchecked
+        {
+            ulong h = (ulong)(uint)leader.GetHashCode();
+            h ^= (ulong)ts.MicrosecondsSinceUnixEpoch;
+            h *= 1099511628211UL;
+            return h == 0 ? 1UL : h;
         }
     }
 

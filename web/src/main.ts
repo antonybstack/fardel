@@ -30,6 +30,7 @@ import {
 import { buildForestClearing } from './world/forest';
 import {
   createPlayerHumanoid,
+  partyRobeColor,
   remoteRobeColor,
   type HumanoidParts,
 } from './world/humanoid';
@@ -140,11 +141,25 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remotes.length === 0
         ? 'remotes: 0'
         : `remotes: ${remotes.length} · ${remotes
-            .map(
-              (r) =>
-                `${r.identityHex.slice(0, 8)}… @(${r.x.toFixed(1)},${r.z.toFixed(1)})`,
-            )
+            .map((r) => {
+              const tag = r.party ? ' [party]' : '';
+              return `${r.identityHex.slice(0, 8)}…${tag} @(${r.x.toFixed(1)},${r.z.toFixed(1)})`;
+            })
             .join(' · ')}`;
+    const party = s.party;
+    const partyLine = !party
+      ? 'party: 0'
+      : party.size === 0
+        ? party.pendingInviteFrom
+          ? `party: 0 · invite from ${party.pendingInviteFrom.slice(0, 8)}… (P accept? use invite flow)`
+          : 'party: 0'
+        : `party: ${party.size}${party.isLeader ? ' · leader' : ''} · ${party.members
+            .map((m) => `${m.identityHex.slice(0, 8)}…${m.isLeader ? '*' : ''}`)
+            .join(' · ')}${
+            party.pendingInviteFrom
+              ? ` · invite from ${party.pendingInviteFrom.slice(0, 8)}…`
+              : ''
+          }`;
     const rCombats = s.remoteCombats ?? [];
     const remoteTargetBits: string[] = [];
     const remoteCastBits: string[] = [];
@@ -182,13 +197,14 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       persistLine,
       poseLine,
       remotesLine,
+      partyLine,
       aoiLine,
       targetLine,
       remoteTargetLine,
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · P invite/accept · O leave',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -324,6 +340,8 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
 function bindInput(opts: {
   onCycleTarget: () => void;
   onCast: (spellId: number) => void;
+  onPartyInviteOrAccept: () => void;
+  onPartyLeave: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -347,6 +365,16 @@ function bindInput(opts: {
     if (e.key === '2') {
       e.preventDefault();
       opts.onCast(SPELL_EMBERBOLT);
+      return;
+    }
+    if (k === 'p') {
+      e.preventDefault();
+      opts.onPartyInviteOrAccept();
+      return;
+    }
+    if (k === 'o') {
+      e.preventDefault();
+      opts.onPartyLeave();
       return;
     }
   };
@@ -646,18 +674,28 @@ async function main(): Promise<void> {
     }
   };
 
+  /** Track which remotes were last tinted as party (green). */
+  const remotePartyTint = new Map<string, boolean>();
+
   const syncRemoteMeshes = (remotes: RemotePose[]) => {
     const seen = new Set<string>();
     for (const r of remotes) {
       const key = r.identityHex;
       seen.add(key);
+      const wantParty = !!r.party;
       let parts = remoteMeshes.get(key);
-      if (!parts) {
+      const tintedParty = remotePartyTint.get(key) === true;
+      if (!parts || tintedParty !== wantParty) {
+        if (parts) {
+          parts.root.dispose();
+          remoteMeshes.delete(key);
+        }
         parts = createPlayerHumanoid(scene, {
           name: `remote_${key.slice(0, 12)}`,
-          robeColor: remoteRobeColor(key),
+          robeColor: wantParty ? partyRobeColor() : remoteRobeColor(key),
         });
         remoteMeshes.set(key, parts);
+        remotePartyTint.set(key, wantParty);
       }
       parts.root.position.x = r.x;
       parts.root.position.y = r.y;
@@ -669,6 +707,7 @@ async function main(): Promise<void> {
       if (!seen.has(key)) {
         parts.root.dispose();
         remoteMeshes.delete(key);
+        remotePartyTint.delete(key);
       }
     }
   };
@@ -732,6 +771,19 @@ async function main(): Promise<void> {
           spellId === SPELL_SPARK ? 220 : Math.min(800, EMBERBOLT_CAST_MS),
         );
       }
+    },
+    onPartyInviteOrAccept: () => {
+      if (!net) return;
+      const party = net.getParty();
+      if (party?.pendingInviteFrom) {
+        net.acceptPartyInvite();
+        return;
+      }
+      net.inviteNearestRemote();
+    },
+    onPartyLeave: () => {
+      if (!net) return;
+      net.leaveParty();
     },
   });
 
@@ -1269,6 +1321,99 @@ async function main(): Promise<void> {
       window.setTimeout(waitDmg, 120);
     };
     window.setTimeout(waitDmg, 600);
+  }
+
+
+  // ?ve=party — wait for party size>=2 + far party mate visible (green tint).
+  if (ve === 'party') {
+    camera.radius = 40;
+    camera.beta = Math.PI / 3.2;
+    camera.alpha = Math.PI / 2.2;
+  }
+  if (net && ve === 'party') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE party: waiting for party invite / remotes…';
+    // Drop a stuck solo party so inbound PartyMate invites can be accepted.
+    try {
+      const p0 = net.getParty();
+      if (p0 && p0.size > 0 && p0.size < 2) net.leaveParty();
+    } catch { /* ignore */ }
+    let ticks = 0;
+    let invited = false;
+    const waitParty = () => {
+      ticks += 1;
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const party = net.getParty();
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE party: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitParty, 200);
+        return;
+      }
+      // Prefer accepting inbound invite (PartyMate initiator). Solo party of 1 blocks accept.
+      if (party?.pendingInviteFrom) {
+        if ((party.size ?? 0) > 0 && (party.size ?? 0) < 2) {
+          net.leaveParty();
+          if (mark) mark.textContent = 'VE party: left solo party to accept inbound invite…';
+          window.setTimeout(waitParty, 250);
+          return;
+        }
+        if ((party.size ?? 0) === 0) {
+          net.acceptPartyInvite();
+          if (mark) {
+            mark.textContent = `VE party: accepting invite from ${party.pendingInviteFrom.slice(0, 12)}…`;
+          }
+          window.setTimeout(waitParty, 300);
+          return;
+        }
+      }
+      if (
+        !invited &&
+        !party?.pendingInviteFrom &&
+        remotes.length >= 1 &&
+        (party?.size ?? 0) < 2
+      ) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) {
+            mark.textContent = `VE party: invited ${hex.slice(0, 12)}… waiting accept + far pose…`;
+          }
+        }
+      }
+      const local = net.getLocalPose();
+      const farParty = remotes.find((r) => {
+        if (!r.party) return false;
+        const dist = Math.hypot(r.x - (local?.x ?? 0), r.z - (local?.z ?? 0));
+        return dist > 80 || Math.abs(r.chunkX) > 1 || Math.abs(r.chunkZ) > 1;
+      });
+      if ((party?.size ?? 0) >= 2 && farParty) {
+        if (local) {
+          camera.setTarget(
+            new Vector3(
+              (local.x + farParty.x) * 0.25,
+              1.2,
+              (local.z + farParty.z) * 0.25,
+            ),
+          );
+          camera.radius = 48;
+        }
+        if (mark) {
+          mark.textContent = `Party OK · size ${party!.size} · far mate ${farParty.identityHex.slice(0, 12)}… @(${farParty.x.toFixed(0)},${farParty.z.toFixed(0)}) · green tint`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE party: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · invited=${invited} · pending=${party?.pendingInviteFrom?.slice(0, 8) ?? '—'} (waiting far party mate…)`;
+      }
+      if (ticks > 200) {
+        if (mark) mark.textContent = 'VE party: timed out waiting for far party mate';
+        return;
+      }
+      window.setTimeout(waitParty, 200);
+    };
+    window.setTimeout(waitParty, 800);
   }
 
   void lastCastSpell;

@@ -6,14 +6,22 @@
 import { type Infer as __Infer } from "spacetimedb";
 
 // Import all reducer arg schemas
+import AcceptPartyInviteReducer from "../accept_party_invite_reducer";
 import CastReducer from "../cast_reducer";
+import CreatePartyReducer from "../create_party_reducer";
 import EnsureTrainingDummyReducer from "../ensure_training_dummy_reducer";
+import InviteToPartyReducer from "../invite_to_party_reducer";
+import LeavePartyReducer from "../leave_party_reducer";
 import MoveReducer from "../move_reducer";
 import SeedCrowdProxiesReducer from "../seed_crowd_proxies_reducer";
 import SetTargetReducer from "../set_target_reducer";
 
+export type AcceptPartyInviteParams = __Infer<typeof AcceptPartyInviteReducer>;
 export type CastParams = __Infer<typeof CastReducer>;
+export type CreatePartyParams = __Infer<typeof CreatePartyReducer>;
 export type EnsureTrainingDummyParams = __Infer<typeof EnsureTrainingDummyReducer>;
+export type InviteToPartyParams = __Infer<typeof InviteToPartyReducer>;
+export type LeavePartyParams = __Infer<typeof LeavePartyReducer>;
 export type MoveParams = __Infer<typeof MoveReducer>;
 export type SeedCrowdProxiesParams = __Infer<typeof SeedCrowdProxiesReducer>;
 export type SetTargetParams = __Infer<typeof SetTargetReducer>;

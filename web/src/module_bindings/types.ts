@@ -42,6 +42,20 @@ export const Npc = __t.object("Npc", {
 });
 export type Npc = __Infer<typeof Npc>;
 
+export const PartyInvite = __t.object("PartyInvite", {
+  invitee: __t.identity(),
+  partyId: __t.u64(),
+  inviter: __t.identity(),
+});
+export type PartyInvite = __Infer<typeof PartyInvite>;
+
+export const PartyMember = __t.object("PartyMember", {
+  identity: __t.identity(),
+  partyId: __t.u64(),
+  isLeader: __t.bool(),
+});
+export type PartyMember = __Infer<typeof PartyMember>;
+
 export const PendingCast = __t.object("PendingCast", {
   scheduleId: __t.u64(),
   scheduledAt: __t.scheduleAt(),
