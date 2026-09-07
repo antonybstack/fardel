@@ -43,6 +43,12 @@ Summary:
 - Under load: **degrade pose publish rate** (hordes-style dynamic tick), never gold/XP correctness.
 - Network LOD (coarse pose tier) is a **follow-up** when metrics demand it — not a v1 requirement.
 
+## Combat cadence (POC)
+
+- Tab-target; server resolves damage against current target.
+- **Shared GCD** gates the spellbook (server clock; client may predict GCD UI).
+- Starter kit: staff + robes presentation; **two** spells (see [MVP.md](MVP.md)). Cast state (windup / GCD) is hot AOI data; spell definitions and unlocks are colder.
+
 ## Client prediction (narrow)
 
 Predict only:

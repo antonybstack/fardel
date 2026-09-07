@@ -22,6 +22,10 @@ A browser MMORPG where **the fardel is the class**: classless progression (skill
 | 1–N | Skills on current target |
 | Esc | Free cursor / cancel |
 
+## POC combat seed
+
+MVP ships a **staff + wizard robes** look and a **2-spell book on a shared GCD** so the yard is playable. That kit is a **starting fardel**, not a locked class — see [MVP.md](MVP.md).
+
 ## Fantasy
 
 You are a traveler defined by weight: tools, trophies, reagents, weapons. Progress is training skills and filling the pack with things that matter — not picking a class at character create.
