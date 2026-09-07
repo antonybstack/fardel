@@ -45,3 +45,14 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 - Default: `http://127.0.0.1:3000`, database `fardel`
 - Default URI: `http://127.0.0.1:3000` on localhost; `https://dev-db.sparkify.dev` when hosted (e.g. play.sparkify.dev)
 - Query override: `?db=https://dev-db.sparkify.dev` (also accepts `?database=`)
+
+## Visual eval hooks
+
+| Query | Proof |
+|---|---|
+| `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
+| `?ve=humanoid` | Frame local procedural humanoid + staff |
+| `?ve=forest` / `?ve=aoi` / `?ve=combat` / `?ve=persist` | Slice presentation shots |
+
+Headless second identity (shared-yard): `dotnet run --project ../tools/SecondClient` while Vite watches remotes.
+

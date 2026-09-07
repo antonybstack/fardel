@@ -134,8 +134,11 @@ See `web/README.md` for exact commands.
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
   staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
   (`ve/babylon-humanoid.png`)
+- **Second-client shared yard (presentation):** remote `PlayerPose` identities
+  render as distinct tinted humanoids; HUD `remotes:` line; `?ve=two-client` +
+  `tools/SecondClient` headless mover (`ve/babylon-two-client.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)
-- Next (north-star): second-client shared-yard proof / credited art packs when
-  licenses land
+- Next (north-star): credited art packs when licenses land; optional cast/target
+  state on remotes; party / always-relevant polish

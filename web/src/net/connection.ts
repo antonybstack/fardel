@@ -34,6 +34,11 @@ export type Pose = {
   interestChunkZ: number;
 };
 
+/** Other identity's pose in the subscribed neighborhood (shared-yard). */
+export type RemotePose = Pose & {
+  identityHex: string;
+};
+
 export type NpcView = {
   npcId: bigint;
   kind: number;
@@ -91,6 +96,7 @@ export type ConnectionStatus =
       targetNpc?: NpcView | null;
       character?: CharacterView;
       aoi?: AoiView;
+      remotes?: RemotePose[];
       castFeedback?: string;
       restoredToken: boolean;
     }
@@ -99,6 +105,7 @@ export type ConnectionStatus =
 
 export type StatusListener = (status: ConnectionStatus) => void;
 export type PoseListener = (pose: Pose) => void;
+export type RemotesListener = (remotes: RemotePose[]) => void;
 export type NpcsListener = (npcs: NpcView[]) => void;
 export type ProxiesListener = (proxies: CrowdProxyView[]) => void;
 export type CombatListener = (combat: CombatView | null) => void;
@@ -113,6 +120,7 @@ export type GameNet = {
   setTarget: (npcId: bigint) => void;
   cast: (spellId: number) => void;
   getLocalPose: () => Pose | null;
+  getRemotes: () => RemotePose[];
   getCombat: () => CombatView | null;
   getCharacter: () => CharacterView | null;
   getNpcs: () => NpcView[];
@@ -323,6 +331,7 @@ export async function connectToSpacetime(
   onCombat?: CombatListener,
   onCharacter?: CharacterListener,
   onProxies?: ProxiesListener,
+  onRemotes?: RemotesListener,
 ): Promise<GameNet | null> {
   const uri = resolveUri();
   const database = resolveDatabaseName();
@@ -341,6 +350,7 @@ export async function connectToSpacetime(
     let castFeedback = '';
     const npcMap = new Map<string, NpcView>();
     const proxyMap = new Map<string, CrowdProxyView>();
+    const remotePoseMap = new Map<string, RemotePose>();
     let subHandle: SubscriptionHandle | null = null;
     let subscribedInterestX = 0;
     let subscribedInterestZ = 0;
@@ -356,6 +366,7 @@ export async function connectToSpacetime(
 
     const listNpcs = (): NpcView[] => Array.from(npcMap.values());
     const listProxies = (): CrowdProxyView[] => Array.from(proxyMap.values());
+    const listRemotes = (): RemotePose[] => Array.from(remotePoseMap.values());
 
     const findNpc = (id: bigint): NpcView | null => {
       if (id === 0n) return null;
@@ -405,6 +416,7 @@ export async function connectToSpacetime(
           : null,
         character: latestCharacter ?? undefined,
         aoi: buildAoi() ?? undefined,
+        remotes: listRemotes(),
         castFeedback: castFeedback || undefined,
         restoredToken,
       });
@@ -436,7 +448,14 @@ export async function connectToSpacetime(
           }
 
           const emitPose = (row: PoseRow) => {
-            if (!localIdentity || !row.identity.isEqual(localIdentity)) return;
+            if (!localIdentity) return;
+            if (!row.identity.isEqual(localIdentity)) {
+              const hex = row.identity.toHexString();
+              remotePoseMap.set(hex, { ...poseView(row), identityHex: hex });
+              onRemotes?.(listRemotes());
+              emitStatus(identityHex);
+              return;
+            }
             latestPose = poseView(row);
             onLocalPose?.(latestPose);
             // Resubscribe when hysteresis-stable interest center moves.
@@ -451,6 +470,16 @@ export async function connectToSpacetime(
               );
             }
             emitStatus(identityHex);
+          };
+
+          const removePose = (row: PoseRow) => {
+            if (!localIdentity) return;
+            if (row.identity.isEqual(localIdentity)) return;
+            const hex = row.identity.toHexString();
+            if (remotePoseMap.delete(hex)) {
+              onRemotes?.(listRemotes());
+              emitStatus(identityHex);
+            }
           };
 
           const emitCombatRow = (row: CombatRow) => {
@@ -494,9 +523,11 @@ export async function connectToSpacetime(
           };
 
           const syncCachesFromDb = () => {
+            remotePoseMap.clear();
             for (const row of conn.db.playerPose.iter()) {
               emitPose(row as PoseRow);
             }
+            onRemotes?.(listRemotes());
             for (const row of conn.db.playerCombat.iter()) {
               emitCombatRow(row as CombatRow);
             }
@@ -570,6 +601,8 @@ export async function connectToSpacetime(
             // Clear hot caches that leave the set; cold tables stay.
             proxyMap.clear();
             emitProxies();
+            remotePoseMap.clear();
+            onRemotes?.(listRemotes());
             applySubscription(ix, iz, () => {
               resubInFlight = false;
               emitStatus(hex);
@@ -581,6 +614,9 @@ export async function connectToSpacetime(
           });
           conn.db.playerPose.onUpdate((_ctx: EventContext, _old, row) => {
             emitPose(row as PoseRow);
+          });
+          conn.db.playerPose.onDelete((_ctx: EventContext, row) => {
+            removePose(row as PoseRow);
           });
 
           conn.db.playerCombat.onInsert((_ctx: EventContext, row) => {
@@ -652,6 +688,7 @@ export async function connectToSpacetime(
                 void conn.reducers.cast({ spellId });
               },
               getLocalPose: () => latestPose,
+              getRemotes: () => listRemotes(),
               getCombat: () => latestCombat,
               getCharacter: () => latestCharacter,
               getNpcs: () => listNpcs(),

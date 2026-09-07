@@ -116,5 +116,5 @@ Before starting work, answer:
 - **Phase:** **post-slice-4 invent** — AOI presentation green; forest kitbash in Babylon yard
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
-- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (hero trees + instanced mid trees + mountain silhouette) (`ve/babylon-forest.png`)
-- **POC north-star:** closer — remaining invent: Pages deploy of Vite `dist`, second-client shared-yard proof, credited art packs for humanoid
+- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (`ve/babylon-forest.png`); **humanoid+staff**; **second-client shared yard** green (`ve/babylon-two-client.png`)
+- **POC north-star:** closer — remaining invent: credited art packs for humanoid; optional remote cast/target presentation

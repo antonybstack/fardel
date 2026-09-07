@@ -15,6 +15,13 @@ export type HumanoidParts = {
   staff: Mesh;
 };
 
+export type HumanoidOptions = {
+  /** Mesh name prefix (default "player"). */
+  name?: string;
+  /** Robe / cloth diffuse (local blue, remotes teal/green/magenta). */
+  robeColor?: Color3;
+};
+
 function mat(
   scene: Scene,
   name: string,
@@ -32,19 +39,23 @@ function mat(
  * Procedural readable humanoid + staff (no art packs).
  * Root at feet (y=0). Total height ~1.8m. Robes + wood staff silhouette.
  */
-export function createPlayerHumanoid(scene: Scene): HumanoidParts {
-  const root = new Mesh('player', scene);
+export function createPlayerHumanoid(
+  scene: Scene,
+  opts: HumanoidOptions = {},
+): HumanoidParts {
+  const prefix = opts.name ?? 'player';
+  const robeDiffuse = opts.robeColor ?? new Color3(0.28, 0.38, 0.72);
+  const root = new Mesh(prefix, scene);
 
-  const robeMat = mat(scene, 'playerRobeMat', new Color3(0.28, 0.38, 0.72), 0.08);
-  const skinMat = mat(scene, 'playerSkinMat', new Color3(0.86, 0.68, 0.52), 0.04);
-  const bootMat = mat(scene, 'playerBootMat', new Color3(0.22, 0.16, 0.12), 0.03);
-  const staffMat = mat(scene, 'playerStaffMat', new Color3(0.45, 0.28, 0.14), 0.05);
-  const orbMat = mat(scene, 'playerStaffOrbMat', new Color3(0.35, 0.75, 1.0), 0.35);
+  const robeMat = mat(scene, `${prefix}RobeMat`, robeDiffuse, 0.08);
+  const skinMat = mat(scene, `${prefix}SkinMat`, new Color3(0.86, 0.68, 0.52), 0.04);
+  const bootMat = mat(scene, `${prefix}BootMat`, new Color3(0.22, 0.16, 0.12), 0.03);
+  const staffMat = mat(scene, `${prefix}StaffMat`, new Color3(0.45, 0.28, 0.14), 0.05);
+  const orbMat = mat(scene, `${prefix}StaffOrbMat`, new Color3(0.35, 0.75, 1.0), 0.35);
   orbMat.specularColor = new Color3(0.4, 0.6, 0.9);
 
-  // Legs (slight gap) — boots
   const legL = MeshBuilder.CreateBox(
-    'playerLegL',
+    `${prefix}LegL`,
     { width: 0.22, height: 0.72, depth: 0.26 },
     scene,
   );
@@ -53,7 +64,7 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   legL.material = bootMat;
 
   const legR = MeshBuilder.CreateBox(
-    'playerLegR',
+    `${prefix}LegR`,
     { width: 0.22, height: 0.72, depth: 0.26 },
     scene,
   );
@@ -61,9 +72,8 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   legR.position = new Vector3(0.14, 0.36, 0);
   legR.material = bootMat;
 
-  // Torso / robes (wider than capsule for readability)
   const torso = MeshBuilder.CreateBox(
-    'playerTorso',
+    `${prefix}Torso`,
     { width: 0.58, height: 0.72, depth: 0.34 },
     scene,
   );
@@ -71,9 +81,8 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   torso.position = new Vector3(0, 1.08, 0);
   torso.material = robeMat;
 
-  // Hip / robe skirt flare
   const skirt = MeshBuilder.CreateCylinder(
-    'playerSkirt',
+    `${prefix}Skirt`,
     {
       height: 0.38,
       diameterTop: 0.52,
@@ -86,9 +95,8 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   skirt.position = new Vector3(0, 0.72, 0);
   skirt.material = robeMat;
 
-  // Head
   const head = MeshBuilder.CreateSphere(
-    'playerHead',
+    `${prefix}Head`,
     { diameter: 0.34, segments: 10 },
     scene,
   );
@@ -96,9 +104,8 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   head.position = new Vector3(0, 1.62, 0);
   head.material = skinMat;
 
-  // Hood / hair cap (robes)
   const hood = MeshBuilder.CreateSphere(
-    'playerHood',
+    `${prefix}Hood`,
     { diameter: 0.38, segments: 8 },
     scene,
   );
@@ -107,9 +114,8 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   hood.scaling = new Vector3(1.05, 0.7, 1.1);
   hood.material = robeMat;
 
-  // Arms
   const armL = MeshBuilder.CreateBox(
-    'playerArmL',
+    `${prefix}ArmL`,
     { width: 0.18, height: 0.62, depth: 0.2 },
     scene,
   );
@@ -118,7 +124,7 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   armL.material = robeMat;
 
   const armR = MeshBuilder.CreateBox(
-    'playerArmR',
+    `${prefix}ArmR`,
     { width: 0.18, height: 0.62, depth: 0.2 },
     scene,
   );
@@ -126,9 +132,8 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   armR.position = new Vector3(0.42, 1.12, 0);
   armR.material = robeMat;
 
-  // Hands (skin)
   const handL = MeshBuilder.CreateBox(
-    'playerHandL',
+    `${prefix}HandL`,
     { width: 0.14, height: 0.14, depth: 0.16 },
     scene,
   );
@@ -137,7 +142,7 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   handL.material = skinMat;
 
   const handR = MeshBuilder.CreateBox(
-    'playerHandR',
+    `${prefix}HandR`,
     { width: 0.14, height: 0.14, depth: 0.16 },
     scene,
   );
@@ -145,15 +150,14 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   handR.position = new Vector3(0.42, 0.76, 0.02);
   handR.material = skinMat;
 
-  // Staff — held in right hand, tip up
-  const staff = new Mesh('playerStaff', scene);
+  const staff = new Mesh(`${prefix}Staff`, scene);
   staff.parent = root;
   staff.position = new Vector3(0.55, 0.55, 0.12);
   staff.rotation.z = -0.18;
   staff.rotation.x = 0.08;
 
   const shaft = MeshBuilder.CreateCylinder(
-    'playerStaffShaft',
+    `${prefix}StaffShaft`,
     {
       height: 1.55,
       diameterTop: 0.045,
@@ -167,7 +171,7 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   shaft.material = staffMat;
 
   const orb = MeshBuilder.CreateSphere(
-    'playerStaffOrb',
+    `${prefix}StaffOrb`,
     { diameter: 0.16, segments: 8 },
     scene,
   );
@@ -175,9 +179,8 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   orb.position.y = 1.55;
   orb.material = orbMat;
 
-  // Collar / shoulder pads for silhouette
   const shoulderL = MeshBuilder.CreateBox(
-    'playerShoulderL',
+    `${prefix}ShoulderL`,
     { width: 0.22, height: 0.14, depth: 0.28 },
     scene,
   );
@@ -186,7 +189,7 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   shoulderL.material = robeMat;
 
   const shoulderR = MeshBuilder.CreateBox(
-    'playerShoulderR',
+    `${prefix}ShoulderR`,
     { width: 0.22, height: 0.14, depth: 0.28 },
     scene,
   );
@@ -194,9 +197,23 @@ export function createPlayerHumanoid(scene: Scene): HumanoidParts {
   shoulderR.position = new Vector3(0.36, 1.4, 0);
   shoulderR.material = robeMat;
 
-  // Root carries robe mat for flashMesh (cast telegraph).
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
 
   return { root, mat: robeMat, staff };
+}
+
+/** Stable robe tint from identity hex (distinct from local blue). */
+export function remoteRobeColor(identityHex: string): Color3 {
+  let h = 0;
+  for (let i = 0; i < identityHex.length; i++) {
+    h = (h * 31 + identityHex.charCodeAt(i)) >>> 0;
+  }
+  const palette = [
+    new Color3(0.18, 0.62, 0.42),
+    new Color3(0.72, 0.28, 0.55),
+    new Color3(0.85, 0.55, 0.18),
+    new Color3(0.45, 0.32, 0.78),
+  ];
+  return palette[h % palette.length]!;
 }

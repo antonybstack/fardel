@@ -22,9 +22,14 @@ import {
   type CrowdProxyView,
   type GameNet,
   type NpcView,
+  type RemotePose,
 } from './net/connection';
 import { buildForestClearing } from './world/forest';
-import { createPlayerHumanoid } from './world/humanoid';
+import {
+  createPlayerHumanoid,
+  remoteRobeColor,
+  type HumanoidParts,
+} from './world/humanoid';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -108,12 +113,23 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
     const aoiLine = aoi
       ? `AOI: interest (${aoi.interestChunkX},${aoi.interestChunkZ}) · pose chunk (${aoi.poseChunkX},${aoi.poseChunkZ}) · proxies ${aoi.proxyCount} (near ${aoi.nearCount} / far ${aoi.farCount})${aoi.neighborhoodSql ? ' · neigh-SQL' : ''}`
       : 'AOI: —';
+    const remotes = s.remotes ?? [];
+    const remotesLine =
+      remotes.length === 0
+        ? 'remotes: 0'
+        : `remotes: ${remotes.length} · ${remotes
+            .map(
+              (r) =>
+                `${r.identityHex.slice(0, 8)}… @(${r.x.toFixed(1)},${r.z.toFixed(1)})`,
+            )
+            .join(' · ')}`;
     return [
       'Connected',
       `identity: ${s.identityHex}`,
       xpLine,
       persistLine,
       poseLine,
+      remotesLine,
       aoiLine,
       targetLine,
       gcdLine,
@@ -343,6 +359,7 @@ async function main(): Promise<void> {
   let lastCastSpell = 0;
   const npcMeshes = new Map<string, NpcMesh>();
   const proxyInstances = new Map<string, InstancedMesh>();
+  const remoteMeshes = new Map<string, HumanoidParts>();
   let moveAccumulator = 0;
   const MOVE_SEND_HZ = 20;
 
@@ -367,6 +384,33 @@ async function main(): Promise<void> {
       if (!seen.has(key)) {
         inst.dispose();
         proxyInstances.delete(key);
+      }
+    }
+  };
+
+  const syncRemoteMeshes = (remotes: RemotePose[]) => {
+    const seen = new Set<string>();
+    for (const r of remotes) {
+      const key = r.identityHex;
+      seen.add(key);
+      let parts = remoteMeshes.get(key);
+      if (!parts) {
+        parts = createPlayerHumanoid(scene, {
+          name: `remote_${key.slice(0, 12)}`,
+          robeColor: remoteRobeColor(key),
+        });
+        remoteMeshes.set(key, parts);
+      }
+      parts.root.position.x = r.x;
+      parts.root.position.y = r.y;
+      parts.root.position.z = r.z;
+      parts.root.rotation.y = r.yaw;
+      parts.root.setEnabled(true);
+    }
+    for (const [key, parts] of remoteMeshes) {
+      if (!seen.has(key)) {
+        parts.root.dispose();
+        remoteMeshes.delete(key);
       }
     }
   };
@@ -501,6 +545,7 @@ async function main(): Promise<void> {
       if (c) selectedTargetId = c.targetNpcId;
       syncNpcMeshes(net.getNpcs());
       syncProxyMeshes(net.getProxies());
+      syncRemoteMeshes(net.getRemotes());
     }
 
     const gcdLeft = gcdRemainingMs(
@@ -546,6 +591,9 @@ async function main(): Promise<void> {
     },
     (proxies) => {
       syncProxyMeshes(proxies);
+    },
+    (remotes) => {
+      syncRemoteMeshes(remotes);
     },
   );
 
@@ -714,6 +762,60 @@ async function main(): Promise<void> {
       window.setTimeout(waitHumanoid, 300);
     };
     window.setTimeout(waitHumanoid, 600);
+  }
+
+  // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
+  if (ve === 'two-client') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.2;
+  }
+
+  if (net && ve === 'two-client') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE two-client: waiting for remote PlayerPose…';
+    let ticks = 0;
+    let nudged = false;
+    const waitTwo = () => {
+      if (!net) return;
+      ticks += 1;
+      // Nudge local off spawn so stacked leftover remotes don't hide the blue local.
+      if (!nudged && latestStatus.state === 'connected') {
+        nudged = true;
+        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0);
+      }
+      const remotes = net.getRemotes();
+      // Prefer a remote that is spatially separated from local for the OK banner.
+      const local = net.getLocalPose();
+      const preferred =
+        remotes.find((r) => {
+          if (!local) return true;
+          return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
+        }) ?? remotes[0];
+      syncRemoteMeshes(remotes);
+      const st = latestStatus;
+      if (st.state === 'connected' && preferred) {
+        const r = preferred;
+        const mid = player.position.add(
+          new Vector3(r.x, r.y, r.z).subtract(player.position).scale(0.5),
+        );
+        camera.setTarget(mid.add(new Vector3(0, 1.2, 0)));
+        camera.radius = 16;
+        if (mark) {
+          mark.textContent = `Two-client OK · remotes ${remotes.length} · remote ${r.identityHex.slice(0, 12)}… @(${r.x.toFixed(1)},${r.z.toFixed(1)}) · local ${st.identityHex.slice(0, 12)}… @(${(local?.x ?? 0).toFixed(1)},${(local?.z ?? 0).toFixed(1)})`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE two-client: Connected · remotes ${remotes.length} (waiting…)`;
+      }
+      if (ticks > 120) {
+        if (mark) mark.textContent = 'VE two-client: timed out waiting for remotes';
+        return;
+      }
+      window.setTimeout(waitTwo, 250);
+    };
+    window.setTimeout(waitTwo, 700);
   }
 
   void lastCastSpell;
