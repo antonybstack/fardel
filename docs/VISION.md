@@ -43,3 +43,5 @@ You are a traveler defined by weight: tools, trophies, reagents, weapons. Progre
 ## Success for the vision doc
 
 Someone new can read this page and know the game’s soul, controls, and hard nos without opening any code.
+
+For **what we build this week**, use [SCOPE.md](SCOPE.md) — vision is ambition; scope is the leash.

@@ -1,5 +1,7 @@
 # MVP slices
 
+> Focus rules: [SCOPE.md](SCOPE.md) — one active slice; north-star demo before side quests.
+
 Goal: a **playable browser yard** with Fardel’s controls, a **simple starter loadout**, and an **early atmosphere kit** (forest + mountains + humanoid) — before custom art pipeline, before open world. See [ASSETS.md](ASSETS.md).
 
 Long-term the game stays **classless** (bag / skills / gear). The POC does **not** invent a Wizard class lock — it ships one readable traveler kit so combat and persistence are testable.
@@ -77,6 +79,8 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 **Done when:** N proxies on-screen with a stated FPS floor on a reference machine; clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
 
 ## Out of MVP
+
+Full anti-goal list and distraction triggers: [SCOPE.md](SCOPE.md).
 
 - Full skill tree, professions, trading, housing
 - More than 2 spells / deep talenting

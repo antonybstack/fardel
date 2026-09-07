@@ -6,7 +6,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 
 **Feel:** [hordes.io](https://hordes.io/play)-like controls (RMB camera, WASD, tab-target) with WoW-scale ambition.  
 **Stack:** C# everywhere that matters — SpacetimeDB C# modules + Unity 6.6+ (WebGPU) client.  
-**Status:** docs-first. Implementation not started.
+**Status:** docs-first. Implementation not started. Next: MVP slice 0 — see [SCOPE.md](docs/SCOPE.md).
 
 **Live hosts:** [play.sparkify.dev](https://play.sparkify.dev) (placeholder) · [dev-db.sparkify.dev](https://dev-db.sparkify.dev) (SpacetimeDB preview)
 
@@ -14,6 +14,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 
 | Doc | What it covers |
 |---|---|
+| [docs/SCOPE.md](docs/SCOPE.md) | Focus contract: north-star, now/not-now |
 | [docs/VISION.md](docs/VISION.md) | Pillars, fantasy, what we are not building |
 | [docs/STACK.md](docs/STACK.md) | Locked tech choices and why |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Netcode, AOI, sim authority, perf laws |
