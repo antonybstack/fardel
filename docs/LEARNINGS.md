@@ -87,3 +87,5 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 
 - Party member frames are client-only Cosmetics over `PartyMember` + remote poses (hex, leader, distance); no party HP table yet — omit health rather than invent fake HP.
 - Robes mesh follows `Character.robesEquipped` like staff: hide hood/skirt/shoulders group; tint torso/arms drab when unequipped (casts remain staff-gated).
+
+- Combat log is client-only Cosmetics over existing signals (cast intent, npc HP deltas, Character equip flips, PartyMember size) — no new combat-event table; keeps module/smokes unchanged.

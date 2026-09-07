@@ -365,6 +365,51 @@ function updatePartyFrames(opts: {
   root.innerHTML = rows.join('');
 }
 
+
+const COMBAT_LOG_MAX = 14;
+
+type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party';
+
+/** Client-only scrolling combat log (cast start, HP delta, equip, party join). */
+function pushCombatLog(kind: CombatLogKind, text: string): void {
+  const root = document.getElementById('combatLogLines');
+  if (!root) return;
+  const line = document.createElement('div');
+  line.className = `clLine ${kind}`;
+  line.setAttribute('data-kind', kind);
+  const tag =
+    kind === 'cast'
+      ? 'CAST'
+      : kind === 'damage'
+        ? 'DMG'
+        : kind === 'equip'
+          ? 'EQ'
+          : 'PARTY';
+  const time = new Date();
+  const hh = String(time.getHours()).padStart(2, '0');
+  const mm = String(time.getMinutes()).padStart(2, '0');
+  const ss = String(time.getSeconds()).padStart(2, '0');
+  line.innerHTML =
+    `<span class="clTag">[${hh}:${mm}:${ss}] ${tag}</span>` +
+    text.replace(/</g, '&lt;');
+  root.appendChild(line);
+  while (root.children.length > COMBAT_LOG_MAX) {
+    root.removeChild(root.firstChild!);
+  }
+  root.scrollTop = root.scrollHeight;
+}
+
+function combatLogKindsPresent(): Set<string> {
+  const root = document.getElementById('combatLogLines');
+  const kinds = new Set<string>();
+  if (!root) return kinds;
+  for (const el of Array.from(root.children)) {
+    const k = (el as HTMLElement).getAttribute('data-kind');
+    if (k) kinds.add(k);
+  }
+  return kinds;
+}
+
 /** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
 const MINIMAP_RANGE_M = 48;
 
@@ -557,7 +602,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · combat log right',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1027,6 +1072,10 @@ async function main(): Promise<void> {
   const damageFloaters: DamageFloater[] = [];
   let latestDamageAmount = 0;
   let latestDamageAtMs = 0;
+  let prevStaffEquipped: boolean | null = null;
+  let prevRobesEquipped: boolean | null = null;
+  let prevPartySize = 0;
+  let prevPartyMemberKey = '';
   const proxyInstances = new Map<string, InstancedMesh>();
   const remoteMeshes = new Map<string, HumanoidParts>();
   const remoteNameplates = new Map<string, Nameplate>();
@@ -1299,6 +1348,23 @@ async function main(): Promise<void> {
       }
       lastCastSpell = spellId;
       net.cast(spellId);
+      {
+        const spellName =
+          spellId === SPELL_EMBERBOLT
+            ? 'Emberbolt'
+            : spellId === SPELL_SPARK
+              ? 'Spark'
+              : `Spell${spellId}`;
+        const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
+        const tgtHint =
+          tid !== 0n ? ` → Dummy/NPC #${tid}` : '';
+        pushCombatLog(
+          'cast',
+          `${spellName} cast start${tgtHint}${
+            spellId === SPELL_EMBERBOLT ? ' (windup)' : ''
+          }`,
+        );
+      }
 
       // Visual telegraph / flash on selected target + player.
       const playerMat = player.material as StandardMaterial;
@@ -1384,6 +1450,14 @@ async function main(): Promise<void> {
           );
           latestDamageAmount = delta;
           latestDamageAtMs = Date.now();
+          {
+            const label =
+              npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+            pushCombatLog(
+              'damage',
+              `${label} #${npc.npcId}  −${delta} HP (${npc.hp}/${npc.maxHp})`,
+            );
+          }
         }
         npcLastHp.set(key, npc.hp);
       }
@@ -1535,6 +1609,85 @@ async function main(): Promise<void> {
             : null,
         remotes: net?.getRemotes() ?? [],
       });
+      // Combat log: staff/robes equip flips + party join.
+      if (ch) {
+        if (prevStaffEquipped === null) {
+          prevStaffEquipped = ch.staffEquipped;
+        } else if (ch.staffEquipped !== prevStaffEquipped) {
+          pushCombatLog(
+            'equip',
+            ch.staffEquipped ? 'Staff equipped' : 'Staff unequipped',
+          );
+          prevStaffEquipped = ch.staffEquipped;
+        }
+        if (prevRobesEquipped === null) {
+          prevRobesEquipped = ch.robesEquipped;
+        } else if (ch.robesEquipped !== prevRobesEquipped) {
+          pushCombatLog(
+            'equip',
+            ch.robesEquipped ? 'Robes equipped' : 'Robes unequipped',
+          );
+          prevRobesEquipped = ch.robesEquipped;
+        }
+      }
+      {
+        const party =
+          st.state === 'connected' ? st.party ?? null : null;
+        const size = party?.size ?? 0;
+        const memberKey = party
+          ? party.members
+              .map((m) => m.identityHex)
+              .sort()
+              .join(',')
+          : '';
+        if (size > prevPartySize && size >= 1) {
+          if (prevPartySize === 0) {
+            pushCombatLog(
+              'party',
+              size === 1
+                ? 'Party formed (you)'
+                : `Joined party · size ${size}`,
+            );
+          } else {
+            const newcomers = party!.members
+              .map((m) => m.identityHex)
+              .filter((h) => !prevPartyMemberKey.split(',').includes(h));
+            const label =
+              newcomers.length > 0
+                ? newcomers
+                    .map((h) => `${h.slice(0, 8)}…`)
+                    .join(', ')
+                : 'member';
+            pushCombatLog(
+              'party',
+              `Party join · ${label} · size ${size}`,
+            );
+          }
+        } else if (
+          size > 0 &&
+          memberKey !== prevPartyMemberKey &&
+          prevPartyMemberKey !== '' &&
+          size >= prevPartySize
+        ) {
+          // Same size but roster changed (swap) — treat as join if new hex.
+          const prevSet = new Set(
+            prevPartyMemberKey.split(',').filter(Boolean),
+          );
+          const joined = party!.members
+            .map((m) => m.identityHex)
+            .filter((h) => !prevSet.has(h));
+          if (joined.length > 0) {
+            pushCombatLog(
+              'party',
+              `Party join · ${joined
+                .map((h) => `${h.slice(0, 8)}…`)
+                .join(', ')} · size ${size}`,
+            );
+          }
+        }
+        prevPartySize = size;
+        prevPartyMemberKey = memberKey;
+      }
     }
     if (latestStatus.state === 'connected') {
       setStatus(formatStatus(latestStatus, now));
@@ -2574,6 +2727,150 @@ async function main(): Promise<void> {
       window.setTimeout(waitRobes, 200);
     };
     window.setTimeout(waitRobes, 600);
+  }
+
+
+  // ?ve=combat-log — seed cast/damage/equip/party lines into scrolling combat log.
+  if (ve === 'combat-log') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'combat-log') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE combat-log: waiting for Connected…';
+    let ticks = 0;
+    let phase:
+      | 'wait'
+      | 'equipFlip'
+      | 'party'
+      | 'cast'
+      | 'done' = 'wait';
+    let equipStep = 0;
+    const waitLog = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE combat-log: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitLog, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 14;
+      const kinds = combatLogKindsPresent();
+      const ready =
+        kinds.has('cast') &&
+        kinds.has('damage') &&
+        kinds.has('equip') &&
+        kinds.has('party');
+      if (ready || phase === 'done') {
+        const lineCount =
+          document.getElementById('combatLogLines')?.children.length ?? 0;
+        if (mark) {
+          mark.textContent =
+            `Combat log OK · lines ${lineCount} · cast+damage+equip+party · strip right`;
+        }
+        phase = 'done';
+        return;
+      }
+      if (phase === 'wait') {
+        // Baseline gear on so unequip→equip produces clear EQ lines.
+        const ch = net.getCharacter();
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        if (ch && !ch.robesEquipped) net.equipRobes();
+        phase = 'equipFlip';
+        equipStep = 0;
+        if (mark) mark.textContent = 'VE combat-log: flipping staff/robes…';
+        window.setTimeout(waitLog, 350);
+        return;
+      }
+      if (phase === 'equipFlip') {
+        if (equipStep === 0) {
+          net.unequipStaff();
+          equipStep = 1;
+          window.setTimeout(waitLog, 280);
+          return;
+        }
+        if (equipStep === 1) {
+          net.equipStaff();
+          equipStep = 2;
+          window.setTimeout(waitLog, 280);
+          return;
+        }
+        if (equipStep === 2) {
+          net.unequipRobes();
+          equipStep = 3;
+          window.setTimeout(waitLog, 280);
+          return;
+        }
+        if (equipStep === 3) {
+          net.equipRobes();
+          equipStep = 4;
+          phase = 'party';
+          if (mark) mark.textContent = 'VE combat-log: forming party…';
+          window.setTimeout(waitLog, 350);
+          return;
+        }
+      }
+      if (phase === 'party') {
+        const party = net.getParty();
+        if (!party || party.size < 1) {
+          // Leave any stale solo then create.
+          if (party && party.size > 0) net.leaveParty();
+          net.createParty();
+          if (mark) mark.textContent = 'VE combat-log: createParty…';
+          window.setTimeout(waitLog, 400);
+          return;
+        }
+        phase = 'cast';
+        if (mark) mark.textContent = 'VE combat-log: casting Spark…';
+        window.setTimeout(waitLog, 200);
+        return;
+      }
+      if (phase === 'cast') {
+        net.ensureTrainingDummy();
+        const cycle = net.getTargetCycle();
+        const dummy =
+          cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+        if (!dummy) {
+          if (mark) mark.textContent = 'VE combat-log: waiting dummy…';
+          if (ticks < 220) window.setTimeout(waitLog, 250);
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const ch = net.getCharacter();
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          // Drive through onCast path so cast-start log fires.
+          lastCastSpell = SPELL_SPARK;
+          castTotalMs = 0;
+          castUntilMs = 0;
+          net.cast(SPELL_SPARK);
+          pushCombatLog(
+            'cast',
+            `Spark cast start → Dummy/NPC #${dummy.npcId}`,
+          );
+          if (mark) mark.textContent = 'VE combat-log: Spark cast · waiting HP delta…';
+        }
+        window.setTimeout(waitLog, 350);
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE combat-log: kinds ${[...kinds].join('+') || '∅'} · phase ${phase} (waiting…)`;
+      }
+      if (ticks > 260) {
+        if (mark) {
+          mark.textContent =
+            `VE combat-log: timed out · kinds ${[...kinds].join('+') || '∅'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitLog, 220);
+    };
+    window.setTimeout(waitLog, 700);
   }
 
   void lastCastSpell;
