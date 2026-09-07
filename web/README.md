@@ -66,6 +66,7 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=cast-feedback` | Prominent Emberbolt cast bar + CANCEL ≠ LOCKOUT toasts + Rest enter chrome (`ve/babylon-cast-feedback.png`) |
 | `?ve=bandage` | BuyYardBandage + UseBandage HP heal; toast/bag (`ve/babylon-bandage.png`) |
 | `?ve=humanoid` | Frame local procedural humanoid + staff |
+| `?ve=atmosphere` | Yard mood: blue/cyan fog + warm sun/cool hemi + lush ground (`ve/babylon-atmosphere.png`) |
 | `?ve=forest` / `?ve=aoi` / `?ve=combat` / `?ve=persist` | Slice presentation shots |
 
 

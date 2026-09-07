@@ -4445,6 +4445,33 @@ async function main(): Promise<void> {
     window.setTimeout(waitForest, 600);
   }
 
+  // ?ve=atmosphere — yard mood shot: fog depth, warm sun, lush ground clearing.
+  if (ve === 'atmosphere') {
+    camera.radius = 42;
+    camera.alpha = Math.PI / 2.65;
+    camera.beta = Math.PI / 3.35;
+  }
+
+  if (net && ve === 'atmosphere') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE atmosphere: waiting for Connected…';
+    const waitAtmosphere = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        net.seedCrowdProxies();
+        syncProxyMeshes(net.getProxies());
+        if (mark) {
+          mark.textContent =
+            'Atmosphere OK · fog+warm sun+ground · Connected · yard mood';
+        }
+        return;
+      }
+      window.setTimeout(waitAtmosphere, 300);
+    };
+    window.setTimeout(waitAtmosphere, 600);
+  }
+
   // ?ve=humanoid — frame local player (humanoid+staff) clearly for VE shot.
   if (ve === 'humanoid') {
     camera.radius = 8;
