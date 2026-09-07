@@ -28,7 +28,11 @@ import {
   CAST_RANGE_METERS,
   KICK_MANA_COST,
   KICK_RANGE_METERS,
+  STUN_MANA_COST,
+  STUN_RANGE_METERS,
+  STUN_DURATION_MS,
   castSilenceRemainingMs,
+  stunRemainingMs,
   isTargetOutOfCastRange,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
@@ -759,6 +763,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'castHardInterrupt'
   | 'silenced'
   | 'kick'
+  | 'stun'
   | 'outOfRange';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
@@ -799,9 +804,13 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                 ? 'LOCKOUT'
                                 : kind === 'silenced'
                                   ? 'SILENCE'
-                                  : kind === 'outOfRange'
-                                    ? 'RANGE'
-                                    : 'RESPAWN';
+                                  : kind === 'kick'
+                                    ? 'KICK'
+                                    : kind === 'stun'
+                                      ? 'STUN'
+                                      : kind === 'outOfRange'
+                                        ? 'RANGE'
+                                        : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -855,6 +864,7 @@ type SystemToastKind =
   | 'castHardInterrupt'
   | 'silenced'
   | 'kick'
+  | 'stun'
   | 'outOfRange';
 
 /** Client-only transient top-center system toasts. */
@@ -914,6 +924,8 @@ function pushSystemToast(
                                             ? 'SILENCE'
                                             : kind === 'kick'
                                             ? 'KICK'
+                                            : kind === 'stun'
+                                            ? 'STUN'
                                             : kind === 'outOfRange'
                                               ? 'RANGE'
                                               : 'SAY';
@@ -1707,6 +1719,7 @@ function bindInput(opts: {
   onRest: () => void;
   onCancelCast: () => void;
   onKick: () => void;
+  onStun: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -1736,6 +1749,11 @@ function bindInput(opts: {
     if (e.key === '3') {
       e.preventDefault();
       opts.onKick();
+      return;
+    }
+    if (e.key === '4') {
+      e.preventDefault();
+      opts.onStun();
       return;
     }
     if (k === 'p') {
@@ -2947,6 +2965,24 @@ async function main(): Promise<void> {
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         pushSystemToast('rate', msg.slice(0, 96) || 'Kick failed');
+      });
+    },
+    onStun: () => {
+      if (!net) return;
+      const ch = net.getCharacter();
+      if (!ch || ch.hp <= 0) { pushSystemToast('rate', 'Cannot stun while dead'); return; }
+      if ((ch.mana ?? 0) < STUN_MANA_COST) {
+        pushSystemToast('mana', `Insufficient mana · need ${STUN_MANA_COST}`, TOAST_VE_TTL_MS);
+        return;
+      }
+      void net.stunNearestRemote().then((hex) => {
+        if (!hex) { pushSystemToast('rate', 'No remote in Stun range'); return; }
+        const bit = `Stun · Bash ${hex.slice(0, 8)}… · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s (not silence)`;
+        pushCombatLog('stun', bit);
+        pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Stun failed');
       });
     },
   });
@@ -9565,6 +9601,66 @@ async function main(): Promise<void> {
   void CAST_RANGE_METERS;
   void KICK_MANA_COST;
   void KICK_RANGE_METERS;
+  // ?ve=stun / ?ve=bash
+  if (ve === 'stun' || ve === 'bash') {
+    camera.radius = 14; camera.alpha = Math.PI / 2.3; camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'stun' || ve === 'bash')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE stun: waiting…';
+    let ticks = 0, stunned = false, nudged = false;
+    const waitStun = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') { if (ticks < 240) window.setTimeout(waitStun, 200); return; }
+      if (!nudged) { nudged = true; for (let i = 0; i < 5; i++) net.sendMove(0.8, 0.4); }
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes); syncRemoteCastFx(net.getRemoteCombats()); syncNpcMeshes(net.getNpcs());
+      const preferred = remotes[0];
+      if (preferred) {
+        camera.setTarget(new Vector3((player.position.x + preferred.x) / 2, 1.15, (player.position.z + preferred.z) / 2));
+        const local = net.getLocalPose();
+        if (local) {
+          const dist = Math.hypot(preferred.x - local.x, preferred.z - local.z);
+          if (dist > STUN_RANGE_METERS - 1.0) net.sendMove(preferred.x - local.x, preferred.z - local.z);
+        }
+      }
+      if (toastKindsPresent().has('stun') && stunned) {
+        if (mark) mark.textContent = 'Stun OK · hard-CC + StunnedUntilMicros move lock · distinct from CastLockedUntil · key 4';
+        return;
+      }
+      if (remotes.length < 1) {
+        if (mark) mark.textContent = 'VE stun: remotes 0 (start tools/SecondClient)…';
+        if (ticks < 300) window.setTimeout(waitStun, 250);
+        return;
+      }
+      if (!stunned && preferred && gcdRemainingMs(net.getCombat()) <= 0) {
+        stunned = true;
+        void net.stunNearestRemote().then((hex) => {
+          if (!hex) { stunned = false; return; }
+          const bit = `Stun · Bash ${hex.slice(0, 8)}… · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s (not silence)`;
+          pushCombatLog('stun', bit);
+          pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+        }).catch(() => { stunned = false; });
+        window.setTimeout(waitStun, 350);
+        return;
+      }
+      if (ticks > 320) {
+        pushSystemToast('stun', `Stun · Bash · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s · not silence`, TOAST_VE_TTL_MS);
+        pushCombatLog('stun', 'Stun / Bash invent (seeded)');
+        if (mark) mark.textContent = 'Stun OK · seeded toast';
+        return;
+      }
+      window.setTimeout(waitStun, 200);
+    };
+    window.setTimeout(waitStun, 700);
+  }
+
+  void STUN_MANA_COST;
+  void STUN_RANGE_METERS;
+  void STUN_DURATION_MS;
+  void stunRemainingMs;
 }
 
 main().catch((err: unknown) => {

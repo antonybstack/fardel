@@ -110,6 +110,7 @@ export const PlayerCombat = __t.object("PlayerCombat", {
   lastCastAt: __t.timestamp(),
   castPushbackCount: __t.i32(),
   castLockedUntil: __t.timestamp(),
+  stunnedUntilMicros: __t.i64(),
 });
 export type PlayerCombat = __Infer<typeof PlayerCombat>;
 

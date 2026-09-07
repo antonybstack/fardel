@@ -20,4 +20,5 @@ export default __t.row({
   lastCastAt: __t.timestamp().name("last_cast_at"),
   castPushbackCount: __t.i32().name("cast_pushback_count"),
   castLockedUntil: __t.timestamp().name("cast_locked_until"),
+  stunnedUntilMicros: __t.i64().name("stunned_until_micros"),
 });

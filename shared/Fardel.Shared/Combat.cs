@@ -97,6 +97,17 @@ public static class Combat
     /// <summary>Mana spent by the kicker (instant; not refunded).</summary>
     public const int KickManaCost = 10;
 
+    /// <summary>
+    /// Stun / Bash — short hard-CC. Breaks target windup (no mana refund) and
+    /// applies StunnedUntil move/cast lockout. Distinct from CastLockedUntil
+    /// silence (Stun does not set CastLockedUntil).
+    /// </summary>
+    public const float StunRangeMeters = 5f;
+    /// <summary>Mana spent by the stunner (instant; not refunded).</summary>
+    public const int StunManaCost = 15;
+    /// <summary>Move + Cast reject with "stunned" while Timestamp &lt; StunnedUntil.</summary>
+    public const int StunDurationMs = 1500;
+
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
 

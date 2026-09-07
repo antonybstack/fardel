@@ -134,3 +134,4 @@ Before starting work, answer:
 - **POC north-star:** closer — remaining invent: credited art packs for humanoid (loot/pickup + player trade + yard vendor + yard tonic + player HP + party frames HP + party XP share + party loot share + minimap party blips + character level + Rest + mana invent done; art packs still blocked)
 
 - `tools/KickSmoke` (Kick / Counterspell interrupt invent)
+- `tools/StunSmoke` (Stun / Bash hard-CC invent)
