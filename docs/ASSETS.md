@@ -61,6 +61,7 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Combat log strip readability (#78): dark plate + damage/heal/kill/system distinct (no neon); `?ve=combat-log-read` (`ve/babylon-combat-log-read.png`)
 - Chat / say panel readability (#88): dark silver-border plate; say/party/whisper channel tints distinct under #39 fog (no neon); `?ve=chat-read`
 - Keybind legend readability (#115): dark silver-border plate + light keycaps; Move/Combat/Social rows crisp under #39 fog; `?ve=keys-read`
+- Vendor panel chrome readability (#106): dark silver plate + warm bronze buy / cool mint sell rows under #39 fog; `?ve=vendor-panel` (VE via ve.sparkify.dev or interim capture; no `ve/*.png` commit)
 - Cast bar chrome readability (#74): Emberbolt/`#castBar` + CANCEL≠LOCKOUT toast chrome crisp vs #39 cyan fog; `?ve=castbar-read` (`ve/babylon-castbar-read.png`)
 - GCD bar chrome readability (#117): cool blue/silver `#gcdBar` distinct from warm cast / crimson lockout under #39 fog; `?ve=gcd-read`
 
