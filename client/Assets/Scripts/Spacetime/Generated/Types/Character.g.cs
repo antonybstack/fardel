@@ -31,6 +31,10 @@ namespace SpacetimeDB.Types
         public bool HasYardTonic;
         [DataMember(Name = "tonic_expires_at")]
         public SpacetimeDB.Timestamp TonicExpiresAt;
+        [DataMember(Name = "has_yard_bandage")]
+        public bool HasYardBandage;
+        [DataMember(Name = "bandage_ready_at")]
+        public SpacetimeDB.Timestamp BandageReadyAt;
         [DataMember(Name = "hp")]
         public int Hp;
         [DataMember(Name = "max_hp")]
@@ -58,6 +62,8 @@ namespace SpacetimeDB.Types
             bool HasEmberShard,
             bool HasYardTonic,
             SpacetimeDB.Timestamp TonicExpiresAt,
+            bool HasYardBandage,
+            SpacetimeDB.Timestamp BandageReadyAt,
             int Hp,
             int MaxHp,
             int Level,
@@ -77,6 +83,8 @@ namespace SpacetimeDB.Types
             this.HasEmberShard = HasEmberShard;
             this.HasYardTonic = HasYardTonic;
             this.TonicExpiresAt = TonicExpiresAt;
+            this.HasYardBandage = HasYardBandage;
+            this.BandageReadyAt = BandageReadyAt;
             this.Hp = Hp;
             this.MaxHp = MaxHp;
             this.Level = Level;

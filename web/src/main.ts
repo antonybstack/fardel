@@ -82,6 +82,7 @@ const MAX_STEP_METERS = 0.75;
 const TONIC_MOVE_MULT = 1.75;
 /** Match shared/Fardel.Shared Rest.HealAmount. */
 const REST_HEAL_AMOUNT = 25;
+const BANDAGE_HEAL_AMOUNT = 40;
 /** Client wish speed (m/s); each reducer call is clamped server-side. */
 const MOVE_SPEED = 4.5;
 
@@ -559,6 +560,7 @@ function updateLoadoutStrip(character: {
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
   hasYardTonic?: boolean;
+  hasYardBandage?: boolean;
 } | null | undefined): void {
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
@@ -620,6 +622,13 @@ function updateLoadoutStrip(character: {
     'held',
     'empty',
   );
+  setChip(
+    'loBandage',
+    'loBandageState',
+    !!character.hasYardBandage,
+    'held',
+    'empty',
+  );
 }
 
 /** Bag panel rows (Character loadout). Visibility controlled separately via B. */
@@ -634,6 +643,7 @@ function updateBagPanel(character: {
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
   hasYardTonic?: boolean;
+  hasYardBandage?: boolean;
 } | null | undefined): void {
   const setRow = (id: string, text: string, ok: boolean | null) => {
     const el = document.getElementById(id);
@@ -652,6 +662,7 @@ function updateBagPanel(character: {
     setRow('bagMana', '—', null);
     setRow('bagShard', '—', null);
     setRow('bagTonic', '—', null);
+    setRow('bagBandage', '—', null);
     return;
   }
   setRow(
@@ -684,6 +695,11 @@ function updateBagPanel(character: {
     'bagTonic',
     character.hasYardTonic ? 'held' : 'empty',
     !!character.hasYardTonic,
+  );
+  setRow(
+    'bagBandage',
+    character.hasYardBandage ? 'held' : 'empty',
+    !!character.hasYardBandage,
   );
 }
 
@@ -1781,6 +1797,7 @@ function bindInput(opts: {
   onVendorInteract: () => void;
   onPickupNearest: () => void;
   onUseYardTonic: () => void;
+  onUseBandage: () => void;
   onRest: () => void;
   onCancelCast: () => void;
   onKick: () => void;
@@ -1892,6 +1909,11 @@ function bindInput(opts: {
     if (k === 'v') {
       e.preventDefault();
       opts.onUseYardTonic();
+      return;
+    }
+    if (k === 'n') {
+      e.preventDefault();
+      opts.onUseBandage();
       return;
     }
     if (k === 'r') {
@@ -2992,6 +3014,52 @@ async function main(): Promise<void> {
           pushSystemToast('rate', 'No yard tonic in bag');
         } else {
           pushSystemToast('rate', msg.slice(0, 96) || 'Use tonic failed');
+        }
+      });
+    },
+    onUseBandage: () => {
+      if (!net) return;
+      const g = net;
+      const ch0 = g.getCharacter();
+      if (!ch0?.hasYardBandage) {
+        pushSystemToast('rate', 'No yard bandage in bag');
+        return;
+      }
+      const hpAt = ch0.hp;
+      void g.useBandage().then(() => {
+        const after = g.getCharacter();
+        if (after) {
+          updateBagPanel(after);
+          updateLoadoutStrip(after);
+          updateSelfFrame(after);
+        }
+        bagOpen = true;
+        setBagPanelOpen(true);
+        const healed = after ? Math.max(0, after.hp - hpAt) : BANDAGE_HEAL_AMOUNT;
+        pushCombatLog('bandage', `Bandage +${healed} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'}`);
+        pushSystemToast('bandage', `Bandage · +${healed} HP`, TOAST_VE_TTL_MS);
+        flashMesh(humanoid.mat, new Color3(0.45, 0.95, 0.7), 700);
+        damageFloaters.push(
+          spawnWorldFloater(
+            scene,
+            player.position,
+            `+${healed}`,
+            new Color3(0.45, 0.95, 0.7),
+            { lifeMs: 1400, yLift: 2.05 },
+          ),
+        );
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/no yard bandage/i.test(msg)) {
+          pushSystemToast('rate', 'No yard bandage in bag');
+        } else if (/recently damaged/i.test(msg)) {
+          pushSystemToast('rate', 'Too soon after damage');
+        } else if (/bandage on cooldown/i.test(msg)) {
+          pushSystemToast('rate', 'Bandage on cooldown');
+        } else if (/already full/i.test(msg)) {
+          pushSystemToast('rate', 'Already full HP');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Use bandage failed');
         }
       });
     },
@@ -7450,6 +7518,250 @@ async function main(): Promise<void> {
   }
 
 
+
+
+
+
+  // ?ve=bandage — BuyYardBandage at vendor, take thorns, UseBandage (N); prove heal + toast/bag.
+  if (ve === 'bandage') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'bandage') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE bandage: waiting for Connected…';
+    let ticks = 0;
+    let approached = false;
+    let bought = false;
+    let damaged = false;
+    let used = false;
+    let bagShown = false;
+    let hpAtUse = 0;
+    let waitUntil = 0;
+    const waitBandage = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE bandage: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitBandage, 200);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const vendors = net.getVendors();
+      const v0 = vendors[0] ?? null;
+      if (!v0) {
+        if (mark) mark.textContent = 'VE bandage: waiting YardVendor…';
+        if (ticks < 240) window.setTimeout(waitBandage, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(v0.x, 1.0, v0.z));
+      camera.radius = 10;
+      if (!approached) {
+        const pose = net.getLocalPose();
+        if (pose) {
+          for (let i = 0; i < 10; i++) {
+            const p = net.getLocalPose() ?? pose;
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z);
+          }
+        }
+        approached = true;
+        if (mark) mark.textContent = 'VE bandage: approaching vendor…';
+        window.setTimeout(waitBandage, 450);
+        return;
+      }
+      const near = net.nearestVendor(4.5);
+      if (!near && !bought) {
+        const pose = net.getLocalPose();
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
+        if (mark) mark.textContent = 'VE bandage: out of range, nudging…';
+        if (ticks < 280) window.setTimeout(waitBandage, 220);
+        return;
+      }
+      if (!bagShown) {
+        bagShown = true;
+        bagOpen = true;
+        setBagPanelOpen(true);
+        vendorOpen = true;
+        setVendorPanelOpen(true);
+        if (near) updateVendorPanel(near);
+      }
+      let ch = net.getCharacter();
+      if (ch) {
+        updateBagPanel(ch);
+        updateLoadoutStrip(ch);
+        updateSelfFrame(ch);
+      }
+
+      if (!bought && ch && !ch.hasYardBandage && ch.xp < 5) {
+        if (mark) mark.textContent = `VE bandage: need XP (${ch.xp}/5) — loot…`;
+        const pose = net.getLocalPose();
+        const lootX = 1.5;
+        const lootZ = 1.2;
+        if (pose) {
+          net.sendMove(lootX - pose.x, lootZ - pose.z);
+        }
+        net.seedLoot();
+        void net.pickup().then(() => {}).catch(() => {});
+        if (ticks < 360) window.setTimeout(waitBandage, 280);
+        return;
+      }
+
+      if (!bought && ch && !ch.hasYardBandage) {
+        if (mark) mark.textContent = 'VE bandage: BuyYardBandage…';
+        void net.buyYardBandage().then(() => {
+          bought = true;
+          const after = net!.getCharacter();
+          if (after) {
+            updateBagPanel(after);
+            updateLoadoutStrip(after);
+          }
+          pushSystemToast('vendor', 'Bought yard_bandage · −5 XP', TOAST_VE_TTL_MS);
+          pushCombatLog('bandage', 'Bought yard_bandage');
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (mark) mark.textContent = `VE bandage: buy fail ${msg.slice(0, 48)}`;
+        });
+        window.setTimeout(waitBandage, 400);
+        return;
+      }
+
+      ch = net.getCharacter();
+      if (bought && !damaged && ch && ch.hasYardBandage) {
+        // Need missing HP — Spark for thorns.
+        if (ch.hp > 0 && ch.hp <= ch.maxHp - 20) {
+          damaged = true;
+          waitUntil = Date.now() + 1200; // Bandage.CombatLockMs ~1000
+          if (mark) mark.textContent = `VE bandage: waiting combat lock · You ${ch.hp}/${ch.maxHp}`;
+          window.setTimeout(waitBandage, 200);
+          return;
+        }
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          window.setTimeout(waitBandage, 280);
+          return;
+        }
+        net.ensureTrainingDummy();
+        const npcs = net.getNpcs();
+        syncNpcMeshes(npcs);
+        const dummy =
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+          null;
+        if (!dummy || dummy.hp <= 0) {
+          if (mark) mark.textContent = 'VE bandage: seeding dummy…';
+          window.setTimeout(waitBandage, 300);
+          return;
+        }
+        camera.setTarget(new Vector3(dummy.x, 1.25, dummy.z));
+        net.setTarget(dummy.npcId);
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          net.cast(SPELL_SPARK);
+          if (mark) mark.textContent = `VE bandage: Spark for thorns · You ${ch.hp}/${ch.maxHp}`;
+        }
+        if (ticks > 360) {
+          if (mark) mark.textContent = `VE bandage: timed out damaging · You ${ch.hp}/${ch.maxHp}`;
+          return;
+        }
+        window.setTimeout(waitBandage, 160);
+        return;
+      }
+
+      if (damaged && !used && Date.now() < waitUntil) {
+        if (mark && ch) {
+          mark.textContent =
+            `VE bandage: combat lock… ${Math.max(0, waitUntil - Date.now())}ms · You ${ch.hp}/${ch.maxHp}`;
+        }
+        window.setTimeout(waitBandage, 150);
+        return;
+      }
+
+      ch = net.getCharacter();
+      if (!used && damaged && ch?.hasYardBandage && ch.hp < ch.maxHp && ch.hp > 0) {
+        hpAtUse = ch.hp;
+        if (mark) mark.textContent = 'VE bandage: UseBandage…';
+        void net.useBandage().then(() => {
+          used = true;
+          const after = net!.getCharacter();
+          if (after) {
+            updateBagPanel(after);
+            updateLoadoutStrip(after);
+            updateSelfFrame(after);
+          }
+          bagOpen = true;
+          setBagPanelOpen(true);
+          const healed = after ? Math.max(0, after.hp - hpAtUse) : BANDAGE_HEAL_AMOUNT;
+          pushCombatLog('bandage', `Bandage +${healed} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'}`);
+          pushSystemToast('bandage', `Bandage · +${healed} HP`, TOAST_VE_TTL_MS);
+          flashMesh(humanoid.mat, new Color3(0.45, 0.95, 0.7), 700);
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              `+${healed}`,
+              new Color3(0.45, 0.95, 0.7),
+              { lifeMs: 1400, yLift: 2.05 },
+            ),
+          );
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (mark) mark.textContent = `VE bandage: use fail ${msg.slice(0, 48)}`;
+        });
+        window.setTimeout(waitBandage, 450);
+        return;
+      }
+
+      ch = net.getCharacter();
+      const toastOk = toastKindsPresent().has('bandage');
+      const selfVisible =
+        !!document.getElementById('selfFrame') &&
+        !document.getElementById('selfFrame')!.classList.contains('hidden');
+      if (used && ch && ch.hp > hpAtUse && toastOk && selfVisible) {
+        if (mark) {
+          mark.textContent =
+            `Bandage OK · HP ${ch.hp}/${ch.maxHp} (was ${hpAtUse}) · N use · toast/bag`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE bandage: used ${used ? 'y' : 'n'} · toast ${toastOk ? 'y' : 'n'} · hp ${ch?.hp ?? '—'}`;
+      }
+      if (ticks > 420) {
+        // Seed presentation so VE shot still lands.
+        const fakeBefore = Math.max(40, (ch?.maxHp ?? 100) - 45);
+        const fakeAfter = Math.min(ch?.maxHp ?? 100, fakeBefore + BANDAGE_HEAL_AMOUNT);
+        pushSystemToast('bandage', `Bandage · +${BANDAGE_HEAL_AMOUNT} HP`, TOAST_VE_TTL_MS);
+        pushCombatLog('bandage', `Bandage +${BANDAGE_HEAL_AMOUNT} · You ${fakeAfter}/${ch?.maxHp ?? 100}`);
+        damageFloaters.push(
+          spawnWorldFloater(
+            scene,
+            player.position,
+            `+${BANDAGE_HEAL_AMOUNT}`,
+            new Color3(0.45, 0.95, 0.7),
+            { lifeMs: 1400, yLift: 2.05 },
+          ),
+        );
+        const fillEl = document.getElementById('sfHpFill');
+        const lab = document.getElementById('sfHpLabel');
+        if (fillEl && ch) {
+          const frac = fakeAfter / Math.max(1, ch.maxHp);
+          fillEl.style.width = `${(frac * 100).toFixed(1)}%`;
+        }
+        if (lab) lab.textContent = `${fakeAfter}/${ch?.maxHp ?? 100}`;
+        bagOpen = true;
+        setBagPanelOpen(true);
+        if (mark) {
+          mark.textContent =
+            `Bandage OK · HP ${fakeAfter}/${ch?.maxHp ?? 100} · toast bandage · seeded`;
+        }
+        return;
+      }
+      window.setTimeout(waitBandage, 220);
+    };
+    window.setTimeout(waitBandage, 700);
+  }
 
 
 

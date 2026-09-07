@@ -652,6 +652,7 @@ namespace SpacetimeDB.Types
                 Reducer.AcceptPartyInvite args => Reducers.InvokeAcceptPartyInvite(eventContext, args),
                 Reducer.AcceptTrade args => Reducers.InvokeAcceptTrade(eventContext, args),
                 Reducer.BuyFromVendor args => Reducers.InvokeBuyFromVendor(eventContext, args),
+                Reducer.BuyYardBandage args => Reducers.InvokeBuyYardBandage(eventContext, args),
                 Reducer.BuyYardTonic args => Reducers.InvokeBuyYardTonic(eventContext, args),
                 Reducer.CancelCast args => Reducers.InvokeCancelCast(eventContext, args),
                 Reducer.CancelTrade args => Reducers.InvokeCancelTrade(eventContext, args),
@@ -677,6 +678,7 @@ namespace SpacetimeDB.Types
                 Reducer.Stun args => Reducers.InvokeStun(eventContext, args),
                 Reducer.UnequipRobes args => Reducers.InvokeUnequipRobes(eventContext, args),
                 Reducer.UnequipStaff args => Reducers.InvokeUnequipStaff(eventContext, args),
+                Reducer.UseBandage args => Reducers.InvokeUseBandage(eventContext, args),
                 Reducer.UseYardTonic args => Reducers.InvokeUseYardTonic(eventContext, args),
                 Reducer.Whisper args => Reducers.InvokeWhisper(eventContext, args),
                 _ => throw new ArgumentOutOfRangeException("Reducer", $"Unknown reducer {reducer}")

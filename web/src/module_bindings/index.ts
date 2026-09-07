@@ -37,6 +37,7 @@ import {
 import AcceptPartyInviteReducer from "./accept_party_invite_reducer";
 import AcceptTradeReducer from "./accept_trade_reducer";
 import BuyFromVendorReducer from "./buy_from_vendor_reducer";
+import BuyYardBandageReducer from "./buy_yard_bandage_reducer";
 import BuyYardTonicReducer from "./buy_yard_tonic_reducer";
 import CancelCastReducer from "./cancel_cast_reducer";
 import CancelTradeReducer from "./cancel_trade_reducer";
@@ -62,6 +63,7 @@ import SetTargetReducer from "./set_target_reducer";
 import StunReducer from "./stun_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
+import UseBandageReducer from "./use_bandage_reducer";
 import UseYardTonicReducer from "./use_yard_tonic_reducer";
 import WhisperReducer from "./whisper_reducer";
 
@@ -248,6 +250,7 @@ const reducersSchema = __reducers(
   __reducerSchema("accept_party_invite", AcceptPartyInviteReducer),
   __reducerSchema("accept_trade", AcceptTradeReducer),
   __reducerSchema("buy_from_vendor", BuyFromVendorReducer),
+  __reducerSchema("buy_yard_bandage", BuyYardBandageReducer),
   __reducerSchema("buy_yard_tonic", BuyYardTonicReducer),
   __reducerSchema("cancel_cast", CancelCastReducer),
   __reducerSchema("cancel_trade", CancelTradeReducer),
@@ -273,6 +276,7 @@ const reducersSchema = __reducers(
   __reducerSchema("stun", StunReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
+  __reducerSchema("use_bandage", UseBandageReducer),
   __reducerSchema("use_yard_tonic", UseYardTonicReducer),
   __reducerSchema("whisper", WhisperReducer),
 );

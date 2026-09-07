@@ -1407,8 +1407,14 @@ body {
   border: 1px solid rgba(125, 255, 181, 0.4);
 }
 
+.sysToast.bandage {
+  border-color: rgba(120, 230, 170, 0.55);
+}
+.sysToast.bandage .toastTag { color: #7dffc0; }
+
 .clLine.rest,
-.clLine.tonic .clTag { color: #7dffb5; }
+.clLine.tonic .clTag,
+.clLine.bandage .clTag { color: #7dffb5; }
 .sysToast.vendor,
 .clLine.vendor .clTag { color: #6dffb0; }
 .sysToast.vendor {

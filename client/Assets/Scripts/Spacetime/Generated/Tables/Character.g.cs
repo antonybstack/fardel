@@ -48,6 +48,8 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<Character, bool> HasEmberShard { get; }
         public global::SpacetimeDB.Col<Character, bool> HasYardTonic { get; }
         public global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp> TonicExpiresAt { get; }
+        public global::SpacetimeDB.Col<Character, bool> HasYardBandage { get; }
+        public global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp> BandageReadyAt { get; }
         public global::SpacetimeDB.Col<Character, int> Hp { get; }
         public global::SpacetimeDB.Col<Character, int> MaxHp { get; }
         public global::SpacetimeDB.Col<Character, int> Level { get; }
@@ -68,6 +70,8 @@ namespace SpacetimeDB.Types
             HasEmberShard = new global::SpacetimeDB.Col<Character, bool>(tableName, "has_ember_shard");
             HasYardTonic = new global::SpacetimeDB.Col<Character, bool>(tableName, "has_yard_tonic");
             TonicExpiresAt = new global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp>(tableName, "tonic_expires_at");
+            HasYardBandage = new global::SpacetimeDB.Col<Character, bool>(tableName, "has_yard_bandage");
+            BandageReadyAt = new global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp>(tableName, "bandage_ready_at");
             Hp = new global::SpacetimeDB.Col<Character, int>(tableName, "hp");
             MaxHp = new global::SpacetimeDB.Col<Character, int>(tableName, "max_hp");
             Level = new global::SpacetimeDB.Col<Character, int>(tableName, "level");
