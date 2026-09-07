@@ -71,7 +71,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - Character row survives disconnect/refresh
 - Bag/equip seed: **staff + robes** equipped; **2 spells** known
 - Casts require known spell + staff equipped (loadout gate)
-- Optional: unequipping the staff disables or weakens casts (light proof that gear matters) — nice-to-have, not required to close the slice
+- Optional: unequipping the staff disables casts — **done** (`UnequipStaff`/`EquipStaff`, StaffEquipSmoke, Babylon U/I + mesh hide)
 - **Headless gate:** `tools/PersistSmoke` — earn XP → disconnect → reconnect with saved token → same identity + Character.Xp
 
 **Done when:** refresh keeps XP, equip, and spellbook; scripted reconnect proof passes.

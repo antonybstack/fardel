@@ -313,6 +313,35 @@ public static partial class Module
         ApplyDamage(ctx, cast.Caster, cast.TargetNpcId, damage);
     }
 
+    /// <summary>Unequip staff — Cast already gates on StaffEquipped (slice 3 nice-to-have).</summary>
+    [SpacetimeDB.Reducer]
+    public static void UnequipStaff(ReducerContext ctx)
+    {
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (!character.StaffEquipped)
+        {
+            return;
+        }
+
+        character.StaffEquipped = false;
+        ctx.Db.Character.Identity.Update(character);
+    }
+
+    /// <summary>Equip staff — restores Cast permission when known spells are present.</summary>
+    [SpacetimeDB.Reducer]
+    public static void EquipStaff(ReducerContext ctx)
+    {
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (character.StaffEquipped)
+        {
+            return;
+        }
+
+        character.StaffEquipped = true;
+        ctx.Db.Character.Identity.Update(character);
+    }
 
     /// <summary>Create a party with sender as sole leader. No-op if already in a party.</summary>
     [SpacetimeDB.Reducer]

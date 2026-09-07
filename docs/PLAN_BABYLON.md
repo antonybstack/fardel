@@ -154,4 +154,7 @@ See `web/README.md` for exact commands.
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)
-- Next (north-star): credited art packs when licenses land; redeploy Pages (party / always-relevant done)
+- **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
+  follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
+  `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
+- Next (north-star): credited art packs when licenses land; redeploy Pages (party + staff-unequip done)

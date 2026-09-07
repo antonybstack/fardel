@@ -38,11 +38,13 @@ import AcceptPartyInviteReducer from "./accept_party_invite_reducer";
 import CastReducer from "./cast_reducer";
 import CreatePartyReducer from "./create_party_reducer";
 import EnsureTrainingDummyReducer from "./ensure_training_dummy_reducer";
+import EquipStaffReducer from "./equip_staff_reducer";
 import InviteToPartyReducer from "./invite_to_party_reducer";
 import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
 import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
 import SetTargetReducer from "./set_target_reducer";
+import UnequipStaffReducer from "./unequip_staff_reducer";
 
 // Import all procedure arg schemas
 
@@ -144,11 +146,13 @@ const reducersSchema = __reducers(
   __reducerSchema("cast", CastReducer),
   __reducerSchema("create_party", CreatePartyReducer),
   __reducerSchema("ensure_training_dummy", EnsureTrainingDummyReducer),
+  __reducerSchema("equip_staff", EquipStaffReducer),
   __reducerSchema("invite_to_party", InviteToPartyReducer),
   __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
   __reducerSchema("seed_crowd_proxies", SeedCrowdProxiesReducer),
   __reducerSchema("set_target", SetTargetReducer),
+  __reducerSchema("unequip_staff", UnequipStaffReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

@@ -36,7 +36,7 @@ That sentence is the finish line. Everything else is either a slice toward it or
 - Pick real asset packs + fill credits ledger
 - Prod authority host decision
 - ~~Party / always-relevant wiring beyond self+target~~ **done** (PartyMember + always-relevant pose subscribe)
-- Optional: staff-unequip affects casts (slice 3 nice-to-have)
+- ~~Optional: staff-unequip affects casts (slice 3 nice-to-have)~~ **done** (`UnequipStaff`/`EquipStaff`, StaffEquipSmoke, U/I + `?ve=staff-equip`)
 - Coarse pose tier only if metrics demand (ADR 0001 follow-up)
 
 ### Not now (explicit anti-goals)
@@ -99,6 +99,7 @@ Prove authority with headless smokes first; Babylon presentation follows:
 - `tools/MoveSmoke` (slice 1)
 - `tools/CombatSmoke` (slice 2)
 - `tools/PersistSmoke` (slice 3)
+- `tools/StaffEquipSmoke` (slice 3 optional — unequip blocks Cast)
 - `tools/AoiSmoke` (slice 4)
 - `tools/PartySmoke` (party / always-relevant invent)
 
@@ -117,5 +118,5 @@ Before starting work, answer:
 - **Phase:** **post-slice-4 invent** — AOI presentation green; forest kitbash in Babylon yard
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
-- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (`ve/babylon-forest.png`); **humanoid+staff**; **second-client shared yard** green (`ve/babylon-two-client.png`); **remote cast/target telegraphs** (`ve/babylon-remote-cast.png`); **floating damage numbers** (`ve/babylon-damage-text.png`); **party / always-relevant** (`ve/babylon-party.png`)
-- **POC north-star:** closer — remaining invent: credited art packs for humanoid; redeploy Pages
+- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (`ve/babylon-forest.png`); **humanoid+staff**; **second-client shared yard** green (`ve/babylon-two-client.png`); **remote cast/target telegraphs** (`ve/babylon-remote-cast.png`); **floating damage numbers** (`ve/babylon-damage-text.png`); **party / always-relevant** (`ve/babylon-party.png`); **staff unequip gates casts** (`ve/babylon-staff-equip.png`)
+- **POC north-star:** closer — remaining invent: credited art packs for humanoid; redeploy Pages (staff-unequip invent done)

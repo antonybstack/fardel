@@ -150,6 +150,8 @@ export type GameNet = {
   seedCrowdProxies: () => void;
   setTarget: (npcId: bigint) => void;
   cast: (spellId: number) => void;
+  unequipStaff: () => void;
+  equipStaff: () => void;
   createParty: () => void;
   inviteToParty: (invitee: Identity) => void;
   acceptPartyInvite: () => void;
@@ -946,9 +948,24 @@ export async function connectToSpacetime(
                     : spellId === SPELL_EMBERBOLT
                       ? 'Emberbolt'
                       : `Spell ${spellId}`;
+                if (latestCharacter && !latestCharacter.staffEquipped) {
+                  castFeedback = 'Staff required';
+                  emitStatus(identityHex);
+                  return;
+                }
                 castFeedback = `Casting ${name}…`;
                 emitStatus(identityHex);
                 void conn.reducers.cast({ spellId });
+              },
+              unequipStaff: () => {
+                castFeedback = 'Unequipping staff…';
+                emitStatus(identityHex);
+                void conn.reducers.unequipStaff({});
+              },
+              equipStaff: () => {
+                castFeedback = 'Equipping staff…';
+                emitStatus(identityHex);
+                void conn.reducers.equipStaff({});
               },
               createParty: () => {
                 castFeedback = 'Creating party…';

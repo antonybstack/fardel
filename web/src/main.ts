@@ -107,13 +107,14 @@ function formatLoadout(ch: NonNullable<Extract<ConnectionStatus, { state: 'conne
   ]
     .filter(Boolean)
     .join('+') || '(none)';
+  const staffLine = ch.staffEquipped ? 'staff: equipped' : 'staff: UNEQUIPPED (casts blocked)';
   const spells = [
     ch.knowsSpark ? 'Spark' : null,
     ch.knowsEmberbolt ? 'Emberbolt' : null,
   ]
     .filter(Boolean)
     .join('+') || '(none)';
-  return `XP ${ch.xp} · loadout ${gear} · spells ${spells}`;
+  return `XP ${ch.xp} · loadout ${gear} · ${staffLine} · spells ${spells}`;
 }
 
 function formatStatus(s: ConnectionStatus, nowMs: number): string {
@@ -204,7 +205,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · P invite/accept · O leave',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · U unequip staff · I equip staff · P invite/accept · O leave',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -223,6 +224,7 @@ function createScene(engine: Engine): {
   scene: Scene;
   camera: ArcRotateCamera;
   player: Mesh;
+  humanoid: HumanoidParts;
   proxySource: Mesh;
 } {
   const scene = new Scene(engine);
@@ -277,7 +279,7 @@ function createScene(engine: Engine): {
   proxyMat.emissiveColor = new Color3(0.18, 0.08, 0.02);
   proxySource.material = proxyMat;
 
-  return { scene, camera, player, proxySource };
+  return { scene, camera, player, humanoid, proxySource };
 }
 
 function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
@@ -342,6 +344,8 @@ function bindInput(opts: {
   onCast: (spellId: number) => void;
   onPartyInviteOrAccept: () => void;
   onPartyLeave: () => void;
+  onUnequipStaff: () => void;
+  onEquipStaff: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -375,6 +379,16 @@ function bindInput(opts: {
     if (k === 'o') {
       e.preventDefault();
       opts.onPartyLeave();
+      return;
+    }
+    if (k === 'u') {
+      e.preventDefault();
+      opts.onUnequipStaff();
+      return;
+    }
+    if (k === 'i') {
+      e.preventDefault();
+      opts.onEquipStaff();
       return;
     }
   };
@@ -420,6 +434,17 @@ function wishFromKeys(
   if (wish.lengthSquared() < 1e-8) return { dx: 0, dz: 0 };
   wish.normalize();
   return { dx: wish.x, dz: wish.z };
+}
+
+
+/** Hide/show staff group + children (Babylon setEnabled on empty parent is not always enough). */
+function setStaffMeshVisible(staff: Mesh, visible: boolean): void {
+  staff.setEnabled(visible);
+  staff.isVisible = visible;
+  for (const child of staff.getChildMeshes(true)) {
+    child.setEnabled(visible);
+    child.isVisible = visible;
+  }
 }
 
 function flashMesh(mat: StandardMaterial, color: Color3, ms: number): void {
@@ -497,7 +522,7 @@ async function main(): Promise<void> {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  const { scene, camera, player, proxySource } = createScene(engine);
+  const { scene, camera, player, humanoid, proxySource } = createScene(engine);
 
   let net: GameNet | null = null;
   let latestStatus: ConnectionStatus = {
@@ -720,6 +745,14 @@ async function main(): Promise<void> {
     },
     onCast: (spellId) => {
       if (!net) return;
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        latestStatus =
+          latestStatus.state === 'connected'
+            ? { ...latestStatus, castFeedback: 'Staff required' }
+            : latestStatus;
+        return;
+      }
       const combat = net.getCombat();
       if (gcdRemainingMs(combat) > 0) {
         latestStatus =
@@ -784,6 +817,14 @@ async function main(): Promise<void> {
     onPartyLeave: () => {
       if (!net) return;
       net.leaveParty();
+    },
+    onUnequipStaff: () => {
+      if (!net) return;
+      net.unequipStaff();
+    },
+    onEquipStaff: () => {
+      if (!net) return;
+      net.equipStaff();
     },
   });
 
@@ -917,6 +958,8 @@ async function main(): Promise<void> {
     setGcdBar(gcdLeft, castLeft, castTotalMs);
     if (latestStatus.state === 'connected') {
       setStatus(formatStatus(latestStatus, now));
+      const equipped = latestStatus.character?.staffEquipped ?? true;
+      setStaffMeshVisible(humanoid.staff, equipped);
     }
 
     camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
@@ -947,8 +990,10 @@ async function main(): Promise<void> {
     (combat) => {
       if (combat) selectedTargetId = combat.targetNpcId;
     },
-    (_character) => {
-      /* HUD refreshed via onStatus */
+    (character) => {
+      /* HUD refreshed via onStatus; staff mesh follows Character.staffEquipped */
+      const equipped = character?.staffEquipped ?? true;
+      setStaffMeshVisible(humanoid.staff, equipped);
     },
     (proxies) => {
       syncProxyMeshes(proxies);
@@ -1323,6 +1368,84 @@ async function main(): Promise<void> {
     window.setTimeout(waitDmg, 600);
   }
 
+
+
+  // ?ve=staff-equip — unequip → cast blocked → HUD + staff mesh hidden.
+  if (ve === 'staff-equip') {
+    camera.radius = 9;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'staff-equip') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE staff-equip: waiting for Connected…';
+    let ticks = 0;
+    let unequipped = false;
+    let castAttempted = false;
+    const waitStaff = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE staff-equip: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitStaff, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 8.5;
+      const ch = net.getCharacter();
+      if (!unequipped) {
+        // Ensure equipped first so unequip transition is visible.
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          if (mark) mark.textContent = 'VE staff-equip: re-equipping baseline…';
+          window.setTimeout(waitStaff, 250);
+          return;
+        }
+        net.unequipStaff();
+        unequipped = true;
+        if (mark) mark.textContent = 'VE staff-equip: unequipping…';
+        window.setTimeout(waitStaff, 300);
+        return;
+      }
+      const unequippedOk = ch && !ch.staffEquipped;
+      if (unequippedOk) {
+        setStaffMeshVisible(humanoid.staff, false);
+      }
+      if (unequippedOk && !castAttempted) {
+        net.ensureTrainingDummy();
+        const cycle = net.getTargetCycle();
+        const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+        if (dummy) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+        }
+        // Attempt cast — client + server should block with Staff required.
+        net.cast(SPELL_SPARK);
+        castAttempted = true;
+        if (mark) {
+          mark.textContent =
+            'VE staff-equip: staff UNEQUIPPED · cast blocked (Staff required) · mesh hidden';
+        }
+        // Keep unequipped for screenshot proof.
+        return;
+      }
+      if (unequippedOk && castAttempted) {
+        const fb =
+          st.state === 'connected' ? st.castFeedback ?? '' : '';
+        if (mark) {
+          mark.textContent = `Staff-equip OK · unequipped · cast: ${fb || 'Staff required'} · mesh hidden`;
+        }
+        return;
+      }
+      if (ticks > 120) {
+        if (mark) mark.textContent = 'VE staff-equip: timed out';
+        return;
+      }
+      window.setTimeout(waitStaff, 200);
+    };
+    window.setTimeout(waitStaff, 600);
+  }
 
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).
   if (ve === 'party') {
