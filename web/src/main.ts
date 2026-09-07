@@ -4555,6 +4555,36 @@ async function main(): Promise<void> {
     window.setTimeout(waitPathGround, 600);
   }
 
+  // ?ve=sky-horizon — play-cam frame of layered mountain silhouette + sky gradient (#55).
+  if (ve === 'sky-horizon') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.55;
+  }
+
+  if (net && ve === 'sky-horizon') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE sky-horizon: waiting for Connected…';
+    const waitSkyHorizon = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        // Face distant N mountains; mid play-cam so ridges read through cyan fog.
+        camera.setTarget(player.position.add(new Vector3(0, 2.5, -12)));
+        camera.radius = 18;
+        camera.alpha = Math.PI / 2.05;
+        camera.beta = Math.PI / 2.55;
+        if (mark) {
+          mark.textContent =
+            'Sky-horizon OK · layered ridges + fog-matched sky · Connected';
+        }
+        return;
+      }
+      window.setTimeout(waitSkyHorizon, 300);
+    };
+    window.setTimeout(waitSkyHorizon, 600);
+  }
+
   // ?ve=humanoid — frame local player (humanoid+staff) clearly for VE shot.
   if (ve === 'humanoid') {
     camera.radius = 8;
