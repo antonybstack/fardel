@@ -111,7 +111,7 @@ Validate early:
 - [x] `dev-db.sparkify.dev` on existing Mac `sparkify` tunnel → `127.0.0.1:3000` (HTTP 404 from SpacetimeDB root is healthy)
 - [x] **Cloudflare Pages project `fardel` live** — custom domain `play.sparkify.dev` (CNAME → `fardel.pages.dev`, proxied)
 - [ ] Prod SpacetimeDB (`db.sparkify.dev` or MainCloud URI)
-- [ ] Replace Pages contents with Vite/`web/dist` Babylon client (Unity WebGL retired from `main`)
+- [x] Replace Pages contents with Vite/`web/dist` Babylon client (Unity WebGL retired from `main`; redeployed with combat-log)
 
 ### Tunnel ops note (this machine)
 
