@@ -4100,7 +4100,15 @@ async function main(): Promise<void> {
       }
     }
 
-    camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
+    // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
+    // radius from current cam position → target; walking forward increases that
+    // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
+    {
+      const follow = player.position.add(new Vector3(0, 1.35, 0));
+      const radius = camera.radius;
+      camera.setTarget(follow);
+      camera.radius = radius;
+    }
     scene.render();
   });
   window.addEventListener('resize', () => engine.resize());
@@ -10383,6 +10391,66 @@ async function main(): Promise<void> {
       window.setTimeout(waitStun, 200);
     };
     window.setTimeout(waitStun, 700);
+  }
+
+
+  // ?ve=camera-zoom-walk — hold forward ~12s; prove ArcRotateCamera radius stable (#30).
+  if (ve === 'camera-zoom-walk' || ve === 'camerazoomwalk') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'camera-zoom-walk' || ve === 'camerazoomwalk')) {
+    const mark = document.getElementById('persistMark');
+    const startRadius = 12;
+    camera.radius = startRadius;
+    if (mark) mark.textContent = 'VE camera-zoom-walk: waiting for Connected…';
+    let ticks = 0;
+    let walkStartedMs = 0;
+    const WALK_MS = 12_000;
+    const RADIUS_EPS = 0.15;
+    const waitZoom = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE camera-zoom-walk: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitZoom, 200);
+        else if (mark) mark.textContent = 'VE camera-zoom-walk: timed out waiting for Connected';
+        return;
+      }
+      if (walkStartedMs === 0) {
+        walkStartedMs = Date.now();
+        camera.radius = startRadius;
+        if (mark) {
+          mark.textContent = `VE camera-zoom-walk: walking forward… r=${camera.radius.toFixed(2)}`;
+        }
+      }
+      // Camera-relative forward (same as holding W) — no wheel/orbit.
+      const wish = wishFromKeys(new Set(['w']), camera);
+      if (wish.dx !== 0 || wish.dz !== 0) {
+        const step = Math.min(MAX_STEP_METERS, MOVE_SPEED / 20);
+        net.sendMove(wish.dx * step, wish.dz * step);
+      }
+      const elapsed = Date.now() - walkStartedMs;
+      const r = camera.radius;
+      if (elapsed < WALK_MS) {
+        if (mark) {
+          mark.textContent = `VE camera-zoom-walk: walking… t=${(elapsed / 1000).toFixed(1)}s r=${r.toFixed(2)} (start ${startRadius.toFixed(2)})`;
+        }
+        window.setTimeout(waitZoom, 50);
+        return;
+      }
+      const dr = Math.abs(r - startRadius);
+      if (mark) {
+        if (dr <= RADIUS_EPS) {
+          mark.textContent = `Camera zoom walk OK · radius ${startRadius.toFixed(2)} → ${r.toFixed(2)} (Δ ${dr.toFixed(3)}) · walked ${(elapsed / 1000).toFixed(1)}s · no pullback`;
+        } else {
+          mark.textContent = `Camera zoom walk FAIL · radius ${startRadius.toFixed(2)} → ${r.toFixed(2)} (Δ ${dr.toFixed(3)}) · walked ${(elapsed / 1000).toFixed(1)}s`;
+        }
+      }
+    };
+    window.setTimeout(waitZoom, 700);
   }
 
   void STUN_MANA_COST;
