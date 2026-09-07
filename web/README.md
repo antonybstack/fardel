@@ -30,6 +30,10 @@ cd web
 
 Output: `dist/` (deploy to Cloudflare Pages → `play.sparkify.dev`).
 
+Typecheck note: package-manager run build runs tsc then vite; keep it green (no vite-only workaround).
+
+After server schema changes (Move.jump, PlayerPose.velY / lastGroundedMicros), regenerate bindings. Checked-in src/module_bindings/ should match develop module.
+
 ## Generate bindings
 
 With local spacetime + published module:
