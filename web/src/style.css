@@ -162,16 +162,19 @@ body {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
 }
 
-/* Selected-target frame — compact name + HP, stacked above combat GCD/cast. */
+/* Selected-target frame — gold select chrome; crisp vs #39 cyan fog / grass. */
 #targetFrame {
   display: flex;
   flex-direction: column;
   width: min(280px, 80vw);
   padding: 7px 10px 8px;
-  background: rgba(8, 12, 24, 0.78);
-  border: 1px solid rgba(106, 162, 255, 0.35);
+  background: rgba(10, 10, 16, 0.9);
+  border: 2px solid rgba(232, 186, 48, 0.95);
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.32);
+  box-shadow:
+    0 0 0 2px rgba(10, 8, 4, 0.95),
+    0 0 12px rgba(220, 168, 36, 0.32),
+    0 4px 16px rgba(0, 0, 0, 0.48);
 }
 
 #targetFrame.hidden {
@@ -187,15 +190,17 @@ body {
 }
 
 #tfName {
-  color: #e8eefc;
+  color: #f4e4a8;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(210, 160, 40, 0.28);
 }
 
 .tfId {
-  color: #8aa0c8;
+  color: #c4b078;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -203,8 +208,8 @@ body {
 .tfHpBar {
   position: relative;
   height: 16px;
-  background: rgba(12, 12, 16, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 8, 12, 0.92);
+  border: 1px solid rgba(180, 140, 40, 0.45);
   border-radius: 5px;
   overflow: hidden;
 }

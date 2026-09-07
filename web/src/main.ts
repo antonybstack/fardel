@@ -1744,21 +1744,41 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     body.material = mat;
   }
 
-  // Local selection reticule — thicker/brighter gold torus (distinct from remote cyan).
+  // Local selection reticule — gold torus crisp vs #39 cyan fog (fog off + unlit + dark halo).
   const ring = MeshBuilder.CreateTorus(
     `npcRing_${npc.npcId}`,
-    { diameter: 1.55, thickness: 0.12, tessellation: 36 },
+    { diameter: 1.58, thickness: 0.14, tessellation: 40 },
     scene,
   );
   ring.parent = root;
-  ring.position.y = 0.06;
+  ring.position.y = 0.07;
   ring.rotation.x = Math.PI / 2;
   const ringMat = new StandardMaterial(`npcRingMat_${npc.npcId}`, scene);
-  ringMat.diffuseColor = new Color3(0.2, 0.2, 0.2);
+  ringMat.diffuseColor = new Color3(1.0, 0.82, 0.2);
   ringMat.emissiveColor = new Color3(0, 0, 0);
-  ringMat.specularColor = new Color3(0.35, 0.28, 0.08);
+  ringMat.specularColor = new Color3(0.15, 0.12, 0.04);
+  ringMat.disableLighting = true;
+  ringMat.fogEnabled = false;
   ring.material = ringMat;
   ring.setEnabled(false);
+
+  // Dark outline halo (child of ring) so gold reads over lush grass / fog wash.
+  const ringHalo = MeshBuilder.CreateTorus(
+    `npcRingHalo_${npc.npcId}`,
+    { diameter: 1.72, thickness: 0.2, tessellation: 40 },
+    scene,
+  );
+  ringHalo.parent = ring;
+  ringHalo.position.y = -0.01;
+  ringHalo.isPickable = false;
+  const ringHaloMat = new StandardMaterial(`npcRingHaloMat_${npc.npcId}`, scene);
+  ringHaloMat.diffuseColor = new Color3(0.04, 0.03, 0.02);
+  ringHaloMat.emissiveColor = new Color3(0.028, 0.02, 0.01);
+  ringHaloMat.specularColor = new Color3(0, 0, 0);
+  ringHaloMat.disableLighting = true;
+  ringHaloMat.fogEnabled = false;
+  ringHaloMat.alpha = 0.9;
+  ringHalo.material = ringHaloMat;
 
   const remoteRing = MeshBuilder.CreateTorus(
     `npcRemoteRing_${npc.npcId}`,
@@ -1774,10 +1794,10 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   remoteRing.material = remoteRingMat;
   remoteRing.setEnabled(false);
 
-  // Overhead chevron (tip down) — readable without neon spam.
+  // Overhead chevron (tip down) — gold select; fog-immune so it stays crisp in cyan haze.
   const marker = MeshBuilder.CreateCylinder(
     `npcMark_${npc.npcId}`,
-    { height: 0.34, diameterTop: 0, diameterBottom: 0.28, tessellation: 6 },
+    { height: 0.36, diameterTop: 0, diameterBottom: 0.3, tessellation: 6 },
     scene,
   );
   marker.parent = root;
@@ -1785,9 +1805,11 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   marker.rotation.z = Math.PI; // tip points at dummy
   marker.isPickable = false;
   const markerMat = new StandardMaterial(`npcMarkMat_${npc.npcId}`, scene);
-  markerMat.diffuseColor = new Color3(0.95, 0.78, 0.2);
-  markerMat.emissiveColor = new Color3(0.75, 0.55, 0.08);
-  markerMat.specularColor = new Color3(0.2, 0.15, 0.04);
+  markerMat.diffuseColor = new Color3(1.0, 0.84, 0.22);
+  markerMat.emissiveColor = new Color3(0.95, 0.72, 0.12);
+  markerMat.specularColor = new Color3(0.12, 0.1, 0.03);
+  markerMat.disableLighting = true;
+  markerMat.fogEnabled = false;
   marker.material = markerMat;
   marker.setEnabled(false);
 
@@ -3506,10 +3528,10 @@ async function main(): Promise<void> {
           mesh.markerMat.diffuseColor = new Color3(0.98, 0.4, 0.18);
           mesh.mat.emissiveColor = new Color3(0.32, 0.08, 0.04);
         } else {
-          mesh.ringMat.emissiveColor = new Color3(1.15, 0.88, 0.18);
-          mesh.ringMat.diffuseColor = new Color3(1.0, 0.82, 0.22);
-          mesh.markerMat.emissiveColor = new Color3(1.05, 0.8, 0.15);
-          mesh.markerMat.diffuseColor = new Color3(0.98, 0.8, 0.2);
+          mesh.ringMat.emissiveColor = new Color3(1.28, 0.95, 0.2);
+          mesh.ringMat.diffuseColor = new Color3(1.0, 0.86, 0.24);
+          mesh.markerMat.emissiveColor = new Color3(1.18, 0.88, 0.16);
+          mesh.markerMat.diffuseColor = new Color3(1.0, 0.84, 0.22);
           // Stronger body tint so tab-target reads even at glancing angles.
           mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
         }
@@ -3584,16 +3606,16 @@ async function main(): Promise<void> {
         const oorPulse = !!(
           npcPulse && isTargetOutOfCastRange(posePulse, npcPulse)
         );
-        const e = 0.95 + 0.35 * (0.5 + 0.5 * Math.sin(now / 210));
+        const e = 1.02 + 0.38 * (0.5 + 0.5 * Math.sin(now / 210));
         mesh.ringMat.emissiveColor = oorPulse
           ? new Color3(e, e * 0.32, 0.1)
-          : new Color3(e, e * 0.76, 0.12);
+          : new Color3(e * 1.08, e * 0.8, 0.14);
         if (mesh.marker.isEnabled()) {
           mesh.marker.position.y = 2.55 + 0.07 * Math.sin(now / 260);
-          const me = 0.75 + 0.35 * (0.5 + 0.5 * Math.sin(now / 260));
+          const me = 0.82 + 0.38 * (0.5 + 0.5 * Math.sin(now / 260));
           mesh.markerMat.emissiveColor = oorPulse
             ? new Color3(me, me * 0.34, 0.1)
-            : new Color3(me, me * 0.74, 0.1);
+            : new Color3(me * 1.05, me * 0.78, 0.12);
         }
       } else {
         mesh.ring.scaling.setAll(1);
@@ -6202,7 +6224,93 @@ async function main(): Promise<void> {
     window.setTimeout(waitReticule, 700);
   }
 
-  // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
+  // ?ve=target-contrast — select Dummy; prove gold #targetFrame + world reticule crisp under #39 fog.
+  if (ve === 'target-contrast') {
+    camera.radius = 9.2;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.35;
+  }
+  if (net && ve === 'target-contrast') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE target-contrast: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitContrast = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 4.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - 2.8);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        // Frame Dummy + HUD target chrome; play-cam distance so fog wash is visible.
+        camera.setTarget(
+          new Vector3(
+            player.position.x * 0.32 + dummy.x * 0.68,
+            1.2,
+            player.position.z * 0.32 + dummy.z * 0.68,
+          ),
+        );
+        camera.radius = 9.2;
+        camera.beta = Math.PI / 3.3;
+      }
+      updateTargetFrame(
+        dummy
+          ? (net.getNpcs().find((n) => n.npcId === dummy.npcId) ?? dummy)
+          : null,
+      );
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const markerOn = !!(mesh && mesh.marker.isEnabled());
+      const frame = document.getElementById('targetFrame');
+      const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+      const nameTxt = document.getElementById('tfName')?.textContent || '';
+      const nameOk = nameTxt.length > 0 && nameTxt !== '—';
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        ringOn &&
+        markerOn &&
+        frameVisible &&
+        nameOk &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent =
+            `Target-contrast OK · gold frame+reticule · Dummy #${dummy.npcId} · fog crisp`;
+        }
+        if (okTicks < 8 && ticks < 140) {
+          window.setTimeout(waitContrast, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent =
+          `VE target-contrast: Connected · dummy ${dummy ? 'yes' : 'no'} · frame ${frameVisible ? 'on' : 'off'} · ring ${ringOn ? 'on' : 'off'} · marker ${markerOn ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE target-contrast: timed out waiting for gold frame + reticule';
+        return;
+      }
+      window.setTimeout(waitContrast, 200);
+    };
+    window.setTimeout(waitContrast, 700);
+  }
+
+    // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
   if (ve === 'debug-hud') {
     camera.radius = 14;
     camera.alpha = Math.PI / 2.4;
