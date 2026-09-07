@@ -48,6 +48,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 **Done when:** editor play mode shows connected identity.
 
 ### 1 — Yard + move
+- **Headless gate:** `tools/MoveSmoke` connects, sends `Move`, asserts server pose updates (Unity not required)
 - Forest clearing: **huge trees** + **distant mountains** backdrop (kitbash OK)
 - Player: **simple humanoid** with staff/robes intent (temp mesh OK if clearly a person)
 - RMB look + WASD

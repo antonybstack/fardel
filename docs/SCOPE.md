@@ -26,7 +26,8 @@ That sentence is the finish line. Everything else is either a slice toward it or
 | Staff/robes + 2 spells + GCD | Skill trees, more spells, talents |
 | Kitbash forest + mountains + humanoid ([ASSETS.md](ASSETS.md)) | Custom character creator, photoreal, cinema VFX |
 | Chunk AOI as designed ([ADR 0001](adr/0001-aoi-interest.md)) | Coarse network LOD, LOS interest, multiple shards |
-| Unity web + SpacetimeDB module + Shared | Second client engine, custom WebGPU client |
+| SpacetimeDB module + Shared + headless smokes | Second client engine, custom WebGPU client |
+| Unity client (deferred until smokes green) | Editor/UI as slice gate |
 | `play` Pages + `dev-db` preview tunnel | Prod MainCloud / `db.sparkify.dev` hard cutover |
 | Span-first / zero-heap **discipline** in new code | Premature micro-optim hunt with no slice-4 numbers |
 
@@ -87,6 +88,19 @@ If an idea sounds like any of these, park it in a note — don’t branch the pl
 
 Revisit locks only with a new ADR (or an explicit superseding decision), not drive-by chat.
 
+
+## Unity deferred (execution)
+
+Keep [ADR 0002](adr/0002-client-host-webgpu.md): Unity remains the **v1 ship client**.
+
+**Until move/cast/GCD smokes are green**, do not block slices on the Unity Editor/UI. Prove authority with:
+
+- `tools/ConnectSmoke` (slice 0)
+- `tools/MoveSmoke` (slice 1)
+- later cast/GCD smokes (slice 2)
+
+Unity Connect scene / forest art resume when those gates pass (presentation, not net learning).
+
 ## Weekly focus check
 
 Before starting work, answer:
@@ -97,5 +111,5 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 0 (Connect) proven** via `tools/ConnectSmoke` (identity OK); Unity Connect scene ready
+- **Phase:** **slice 1 (Move)** — Unity Editor deferred; headless smokes are the gate
 - **POC north-star:** not started
