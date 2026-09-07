@@ -54,6 +54,7 @@ import {
   ROBE_EMISSIVE_SCALE,
   type HumanoidParts,
 } from './world/humanoid';
+import { createTrainingDummy } from './world/dummy';
 import {
   casterMuzzle,
   createEmberBeam,
@@ -107,6 +108,8 @@ type NpcMesh = {
   /** Overhead chevron for local selection reticule. */
   marker: Mesh;
   mat: StandardMaterial;
+  /** Extra mats faded/flashed with primary (scarecrow wood/head). */
+  extraMats: StandardMaterial[];
   ringMat: StandardMaterial;
   remoteRingMat: StandardMaterial;
   markerMat: StandardMaterial;
@@ -1674,26 +1677,30 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   root.position = new Vector3(npc.x, 0, npc.z);
 
   const isDummy = npc.kind === NPC_KIND_DUMMY;
-  const body = isDummy
-    ? MeshBuilder.CreateCylinder(
-        `npcBody_${npc.npcId}`,
-        { height: 1.6, diameter: 0.9 },
-        scene,
-      )
-    : MeshBuilder.CreateCapsule(
-        `npcBody_${npc.npcId}`,
-        { height: 1.6, radius: 0.32 },
-        scene,
-      );
-  body.parent = root;
-  body.position.y = 0.8;
-
-  const mat = new StandardMaterial(`npcMat_${npc.npcId}`, scene);
-  mat.diffuseColor = isDummy
-    ? new Color3(0.75, 0.55, 0.35)
-    : new Color3(0.7, 0.35, 0.35);
-  mat.specularColor = new Color3(0.1, 0.1, 0.1);
-  body.material = mat;
+  let body: Mesh;
+  let mat: StandardMaterial;
+  let extraMats: StandardMaterial[] = [];
+  if (isDummy) {
+    // Scarecrow / practice dummy — wood post + crossbeam + canvas (not a cylinder).
+    const dummy = createTrainingDummy(scene, `npc_${npc.npcId}`);
+    body = dummy.body;
+    body.parent = root;
+    body.position.y = 0;
+    mat = dummy.mat;
+    extraMats = dummy.extraMats;
+  } else {
+    body = MeshBuilder.CreateCapsule(
+      `npcBody_${npc.npcId}`,
+      { height: 1.6, radius: 0.32 },
+      scene,
+    );
+    body.parent = root;
+    body.position.y = 0.8;
+    mat = new StandardMaterial(`npcMat_${npc.npcId}`, scene);
+    mat.diffuseColor = new Color3(0.7, 0.35, 0.35);
+    mat.specularColor = new Color3(0.1, 0.1, 0.1);
+    body.material = mat;
+  }
 
   // Local selection reticule — thicker/brighter gold torus (distinct from remote cyan).
   const ring = MeshBuilder.CreateTorus(
@@ -1732,7 +1739,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     scene,
   );
   marker.parent = root;
-  marker.position.y = 2.55;
+  marker.position.y = isDummy ? 2.45 : 2.55;
   marker.rotation.z = Math.PI; // tip points at dummy
   marker.isPickable = false;
   const markerMat = new StandardMaterial(`npcMarkMat_${npc.npcId}`, scene);
@@ -1746,7 +1753,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   if (isDummy) {
     nameplate = createNameplate(scene, `npc_${npc.npcId}`);
     nameplate.mesh.parent = root;
-    nameplate.mesh.position.set(0, 2.0, 0);
+    nameplate.mesh.position.set(0, 2.15, 0);
     paintNameplate(nameplate, 'Dummy', '#e8c89a', npc.maxHp > 0 ? npc.hp / npc.maxHp : 1);
   }
 
@@ -1757,6 +1764,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     remoteRing,
     marker,
     mat,
+    extraMats,
     ringMat,
     remoteRingMat,
     markerMat,
@@ -2313,26 +2321,33 @@ function spawnDeathBurst(scene: Scene, at: Vector3): NpcLifeFx['burst'] {
   return burst;
 }
 
+/** Fade / restore all npc presentation mats (dummy cloth+wood+head). */
+function npcPresentationMats(mesh: NpcMesh): StandardMaterial[] {
+  return [mesh.mat, ...mesh.extraMats];
+}
+
 function beginNpcDeathFx(
   scene: Scene,
   mesh: NpcMesh,
 ): NpcLifeFx {
   mesh.root.setEnabled(true);
   mesh.root.scaling.setAll(1);
-  mesh.body.position.y = 0.8;
-  mesh.mat.alpha = 1;
-  mesh.mat.transparencyMode = 2; // ALPHA_BLEND
+  const baseBodyY = mesh.body.position.y;
+  for (const m of npcPresentationMats(mesh)) {
+    m.alpha = 1;
+    m.transparencyMode = 2; // ALPHA_BLEND
+  }
   mesh.ring.setEnabled(false);
   mesh.remoteRing.setEnabled(false);
   mesh.marker.setEnabled(false);
   if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
   const at = mesh.root.position.clone();
-  at.y += 0.8;
+  at.y += 0.9;
   return {
     phase: 'dying',
     bornMs: Date.now(),
     lifeMs: DEATH_FX_MS,
-    baseBodyY: 0.8,
+    baseBodyY,
     baseEmissive: mesh.mat.emissiveColor.clone(),
     burst: spawnDeathBurst(scene, at),
   };
@@ -2341,16 +2356,18 @@ function beginNpcDeathFx(
 function beginNpcRespawnFx(mesh: NpcMesh): NpcLifeFx {
   mesh.root.setEnabled(true);
   mesh.root.scaling.setAll(0.12);
-  mesh.body.position.y = 0.8;
-  mesh.mat.alpha = 1;
-  mesh.mat.transparencyMode = 0;
-  mesh.mat.emissiveColor = new Color3(0.85, 0.75, 0.35);
+  const baseBodyY = mesh.body.position.y;
+  for (const m of npcPresentationMats(mesh)) {
+    m.alpha = 1;
+    m.transparencyMode = 0;
+    m.emissiveColor = new Color3(0.85, 0.75, 0.35);
+  }
   if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(true);
   return {
     phase: 'spawning',
     bornMs: Date.now(),
     lifeMs: RESPAWN_FX_MS,
-    baseBodyY: 0.8,
+    baseBodyY,
     baseEmissive: new Color3(0, 0, 0),
     burst: [],
   };
@@ -2360,9 +2377,11 @@ function finishNpcLifeFx(mesh: NpcMesh, fx: NpcLifeFx): void {
   disposeLifeBurst(fx);
   mesh.root.scaling.setAll(1);
   mesh.body.position.y = fx.baseBodyY;
-  mesh.mat.alpha = 1;
-  mesh.mat.transparencyMode = 0;
-  mesh.mat.emissiveColor = fx.baseEmissive.clone();
+  for (const m of npcPresentationMats(mesh)) {
+    m.alpha = 1;
+    m.transparencyMode = 0;
+    m.emissiveColor = fx.baseEmissive.clone();
+  }
   if (fx.phase === 'dying') {
     mesh.root.setEnabled(false);
     if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
@@ -3623,8 +3642,10 @@ async function main(): Promise<void> {
         const scale = 1 - t * 0.88;
         mesh.root.scaling.setAll(Math.max(0.08, scale));
         mesh.body.position.y = fx.baseBodyY - sink;
-        mesh.mat.alpha = Math.max(0, 1 - t);
-        mesh.mat.emissiveColor = new Color3(0.55 * (1 - t), 0.12 * (1 - t), 0.02);
+        for (const m of npcPresentationMats(mesh)) {
+          m.alpha = Math.max(0, 1 - t);
+          m.emissiveColor = new Color3(0.55 * (1 - t), 0.12 * (1 - t), 0.02);
+        }
         for (const b of fx.burst) {
           b.mesh.position.x += b.vx * dt;
           b.mesh.position.y += b.vy * dt;
@@ -3643,11 +3664,10 @@ async function main(): Promise<void> {
         const scale = 0.12 + ease * 0.88;
         mesh.root.scaling.setAll(scale);
         const flash = 1 - t;
-        mesh.mat.emissiveColor = new Color3(
-          0.85 * flash,
-          0.7 * flash,
-          0.25 * flash,
-        );
+        const spawnEm = new Color3(0.85 * flash, 0.7 * flash, 0.25 * flash);
+        for (const m of npcPresentationMats(mesh)) {
+          m.emissiveColor = spawnEm.clone();
+        }
         if (age >= fx.lifeMs) {
           finishNpcLifeFx(mesh, fx);
           npcLifeFx.delete(key);
@@ -4664,6 +4684,85 @@ async function main(): Promise<void> {
       window.setTimeout(waitPolish, 200);
     };
     window.setTimeout(waitPolish, 600);
+  }
+
+  // ?ve=dummy — frame scarecrow/practice dummy at play-cam under canonical #39 lights.
+  if (ve === 'dummy') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 2.75;
+  }
+  if (net && ve === 'dummy') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE dummy: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitDummy = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        // Stand ~5.5–7m out so scarecrow fills play-cam (reads as TARGET / hit-me).
+        if (dist > 7.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - 5.8);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        } else if (dist < 4.8) {
+          const step = Math.min(MAX_STEP_METERS, 5.8 - dist);
+          net.sendMove((-dx / dist) * step, (-dz / dist) * step);
+        }
+        // Bias toward dummy so wood post + X-pad + sack head dominate the shot.
+        camera.setTarget(
+          new Vector3(
+            player.position.x * 0.15 + dummy.x * 0.85,
+            1.2,
+            player.position.z * 0.15 + dummy.z * 0.85,
+          ),
+        );
+        camera.radius = 9.5;
+        camera.alpha = Math.PI / 2.15;
+        camera.beta = Math.PI / 2.75;
+      }
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const scarecrow =
+        !!(mesh && mesh.extraMats.length >= 2 && mesh.body.getChildMeshes().length >= 5);
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        mesh &&
+        scarecrow &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent =
+            `Dummy OK · scarecrow silhouette · wood+canvas · canonical forest lights · #${dummy.npcId}`;
+        }
+        if (okTicks < 6 && ticks < 140) {
+          window.setTimeout(waitDummy, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE dummy: Connected · dummy ${dummy ? 'yes' : 'no'} · parts ${scarecrow ? 'ok' : '…'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE dummy: timed out waiting for scarecrow dummy';
+        return;
+      }
+      window.setTimeout(waitDummy, 200);
+    };
+    window.setTimeout(waitDummy, 700);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.

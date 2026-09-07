@@ -51,6 +51,7 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Cloth vs skin vs wood staff material separation; staff orb readable
 - Still kitbash-OK until free packs land; must read as a *person*
 - VE: `?ve=humanoid-polish`
+- Training dummy scarecrow (#45): `?ve=dummy` (`ve/babylon-dummy.png`)
 
 ### Path / ground targets (Issue #44)
 
@@ -124,7 +125,7 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
   distant mountains stay **procedural**; sky dome + locked #32/#39 cyan fog / warm sun / cool hemi.
   Procedural fallback keeps post-#40 ThinInstance density + LOD if the pack fails to load.
 - `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
-  silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy stays cylinder.
+  silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy is procedural scarecrow (wood post + crossbeam + canvas/sack; `web/src/world/dummy.ts`, #45).
 
 Vendored under `web/public/third-party/quaternius-stylized-nature/` (see ledger). Visual north star remains Issue #31 / mood brief above.
 

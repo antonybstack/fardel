@@ -135,9 +135,10 @@ See `web/README.md` for exact commands.
   (`?ve=path-ground`, `ve/babylon-path-ground.png`); sky/horizon silhouette #55
   (`?ve=sky-horizon`, `ve/babylon-sky-horizon.png`)
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
-  staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
+  staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; training dummy scarecrow (`web/src/world/dummy.ts`, #45, `?ve=dummy`)
   (`ve/babylon-humanoid.png`); readability polish #33 (`?ve=humanoid-polish`,
-  `ve/babylon-humanoid-polish.png`)
+  `ve/babylon-humanoid-polish.png`); training dummy scarecrow #45 (`?ve=dummy`,
+  `ve/babylon-dummy.png`)
 - **Second-client shared yard (presentation):** remote `PlayerPose` identities
   render as distinct tinted humanoids; HUD `remotes:` line; `?ve=two-client` +
   `tools/SecondClient` headless mover (`ve/babylon-two-client.png`)
