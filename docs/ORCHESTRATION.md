@@ -99,8 +99,12 @@ Do not re-ping Reviewer or Lead about a PR that is already merged — check `gh 
 
 - Target **`develop`**, never `main` (except Release’s promote PR).
 - Body includes `Fixes #N` (or `Closes #N`) so merge closes the Issue.
-- **VE required** for user-visible changes: commit `ve/*.png` **and** embed in the PR body.
-- `ve/` is often gitignored → use `git add -f ve/<file>.png`.
+- **VE required** for user-visible changes: commit a **real** PNG under repo-root `ve/` **and** embed it in the PR body.
+- `ve/` is often gitignored → use `git add -f ve/<file>.png`. Never commit text placeholders as `.png`.
+- **PR embeds MUST be absolute raw URLs** so GitHub renders them:
+  `![label](https://raw.githubusercontent.com/antonybstack/fardel/<branch>/ve/<file>.png)`
+  Relative `![...](ve/foo.png)` resolves under `/pull/` and **breaks** (shows as `…/pull/ve/…`).
+- Optional: paste extra shots into a PR comment (GitHub `user-attachments` hosting). That is fine as supplemental evidence, **not** a substitute for committed `ve/` + absolute raw embed (Reviewer standing bar).
 - Serialize **schema / reducer / Spacetime module** edits to **one Dev at a time**. Client-only Cosmetics can parallel.
 - After merge: Lead broadcasts new `develop` tip SHA; open branches rebase onto it before next push.
 
