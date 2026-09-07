@@ -112,6 +112,74 @@ function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number)
 }
 
 
+
+/** DOM selected-target frame (name + HP + short id). Hidden when no target. */
+function updateTargetFrame(target: NpcView | null | undefined): void {
+  const frame = document.getElementById('targetFrame');
+  if (!frame) return;
+  if (!target || target.npcId === 0n || target.hp <= 0) {
+    frame.classList.add('hidden');
+    return;
+  }
+  frame.classList.remove('hidden');
+  const nameEl = document.getElementById('tfName');
+  const idEl = document.getElementById('tfId');
+  const fill = document.getElementById('tfHpFill');
+  const label = document.getElementById('tfHpLabel');
+  const name = target.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+  if (nameEl) nameEl.textContent = name;
+  if (idEl) idEl.textContent = `#${target.npcId.toString()}`;
+  const frac = target.maxHp > 0 ? Math.max(0, Math.min(1, target.hp / target.maxHp)) : 0;
+  if (fill) {
+    fill.style.width = `${(frac * 100).toFixed(1)}%`;
+    fill.classList.toggle('mid', frac <= 0.4 && frac > 0.18);
+    fill.classList.toggle('low', frac <= 0.18);
+  }
+  if (label) label.textContent = `${target.hp}/${target.maxHp}`;
+}
+
+/** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff dim. */
+function updateSpellHotbar(opts: {
+  gcdMs: number;
+  castingMs: number;
+  castingTotal: number;
+  castingSpell: number;
+  staffEquipped: boolean;
+}): void {
+  const gcdPct = opts.gcdMs > 0 ? Math.min(100, (opts.gcdMs / 1200) * 100) : 0;
+  const castPct =
+    opts.castingTotal > 0 && opts.castingMs > 0
+      ? Math.min(100, ((opts.castingTotal - opts.castingMs) / opts.castingTotal) * 100)
+      : 0;
+  const castingEmber =
+    opts.castingSpell === SPELL_EMBERBOLT && opts.castingMs > 0 && opts.castingTotal > 0;
+
+  const applySlot = (
+    slotId: string,
+    sweepId: string,
+    castId: string,
+    isCastingThis: boolean,
+  ) => {
+    const slot = document.getElementById(slotId);
+    const sweep = document.getElementById(sweepId);
+    const cast = document.getElementById(castId);
+    if (!slot || !sweep || !cast) return;
+    slot.classList.toggle('disabled', !opts.staffEquipped);
+    slot.classList.toggle('onGcd', opts.gcdMs > 0 && opts.staffEquipped);
+    slot.classList.toggle('casting', isCastingThis && opts.staffEquipped);
+    sweep.style.height = opts.staffEquipped ? `${gcdPct}%` : '0%';
+    cast.style.height = isCastingThis && opts.staffEquipped ? `${castPct}%` : '0%';
+  };
+
+  applySlot('slotSpark', 'sweepSpark', 'castSpark', false);
+  applySlot(
+    'slotEmberbolt',
+    'sweepEmberbolt',
+    'castEmberbolt',
+    castingEmber,
+  );
+}
+
 /** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
 const MINIMAP_RANGE_M = 48;
 
@@ -1194,6 +1262,28 @@ async function main(): Promise<void> {
     );
     const castLeft = Math.max(0, castUntilMs - now);
     setGcdBar(gcdLeft, castLeft, castTotalMs);
+    {
+      const st = latestStatus;
+      const tgt =
+        st.state === 'connected'
+          ? st.targetNpc ??
+            (selectedTargetId !== 0n
+              ? (net?.getNpcs().find((n) => n.npcId === selectedTargetId) ?? null)
+              : null)
+          : null;
+      updateTargetFrame(tgt);
+      const equipped =
+        st.state === 'connected'
+          ? (st.character?.staffEquipped ?? true)
+          : true;
+      updateSpellHotbar({
+        gcdMs: gcdLeft,
+        castingMs: castLeft,
+        castingTotal: castTotalMs,
+        castingSpell: lastCastSpell,
+        staffEquipped: equipped,
+      });
+    }
     if (latestStatus.state === 'connected') {
       setStatus(formatStatus(latestStatus, now));
       const equipped = latestStatus.character?.staffEquipped ?? true;
@@ -1817,6 +1907,99 @@ async function main(): Promise<void> {
       window.setTimeout(waitPlates, 200);
     };
     window.setTimeout(waitPlates, 700);
+  }
+
+  // ?ve=hotbar / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
+  if (ve === 'hotbar' || ve === 'target-frame') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && (ve === 'hotbar' || ve === 'target-frame')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hotbar: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let castSent = false;
+    const waitHotbar = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 5.5) {
+          const step = Math.min(MAX_STEP_METERS, dist - 3.5);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.2,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 11;
+      }
+      if (st.state === 'connected' && dummy && !castSent) {
+        const ch = net.getCharacter();
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          window.setTimeout(waitHotbar, 250);
+          return;
+        }
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          lastCastSpell = SPELL_SPARK;
+          net.cast(SPELL_SPARK);
+          castSent = true;
+          window.setTimeout(() => {
+            if (!net) return;
+            if (gcdRemainingMs(net.getCombat()) <= 0) {
+              lastCastSpell = SPELL_EMBERBOLT;
+              castTotalMs = EMBERBOLT_CAST_MS;
+              castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+              net.cast(SPELL_EMBERBOLT);
+            }
+          }, 1300);
+        }
+      }
+      const frame = document.getElementById('targetFrame');
+      const hotbar = document.getElementById('spellHotbar');
+      const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+      const combat = net.getCombat();
+      const gcdLeftNow = gcdRemainingMs(combat);
+      const nameTxt = document.getElementById('tfName')?.textContent || '';
+      const nameOk = nameTxt.length > 0 && nameTxt !== '—';
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        frameVisible &&
+        nameOk &&
+        hotbar &&
+        castSent &&
+        (gcdLeftNow > 0 || castUntilMs > Date.now())
+      ) {
+        if (mark) {
+          mark.textContent = `Hotbar OK · target Dummy #${dummy.npcId} HP ${dummy.hp}/${dummy.maxHp} · Spark/Emberbolt slots · GCD ${(gcdLeftNow / 1000).toFixed(1)}s`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE hotbar: Connected · dummy ${dummy ? 'yes' : 'no'} · frame ${frameVisible ? 'on' : 'off'} · castSent=${castSent} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE hotbar: timed out waiting for target frame + hotbar';
+        return;
+      }
+      window.setTimeout(waitHotbar, 200);
+    };
+    window.setTimeout(waitHotbar, 700);
   }
 
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).

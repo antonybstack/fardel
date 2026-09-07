@@ -9,9 +9,33 @@
   <body>
     <canvas id="renderCanvas"></canvas>
     <canvas id="minimap" width="160" height="160" aria-label="Minimap"></canvas>
+    <div id="spellHotbar" aria-label="Spell hotbar">
+      <div class="spellSlot" id="slotSpark" data-spell="spark">
+        <div class="slotSweep" id="sweepSpark"></div>
+        <div class="slotCast" id="castSpark"></div>
+        <span class="slotKey">1</span>
+        <span class="slotName">Spark</span>
+      </div>
+      <div class="spellSlot" id="slotEmberbolt" data-spell="emberbolt">
+        <div class="slotSweep" id="sweepEmberbolt"></div>
+        <div class="slotCast" id="castEmberbolt"></div>
+        <span class="slotKey">2</span>
+        <span class="slotName">Emberbolt</span>
+      </div>
+    </div>
     <div id="hud">
       <div id="status">Booting…</div>
       <div id="persistMark" class="persistMark"></div>
+      <div id="targetFrame" class="hidden" aria-label="Selected target">
+        <div class="tfNameRow">
+          <span id="tfName">—</span>
+          <span id="tfId" class="tfId"></span>
+        </div>
+        <div class="tfHpBar">
+          <div class="tfHpFill" id="tfHpFill"></div>
+          <span class="tfHpLabel" id="tfHpLabel">—</span>
+        </div>
+      </div>
       <div id="combatBars">
         <div class="bar" id="gcdBar">
           <div class="barFill" id="gcdFill"></div>

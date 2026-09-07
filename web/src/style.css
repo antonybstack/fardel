@@ -120,3 +120,176 @@ body {
   background: rgba(6, 10, 20, 0.72);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
 }
+
+/* Selected-target frame — compact name + HP, stacked above combat GCD/cast. */
+#targetFrame {
+  display: flex;
+  flex-direction: column;
+  width: min(280px, 80vw);
+  padding: 7px 10px 8px;
+  background: rgba(8, 12, 24, 0.78);
+  border: 1px solid rgba(106, 162, 255, 0.35);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.32);
+}
+
+#targetFrame.hidden {
+  display: none;
+}
+
+.tfNameRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+#tfName {
+  color: #e8eefc;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+.tfId {
+  color: #8aa0c8;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tfHpBar {
+  position: relative;
+  height: 16px;
+  background: rgba(12, 12, 16, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.tfHpFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  background: linear-gradient(90deg, #2f8f55, #5ed68a);
+  transition: width 80ms linear, background 120ms ease;
+}
+
+.tfHpFill.mid {
+  background: linear-gradient(90deg, #a87a12, #e6be37);
+}
+
+.tfHpFill.low {
+  background: linear-gradient(90deg, #a02820, #dc463c);
+}
+
+.tfHpLabel {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 0 8px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #e8eefc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  text-align: center;
+}
+
+
+/* Bottom-center dual spell hotbar */
+#spellHotbar {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  z-index: 12;
+  pointer-events: none;
+  display: flex;
+  gap: 10px;
+}
+
+.spellSlot {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 12px;
+  background: rgba(8, 12, 24, 0.82);
+  border: 1px solid rgba(106, 162, 255, 0.4);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.spellSlot.disabled {
+  opacity: 0.42;
+  filter: grayscale(0.55);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.spellSlot.onGcd {
+  border-color: rgba(106, 162, 255, 0.22);
+}
+
+.spellSlot.casting {
+  border-color: rgba(255, 179, 71, 0.75);
+  box-shadow: 0 0 14px rgba(255, 140, 40, 0.35);
+}
+
+.slotKey {
+  position: absolute;
+  left: 6px;
+  top: 4px;
+  z-index: 2;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9ec0ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.slotName {
+  position: relative;
+  z-index: 2;
+  font-size: 12px;
+  font-weight: 650;
+  color: #e8eefc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.slotSweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0%;
+  z-index: 1;
+  background: rgba(4, 8, 18, 0.72);
+  pointer-events: none;
+  transition: height 40ms linear;
+}
+
+.slotCast {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0%;
+  z-index: 1;
+  background: linear-gradient(0deg, rgba(196, 90, 18, 0.55), rgba(255, 179, 71, 0.35));
+  pointer-events: none;
+  transition: height 40ms linear;
+}
+
+#slotSpark .slotName {
+  color: #b8d8ff;
+}
+
+#slotEmberbolt .slotName {
+  color: #ffc48a;
+}
