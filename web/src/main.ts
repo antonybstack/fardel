@@ -239,7 +239,7 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   if (label) label.textContent = `${target.hp}/${target.maxHp}`;
 }
 
-/** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots visible. */
+/** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots (?ve=hotbar / hotbar-afford). */
 let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = null;
 
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
@@ -5800,13 +5800,13 @@ async function main(): Promise<void> {
     window.setTimeout(waitPlates, 700);
   }
 
-  // ?ve=hotbar / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
-  if (ve === 'hotbar' || ve === 'target-frame') {
+  // ?ve=hotbar / ?ve=hotbar-afford / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
+  if (ve === 'hotbar' || ve === 'hotbar-afford' || ve === 'target-frame') {
     camera.radius = 12;
     camera.alpha = Math.PI / 2.4;
     camera.beta = Math.PI / 3.2;
   }
-  if (net && (ve === 'hotbar' || ve === 'target-frame')) {
+  if (net && (ve === 'hotbar' || ve === 'hotbar-afford' || ve === 'target-frame')) {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE hotbar: waiting for Connected + Dummy…';
     let ticks = 0;
@@ -5845,7 +5845,10 @@ async function main(): Promise<void> {
           window.setTimeout(waitHotbar, 250);
           return;
         }
-        if (gcdRemainingMs(net.getCombat()) <= 0) {
+        // hotbar-afford: skip cast — proof is empty/STAFF/OOM chrome only.
+        if (ve === 'hotbar-afford') {
+          castSent = true;
+        } else if (gcdRemainingMs(net.getCombat()) <= 0) {
           lastCastSpell = SPELL_SPARK;
           net.cast(SPELL_SPARK);
           castSent = true;
@@ -5867,17 +5870,19 @@ async function main(): Promise<void> {
       const gcdLeftNow = gcdRemainingMs(combat);
       const nameTxt = document.getElementById('tfName')?.textContent || '';
       const nameOk = nameTxt.length > 0 && nameTxt !== '—';
+      const affordReady =
+        ve === 'hotbar-afford' ||
+        (castSent && (gcdLeftNow > 0 || castUntilMs > Date.now() || veHotbarPresent));
       if (
         st.state === 'connected' &&
         dummy &&
         frameVisible &&
         nameOk &&
         hotbar &&
-        castSent &&
-        (gcdLeftNow > 0 || castUntilMs > Date.now() || veHotbarPresent)
+        affordReady
       ) {
-        // Seed distinct affordances for hotbar proof: empty 3–6 + Spark STAFF + Emberbolt OOM.
-        if (ve === 'hotbar') {
+        // Seed distinct affordances: empty 3–6 + Spark STAFF + Emberbolt OOM (hotbar + hotbar-afford).
+        if (ve === 'hotbar' || ve === 'hotbar-afford') {
           veHotbarPresent = { sparkDisabled: true, emberLowMana: true };
           updateSpellHotbar({
             gcdMs: 0,
@@ -5891,8 +5896,9 @@ async function main(): Promise<void> {
           });
           const emptyCount = hotbar.querySelectorAll('.spellSlot.empty').length;
           if (mark) {
+            const tag = ve === 'hotbar-afford' ? 'Hotbar-afford OK' : 'Hotbar OK';
             mark.textContent =
-              `Hotbar OK · empty ${emptyCount} · Spark STAFF (disabled) · Emberbolt OOM · target Dummy #${dummy.npcId}`;
+              `${tag} · empty ${emptyCount} · Spark STAFF (disabled) · Emberbolt OOM · target Dummy #${dummy.npcId}`;
           }
         } else if (mark) {
           mark.textContent = `Hotbar OK · target Dummy #${dummy.npcId} HP ${dummy.hp}/${dummy.maxHp} · Spark/Emberbolt slots · GCD ${(gcdLeftNow / 1000).toFixed(1)}s`;
