@@ -5,6 +5,7 @@ import {
   DynamicTexture,
   Engine,
   InstancedMesh,
+  Material,
   Mesh,
   MeshBuilder,
   Scene,
@@ -1117,6 +1118,24 @@ function createScene(engine: Engine): {
   // Local player: procedural humanoid + staff (crowd proxies stay capsules).
   const humanoid = createPlayerHumanoid(scene);
   const player = humanoid.root;
+  let localGhostOn = false;
+  /** Brief translucent blue-grey robe while Character.Hp≤0 (client-only). */
+  const setLocalGhost = (on: boolean): void => {
+    if (on === localGhostOn) return;
+    localGhostOn = on;
+    const mat = humanoid.mat;
+    if (on) {
+      mat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+      mat.alpha = 0.42;
+      mat.diffuseColor = new Color3(0.48, 0.58, 0.78);
+      mat.emissiveColor = new Color3(0.38, 0.58, 0.92);
+    } else {
+      mat.alpha = 1;
+      mat.transparencyMode = Material.MATERIAL_OPAQUE;
+      mat.diffuseColor = humanoid.robeBaseColor.clone();
+      mat.emissiveColor = humanoid.robeBaseColor.scale(0.08);
+    }
+  };
   player.position = new Vector3(0, 0, 0);
 
   // CrowdProxy source mesh (hidden) — instances are amber, distinct from local blue player.
@@ -2727,9 +2746,13 @@ async function main(): Promise<void> {
         if (typeof ch.hp === 'number') {
           if (prevPlayerHp === null) {
             prevPlayerHp = ch.hp;
-            if (ch.hp <= 0) setDeathGreyout(true, 'Respawning at yard…');
+            if (ch.hp <= 0) {
+              setDeathGreyout(true, 'Respawning at yard…');
+              setLocalGhost(true);
+            }
           } else if (ch.hp <= 0 && prevPlayerHp > 0) {
             setDeathGreyout(true, 'Respawning at yard…');
+            setLocalGhost(true);
             pushCombatLog('death', 'You died');
             pushSystemToast('death', 'You died · respawning', TOAST_VE_TTL_MS);
             selectedTargetId = 0n;
@@ -2737,6 +2760,7 @@ async function main(): Promise<void> {
             prevPlayerHp = ch.hp;
           } else if (ch.hp > 0 && prevPlayerHp <= 0) {
             setDeathGreyout(false);
+            setLocalGhost(false);
             pushCombatLog('respawn', 'You respawned at yard');
             pushSystemToast('respawn', 'Respawned · full HP', TOAST_VE_TTL_MS);
             flashMesh(humanoid.mat, new Color3(0.55, 0.85, 1.0), 900);
@@ -2746,6 +2770,15 @@ async function main(): Promise<void> {
             if (ch.hp < prevPlayerHp) {
               const dmg = prevPlayerHp - ch.hp;
               pushCombatLog('damage', `Thorns −${dmg} · You ${ch.hp}/${ch.maxHp}`);
+              damageFloaters.push(
+                spawnDamageFloater(
+                  scene,
+                  player.position,
+                  dmg,
+                  new Color3(1.0, 0.35, 0.45),
+                ),
+              );
+              flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
             }
             prevPlayerHp = ch.hp;
           }
@@ -5538,11 +5571,13 @@ async function main(): Promise<void> {
         setDeathGreyout(true, 'Respawning at yard…');
         if (mark) {
           mark.textContent =
-            `Player HP OK · You died · greyout · self HP ${hpLabel || (ch ? `${ch.hp}/${ch.maxHp}` : '—')} · casts ${casts}`;
+            `Player HP OK · You died · greyout · ghost · self HP ${hpLabel || (ch ? `${ch.hp}/${ch.maxHp}` : '—')} · casts ${casts}`;
+          setLocalGhost(true);
         }
         // Keep re-asserting greyout so a fast respawn still shows for the shot.
         const hold = () => {
           setDeathGreyout(true, 'Respawning at yard…');
+          setLocalGhost(true);
           window.setTimeout(hold, 200);
         };
         hold();
