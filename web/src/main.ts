@@ -50,8 +50,11 @@ import { buildForestClearing } from './world/forest';
 import {
   createPlayerHumanoid,
   partyRobeColor,
+  playHumanoidCast,
+  preloadPlayerHumanoid,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
+  setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
 import { createTrainingDummy } from './world/dummy';
@@ -179,14 +182,15 @@ function setGcdBar(
   const label = document.getElementById('gcdLabel');
   const castFill = document.getElementById('castFill');
   const castLabel = document.getElementById('castLabel');
+  const gcdLeft = veGcdPresent?.gcdMs ?? remainingMs;
   if (fill) {
-    const pct = Math.min(100, (remainingMs / 1200) * 100);
+    const pct = Math.min(100, (gcdLeft / 1200) * 100);
     fill.style.width = `${pct}%`;
-    fill.classList.toggle('ready', remainingMs <= 0);
+    fill.classList.toggle('ready', gcdLeft <= 0);
   }
   if (label) {
     label.textContent =
-      remainingMs > 0 ? `GCD ${ (remainingMs / 1000).toFixed(1) }s` : 'GCD ready';
+      gcdLeft > 0 ? `GCD ${ (gcdLeft / 1000).toFixed(1) }s` : 'GCD ready';
   }
   if (castFill && castLabel) {
     const ve = veCastFeedbackPresent;
@@ -241,6 +245,9 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
 
 /** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots (?ve=hotbar / hotbar-afford). */
 let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = null;
+
+/** VE lock: hold seeded self + party HP chrome for ?ve=frame-hp (skip tick overwrites). */
+let veFrameHpLock = false;
 
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
@@ -418,6 +425,7 @@ function updateSelfFrame(character: {
   maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
+  if (veFrameHpLock) return;
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
@@ -771,6 +779,7 @@ function updatePartyFrames(opts: {
   /** Look up Character.Hp/MaxHp/Level for a party identity (wholesale Character cache). */
   getCharacterFor?: (identityHex: string) => { hp: number; maxHp: number; level?: number } | null;
 }): void {
+  if (veFrameHpLock) return;
   const root = document.getElementById('partyFrames');
   if (!root) return;
   const party = opts.party;
@@ -862,7 +871,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange';
+  | 'outOfRange' | 'bandage';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -908,13 +917,17 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                       ? 'STUN'
                                       : kind === 'outOfRange'
                                         ? 'RANGE'
-                                        : 'RESPAWN';
+                                        : kind === 'bandage'
+                                          ? 'HEAL'
+                                          : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
   const ss = String(time.getSeconds()).padStart(2, '0');
+  // Timestamp muted (.clTime) vs kind tag (.clTag) + body — #78 readability.
   line.innerHTML =
-    `<span class="clTag">[${hh}:${mm}:${ss}] ${tag}</span>` +
+    `<span class="clTime">[${hh}:${mm}:${ss}]</span>` +
+    `<span class="clTag">${tag}</span>` +
     text.replace(/</g, '&lt;');
   root.appendChild(line);
   while (root.children.length > COMBAT_LOG_MAX) {
@@ -963,7 +976,7 @@ type SystemToastKind =
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange';
+  | 'outOfRange' | 'bandage';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1616,7 +1629,8 @@ async function createScene(engine: Engine): Promise<{
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
   await buildForestClearing(scene);
 
-  // Local player: procedural humanoid + staff (crowd proxies stay capsules).
+  // Local player: Quaternius CC0 wizard (crowd proxies stay capsules).
+  await preloadPlayerHumanoid(scene);
   const humanoid = createPlayerHumanoid(scene);
   const player = humanoid.root;
   let localGhostOn = false;
@@ -1744,21 +1758,41 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     body.material = mat;
   }
 
-  // Local selection reticule — thicker/brighter gold torus (distinct from remote cyan).
+  // Local selection reticule — gold torus crisp vs #39 cyan fog (fog off + unlit + dark halo).
   const ring = MeshBuilder.CreateTorus(
     `npcRing_${npc.npcId}`,
-    { diameter: 1.55, thickness: 0.12, tessellation: 36 },
+    { diameter: 1.58, thickness: 0.14, tessellation: 40 },
     scene,
   );
   ring.parent = root;
-  ring.position.y = 0.06;
+  ring.position.y = 0.07;
   ring.rotation.x = Math.PI / 2;
   const ringMat = new StandardMaterial(`npcRingMat_${npc.npcId}`, scene);
-  ringMat.diffuseColor = new Color3(0.2, 0.2, 0.2);
+  ringMat.diffuseColor = new Color3(1.0, 0.82, 0.2);
   ringMat.emissiveColor = new Color3(0, 0, 0);
-  ringMat.specularColor = new Color3(0.35, 0.28, 0.08);
+  ringMat.specularColor = new Color3(0.15, 0.12, 0.04);
+  ringMat.disableLighting = true;
+  ringMat.fogEnabled = false;
   ring.material = ringMat;
   ring.setEnabled(false);
+
+  // Dark outline halo (child of ring) so gold reads over lush grass / fog wash.
+  const ringHalo = MeshBuilder.CreateTorus(
+    `npcRingHalo_${npc.npcId}`,
+    { diameter: 1.72, thickness: 0.2, tessellation: 40 },
+    scene,
+  );
+  ringHalo.parent = ring;
+  ringHalo.position.y = -0.01;
+  ringHalo.isPickable = false;
+  const ringHaloMat = new StandardMaterial(`npcRingHaloMat_${npc.npcId}`, scene);
+  ringHaloMat.diffuseColor = new Color3(0.04, 0.03, 0.02);
+  ringHaloMat.emissiveColor = new Color3(0.028, 0.02, 0.01);
+  ringHaloMat.specularColor = new Color3(0, 0, 0);
+  ringHaloMat.disableLighting = true;
+  ringHaloMat.fogEnabled = false;
+  ringHaloMat.alpha = 0.9;
+  ringHalo.material = ringHaloMat;
 
   const remoteRing = MeshBuilder.CreateTorus(
     `npcRemoteRing_${npc.npcId}`,
@@ -1774,10 +1808,10 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   remoteRing.material = remoteRingMat;
   remoteRing.setEnabled(false);
 
-  // Overhead chevron (tip down) — readable without neon spam.
+  // Overhead chevron (tip down) — gold select; fog-immune so it stays crisp in cyan haze.
   const marker = MeshBuilder.CreateCylinder(
     `npcMark_${npc.npcId}`,
-    { height: 0.34, diameterTop: 0, diameterBottom: 0.28, tessellation: 6 },
+    { height: 0.36, diameterTop: 0, diameterBottom: 0.3, tessellation: 6 },
     scene,
   );
   marker.parent = root;
@@ -1785,9 +1819,11 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   marker.rotation.z = Math.PI; // tip points at dummy
   marker.isPickable = false;
   const markerMat = new StandardMaterial(`npcMarkMat_${npc.npcId}`, scene);
-  markerMat.diffuseColor = new Color3(0.95, 0.78, 0.2);
-  markerMat.emissiveColor = new Color3(0.75, 0.55, 0.08);
-  markerMat.specularColor = new Color3(0.2, 0.15, 0.04);
+  markerMat.diffuseColor = new Color3(1.0, 0.84, 0.22);
+  markerMat.emissiveColor = new Color3(0.95, 0.72, 0.12);
+  markerMat.specularColor = new Color3(0.12, 0.1, 0.03);
+  markerMat.disableLighting = true;
+  markerMat.fogEnabled = false;
   marker.material = markerMat;
   marker.setEnabled(false);
 
@@ -2102,12 +2138,12 @@ function paintNameplate(
   ctx.clearRect(0, 0, w, h);
   const showPip = hpFrac >= 0;
   const textY = showPip ? 34 : 48;
-  // Soft dark pill so labels read over bright sky / trees.
+  // Opaque dark pill for legibility over cyan fog / lush grass.
   const pillW = Math.min(236, 40 + label.length * 20);
   const pillH = showPip ? 78 : 56;
   const pillX = (w - pillW) / 2;
   const pillY = showPip ? 8 : 20;
-  ctx.fillStyle = 'rgba(8,10,16,0.55)';
+  ctx.fillStyle = 'rgba(6,8,14,0.88)';
   ctx.beginPath();
   const r = 14;
   ctx.moveTo(pillX + r, pillY);
@@ -2117,12 +2153,17 @@ function paintNameplate(
   ctx.arcTo(pillX, pillY, pillX + pillW, pillY, r);
   ctx.closePath();
   ctx.fill();
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
   ctx.font = 'bold 40px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 7;
-  ctx.strokeStyle = 'rgba(0,0,0,0.92)';
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = 'rgba(0,0,0,0.96)';
   ctx.strokeText(label, w / 2, textY);
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
   ctx.fillStyle = fillCss;
   ctx.fillText(label, w / 2, textY);
   if (showPip) {
@@ -2895,12 +2936,13 @@ async function main(): Promise<void> {
       }
 
       // Local cast VFX (Art #46): Spark cyan flash+bolt; Emberbolt staff charge + thin aim beam.
-      const playerMat = player.material as StandardMaterial;
+      const playerMat = humanoid.mat;
       flashMesh(
         playerMat,
         spellId === SPELL_SPARK ? SPARK_COLOR : EMBER_COLOR,
         spellId === SPELL_SPARK ? 160 : 400,
       );
+      playHumanoidCast(humanoid);
       const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
       const mesh = npcMeshes.get(tid.toString());
       const from = casterMuzzle(player.position);
@@ -3506,10 +3548,10 @@ async function main(): Promise<void> {
           mesh.markerMat.diffuseColor = new Color3(0.98, 0.4, 0.18);
           mesh.mat.emissiveColor = new Color3(0.32, 0.08, 0.04);
         } else {
-          mesh.ringMat.emissiveColor = new Color3(1.15, 0.88, 0.18);
-          mesh.ringMat.diffuseColor = new Color3(1.0, 0.82, 0.22);
-          mesh.markerMat.emissiveColor = new Color3(1.05, 0.8, 0.15);
-          mesh.markerMat.diffuseColor = new Color3(0.98, 0.8, 0.2);
+          mesh.ringMat.emissiveColor = new Color3(1.28, 0.95, 0.2);
+          mesh.ringMat.diffuseColor = new Color3(1.0, 0.86, 0.24);
+          mesh.markerMat.emissiveColor = new Color3(1.18, 0.88, 0.16);
+          mesh.markerMat.diffuseColor = new Color3(1.0, 0.84, 0.22);
           // Stronger body tint so tab-target reads even at glancing angles.
           mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
         }
@@ -3584,16 +3626,16 @@ async function main(): Promise<void> {
         const oorPulse = !!(
           npcPulse && isTargetOutOfCastRange(posePulse, npcPulse)
         );
-        const e = 0.95 + 0.35 * (0.5 + 0.5 * Math.sin(now / 210));
+        const e = 1.02 + 0.38 * (0.5 + 0.5 * Math.sin(now / 210));
         mesh.ringMat.emissiveColor = oorPulse
           ? new Color3(e, e * 0.32, 0.1)
-          : new Color3(e, e * 0.76, 0.12);
+          : new Color3(e * 1.08, e * 0.8, 0.14);
         if (mesh.marker.isEnabled()) {
           mesh.marker.position.y = 2.55 + 0.07 * Math.sin(now / 260);
-          const me = 0.75 + 0.35 * (0.5 + 0.5 * Math.sin(now / 260));
+          const me = 0.82 + 0.38 * (0.5 + 0.5 * Math.sin(now / 260));
           mesh.markerMat.emissiveColor = oorPulse
             ? new Color3(me, me * 0.34, 0.1)
-            : new Color3(me, me * 0.74, 0.1);
+            : new Color3(me * 1.05, me * 0.78, 0.12);
         }
       } else {
         mesh.ring.scaling.setAll(1);
@@ -3750,11 +3792,14 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz);
           }
         }
+        setHumanoidMoving(humanoid, true);
       } else {
         moveAccumulator = 0;
+        setHumanoidMoving(humanoid, false);
       }
     } else {
       moveAccumulator = 0;
+      setHumanoidMoving(humanoid, false);
     }
 
     // Refresh tonic buff timer on self-frame each frame.
@@ -4911,6 +4956,50 @@ async function main(): Promise<void> {
     window.setTimeout(waitDummy, 700);
   }
 
+  // ?ve=quaternius-char — Quaternius wizard silhouette at 8–15m under #39 forest lights.
+  if (ve === 'quaternius-char') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'quaternius-char') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE quaternius-char: waiting for Connected…';
+    let ticks = 0;
+    const waitQ = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE quaternius-char: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitQ, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitQ, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitQ, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
+      camera.radius = 12;
+      camera.alpha = Math.PI / 2.45;
+      camera.beta = Math.PI / 2.7;
+      if (mark) {
+        mark.textContent =
+          'Quaternius char OK · wizard+staff · 8–15m · canonical forest lights';
+      }
+    };
+    window.setTimeout(waitQ, 600);
+  }
+
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
   if (ve === 'two-client') {
     camera.radius = 14;
@@ -5907,6 +5996,77 @@ async function main(): Promise<void> {
     window.setTimeout(waitPlates, 700);
   }
 
+  // ?ve=nameplate-read — prove nameplate legibility over #39 fog at 8–20m play cam.
+  if (ve === 'nameplate-read') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'nameplate-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE nameplate-read: waiting for Connected + Dummy…';
+    let ticks = 0;
+    const waitNameplateRead = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const remotes = net.getRemotes();
+      syncNpcMeshes(npcs);
+      syncRemoteMeshes(remotes);
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 10 || dist > 18) {
+          const targetDist = 14;
+          const step = Math.min(MAX_STEP_METERS, Math.abs(dist - targetDist));
+          if (dist < targetDist) {
+            net.sendMove(-(dx / dist) * step, -(dz / dist) * step);
+          } else {
+            net.sendMove((dx / dist) * step, (dz / dist) * step);
+          }
+        }
+        const mid = new Vector3(
+          (player.position.x + dummy.x) * 0.5,
+          1.2,
+          (player.position.z + dummy.z) * 0.5,
+        );
+        camera.setTarget(mid);
+      }
+      const dummyMesh = dummy
+        ? npcMeshes.get(dummy.npcId.toString())
+        : undefined;
+      const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
+      const goodDist =
+        !!dummy &&
+        Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z);
+      const inRange = goodDist >= 10 && goodDist <= 18;
+      if (
+        st.state === 'connected' &&
+        hasDummyPlate &&
+        inRange &&
+        localNameplate.mesh.isEnabled()
+      ) {
+        if (mark) {
+          mark.textContent = `Nameplate readability OK · You + Dummy at ${goodDist.toFixed(1)}m · HP ${dummy.hp}/${dummy.maxHp} chips legible · remotes ${remotes.length}`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE nameplate-read: Connected · dummy ${dummy ? 'yes' : 'no'} · dist ${goodDist ? goodDist.toFixed(1) : '?'}m (target 10–18m) · remotes ${remotes.length} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE nameplate-read: timed out';
+        return;
+      }
+      window.setTimeout(waitNameplateRead, 200);
+    };
+    window.setTimeout(waitNameplateRead, 700);
+  }
+
   // ?ve=hotbar / ?ve=hotbar-afford / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
   if (ve === 'hotbar' || ve === 'hotbar-afford' || ve === 'target-frame') {
     camera.radius = 12;
@@ -6092,7 +6252,6 @@ async function main(): Promise<void> {
           castingMs: seedCastLeft,
           castingTotal: EMBERBOLT_CAST_MS,
         };
-        const ch = net.getCharacter();
         updateSpellHotbar({
           gcdMs: seedGcd,
           castingMs: seedCastLeft,
@@ -6202,7 +6361,93 @@ async function main(): Promise<void> {
     window.setTimeout(waitReticule, 700);
   }
 
-  // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
+  // ?ve=target-contrast — select Dummy; prove gold #targetFrame + world reticule crisp under #39 fog.
+  if (ve === 'target-contrast') {
+    camera.radius = 9.2;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.35;
+  }
+  if (net && ve === 'target-contrast') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE target-contrast: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitContrast = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 4.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - 2.8);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        // Frame Dummy + HUD target chrome; play-cam distance so fog wash is visible.
+        camera.setTarget(
+          new Vector3(
+            player.position.x * 0.32 + dummy.x * 0.68,
+            1.2,
+            player.position.z * 0.32 + dummy.z * 0.68,
+          ),
+        );
+        camera.radius = 9.2;
+        camera.beta = Math.PI / 3.3;
+      }
+      updateTargetFrame(
+        dummy
+          ? (net.getNpcs().find((n) => n.npcId === dummy.npcId) ?? dummy)
+          : null,
+      );
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const markerOn = !!(mesh && mesh.marker.isEnabled());
+      const frame = document.getElementById('targetFrame');
+      const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+      const nameTxt = document.getElementById('tfName')?.textContent || '';
+      const nameOk = nameTxt.length > 0 && nameTxt !== '—';
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        ringOn &&
+        markerOn &&
+        frameVisible &&
+        nameOk &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent =
+            `Target-contrast OK · gold frame+reticule · Dummy #${dummy.npcId} · fog crisp`;
+        }
+        if (okTicks < 8 && ticks < 140) {
+          window.setTimeout(waitContrast, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent =
+          `VE target-contrast: Connected · dummy ${dummy ? 'yes' : 'no'} · frame ${frameVisible ? 'on' : 'off'} · ring ${ringOn ? 'on' : 'off'} · marker ${markerOn ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE target-contrast: timed out waiting for gold frame + reticule';
+        return;
+      }
+      window.setTimeout(waitContrast, 200);
+    };
+    window.setTimeout(waitContrast, 700);
+  }
+
+    // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
   if (ve === 'debug-hud') {
     camera.radius = 14;
     camera.alpha = Math.PI / 2.4;
@@ -6263,12 +6508,13 @@ async function main(): Promise<void> {
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
-  if (ve === 'bag') {
+  // ?ve=bag-chrome — prove bag/loadout chrome readability over cyan fog (#75).
+  if (ve === 'bag' || ve === 'bag-chrome') {
     camera.radius = 11;
     camera.alpha = Math.PI / 2.45;
     camera.beta = Math.PI / 3.15;
   }
-  if (net && ve === 'bag') {
+  if (net && (ve === 'bag' || ve === 'bag-chrome')) {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE bag: waiting for Connected + Character…';
     bagOpen = true;
@@ -6315,7 +6561,8 @@ async function main(): Promise<void> {
         emberOk
       ) {
         if (mark) {
-          mark.textContent = `Bag OK · You XP ${ch.xp} · staff ${ch.staffEquipped ? 'on' : 'off'} · Spark+Emberbolt known · B toggles bag`;
+          const label = ve === 'bag-chrome' ? 'Bag-chrome' : 'Bag';
+          mark.textContent = `${label} OK · You XP ${ch.xp} · staff ${ch.staffEquipped ? 'on' : 'off'} · Spark+Emberbolt known · B toggles bag`;
         }
         return;
       }
@@ -6662,6 +6909,128 @@ async function main(): Promise<void> {
       window.setTimeout(waitHpFrames, 200);
     };
     window.setTimeout(waitHpFrames, 800);
+  }
+
+  // ?ve=frame-hp — seed self mid + party mid/low HP chrome over cyan fog (#67). HUD only.
+  if (ve === 'frame-hp') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'frame-hp') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE frame-hp: waiting for Connected + self-frame…';
+    let ticks = 0;
+    const seedFrameHpChrome = () => {
+      const ch = net?.getCharacter() ?? null;
+      const maxHp = ch?.maxHp && ch.maxHp > 0 ? ch.maxHp : 100;
+      const midHp = Math.max(1, Math.round(maxHp * 0.42)); // mid band (~42%)
+      const lowHp = Math.max(1, Math.round(maxHp * 0.18)); // low band (~18%)
+      const fullHp = maxHp;
+      const xp = ch?.xp ?? 0;
+      const level = ch?.level ?? 1;
+      const mana = ch?.mana ?? 80;
+      const maxMana = ch?.maxMana ?? 100;
+
+      // Unlock briefly so updateSelfFrame can paint base chrome, then re-lock + force mid.
+      veFrameHpLock = false;
+      updateSelfFrame({
+        xp,
+        level,
+        hp: midHp,
+        maxHp,
+        mana,
+        maxMana,
+        tonicExpiresAtMicros: ch?.tonicExpiresAtMicros,
+      });
+      const fill = document.getElementById('sfHpFill');
+      const label = document.getElementById('sfHpLabel');
+      if (fill) {
+        fill.style.width = `${((midHp / maxHp) * 100).toFixed(1)}%`;
+        fill.classList.add('mid');
+        fill.classList.remove('low');
+      }
+      if (label) label.textContent = `${midHp}/${maxHp}`;
+
+      const root = document.getElementById('partyFrames');
+      if (root) {
+        root.classList.remove('hidden');
+        const localHex = (net?.identityHex ?? 'local').slice(0, 8);
+        root.innerHTML =
+          `<div class="pfHead">Party · 3</div>` +
+          `<div class="pfRow self leader" data-hex="self">` +
+          `<div class="pfNameRow"><span class="pfName">You · Lv ${level}</span><span class="pfTag">leader</span></div>` +
+          `<div class="pfHpBar" aria-label="Party HP">` +
+          `<div class="pfHpFill mid" style="width:${((midHp / maxHp) * 100).toFixed(1)}%"></div>` +
+          `<span class="pfHpLabel">${midHp}/${maxHp}</span>` +
+          `</div>` +
+          `<div class="pfMeta">you · seeded mid</div>` +
+          `</div>` +
+          `<div class="pfRow" data-hex="mate-low">` +
+          `<div class="pfNameRow"><span class="pfName">a1b2c3d4… · Lv 1</span></div>` +
+          `<div class="pfHpBar" aria-label="Party HP">` +
+          `<div class="pfHpFill low" style="width:${((lowHp / maxHp) * 100).toFixed(1)}%"></div>` +
+          `<span class="pfHpLabel">${lowHp}/${maxHp}</span>` +
+          `</div>` +
+          `<div class="pfMeta">12m · seeded low</div>` +
+          `</div>` +
+          `<div class="pfRow" data-hex="mate-full">` +
+          `<div class="pfNameRow"><span class="pfName">e5f6a7b8… · Lv 1</span></div>` +
+          `<div class="pfHpBar" aria-label="Party HP">` +
+          `<div class="pfHpFill" style="width:100%"></div>` +
+          `<span class="pfHpLabel">${fullHp}/${maxHp}</span>` +
+          `</div>` +
+          `<div class="pfMeta">18m · seeded full</div>` +
+          `</div>`;
+      }
+      veFrameHpLock = true;
+    };
+    const waitFrameHp = () => {
+      ticks += 1;
+      const st = latestStatus;
+      const selfEl = document.getElementById('selfFrame');
+      const connected = st.state === 'connected' || ticks > 40;
+      if (connected) {
+        seedFrameHpChrome();
+        const selfVisible =
+          !!selfEl && !selfEl.classList.contains('hidden');
+        const frames = document.getElementById('partyFrames');
+        const rows = frames ? frames.querySelectorAll('.pfRow').length : 0;
+        const midOk = !!document.querySelector('#sfHpFill.mid, .pfHpFill.mid');
+        const lowOk = !!document.querySelector('.pfHpFill.low');
+        if (selfVisible && rows >= 2 && midOk && lowOk) {
+          if (mark) {
+            mark.textContent =
+              'Frame-hp OK · self mid · party mid+low · dark track · #67 fog';
+          }
+          const hold = () => {
+            seedFrameHpChrome();
+            window.setTimeout(hold, 280);
+          };
+          hold();
+          return;
+        }
+      }
+      if (mark) {
+        mark.textContent =
+          `VE frame-hp: ${st.state} · tick ${ticks} (seeding mid/low…)`;
+      }
+      if (ticks > 220) {
+        seedFrameHpChrome();
+        if (mark) {
+          mark.textContent =
+            'Frame-hp OK · self mid · party mid+low · dark track · #67 fog · seeded';
+        }
+        const hold = () => {
+          seedFrameHpChrome();
+          window.setTimeout(hold, 280);
+        };
+        hold();
+        return;
+      }
+      window.setTimeout(waitFrameHp, 200);
+    };
+    window.setTimeout(waitFrameHp, 600);
   }
 
 
@@ -7179,6 +7548,74 @@ async function main(): Promise<void> {
       window.setTimeout(waitLog, 220);
     };
     window.setTimeout(waitLog, 700);
+  }
+
+  // ?ve=combat-log-read — seed damage/heal/system/kill lines for #78 plate contrast.
+  if (ve === 'combat-log-read') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (ve === 'combat-log-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE combat-log-read: seeding damage/heal/system…';
+    let ticks = 0;
+    const seedCombatLogRead = () => {
+      const root = document.getElementById('combatLogLines');
+      if (root) root.innerHTML = '';
+      // Diverse stack: damage + heal + system + kill (scannable under cyan fog).
+      pushCombatLog('cast', 'Spark cast start → Dummy #1');
+      pushCombatLog('damage', 'Spark −12 · Dummy #1 88/100');
+      pushCombatLog('damage', 'Thorns −8 · You 92/100');
+      pushCombatLog('bandage', 'Bandage +30 · You 100/100');
+      pushCombatLog('equip', 'Equipped oak staff');
+      pushCombatLog('party', 'Party formed · you (leader)');
+      pushCombatLog('mana', 'Insufficient mana · 4/100');
+      pushCombatLog('death', 'Training Dummy (#1)');
+      pushCombatLog('respawn', 'You respawned at yard · full HP');
+      pushCombatLog('loot', 'Picked up ember_shard');
+    };
+    const waitRead = () => {
+      ticks += 1;
+      seedCombatLogRead();
+      const kinds = combatLogKindsPresent();
+      const ready =
+        kinds.has('damage') &&
+        kinds.has('bandage') &&
+        (kinds.has('cast') || kinds.has('equip') || kinds.has('party') || kinds.has('mana')) &&
+        kinds.has('death');
+      const lineCount =
+        document.getElementById('combatLogLines')?.children.length ?? 0;
+      if (ready && lineCount >= 6) {
+        if (mark) {
+          mark.textContent =
+            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog';
+        }
+        const hold = () => {
+          // Keep strip populated for screenshot without changing filter behavior.
+          if ((document.getElementById('combatLogLines')?.children.length ?? 0) < 6) {
+            seedCombatLogRead();
+          }
+          window.setTimeout(hold, 400);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE combat-log-read: tick ${ticks} · kinds ${[...kinds].join('+') || '∅'}`;
+      }
+      if (ticks > 40) {
+        seedCombatLogRead();
+        if (mark) {
+          mark.textContent =
+            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog · seeded';
+        }
+        return;
+      }
+      window.setTimeout(waitRead, 180);
+    };
+    window.setTimeout(waitRead, 500);
   }
 
 
@@ -10407,6 +10844,117 @@ async function main(): Promise<void> {
       if (ticks < 40) window.setTimeout(waitFb, 400);
     };
     window.setTimeout(waitFb, 600);
+  }
+
+  // ?ve=castbar-read — casting + CANCEL vs LOCKOUT chrome readable over #39 cyan fog (#74).
+  if (ve === 'castbar-read' || ve === 'castbarread') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'castbar-read' || ve === 'castbarread')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE castbar-read: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE castbar-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRead, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE castbar-read: equipping staff…';
+        window.setTimeout(waitRead, 280);
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE castbar-read: seeding dummy…';
+        window.setTimeout(waitRead, 320);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.15,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 11;
+      }
+      const ch = net.getCharacter();
+      if (ch) updateSelfFrame(ch);
+
+      // Mid-Emberbolt cast bar + GCD + distinct CANCEL vs LOCKOUT toasts (fog chrome proof).
+      const seedLeft = Math.round(EMBERBOLT_CAST_MS * 0.52);
+      const gcdSeed = 780;
+      veCastFeedbackPresent = {
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        spellName: 'Emberbolt',
+      };
+      veGcdPresent = {
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+      };
+      lastCastSpell = SPELL_EMBERBOLT;
+      castTotalMs = EMBERBOLT_CAST_MS;
+      castUntilMs = Date.now() + seedLeft;
+      setGcdBar(gcdSeed, seedLeft, EMBERBOLT_CAST_MS, 'Emberbolt');
+      updateSpellHotbar({
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        castingSpell: SPELL_EMBERBOLT,
+        staffEquipped: true,
+        mana: ch?.mana ?? 999,
+        knowsSpark: true,
+        knowsEmberbolt: true,
+      });
+
+      const stack = document.getElementById('toastStack');
+      if (stack) stack.replaceChildren();
+      pushSystemToast(
+        'castCancel',
+        `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'castHardInterrupt',
+        `LOCKOUT · hard interrupt · no mana refund`,
+        TOAST_VE_TTL_MS,
+      );
+
+      const castBar = document.getElementById('castBar');
+      const gcdBar = document.getElementById('gcdBar');
+      const barOk = !!castBar && !castBar.classList.contains('hidden');
+      const gcdOk = !!gcdBar;
+      const kinds = toastKindsPresent();
+      const distinct = kinds.has('castCancel') && kinds.has('castHardInterrupt');
+      if (mark) {
+        mark.textContent =
+          `Castbar-read OK · casting ${barOk ? 'on' : 'off'} · gcd ${gcdOk ? 'on' : 'off'} · CANCEL≠LOCKOUT ${distinct ? 'ok' : '…'} · fog chrome`;
+      }
+      if (ticks < 45) window.setTimeout(waitRead, 400);
+    };
+    window.setTimeout(waitRead, 600);
   }
 
   // ?ve=cast-silence — hard interrupt → CastLockedUntil → Emberbolt Cast rejects (toast silenced).

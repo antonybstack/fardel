@@ -63,27 +63,47 @@ body {
   display: none;
 }
 
-/* Main Emberbolt cast bar — taller, glowing, unmistakable mid-combat. */
+/* Main Emberbolt cast bar — fog-immune warm chrome vs #39 cyan fog. */
 #castBar {
-  height: 28px;
+  height: 30px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 186, 90, 0.72);
-  background: rgba(18, 10, 4, 0.88);
+  border: 2px solid rgba(255, 176, 64, 0.98);
+  background: rgba(12, 6, 2, 0.96);
   box-shadow:
-    0 0 18px rgba(255, 140, 40, 0.42),
-    0 4px 16px rgba(0, 0, 0, 0.45),
-    inset 0 0 0 1px rgba(255, 210, 130, 0.28);
+    0 0 0 2px rgba(6, 4, 2, 0.96),
+    0 0 20px rgba(255, 140, 40, 0.55),
+    0 4px 18px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 220, 150, 0.38);
 }
 
 #castBar .barLabel {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 26px;
-  letter-spacing: 0.02em;
-  color: #fff4e0;
+  letter-spacing: 0.03em;
+  color: #fff8e8;
   text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.85),
-    0 0 10px rgba(255, 160, 60, 0.45);
+    0 1px 3px rgba(0, 0, 0, 0.95),
+    0 0 12px rgba(255, 160, 50, 0.55);
+}
+
+/* GCD bar — cool blue secondary chrome; distinct from warm cast / crimson lockout. */
+#gcdBar {
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 170, 255, 0.72);
+  background: rgba(6, 10, 22, 0.94);
+  box-shadow:
+    0 0 0 1px rgba(4, 6, 14, 0.92),
+    0 2px 10px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(140, 190, 255, 0.18);
+}
+
+#gcdBar .barLabel {
+  font-size: 11px;
+  font-weight: 650;
+  color: #dce8ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 .barFill {
@@ -105,13 +125,13 @@ body {
 .barFill.cast {
   background: linear-gradient(
     90deg,
-    rgba(170, 55, 8, 0.95) 0%,
-    rgba(255, 130, 28, 0.92) 55%,
-    rgba(255, 220, 130, 0.95) 100%
+    rgba(190, 50, 0, 1) 0%,
+    rgba(255, 128, 18, 1) 50%,
+    rgba(255, 230, 120, 1) 100%
   );
   box-shadow:
-    inset 0 0 12px rgba(255, 120, 30, 0.35),
-    2px 0 10px rgba(255, 200, 100, 0.55);
+    inset 0 0 14px rgba(255, 110, 20, 0.45),
+    2px 0 14px rgba(255, 190, 80, 0.7);
   animation: castFillPulse 900ms ease-in-out infinite;
 }
 
@@ -162,16 +182,19 @@ body {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
 }
 
-/* Selected-target frame — compact name + HP, stacked above combat GCD/cast. */
+/* Selected-target frame — gold select chrome; crisp vs #39 cyan fog / grass. */
 #targetFrame {
   display: flex;
   flex-direction: column;
   width: min(280px, 80vw);
   padding: 7px 10px 8px;
-  background: rgba(8, 12, 24, 0.78);
-  border: 1px solid rgba(106, 162, 255, 0.35);
+  background: rgba(10, 10, 16, 0.9);
+  border: 2px solid rgba(232, 186, 48, 0.95);
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.32);
+  box-shadow:
+    0 0 0 2px rgba(10, 8, 4, 0.95),
+    0 0 12px rgba(220, 168, 36, 0.32),
+    0 4px 16px rgba(0, 0, 0, 0.48);
 }
 
 #targetFrame.hidden {
@@ -187,15 +210,17 @@ body {
 }
 
 #tfName {
-  color: #e8eefc;
+  color: #f4e4a8;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: 0.02em;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(210, 160, 40, 0.28);
 }
 
 .tfId {
-  color: #8aa0c8;
+  color: #c4b078;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -203,8 +228,8 @@ body {
 .tfHpBar {
   position: relative;
   height: 16px;
-  background: rgba(12, 12, 16, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(8, 8, 12, 0.92);
+  border: 1px solid rgba(180, 140, 40, 0.45);
   border-radius: 5px;
   overflow: hidden;
 }
@@ -576,27 +601,29 @@ body {
   align-items: center;
   gap: 5px;
   padding: 5px 8px;
-  background: rgba(8, 12, 24, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 12, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 7px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
   min-width: 0;
 }
 
 .loChip.on {
-  border-color: rgba(94, 214, 138, 0.45);
+  border-color: rgba(94, 214, 138, 0.65);
+  background: rgba(12, 20, 16, 0.94);
 }
 
 .loChip.off {
-  opacity: 0.55;
-  filter: grayscale(0.45);
-  border-color: rgba(220, 70, 60, 0.35);
+  opacity: 0.65;
+  filter: grayscale(0.5);
+  border-color: rgba(220, 70, 60, 0.5);
+  background: rgba(18, 8, 8, 0.92);
 }
 
 .loIcon {
   font-size: 12px;
   line-height: 1;
-  color: #c8d6f0;
+  color: #d8e6ff;
 }
 
 .loIcon.staff {
@@ -620,23 +647,23 @@ body {
 }
 
 .loLabel {
-  color: #e8eefc;
+  color: #f0f6ff;
   font-size: 11px;
   font-weight: 650;
 }
 
 .loState {
-  color: #8aa0c8;
+  color: #aec4e8;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
 .loChip.on .loState {
-  color: #5ed68a;
+  color: #6ee89a;
 }
 
 .loChip.off .loState {
-  color: #dc463c;
+  color: #ec564c;
 }
 
 /* Bag / loadout panel — toggled with B. */
@@ -648,10 +675,10 @@ body {
   pointer-events: none;
   width: min(240px, 48vw);
   padding: 10px 12px 9px;
-  background: rgba(8, 12, 24, 0.88);
-  border: 1px solid rgba(196, 160, 106, 0.4);
+  background: rgba(8, 12, 24, 0.94);
+  border: 1px solid rgba(196, 160, 106, 0.6);
   border-radius: 10px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -669,7 +696,7 @@ body {
 }
 
 .bagTitle {
-  color: #e8c89a;
+  color: #f4d6aa;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -688,27 +715,29 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  color: #c8d6f0;
+  color: #d4e0f8;
   font-size: 12px;
 }
 
 .bagRow span:last-child {
-  color: #e8eefc;
+  color: #f0f6ff;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
 .bagRow span:last-child.ok {
-  color: #5ed68a;
+  color: #6ee89a;
+  font-weight: 700;
 }
 
 .bagRow span:last-child.bad {
-  color: #dc463c;
+  color: #ec564c;
+  font-weight: 700;
 }
 
 .bagFoot {
   margin-top: 4px;
-  color: #8aa0c8;
+  color: #9eb4d8;
   font-size: 10px;
   line-height: 1.35;
 }
@@ -853,15 +882,19 @@ body {
   color: #8aa0c8;
 }
 
-/* Party-frame HP bar (Character.Hp / MaxHp for You + mates). */
+/* Party-frame HP bar — dark track + saturated fill punch over cyan fog (#67). */
 .pfHpBar {
   position: relative;
   margin-top: 3px;
   height: 12px;
-  background: rgba(12, 12, 16, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(3, 5, 9, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.88);
   border-radius: 4px;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.45);
 }
 .pfHpFill {
   position: absolute;
@@ -869,17 +902,20 @@ body {
   top: 0;
   bottom: 0;
   width: 100%;
-  background: linear-gradient(90deg, #2f8f5a, #5ed68a);
+  background: linear-gradient(90deg, #178a42, #3ce072);
   transition: width 80ms linear, background 120ms ease;
 }
+/* Self row: same saturated green at full (frame chrome distinguishes You — not fog-cyan). */
 .pfRow.self .pfHpFill {
-  background: linear-gradient(90deg, #2f6f8f, #5eb8d6);
+  background: linear-gradient(90deg, #178a42, #3ce072);
 }
-.pfHpFill.mid {
-  background: linear-gradient(90deg, #a87a12, #e6be37);
+.pfHpFill.mid,
+.pfRow.self .pfHpFill.mid {
+  background: linear-gradient(90deg, #c4860c, #f0c22e);
 }
-.pfHpFill.low {
-  background: linear-gradient(90deg, #a02820, #dc463c);
+.pfHpFill.low,
+.pfRow.self .pfHpFill.low {
+  background: linear-gradient(90deg, #b41c14, #f04836);
 }
 .pfHpLabel {
   position: relative;
@@ -888,8 +924,12 @@ body {
   padding: 0 6px;
   font-size: 9px;
   line-height: 12px;
-  color: #e8eefc;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.98),
+    0 1px 3px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -898,86 +938,129 @@ body {
   border-color: rgba(180, 80, 80, 0.45);
 }
 
-/* Scrolling combat log — right column under minimap (client-only). */
+/* Scrolling combat log — right column under minimap (client-only).
+   #78 readability: dark plate over cyan fog; damage/heal/kill/system distinct, no neon. */
 #combatLog {
   position: absolute;
   right: 12px;
   top: 184px;
   z-index: 12;
   pointer-events: none;
-  width: min(280px, 42vw);
-  max-height: min(280px, 42vh);
+  width: min(292px, 44vw);
+  max-height: min(300px, 44vh);
   display: flex;
   flex-direction: column;
-  background: rgba(8, 12, 24, 0.78);
-  border: 1px solid rgba(255, 179, 71, 0.28);
+  background: rgba(6, 10, 20, 0.88);
+  border: 1px solid rgba(150, 168, 196, 0.34);
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.52),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.045);
   overflow: hidden;
 }
 
 .clHead {
   padding: 5px 9px 3px;
-  color: #ffc48a;
+  color: #d2dae8;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(255, 179, 71, 0.18);
+  border-bottom: 1px solid rgba(150, 168, 196, 0.22);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 .clLines {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 9px 7px;
+  gap: 3px;
+  padding: 6px 9px 8px;
   overflow: hidden;
-  max-height: min(250px, 38vh);
+  max-height: min(268px, 40vh);
 }
 
 .clLine {
-  color: #c8d6f0;
-  font-size: 11px;
-  line-height: 1.35;
+  color: #c6ceda;
+  font-size: 12px;
+  line-height: 1.38;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.clLine.cast {
-  color: #9ec0ff;
-}
-
-.clLine.damage {
-  color: #ffb347;
-  font-weight: 650;
-}
-
-.clLine.equip {
-  color: #e8c89a;
-}
-
-.clLine.party {
-  color: #5ed68a;
-}
-
-.clLine.death {
-  color: #ff7a7a;
-  font-weight: 700;
-}
-
-.clLine.respawn {
-  color: #9ee6c4;
-  font-weight: 650;
+/* Timestamps muted vs message body (#78). */
+.clLine .clTime {
+  color: #7a8799;
+  opacity: 0.88;
+  margin-right: 5px;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .clLine .clTag {
-  opacity: 0.75;
-  margin-right: 4px;
+  opacity: 0.92;
+  margin-right: 5px;
   font-size: 10px;
   font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* System / misc — cool grey-white (default + cast/equip/party/mana/…). */
+.clLine.cast,
+.clLine.equip,
+.clLine.party,
+.clLine.mana,
+.clLine.castCancel,
+.clLine.castPushback,
+.clLine.castHardInterrupt,
+.clLine.silenced,
+.clLine.kick,
+.clLine.stun,
+.clLine.outOfRange {
+  color: #c6ceda;
+}
+
+/* Damage — warm orange→red, not neon. */
+.clLine.damage {
+  color: #e89048;
+  font-weight: 650;
+}
+.clLine.damage .clTag {
+  color: #e07038;
+}
+
+/* Heal — clear green (bandage / rest / tonic). */
+.clLine.bandage,
+.clLine.rest,
+.clLine.tonic {
+  color: #3ecf78;
+  font-weight: 650;
+}
+.clLine.bandage .clTag,
+.clLine.rest .clTag,
+.clLine.tonic .clTag {
+  color: #34c06c;
+}
+
+/* Critical / kill — brighter weight, no glow soup. */
+.clLine.death {
+  color: #f07870;
+  font-weight: 750;
+}
+.clLine.death .clTag {
+  color: #ee6860;
+}
+
+.clLine.respawn {
+  color: #7dcaa0;
+  font-weight: 650;
+}
+.clLine.respawn .clTag {
+  color: #6cbc90;
 }
 
 
@@ -1379,7 +1462,11 @@ body {
 .sysToast.loot .toastTag { color: #ffb04a; }
 
 .clLine.trade,
-.clLine.loot .clTag { color: #ffb04a; }
+.clLine.loot {
+  color: #d2b896;
+}
+.clLine.trade .clTag,
+.clLine.loot .clTag { color: #c9a878; }
 
 
 #vendorPanel {
@@ -1439,25 +1526,29 @@ body {
 }
 .sysToast.bandage .toastTag { color: #7dffc0; }
 
-.clLine.rest,
-.clLine.tonic .clTag,
-.clLine.bandage .clTag { color: #7dffb5; }
-.sysToast.vendor,
-.clLine.vendor .clTag { color: #6dffb0; }
+.clLine.vendor {
+  color: #c6ceda;
+}
+.clLine.vendor .clTag { color: #a8b4c4; }
+.sysToast.vendor .toastTag { color: #6dffb0; }
 .sysToast.vendor {
   border-color: rgba(80, 220, 160, 0.55);
 }
 
 
-/* Self-frame player HP bar (Character.Hp / MaxHp). */
+/* Self-frame HP bar — saturated green vs dark track; mid amber / low red (#67). */
 .sfHpBar {
   position: relative;
   margin-top: 6px;
   height: 14px;
-  background: rgba(12, 12, 16, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(3, 5, 9, 0.96);
+  border: 1px solid rgba(0, 0, 0, 0.88);
   border-radius: 5px;
   overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.45);
 }
 .sfHpFill {
   position: absolute;
@@ -1465,14 +1556,14 @@ body {
   top: 0;
   bottom: 0;
   width: 100%;
-  background: linear-gradient(90deg, #2f6f8f, #5eb8d6);
+  background: linear-gradient(90deg, #178a42, #3ce072);
   transition: width 80ms linear, background 120ms ease;
 }
 .sfHpFill.mid {
-  background: linear-gradient(90deg, #a87a12, #e6be37);
+  background: linear-gradient(90deg, #c4860c, #f0c22e);
 }
 .sfHpFill.low {
-  background: linear-gradient(90deg, #a02820, #dc463c);
+  background: linear-gradient(90deg, #b41c14, #f04836);
 }
 .sfHpLabel {
   position: relative;
@@ -1481,8 +1572,12 @@ body {
   padding: 0 8px;
   font-size: 10px;
   line-height: 14px;
-  color: #e8eefc;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow:
+    0 0 2px rgba(0, 0, 0, 0.98),
+    0 1px 3px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -1659,55 +1754,59 @@ body {
 }
 .sysToast.mana .toastTag { color: #9ab4ff; }
 
-/* CANCEL = soft amber player interrupt (refund). LOCKOUT = harsh crimson hard-interrupt. */
+/* CANCEL = soft amber refund. LOCKOUT = harsh crimson hard-interrupt. Fog-immune fills. */
 .sysToast.castCancel {
-  border-color: rgba(255, 196, 110, 0.85);
-  background: linear-gradient(180deg, rgba(42, 28, 10, 0.94), rgba(18, 12, 6, 0.92));
+  border: 2px solid rgba(255, 190, 90, 0.98);
+  background: linear-gradient(180deg, rgba(48, 30, 8, 0.97), rgba(16, 10, 4, 0.96));
   box-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.45),
-    0 0 14px rgba(255, 170, 70, 0.28);
+    0 0 0 1px rgba(8, 5, 2, 0.9),
+    0 4px 18px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(255, 170, 60, 0.38);
 }
 .sysToast.castCancel .toastTag {
-  color: #ffd090;
-  background: rgba(255, 170, 70, 0.18);
-  padding: 2px 7px;
+  color: #ffe2a8;
+  background: rgba(255, 160, 50, 0.28);
+  padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 190, 100, 0.45);
+  border: 1px solid rgba(255, 200, 100, 0.7);
+  font-weight: 750;
 }
 
-.clLine.castCancel .clTag { color: #ffb45a; }
+.clLine.castCancel .clTag { color: #b8c0cc; }
 
 .sysToast.castPushback {
   border-color: rgba(255, 120, 90, 0.55);
 }
 .sysToast.castPushback .toastTag { color: #ff7860; }
 
-.clLine.castPushback .clTag { color: #ff7860; }
+.clLine.castPushback .clTag { color: #b8c0cc; }
 
 .sysToast.castHardInterrupt {
-  border-color: rgba(255, 60, 90, 0.95);
-  background: linear-gradient(180deg, rgba(55, 8, 18, 0.96), rgba(22, 4, 10, 0.94));
+  border: 2px solid rgba(255, 48, 78, 1);
+  background: linear-gradient(180deg, rgba(64, 4, 16, 0.98), rgba(20, 2, 8, 0.97));
   box-shadow:
-    0 4px 20px rgba(0, 0, 0, 0.5),
-    0 0 18px rgba(255, 40, 70, 0.42);
+    0 0 0 1px rgba(10, 0, 4, 0.95),
+    0 4px 22px rgba(0, 0, 0, 0.55),
+    0 0 22px rgba(255, 30, 60, 0.55);
 }
 .sysToast.castHardInterrupt .toastTag {
-  color: #ff8a9a;
-  background: rgba(255, 40, 70, 0.28);
-  padding: 2px 7px;
+  color: #ffd0d6;
+  background: rgba(220, 20, 55, 0.42);
+  padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 80, 100, 0.65);
-  letter-spacing: 0.08em;
+  border: 1px solid rgba(255, 70, 95, 0.85);
+  letter-spacing: 0.1em;
+  font-weight: 800;
 }
 
-.clLine.castHardInterrupt .clTag { color: #ff465a; }
+.clLine.castHardInterrupt .clTag { color: #b8c0cc; }
 
 .sysToast.silenced {
   border-color: rgba(180, 120, 255, 0.65);
 }
 .sysToast.silenced .toastTag { color: #c49bff; }
 
-.clLine.silenced .clTag { color: #c49bff; }
+.clLine.silenced .clTag { color: #b8c0cc; }
 
 .spellSlot.outOfRange {
   opacity: 0.42;
@@ -1722,11 +1821,11 @@ body {
 }
 .sysToast.outOfRange .toastTag { color: #ffb07a; }
 
-.clLine.outOfRange .clTag { color: #ffb07a; }
+.clLine.outOfRange .clTag { color: #b8c0cc; }
 
 .sysToast.kick { border-color: rgba(255, 160, 60, 0.7); }
 .sysToast.kick .toastTag { color: #ffb03c; }
-.clLine.kick .clTag { color: #ffb03c; }
+.clLine.kick .clTag { color: #b8c0cc; }
 .sysToast.stun { border-color: rgba(120, 200, 255, 0.75); }
 .sysToast.stun .toastTag { color: #7ec8ff; }
-.clLine.stun .clTag { color: #7ec8ff; }
+.clLine.stun .clTag { color: #b8c0cc; }

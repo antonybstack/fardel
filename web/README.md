@@ -60,16 +60,21 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=debug-hud` | Force `#status` + `#fpsHud` visible; HUD `Debug HUD OK · status visible · F3/?debug=1` (`ve/babylon-debug-hud.png`) |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
 | `?ve=reticule` | Select Dummy; prove gold ring + overhead marker (`ve/babylon-reticule.png`); HUD `Reticule OK · … · gold ring+marker` |
+| `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |
 | `?ve=keys` | Open keybind legend overlay (H); HUD `Keys legend OK · …` (`ve/babylon-keys.png`) |
 | `?ve=death-ux` | Kill self via Dummy; prove stronger greyout + live respawn countdown + death toast (`ve/babylon-death-ux.png`); HUD `Death UX OK · …` |
 | `?ve=cast-range` | Move beyond CastRangeMeters; outOfRange toast + dim hotbar (`ve/babylon-cast-range.png`) |
 | `?ve=cast-range-ring` | Selected Dummy beyond cast range; Babylon ground reach ring (`ve/babylon-cast-range-ring.png`); HUD `Cast-range ring OK · …` |
 | `?ve=cast-cancel` | Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast (`ve/babylon-cast-cancel.png`) |
 | `?ve=cast-feedback` | Prominent Emberbolt cast bar + CANCEL ≠ LOCKOUT toasts + Rest enter chrome (`ve/babylon-cast-feedback.png`) |
+| `?ve=castbar-read` | Cast / CANCEL / LOCKOUT chrome readable over #39 cyan fog (`ve/babylon-castbar-read.png`); HUD `Castbar-read OK · … · fog chrome` |
 | `?ve=bandage` | BuyYardBandage + UseBandage HP heal; toast/bag (`ve/babylon-bandage.png`) |
 | `?ve=humanoid` | Frame local procedural humanoid + staff |
 | `?ve=dummy` | Frame scarecrow/practice dummy (wood+canvas) under #39 lights (`ve/babylon-dummy.png`) |
 | `?ve=floater-read` | Damage/heal/XP floaters with thick outline under #39 fog (`ve/babylon-floater-read.png`) |
+| `?ve=quaternius-char` | Quaternius CC0 wizard at 8–15m under #39 lights (`ve/babylon-quaternius-char.png`) |
+| `?ve=frame-hp` | Self + party HP bars mid/low contrast over cyan fog (#67) (`ve/babylon-frame-hp.png`) |
+| `?ve=combat-log-read` | Combat log strip readability over cyan fog (#78) (`ve/babylon-combat-log-read.png`) |
 | `?ve=atmosphere` | Yard mood: blue/cyan fog + warm sun/cool hemi + lush ground (`ve/babylon-atmosphere.png`) |
 | `?ve=spell-vfx` | Spark cyan flash+bolt+impact + Emberbolt staff charge→projectile→impact (`ve/babylon-spell-vfx.png`) |
 | `?ve=path-ground` | Dirt/stone trail vs lush grass (#44) (`ve/babylon-path-ground.png`) |
