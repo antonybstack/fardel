@@ -51,6 +51,7 @@ import {
   createPlayerHumanoid,
   partyRobeColor,
   remoteRobeColor,
+  ROBE_EMISSIVE_SCALE,
   type HumanoidParts,
 } from './world/humanoid';
 import {
@@ -1575,7 +1576,7 @@ function createScene(engine: Engine): {
       mat.alpha = 1;
       mat.transparencyMode = Material.MATERIAL_OPAQUE;
       mat.diffuseColor = humanoid.robeBaseColor.clone();
-      mat.emissiveColor = humanoid.robeBaseColor.scale(0.08);
+      mat.emissiveColor = humanoid.robeBaseColor.scale(ROBE_EMISSIVE_SCALE);
     }
   };
   player.position = new Vector3(0, 0, 0);
@@ -1994,7 +1995,7 @@ function setRobesMeshVisible(parts: HumanoidParts, equipped: boolean): void {
   const drab = new Color3(0.42, 0.4, 0.38);
   const col = equipped ? parts.robeBaseColor : drab;
   parts.mat.diffuseColor.copyFrom(col);
-  parts.mat.emissiveColor.copyFrom(col.scale(equipped ? 0.08 : 0.04));
+  parts.mat.emissiveColor.copyFrom(col.scale(equipped ? ROBE_EMISSIVE_SCALE : 0.04));
 }
 
 function flashMesh(mat: StandardMaterial, color: Color3, ms: number): void {
@@ -2534,7 +2535,7 @@ async function main(): Promise<void> {
         fx.bar.setEnabled(false);
         if (parts && !casting) {
           // Restore robe emissive after windup (match createPlayerHumanoid scale).
-          parts.mat.emissiveColor = parts.mat.diffuseColor.scale(0.08);
+          parts.mat.emissiveColor = parts.mat.diffuseColor.scale(ROBE_EMISSIVE_SCALE);
         }
         continue;
       }
@@ -4495,6 +4496,62 @@ async function main(): Promise<void> {
       window.setTimeout(waitHumanoid, 300);
     };
     window.setTimeout(waitHumanoid, 600);
+  }
+
+  // ?ve=humanoid-polish — play-cam frame; robes+staff on; silhouette/materials under canonical #39 forest lights.
+  if (ve === 'humanoid-polish') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.55;
+    camera.beta = Math.PI / 2.65;
+  }
+  if (net && ve === 'humanoid-polish') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE humanoid-polish: waiting for Connected…';
+    let ticks = 0;
+    const waitPolish = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE humanoid-polish: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitPolish, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE humanoid-polish: equipping staff…';
+        window.setTimeout(waitPolish, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        if (mark) mark.textContent = 'VE humanoid-polish: equipping robes…';
+        window.setTimeout(waitPolish, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
+      camera.radius = 11;
+      camera.alpha = Math.PI / 2.55;
+      camera.beta = Math.PI / 2.65;
+      const staffOn = humanoid.staff.isEnabled();
+      const robesOn = humanoid.robes.isEnabled();
+      if (staffOn && robesOn) {
+        if (mark) {
+          mark.textContent =
+            'Humanoid polish OK · silhouette · robes/staff · canonical forest lights';
+        }
+        return;
+      }
+      if (ticks > 120) {
+        if (mark) mark.textContent = 'VE humanoid-polish: timed out';
+        return;
+      }
+      window.setTimeout(waitPolish, 200);
+    };
+    window.setTimeout(waitPolish, 600);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
