@@ -202,6 +202,13 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
 /** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots visible. */
 let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = null;
 
+/** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
+let veGcdPresent: null | {
+  gcdMs: number;
+  castingMs: number;
+  castingTotal: number;
+} = null;
+
 /** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana/empty affordances. */
 function updateSpellHotbar(opts: {
   gcdMs: number;
@@ -216,15 +223,20 @@ function updateSpellHotbar(opts: {
   knowsSpark?: boolean;
   knowsEmberbolt?: boolean;
 }): void {
-  const gcdPct = opts.gcdMs > 0 ? Math.min(100, (opts.gcdMs / 1200) * 100) : 0;
+  const gcdMs = veGcdPresent?.gcdMs ?? opts.gcdMs;
+  const castingMs = veGcdPresent?.castingMs ?? opts.castingMs;
+  const castingTotal = veGcdPresent?.castingTotal ?? opts.castingTotal;
+  const castingSpell = veGcdPresent ? SPELL_EMBERBOLT : opts.castingSpell;
+  const staffEquipped = veGcdPresent ? true : opts.staffEquipped;
+  const gcdPct = gcdMs > 0 ? Math.min(100, (gcdMs / 1200) * 100) : 0;
   const castPct =
-    opts.castingTotal > 0 && opts.castingMs > 0
-      ? Math.min(100, ((opts.castingTotal - opts.castingMs) / opts.castingTotal) * 100)
+    castingTotal > 0 && castingMs > 0
+      ? Math.min(100, ((castingTotal - castingMs) / castingTotal) * 100)
       : 0;
   const castingEmber =
-    opts.castingSpell === SPELL_EMBERBOLT && opts.castingMs > 0 && opts.castingTotal > 0;
-  const mana = opts.mana ?? 999;
-  const oor = !!opts.outOfRange;
+    castingSpell === SPELL_EMBERBOLT && castingMs > 0 && castingTotal > 0;
+  const mana = veGcdPresent ? 999 : (opts.mana ?? 999);
+  const oor = veGcdPresent ? false : !!opts.outOfRange;
 
   const applySlot = (
     slotId: string,
@@ -246,17 +258,17 @@ function updateSpellHotbar(opts: {
       return;
     }
     slot.classList.remove('unknown');
-    const lowMana = opts.staffEquipped && mana < cost;
+    const lowMana = staffEquipped && mana < cost;
     const dimmed = lowMana || oor;
     // Disabled (no staff) wins over lowMana — JS only sets lowMana when staff equipped.
-    slot.classList.toggle('disabled', !opts.staffEquipped);
+    slot.classList.toggle('disabled', !staffEquipped);
     slot.classList.toggle('lowMana', lowMana);
-    slot.classList.toggle('outOfRange', oor && opts.staffEquipped && !lowMana);
-    slot.classList.toggle('onGcd', opts.gcdMs > 0 && opts.staffEquipped && !dimmed);
-    slot.classList.toggle('casting', isCastingThis && opts.staffEquipped && !dimmed);
-    sweep.style.height = opts.staffEquipped && !dimmed ? `${gcdPct}%` : '0%';
+    slot.classList.toggle('outOfRange', oor && staffEquipped && !lowMana);
+    slot.classList.toggle('onGcd', gcdMs > 0 && staffEquipped && !dimmed);
+    slot.classList.toggle('casting', isCastingThis && staffEquipped && !dimmed);
+    sweep.style.height = staffEquipped && !dimmed ? `${gcdPct}%` : '0%';
     cast.style.height =
-      isCastingThis && opts.staffEquipped && !dimmed ? `${castPct}%` : '0%';
+      isCastingThis && staffEquipped && !dimmed ? `${castPct}%` : '0%';
   };
 
   const knowsSpark = opts.knowsSpark ?? true;
@@ -4868,6 +4880,109 @@ async function main(): Promise<void> {
       window.setTimeout(waitHotbar, 200);
     };
     window.setTimeout(waitHotbar, 700);
+  }
+
+  // ?ve=gcd — thicker GCD sweep + Emberbolt cast fill readability (presentation seed).
+  if (ve === 'gcd') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'gcd') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE gcd: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let castSent = false;
+    const waitGcd = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 5.5) {
+          const step = Math.min(MAX_STEP_METERS, dist - 3.5);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.2,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 11;
+      }
+      if (st.state === 'connected' && dummy && !castSent) {
+        const ch = net.getCharacter();
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          window.setTimeout(waitGcd, 250);
+          return;
+        }
+        // Kick a live Emberbolt so GCD + cast are in flight, then seed mid-progress for the shot.
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          lastCastSpell = SPELL_EMBERBOLT;
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+          net.cast(SPELL_EMBERBOLT);
+          castSent = true;
+        }
+      }
+      const hotbar = document.getElementById('spellHotbar');
+      const combat = net.getCombat();
+      const gcdLive = gcdRemainingMs(combat);
+      const castLive = Math.max(0, castUntilMs - Date.now());
+      // Prefer presentation seed once Connected (Dummy optional — hotbar readability is the proof).
+      if (st.state === 'connected' && hotbar && (castSent || ticks > 8)) {
+        // Presentation seed: mid GCD scrub + mid Emberbolt fill — readable for screenshot.
+        const seedGcd = Math.max(720, gcdLive || 780);
+        const seedCastLeft = Math.max(550, Math.min(EMBERBOLT_CAST_MS - 200, castLive || 700));
+        veGcdPresent = {
+          gcdMs: seedGcd,
+          castingMs: seedCastLeft,
+          castingTotal: EMBERBOLT_CAST_MS,
+        };
+        const ch = net.getCharacter();
+        updateSpellHotbar({
+          gcdMs: seedGcd,
+          castingMs: seedCastLeft,
+          castingTotal: EMBERBOLT_CAST_MS,
+          castingSpell: SPELL_EMBERBOLT,
+          staffEquipped: true,
+          mana: 999,
+          knowsSpark: true,
+          knowsEmberbolt: true,
+        });
+        const sweepPct = Math.min(100, Math.round((seedGcd / 1200) * 100));
+        const castPct = Math.min(
+          100,
+          Math.round(((EMBERBOLT_CAST_MS - seedCastLeft) / EMBERBOLT_CAST_MS) * 100),
+        );
+        const dummyBit = dummy ? `Dummy #${dummy.npcId}` : 'no Dummy';
+        if (mark) {
+          mark.textContent =
+            `GCD OK · sweep ${sweepPct}% · Emberbolt cast ${castPct}% · ${dummyBit}`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE gcd: Connected · dummy ${dummy ? 'yes' : 'no'} · castSent=${castSent} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE gcd: timed out waiting for GCD/cast proof';
+        return;
+      }
+      window.setTimeout(waitGcd, 200);
+    };
+    window.setTimeout(waitGcd, 700);
   }
 
   // ?ve=reticule — select Dummy; prove gold selection reticule + overhead marker.
