@@ -132,7 +132,8 @@ See `web/README.md` for exact commands.
   ThinInstanced mid-tree variety + far LOD ring, distant snow-capped mountain
   silhouette, dusk sky/fog + hemi/sun mood (`web/src/world/forest.ts`);
   (`ve/babylon-forest.png`, `?ve=forest`); path/ground polish #44
-  (`?ve=path-ground`, `ve/babylon-path-ground.png`)
+  (`?ve=path-ground`, `ve/babylon-path-ground.png`); sky/horizon silhouette #55
+  (`?ve=sky-horizon`, `ve/babylon-sky-horizon.png`)
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
   staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
   (`ve/babylon-humanoid.png`); readability polish #33 (`?ve=humanoid-polish`,

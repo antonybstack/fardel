@@ -59,6 +59,14 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Keep lush grass `~(0.26, 0.52, 0.18)`; procedural DIY (trail strip, stone flecks, faint moss patches); no paid packs
 - VE: `?ve=path-ground`
 
+### Sky / horizon silhouette targets (Issue #55)
+
+- Distant cool grey-blue mountain silhouettes readable through locked #39 cyan fog at 8–30m play cam
+- 2–3 soft layered ranges (near/mid/far value steps); low detail / mood backdrop; soft snow caps (not neon)
+- Sky dome soft gradient into fog color `(0.34, 0.55, 0.7)` — no harsh horizon seam; slightly warmer zenith OK
+- Do **not** change fog dens / fogColor / hemi / sun lock; procedural DIY only
+- VE: `?ve=sky-horizon`
+
 ### Forest targets (Issue #34)
 
 - More mid-tree variety + stronger hero silhouettes; LOD/instancing discipline (see Principles)
