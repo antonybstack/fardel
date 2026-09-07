@@ -662,6 +662,7 @@ namespace SpacetimeDB.Types
                 Reducer.EquipRobes args => Reducers.InvokeEquipRobes(eventContext, args),
                 Reducer.EquipStaff args => Reducers.InvokeEquipStaff(eventContext, args),
                 Reducer.InviteToParty args => Reducers.InvokeInviteToParty(eventContext, args),
+                Reducer.Kick args => Reducers.InvokeKick(eventContext, args),
                 Reducer.LeaveParty args => Reducers.InvokeLeaveParty(eventContext, args),
                 Reducer.Move args => Reducers.InvokeMove(eventContext, args),
                 Reducer.OfferTrade args => Reducers.InvokeOfferTrade(eventContext, args),

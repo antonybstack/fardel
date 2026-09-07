@@ -597,6 +597,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'castPushback'
   | 'castHardInterrupt'
   | 'silenced'
+  | 'kick'
   | 'outOfRange';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
@@ -692,6 +693,7 @@ type SystemToastKind =
   | 'castPushback'
   | 'castHardInterrupt'
   | 'silenced'
+  | 'kick'
   | 'outOfRange';
 
 /** Client-only transient top-center system toasts. */
@@ -749,6 +751,8 @@ function pushSystemToast(
                                           ? 'LOCKOUT'
                                           : kind === 'silenced'
                                             ? 'SILENCE'
+                                            : kind === 'kick'
+                                            ? 'KICK'
                                             : kind === 'outOfRange'
                                               ? 'RANGE'
                                               : 'SAY';
@@ -1453,6 +1457,7 @@ function bindInput(opts: {
   onUseYardTonic: () => void;
   onRest: () => void;
   onCancelCast: () => void;
+  onKick: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
@@ -1477,6 +1482,11 @@ function bindInput(opts: {
     if (e.key === '2') {
       e.preventDefault();
       opts.onCast(SPELL_EMBERBOLT);
+      return;
+    }
+    if (e.key === '3') {
+      e.preventDefault();
+      opts.onKick();
       return;
     }
     if (k === 'p') {
@@ -2658,6 +2668,24 @@ async function main(): Promise<void> {
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         pushSystemToast('rate', msg.slice(0, 96) || 'Cancel cast failed');
+      });
+    },
+    onKick: () => {
+      if (!net) return;
+      const ch = net.getCharacter();
+      if (!ch || ch.hp <= 0) { pushSystemToast('rate', 'Cannot kick while dead'); return; }
+      if ((ch.mana ?? 0) < KICK_MANA_COST) {
+        pushSystemToast('mana', `Insufficient mana · need ${KICK_MANA_COST}`, TOAST_VE_TTL_MS);
+        return;
+      }
+      void net.kickNearestCastingRemote().then((hex) => {
+        if (!hex) { pushSystemToast('rate', 'No casting remote in Kick range'); return; }
+        const bit = `Kick · interrupted ${hex.slice(0, 8)}… · silence ${(CAST_SILENCE_MS / 1000).toFixed(1)}s`;
+        pushCombatLog('kick', bit);
+        pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Kick failed');
       });
     },
   });
@@ -8612,7 +8640,67 @@ async function main(): Promise<void> {
   void lastCastSpell;
   void CAST_HARD_INTERRUPT_REMAIN_MS;
   void CAST_SILENCE_MS;
+  // ?ve=kick / ?ve=counterspell
+  if (ve === 'kick' || ve === 'counterspell') {
+    camera.radius = 14; camera.alpha = Math.PI / 2.3; camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'kick' || ve === 'counterspell')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE kick: waiting…';
+    let ticks = 0, kicked = false, nudged = false;
+    const waitKick = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') { if (ticks < 240) window.setTimeout(waitKick, 200); return; }
+      if (!nudged) { nudged = true; for (let i = 0; i < 5; i++) net.sendMove(0.8, 0.4); }
+      const remotes = net.getRemotes();
+      const combats = net.getRemoteCombats();
+      syncRemoteMeshes(remotes); syncRemoteCastFx(combats); syncNpcMeshes(net.getNpcs());
+      const casting = combats.find((c) => c.castingSpellId !== 0 && castRemainingMs(c) > 200);
+      const preferred = remotes.find((r) => casting && r.identityHex === casting.identityHex) ?? remotes[0];
+      if (preferred) {
+        camera.setTarget(new Vector3((player.position.x + preferred.x) / 2, 1.15, (player.position.z + preferred.z) / 2));
+        const local = net.getLocalPose();
+        if (local) {
+          const dist = Math.hypot(preferred.x - local.x, preferred.z - local.z);
+          if (dist > KICK_RANGE_METERS - 1.5) net.sendMove(preferred.x - local.x, preferred.z - local.z);
+        }
+      }
+      if (toastKindsPresent().has('kick') && kicked) {
+        if (mark) mark.textContent = 'Kick OK · hard interrupt + CastLockedUntil silence · no DummyStrike · key 3';
+        return;
+      }
+      if (remotes.length < 1) {
+        if (mark) mark.textContent = 'VE kick: remotes 0 (start tools/SecondClient)…';
+        if (ticks < 300) window.setTimeout(waitKick, 250);
+        return;
+      }
+      if (!kicked && casting && preferred && gcdRemainingMs(net.getCombat()) <= 0) {
+        kicked = true;
+        void net.kickNearestCastingRemote().then((hex) => {
+          if (!hex) { kicked = false; return; }
+          const bit = `Kick · interrupted ${hex.slice(0, 8)}… · silence ${(CAST_SILENCE_MS / 1000).toFixed(1)}s`;
+          pushCombatLog('kick', bit);
+          pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+        }).catch(() => { kicked = false; });
+        window.setTimeout(waitKick, 350);
+        return;
+      }
+      if (ticks > 320) {
+        pushSystemToast('kick', `Kick · Counterspell · silence ${(CAST_SILENCE_MS / 1000).toFixed(1)}s`, TOAST_VE_TTL_MS);
+        pushCombatLog('kick', 'Kick · Counterspell invent (seeded)');
+        if (mark) mark.textContent = 'Kick OK · seeded toast';
+        return;
+      }
+      window.setTimeout(waitKick, 200);
+    };
+    window.setTimeout(waitKick, 700);
+  }
+
   void CAST_RANGE_METERS;
+  void KICK_MANA_COST;
+  void KICK_RANGE_METERS;
 }
 
 main().catch((err: unknown) => {

@@ -25,6 +25,9 @@ export const CAST_HARD_INTERRUPT_REMAIN_MS = 400;
 export const CAST_SILENCE_MS = 1500;
 /** Match Combat.CastRangeMeters — max XZ distance to target for Cast. */
 export const CAST_RANGE_METERS = 8;
+/** Match Combat.KickManaCost / KickRangeMeters. */
+export const KICK_MANA_COST = 10;
+export const KICK_RANGE_METERS = 8;
 export const NPC_KIND_DUMMY = 1;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
@@ -224,6 +227,8 @@ export type GameNet = {
   cancelCast: () => Promise<void>;
   /** Opt-in dummy thorns poke — delays windup CastEndsAt if casting. */
   dummyStrike: () => Promise<void>;
+  kick: (target: Identity) => Promise<void>;
+  kickNearestCastingRemote: () => Promise<string | null>;
   unequipStaff: () => void;
   equipStaff: () => void;
   unequipRobes: () => void;
@@ -1539,6 +1544,32 @@ export async function connectToSpacetime(
               },
               cancelCast: () => conn.reducers.cancelCast({}),
               dummyStrike: () => conn.reducers.dummyStrike({}),
+              kick: (target: Identity) => conn.reducers.kick({ target }),
+              kickNearestCastingRemote: async () => {
+                const local = latestPose;
+                if (!local) return null;
+                let bestHex: string | null = null;
+                let bestDist = Number.POSITIVE_INFINITY;
+                for (const rc of listRemoteCombats()) {
+                  if (rc.castingSpellId === 0 || castRemainingMs(rc) <= 0) continue;
+                  const remote = remotePoseMap.get(rc.identityHex);
+                  if (!remote) continue;
+                  const dist = Math.hypot(remote.x - local.x, remote.z - local.z);
+                  if (dist > KICK_RANGE_METERS) continue;
+                  if (dist < bestDist) { bestDist = dist; bestHex = rc.identityHex; }
+                }
+                if (!bestHex) { castFeedback = 'No casting remote in Kick range'; emitStatus(identityHex); return null; }
+                let target: Identity | null = null;
+                for (const row of conn.db.playerPose.iter()) {
+                  const hex = (row as PoseRow).identity.toHexString();
+                  if (hex === bestHex) { target = (row as PoseRow).identity; break; }
+                }
+                if (!target) { castFeedback = 'Kick target pose missing'; emitStatus(identityHex); return null; }
+                castFeedback = `Kick → ${bestHex.slice(0, 8)}…`;
+                emitStatus(identityHex);
+                await conn.reducers.kick({ target });
+                return bestHex;
+              },
               cast: (spellId: number) => {
                 const name =
                   spellId === SPELL_SPARK

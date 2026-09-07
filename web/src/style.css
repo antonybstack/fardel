@@ -1345,3 +1345,7 @@ body {
 .sysToast.outOfRange .toastTag { color: #ffb07a; }
 
 .clLine.outOfRange .clTag { color: #ffb07a; }
+
+.sysToast.kick { border-color: rgba(255, 160, 60, 0.7); }
+.sysToast.kick .toastTag { color: #ffb03c; }
+.clLine.kick .clTag { color: #ffb03c; }

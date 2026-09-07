@@ -47,6 +47,7 @@ import EnsureTrainingDummyReducer from "./ensure_training_dummy_reducer";
 import EquipRobesReducer from "./equip_robes_reducer";
 import EquipStaffReducer from "./equip_staff_reducer";
 import InviteToPartyReducer from "./invite_to_party_reducer";
+import KickReducer from "./kick_reducer";
 import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
 import OfferTradeReducer from "./offer_trade_reducer";
@@ -256,6 +257,7 @@ const reducersSchema = __reducers(
   __reducerSchema("equip_robes", EquipRobesReducer),
   __reducerSchema("equip_staff", EquipStaffReducer),
   __reducerSchema("invite_to_party", InviteToPartyReducer),
+  __reducerSchema("kick", KickReducer),
   __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
   __reducerSchema("offer_trade", OfferTradeReducer),

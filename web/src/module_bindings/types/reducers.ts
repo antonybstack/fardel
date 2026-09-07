@@ -19,6 +19,7 @@ import EnsureTrainingDummyReducer from "../ensure_training_dummy_reducer";
 import EquipRobesReducer from "../equip_robes_reducer";
 import EquipStaffReducer from "../equip_staff_reducer";
 import InviteToPartyReducer from "../invite_to_party_reducer";
+import KickReducer from "../kick_reducer";
 import LeavePartyReducer from "../leave_party_reducer";
 import MoveReducer from "../move_reducer";
 import OfferTradeReducer from "../offer_trade_reducer";
@@ -48,6 +49,7 @@ export type EnsureTrainingDummyParams = __Infer<typeof EnsureTrainingDummyReduce
 export type EquipRobesParams = __Infer<typeof EquipRobesReducer>;
 export type EquipStaffParams = __Infer<typeof EquipStaffReducer>;
 export type InviteToPartyParams = __Infer<typeof InviteToPartyReducer>;
+export type KickParams = __Infer<typeof KickReducer>;
 export type LeavePartyParams = __Infer<typeof LeavePartyReducer>;
 export type MoveParams = __Infer<typeof MoveReducer>;
 export type OfferTradeParams = __Infer<typeof OfferTradeReducer>;
