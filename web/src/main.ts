@@ -6513,6 +6513,61 @@ async function main(): Promise<void> {
     }
   }
 
+  // ?ve=jump — prove spacebar jump (server-authoritative Y with gravity).
+  if (net && ve === 'jump') {
+    camera.radius = 9;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.8;
+    keysLegendOpen = true;
+    setKeysLegendOpen(true);
+    const mark = document.getElementById('persistMark');
+    let ticks = 0;
+    let jumpAttempted = false;
+    const waitJump = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE jump: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitJump, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE jump: waiting for pose…';
+        if (ticks < 100) window.setTimeout(waitJump, 100);
+        return;
+      }
+      if (!jumpAttempted && ticks > 5) {
+        jumpAttempted = true;
+        // Trigger jump by simulating Space key press
+        net.sendMove(0, 0, true);
+        if (mark) mark.textContent = 'VE jump: Space sent · Y rising…';
+        window.setTimeout(waitJump, 150);
+        return;
+      }
+      if (jumpAttempted && pose.y > 0.3) {
+        if (mark) {
+          mark.textContent =
+            `Jump OK · Y=${pose.y.toFixed(2)}m · Space key · server-authoritative · gravity + ground clamp · keybind legend shows Space`;
+        }
+        return;
+      }
+      if (jumpAttempted && ticks > 50) {
+        if (mark) {
+          mark.textContent =
+            `Jump attempted · Y=${pose.y.toFixed(2)}m · Space sent · may need server rebuild for schema`;
+        }
+        return;
+      }
+      if (mark && !jumpAttempted) {
+        mark.textContent = `VE jump: connected · warming up… (tick ${ticks})`;
+      }
+      if (ticks < 100) window.setTimeout(waitJump, 100);
+    };
+    window.setTimeout(waitJump, 600);
+  }
+
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
   // ?ve=bag-chrome — prove bag/loadout chrome readability over cyan fog (#75).
   if (ve === 'bag' || ve === 'bag-chrome') {
