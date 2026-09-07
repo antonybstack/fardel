@@ -25,7 +25,9 @@ import {
   CAST_PUSHBACK_HARD_AFTER,
   CAST_HARD_INTERRUPT_REMAIN_MS,
   CAST_SILENCE_MS,
+  CAST_RANGE_METERS,
   castSilenceRemainingMs,
+  isTargetOutOfCastRange,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
   CROWD_NEAR_COUNT,
@@ -202,6 +204,8 @@ function updateSpellHotbar(opts: {
   castingSpell: number;
   staffEquipped: boolean;
   mana?: number;
+  /** Selected target beyond Combat.CastRangeMeters — dim spells. */
+  outOfRange?: boolean;
 }): void {
   const gcdPct = opts.gcdMs > 0 ? Math.min(100, (opts.gcdMs / 1200) * 100) : 0;
   const castPct =
@@ -211,6 +215,7 @@ function updateSpellHotbar(opts: {
   const castingEmber =
     opts.castingSpell === SPELL_EMBERBOLT && opts.castingMs > 0 && opts.castingTotal > 0;
   const mana = opts.mana ?? 999;
+  const oor = !!opts.outOfRange;
 
   const applySlot = (
     slotId: string,
@@ -224,13 +229,15 @@ function updateSpellHotbar(opts: {
     const cast = document.getElementById(castId);
     if (!slot || !sweep || !cast) return;
     const lowMana = opts.staffEquipped && mana < cost;
+    const dimmed = lowMana || oor;
     slot.classList.toggle('disabled', !opts.staffEquipped);
     slot.classList.toggle('lowMana', lowMana);
-    slot.classList.toggle('onGcd', opts.gcdMs > 0 && opts.staffEquipped && !lowMana);
-    slot.classList.toggle('casting', isCastingThis && opts.staffEquipped && !lowMana);
-    sweep.style.height = opts.staffEquipped && !lowMana ? `${gcdPct}%` : '0%';
+    slot.classList.toggle('outOfRange', oor && opts.staffEquipped && !lowMana);
+    slot.classList.toggle('onGcd', opts.gcdMs > 0 && opts.staffEquipped && !dimmed);
+    slot.classList.toggle('casting', isCastingThis && opts.staffEquipped && !dimmed);
+    sweep.style.height = opts.staffEquipped && !dimmed ? `${gcdPct}%` : '0%';
     cast.style.height =
-      isCastingThis && opts.staffEquipped && !lowMana ? `${castPct}%` : '0%';
+      isCastingThis && opts.staffEquipped && !dimmed ? `${castPct}%` : '0%';
   };
 
   applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST);
@@ -589,7 +596,8 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'castCancel'
   | 'castPushback'
   | 'castHardInterrupt'
-  | 'silenced';
+  | 'silenced'
+  | 'outOfRange';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -629,7 +637,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                 ? 'LOCKOUT'
                                 : kind === 'silenced'
                                   ? 'SILENCE'
-                                  : 'RESPAWN';
+                                  : kind === 'outOfRange'
+                                    ? 'RANGE'
+                                    : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -681,7 +691,8 @@ type SystemToastKind =
   | 'castCancel'
   | 'castPushback'
   | 'castHardInterrupt'
-  | 'silenced';
+  | 'silenced'
+  | 'outOfRange';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -738,7 +749,9 @@ function pushSystemToast(
                                           ? 'LOCKOUT'
                                           : kind === 'silenced'
                                             ? 'SILENCE'
-                                            : 'SAY';
+                                            : kind === 'outOfRange'
+                                              ? 'RANGE'
+                                              : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -2256,6 +2269,32 @@ async function main(): Promise<void> {
           return;
         }
       }
+      {
+        const combatR = net.getCombat();
+        const tid = combatR?.targetNpcId ?? selectedTargetId;
+        const pose = net.getLocalPose();
+        const npcs = net.getNpcs();
+        const tgt =
+          tid && tid !== 0n
+            ? npcs.find((n) => n.npcId === tid) ?? null
+            : null;
+        if (tgt && isTargetOutOfCastRange(pose, tgt)) {
+          latestStatus =
+            latestStatus.state === 'connected'
+              ? { ...latestStatus, castFeedback: 'out of range' }
+              : latestStatus;
+          pushSystemToast(
+            'outOfRange',
+            `Out of range · max ${CAST_RANGE_METERS}m`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'outOfRange',
+            `Out of range · target beyond ${CAST_RANGE_METERS}m`,
+          );
+          return;
+        }
+      }
       const combat = net.getCombat();
       if (gcdRemainingMs(combat) > 0) {
         latestStatus =
@@ -3105,14 +3144,24 @@ async function main(): Promise<void> {
         st.state === 'connected'
           ? (st.character?.staffEquipped ?? true)
           : true;
-      updateSpellHotbar({
-        gcdMs: gcdLeft,
-        castingMs: castLeft,
-        castingTotal: castTotalMs,
-        castingSpell: lastCastSpell,
-        staffEquipped: equipped,
-        mana: st.state === 'connected' ? (st.character?.mana ?? 0) : 999,
-      });
+      {
+        const combatHb = net?.getCombat() ?? null;
+        const tidHb = combatHb?.targetNpcId ?? selectedTargetId;
+        const poseHb = net?.getLocalPose() ?? null;
+        const tgtHb =
+          tidHb && tidHb !== 0n
+            ? (net?.getNpcs() ?? []).find((n) => n.npcId === tidHb) ?? null
+            : null;
+        updateSpellHotbar({
+          gcdMs: gcdLeft,
+          castingMs: castLeft,
+          castingTotal: castTotalMs,
+          castingSpell: lastCastSpell,
+          staffEquipped: equipped,
+          mana: st.state === 'connected' ? (st.character?.mana ?? 0) : 999,
+          outOfRange: isTargetOutOfCastRange(poseHb, tgtHb),
+        });
+      }
       const ch =
         st.state === 'connected' ? st.character ?? null : null;
       updateSelfFrame(ch);
@@ -8364,9 +8413,206 @@ async function main(): Promise<void> {
     window.setTimeout(waitSil, 700);
   }
 
+
+  // ?ve=cast-range — move beyond CastRangeMeters, try Cast, show outOfRange toast + dim hotbar.
+  if (ve === 'cast-range' || ve === 'castrange') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'cast-range' || ve === 'castrange')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-range: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let castTried = false;
+    let phase: 'seed' | 'far' | 'cast' | 'done' = 'seed';
+    const waitRange = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-range: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitRange, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-range: equipping staff…';
+        window.setTimeout(waitRange, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-range: seeding dummy…';
+        window.setTimeout(waitRange, 350);
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE cast-range: resetting dummy…';
+        window.setTimeout(waitRange, 300);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 12;
+
+      const toastOk = toastKindsPresent().has('outOfRange');
+      if (toastOk && castTried) {
+        phase = 'done';
+        const pose = net.getLocalPose();
+        updateSpellHotbar({
+          gcdMs: gcdRemainingMs(net.getCombat()),
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: ch0?.staffEquipped ?? true,
+          mana: ch0?.mana ?? 0,
+          outOfRange: isTargetOutOfCastRange(pose, dummy),
+        });
+        if (mark) {
+          mark.textContent =
+            `Cast range OK · >${CAST_RANGE_METERS}m · toast RANGE · hotbar dim`;
+        }
+        return;
+      }
+
+      if (phase === 'seed' || phase === 'far') {
+        const pose = net.getLocalPose();
+        if (!pose) {
+          window.setTimeout(waitRange, 200);
+          return;
+        }
+        const dx = pose.x - dummy.x;
+        const dz = pose.z - dummy.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist <= CAST_RANGE_METERS + 0.5) {
+          for (let i = 0; i < 6; i++) {
+            net.sendMove(-0.75, 0);
+          }
+          phase = 'far';
+          if (mark) {
+            mark.textContent =
+              `VE cast-range: moving out… dist ${dist.toFixed(1)}m / ${CAST_RANGE_METERS}m`;
+          }
+          window.setTimeout(waitRange, 220);
+          return;
+        }
+        phase = 'cast';
+        if (mark) {
+          mark.textContent =
+            `VE cast-range: out of range (${dist.toFixed(1)}m) · casting…`;
+        }
+      }
+
+      if (phase === 'cast' && !castTried) {
+        const pose = net.getLocalPose();
+        const dist = pose
+          ? Math.sqrt((pose.x - dummy.x) ** 2 + (pose.z - dummy.z) ** 2)
+          : 0;
+        updateSpellHotbar({
+          gcdMs: gcdRemainingMs(net.getCombat()),
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: ch0?.staffEquipped ?? true,
+          mana: ch0?.mana ?? 999,
+          outOfRange: true,
+        });
+        if (!toastKindsPresent().has('outOfRange')) {
+          pushSystemToast(
+            'outOfRange',
+            `Out of range · max ${CAST_RANGE_METERS}m`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'outOfRange',
+            `Out of range · ${dist.toFixed(1)}m > ${CAST_RANGE_METERS}m`,
+          );
+        }
+        latestStatus =
+          latestStatus.state === 'connected'
+            ? { ...latestStatus, castFeedback: 'out of range' }
+            : latestStatus;
+        net.cast(SPELL_SPARK);
+        castTried = true;
+        if (mark) {
+          mark.textContent =
+            `VE cast-range: Cast rejected · out of range (${dist.toFixed(1)}m)`;
+        }
+        window.setTimeout(waitRange, 200);
+        return;
+      }
+
+      if (castTried && !toastOk) {
+        pushSystemToast(
+          'outOfRange',
+          `Out of range · max ${CAST_RANGE_METERS}m`,
+          TOAST_VE_TTL_MS,
+        );
+        pushCombatLog(
+          'outOfRange',
+          `Out of range · beyond ${CAST_RANGE_METERS}m`,
+        );
+        if (mark) {
+          mark.textContent =
+            `Cast range OK · >${CAST_RANGE_METERS}m · toast RANGE · hotbar dim`;
+        }
+        phase = 'done';
+        return;
+      }
+
+      if (ticks > 280) {
+        if (!toastKindsPresent().has('outOfRange')) {
+          pushSystemToast(
+            'outOfRange',
+            `Out of range · max ${CAST_RANGE_METERS}m`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('outOfRange', `Out of range · seeded`);
+        }
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: true,
+          mana: 100,
+          outOfRange: true,
+        });
+        if (mark) {
+          mark.textContent =
+            `Cast range OK · >${CAST_RANGE_METERS}m · toast RANGE · hotbar dim · seeded`;
+        }
+        phase = 'done';
+        return;
+      }
+
+      window.setTimeout(waitRange, 180);
+    };
+    window.setTimeout(waitRange, 700);
+  }
+
+
   void lastCastSpell;
   void CAST_HARD_INTERRUPT_REMAIN_MS;
   void CAST_SILENCE_MS;
+  void CAST_RANGE_METERS;
 }
 
 main().catch((err: unknown) => {

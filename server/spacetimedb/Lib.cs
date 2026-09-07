@@ -432,6 +432,34 @@ public static partial class Module
             throw new Exception("silenced");
         }
 
+        var combat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+
+        if (combat.TargetNpcId == 0)
+        {
+            throw new Exception("No target");
+        }
+
+        var npc = ctx.Db.Npc.NpcId.Find(combat.TargetNpcId)
+            ?? throw new Exception("Target npc not found");
+        if (npc.Hp <= 0)
+        {
+            throw new Exception("Target dead");
+        }
+
+        // Horizontal (XZ) cast range — same pattern as Trade/Loot/Vendor.
+        var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        {
+            var dx = pose.X - npc.X;
+            var dz = pose.Z - npc.Z;
+            var range = Combat.CastRangeMeters;
+            if (dx * dx + dz * dz > range * range)
+            {
+                throw new Exception("out of range");
+            }
+        }
+
         TickManaRegen(ctx, ref character);
         var manaCost = Combat.ManaCost(spellId);
         if (manaCost > 0 && character.Mana < manaCost)
@@ -445,23 +473,9 @@ public static partial class Module
         }
         ctx.Db.Character.Identity.Update(character);
 
-        var combat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
-            ?? throw new Exception("PlayerCombat missing");
         if (ctx.Timestamp < combat.GcdReadyAt)
         {
             throw new Exception("GCD");
-        }
-
-        if (combat.TargetNpcId == 0)
-        {
-            throw new Exception("No target");
-        }
-
-        var npc = ctx.Db.Npc.NpcId.Find(combat.TargetNpcId)
-            ?? throw new Exception("Target npc not found");
-        if (npc.Hp <= 0)
-        {
-            throw new Exception("Target dead");
         }
 
         combat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
@@ -553,6 +567,94 @@ public static partial class Module
         }
 
         ApplyPlayerDamage(ctx, ctx.Sender, Combat.DummyThornsDamage);
+    }
+
+    /// <summary>
+    /// Kick / Counterspell — hard-interrupt a nearby caster's windup and apply
+    /// CastLockedUntil silence (same path as DummyStrike hard interrupt, without
+    /// the pushback chain). Instant; spends KickManaCost + shared GCD.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void Kick(ReducerContext ctx, Identity target)
+    {
+        if (target.Equals(ctx.Sender))
+        {
+            throw new Exception("Cannot kick self");
+        }
+
+        var selfChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (selfChar.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+
+        if (ctx.Db.Character.Identity.Find(target) is null)
+        {
+            throw new Exception("Target missing");
+        }
+        if (ctx.Db.PlayerPose.Identity.Find(target) is null)
+        {
+            throw new Exception("Target not online");
+        }
+
+        var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        var targetPose = ctx.Db.PlayerPose.Identity.Find(target)
+            ?? throw new Exception("Target not online");
+        {
+            var dx = selfPose.X - targetPose.X;
+            var dz = selfPose.Z - targetPose.Z;
+            var range = Combat.KickRangeMeters;
+            if (dx * dx + dz * dz > range * range)
+            {
+                throw new Exception("Out of range");
+            }
+        }
+
+        var selfCombat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp < selfCombat.GcdReadyAt)
+        {
+            throw new Exception("GCD");
+        }
+        if (ctx.Timestamp < selfCombat.CastLockedUntil)
+        {
+            throw new Exception("silenced");
+        }
+        if (selfCombat.CastingSpellId != 0)
+        {
+            throw new Exception("Busy casting");
+        }
+
+        var targetCombat = ctx.Db.PlayerCombat.Identity.Find(target)
+            ?? throw new Exception("Target combat missing");
+        if (targetCombat.CastingSpellId == 0)
+        {
+            throw new Exception("Target not casting");
+        }
+
+        TickManaRegen(ctx, ref selfChar);
+        if (Combat.KickManaCost > 0 && selfChar.Mana < Combat.KickManaCost)
+        {
+            ctx.Db.Character.Identity.Update(selfChar);
+            throw new Exception("Insufficient mana");
+        }
+        if (Combat.KickManaCost > 0)
+        {
+            selfChar.Mana -= Combat.KickManaCost;
+        }
+        ctx.Db.Character.Identity.Update(selfChar);
+
+        selfCombat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
+        selfCombat.LastSpellId = 0;
+        selfCombat.LastCastAt = ctx.Timestamp;
+        ctx.Db.PlayerCombat.Identity.Update(selfCombat);
+
+        Log.Info(
+            $"Kick {ctx.Sender} → {target} spell={targetCombat.CastingSpellId} " +
+            $"(hard interrupt + silence {Combat.CastSilenceMs}ms)");
+        InterruptWindupCast(ctx, target, refundMana: false);
     }
 
     /// <summary>Unequip staff — Cast already gates on StaffEquipped (slice 3 nice-to-have).</summary>

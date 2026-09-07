@@ -23,6 +23,8 @@ export const CAST_PUSHBACK_HARD_AFTER = 1;
 export const CAST_HARD_INTERRUPT_REMAIN_MS = 400;
 /** Match Combat.CastSilenceMs — post hard-interrupt Cast lockout. */
 export const CAST_SILENCE_MS = 1500;
+/** Match Combat.CastRangeMeters — max XZ distance to target for Cast. */
+export const CAST_RANGE_METERS = 8;
 export const NPC_KIND_DUMMY = 1;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
@@ -1568,9 +1570,32 @@ export async function connectToSpacetime(
                   emitStatus(identityHex);
                   return;
                 }
+                if (latestCombat && latestCombat.targetNpcId !== 0n && latestPose) {
+                  const tgt = findNpc(latestCombat.targetNpcId);
+                  if (tgt) {
+                    const dx = latestPose.x - tgt.x;
+                    const dz = latestPose.z - tgt.z;
+                    if (dx * dx + dz * dz > CAST_RANGE_METERS * CAST_RANGE_METERS) {
+                      castFeedback = 'out of range';
+                      emitStatus(identityHex);
+                      return;
+                    }
+                  }
+                }
                 castFeedback = `Casting ${name}…`;
                 emitStatus(identityHex);
-                void conn.reducers.cast({ spellId });
+                void conn.reducers
+                  .cast({ spellId })
+                  .catch((err: unknown) => {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    if (/out of range/i.test(msg)) {
+                      castFeedback = 'out of range';
+                      emitStatus(identityHex);
+                    } else if (msg) {
+                      castFeedback = msg.slice(0, 96);
+                      emitStatus(identityHex);
+                    }
+                  });
               },
               unequipStaff: () => {
                 castFeedback = 'Unequipping staff…';
@@ -1767,6 +1792,18 @@ export function castRemainingMs(combat: CombatView | null | undefined, nowMs = D
   if (!combat || combat.castingSpellId === 0) return 0;
   const endsMs = Number(combat.castEndsAtMicros / 1000n);
   return Math.max(0, endsMs - nowMs);
+}
+
+
+/** True when local pose is farther than CAST_RANGE_METERS from target (XZ). */
+export function isTargetOutOfCastRange(
+  pose: { x: number; z: number } | null | undefined,
+  target: { x: number; z: number } | null | undefined,
+): boolean {
+  if (!pose || !target) return false;
+  const dx = pose.x - target.x;
+  const dz = pose.z - target.z;
+  return dx * dx + dz * dz > CAST_RANGE_METERS * CAST_RANGE_METERS;
 }
 
 /** Ms remaining on hard-interrupt Cast silence (0 if unlocked). */

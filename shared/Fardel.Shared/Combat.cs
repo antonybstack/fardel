@@ -81,6 +81,22 @@ public static class Combat
     /// </summary>
     public const int CastSilenceMs = 1500;
 
+    /// <summary>
+    /// Max horizontal (XZ) distance from caster <c>PlayerPose</c> to targeted
+    /// NPC for Cast. Spawn (0,0,0) ↔ dummy (~5,0,0) is IN range so CombatSmoke /
+    /// ManaSmoke / CastSilenceSmoke keep working; Move far (&gt; this) gets OUT.
+    /// </summary>
+    public const float CastRangeMeters = 8f;
+
+    /// <summary>
+    /// Kick / Counterspell — first-class PvP interrupt. Hard-cancels target
+    /// windup (no mana refund) and applies the same CastLockedUntil silence
+    /// without DummyStrike pushback chain.
+    /// </summary>
+    public const float KickRangeMeters = 8f;
+    /// <summary>Mana spent by the kicker (instant; not refunded).</summary>
+    public const int KickManaCost = 10;
+
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
 
