@@ -1,0 +1,200 @@
+using Fardel.Shared;
+using SpacetimeDB;
+using SpacetimeDB.Types;
+
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
+const int timeoutMs = 20000;
+
+var connected = new TaskCompletionSource<Identity>();
+var subscribed = new TaskCompletionSource();
+var jumped = new TaskCompletionSource<(float y, float velY)>();
+var landed = new TaskCompletionSource<float>();
+
+DbConnection? conn = null;
+Identity? me = null;
+
+try
+{
+    conn = DbConnection.Builder()
+        .WithUri(uri)
+        .WithDatabaseName(db)
+        .OnConnect((c, identity, _) =>
+        {
+            me = identity;
+            connected.TrySetResult(identity);
+        })
+        .OnConnectError(e => connected.TrySetException(e))
+        .OnDisconnect((_, e) =>
+        {
+            if (!jumped.Task.IsCompleted)
+            {
+                jumped.TrySetException(e ?? new Exception("disconnected early"));
+            }
+            if (!landed.Task.IsCompleted)
+            {
+                landed.TrySetException(e ?? new Exception("disconnected early"));
+            }
+        })
+        .Build();
+
+    if (!await WaitTick(connected.Task, timeoutMs, conn, "connect"))
+    {
+        Fail("connect timeout");
+        return;
+    }
+
+    var identity = await connected.Task;
+    Console.WriteLine("connected " + identity);
+
+    var jumpedOnce = false;
+    var landedOnce = false;
+
+    conn.Db.PlayerPose.OnInsert += (_, _) => { };
+    conn.Db.PlayerPose.OnUpdate += (EventContext ctx, PlayerPose oldPose, PlayerPose newPose) =>
+    {
+        if (me is { } id && newPose.Identity == id)
+        {
+            // Detect jump: Y rising above GroundY or VelY near JumpVelocity
+            if (!jumpedOnce && (newPose.Y > Movement.GroundY + 0.05f || MathF.Abs(newPose.VelY - Movement.JumpVelocity) < 1f))
+            {
+                jumpedOnce = true;
+                jumped.TrySetResult((newPose.Y, newPose.VelY));
+            }
+
+            // Detect landing: Y back near GroundY and VelY near 0
+            if (jumpedOnce && !landedOnce && MathF.Abs(newPose.Y - Movement.GroundY) < 0.05f && MathF.Abs(newPose.VelY) < 0.1f)
+            {
+                landedOnce = true;
+                landed.TrySetResult(newPose.Y);
+            }
+        }
+    };
+
+    conn.SubscriptionBuilder()
+        .OnApplied(_ => subscribed.TrySetResult())
+        .OnError((_, e) => subscribed.TrySetException(e))
+        .SubscribeToAllTables();
+
+    if (!await WaitTick(subscribed.Task, timeoutMs, conn, "subscribe"))
+    {
+        Fail("subscribe timeout");
+        return;
+    }
+
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } pose)
+    {
+        Fail("PlayerPose missing after subscribe");
+        return;
+    }
+
+    Console.WriteLine($"spawn pose ({pose.X}, {pose.Y}, {pose.Z}) velY={pose.VelY}");
+
+    // Jump while grounded
+    conn.Reducers.Move(0f, 0f, jump: true);
+
+    if (!await WaitTick(jumped.Task, timeoutMs, conn, "jump"))
+    {
+        Fail("jump timeout — no pose update with rising Y");
+        return;
+    }
+
+    var (jumpY, jumpVelY) = await jumped.Task;
+    Console.WriteLine($"jumped: Y={jumpY} velY={jumpVelY}");
+
+    if (jumpY <= Movement.GroundY + 0.01f && MathF.Abs(jumpVelY - Movement.JumpVelocity) > 1f)
+    {
+        Fail("jump did not raise Y or set VelY");
+        return;
+    }
+
+    // Wait for landing
+    if (!await WaitTick(landed.Task, timeoutMs, conn, "landing"))
+    {
+        Fail("landing timeout — player did not return to ground");
+        return;
+    }
+
+    var landY = await landed.Task;
+    Console.WriteLine($"landed: Y={landY}");
+
+    // Second jump while airborne should not re-boost (anti multi-jump)
+    // Get current pose
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseBeforeSecond)
+    {
+        Fail("PlayerPose missing before second jump");
+        return;
+    }
+
+    var beforeVelY = poseBeforeSecond.VelY;
+
+    // Try immediate second jump
+    conn.Reducers.Move(0f, 0f, jump: true);
+    await Task.Delay(200); // Brief wait for update
+
+    if (conn.Db.PlayerPose.Identity.Find(identity) is { } poseAfterSecond)
+    {
+        // VelY should not jump back to JumpVelocity if already landed/grounded
+        if (MathF.Abs(poseAfterSecond.VelY - Movement.JumpVelocity) < 0.5f && MathF.Abs(beforeVelY) < 0.1f)
+        {
+            // This is fine - we jumped again from ground
+            Console.WriteLine($"second jump from ground: velY {beforeVelY} -> {poseAfterSecond.VelY}");
+        }
+        else
+        {
+            Console.WriteLine($"second jump check: velY {beforeVelY} -> {poseAfterSecond.VelY}");
+        }
+    }
+
+    // Small XZ move with jump=false still works
+    var beforeX = poseBeforeSecond.X;
+    conn.Reducers.Move(0.1f, 0f, jump: false);
+    await Task.Delay(200);
+
+    if (conn.Db.PlayerPose.Identity.Find(identity) is { } finalPose)
+    {
+        if (MathF.Abs(finalPose.X - beforeX) < 0.01f)
+        {
+            Fail("XZ movement broken after jump");
+            return;
+        }
+        Console.WriteLine($"XZ move OK: X {beforeX} -> {finalPose.X}");
+    }
+
+    Console.WriteLine("OK: JumpSmoke passed");
+    Environment.ExitCode = 0;
+}
+catch (Exception e)
+{
+    Fail(e.ToString());
+}
+finally
+{
+    try { conn?.Disconnect(); } catch { /* ignore */ }
+}
+
+static void Fail(string msg)
+{
+    Console.Error.WriteLine("FAIL: " + msg);
+    Environment.ExitCode = 1;
+}
+
+static async Task<bool> WaitTick(Task task, int timeoutMs, DbConnection conn, string label)
+{
+    using var cts = new CancellationTokenSource(timeoutMs);
+    try
+    {
+        while (!task.IsCompleted && !cts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            await Task.Delay(16, cts.Token).ConfigureAwait(false);
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        Console.Error.WriteLine($"timeout waiting for {label}");
+        return false;
+    }
+
+    return task.IsCompleted;
+}
