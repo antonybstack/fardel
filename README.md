@@ -26,6 +26,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/adr/0001-aoi-interest.md](docs/adr/0001-aoi-interest.md) | AOI: chunk neighborhood, hysteresis, load shed |
 | [docs/adr/0002-client-host-webgpu.md](docs/adr/0002-client-host-webgpu.md) | Historical Unity host (superseded for active host) |
 | [docs/adr/0003-babylon-web-client.md](docs/adr/0003-babylon-web-client.md) | Active client: Babylon.js + TypeScript |
+| [docs/DEV_BOX.md](docs/DEV_BOX.md) | Linux box self-reliant loop (no Mac) |
 
 ## Quick start (local)
 
