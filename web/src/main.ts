@@ -19,6 +19,9 @@ import {
   SPELL_EMBERBOLT,
   SPELL_SPARK,
   EMBERBOLT_CAST_MS,
+  SPARK_MANA_COST,
+  EMBERBOLT_MANA_COST,
+  REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
   CROWD_NEAR_COUNT,
   type ConnectionStatus,
@@ -186,13 +189,14 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   if (label) label.textContent = `${target.hp}/${target.maxHp}`;
 }
 
-/** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff dim. */
+/** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana dim. */
 function updateSpellHotbar(opts: {
   gcdMs: number;
   castingMs: number;
   castingTotal: number;
   castingSpell: number;
   staffEquipped: boolean;
+  mana?: number;
 }): void {
   const gcdPct = opts.gcdMs > 0 ? Math.min(100, (opts.gcdMs / 1200) * 100) : 0;
   const castPct =
@@ -201,30 +205,36 @@ function updateSpellHotbar(opts: {
       : 0;
   const castingEmber =
     opts.castingSpell === SPELL_EMBERBOLT && opts.castingMs > 0 && opts.castingTotal > 0;
+  const mana = opts.mana ?? 999;
 
   const applySlot = (
     slotId: string,
     sweepId: string,
     castId: string,
     isCastingThis: boolean,
+    cost: number,
   ) => {
     const slot = document.getElementById(slotId);
     const sweep = document.getElementById(sweepId);
     const cast = document.getElementById(castId);
     if (!slot || !sweep || !cast) return;
+    const lowMana = opts.staffEquipped && mana < cost;
     slot.classList.toggle('disabled', !opts.staffEquipped);
-    slot.classList.toggle('onGcd', opts.gcdMs > 0 && opts.staffEquipped);
-    slot.classList.toggle('casting', isCastingThis && opts.staffEquipped);
-    sweep.style.height = opts.staffEquipped ? `${gcdPct}%` : '0%';
-    cast.style.height = isCastingThis && opts.staffEquipped ? `${castPct}%` : '0%';
+    slot.classList.toggle('lowMana', lowMana);
+    slot.classList.toggle('onGcd', opts.gcdMs > 0 && opts.staffEquipped && !lowMana);
+    slot.classList.toggle('casting', isCastingThis && opts.staffEquipped && !lowMana);
+    sweep.style.height = opts.staffEquipped && !lowMana ? `${gcdPct}%` : '0%';
+    cast.style.height =
+      isCastingThis && opts.staffEquipped && !lowMana ? `${castPct}%` : '0%';
   };
 
-  applySlot('slotSpark', 'sweepSpark', 'castSpark', false);
+  applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST);
   applySlot(
     'slotEmberbolt',
     'sweepEmberbolt',
     'castEmberbolt',
     castingEmber,
+    EMBERBOLT_MANA_COST,
   );
 }
 
@@ -238,12 +248,14 @@ function tonicRemainingMs(character: {
   return Number(left / 1000n);
 }
 
-/** Player self-frame: You + Lv + XP + HP bar + tonic buff timer. */
+/** Player self-frame: You + Lv + XP + HP/mana bars + tonic buff timer. */
 function updateSelfFrame(character: {
   xp: number;
   level?: number;
   hp?: number;
   maxHp?: number;
+  mana?: number;
+  maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
   const frame = document.getElementById('selfFrame');
@@ -271,6 +283,17 @@ function updateSelfFrame(character: {
     fill.classList.toggle('low', frac <= 0.25);
   }
   if (label) label.textContent = maxHp > 0 ? `${hp}/${maxHp}` : '—';
+  const manaFill = document.getElementById('sfManaFill');
+  const manaLabel = document.getElementById('sfManaLabel');
+  const mana = character.mana ?? 0;
+  const maxMana = character.maxMana ?? 0;
+  const manaFrac = maxMana > 0 ? Math.max(0, Math.min(1, mana / maxMana)) : 0;
+  if (manaFill) {
+    manaFill.style.width = `${(manaFrac * 100).toFixed(1)}%`;
+    manaFill.classList.toggle('mid', manaFrac > 0.25 && manaFrac <= 0.55);
+    manaFill.classList.toggle('low', manaFrac <= 0.25);
+  }
+  if (manaLabel) manaLabel.textContent = maxMana > 0 ? `${mana}/${maxMana}` : '—';
   const buffEl = document.getElementById('sfBuff');
   if (buffEl) {
     const leftMs = tonicRemainingMs(character);
@@ -376,6 +399,8 @@ function updateLoadoutStrip(character: {
 function updateBagPanel(character: {
   xp: number;
   level?: number;
+  mana?: number;
+  maxMana?: number;
   staffEquipped: boolean;
   robesEquipped: boolean;
   knowsSpark: boolean;
@@ -397,6 +422,7 @@ function updateBagPanel(character: {
     setRow('bagEmber', '—', null);
     setRow('bagLevel', '—', null);
     setRow('bagXp', '—', null);
+    setRow('bagMana', '—', null);
     setRow('bagShard', '—', null);
     setRow('bagTonic', '—', null);
     return;
@@ -419,6 +445,9 @@ function updateBagPanel(character: {
   );
   setRow('bagLevel', `Lv ${character.level ?? 1}`, null);
   setRow('bagXp', String(character.xp), null);
+  const bm = character.mana ?? 0;
+  const bmm = character.maxMana ?? 0;
+  setRow('bagMana', bmm > 0 ? `${bm}/${bmm}` : '—', bmm > 0 && bm > 0);
   setRow(
     'bagShard',
     character.hasEmberShard ? 'held' : 'empty',
@@ -550,7 +579,8 @@ const COMBAT_LOG_MAX = 14;
 type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot' | 'trade'
   | 'vendor'
   | 'tonic'
-  | 'rest';
+  | 'rest'
+  | 'mana';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -580,7 +610,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                       ? 'TONIC'
                       : kind === 'rest'
                         ? 'REST'
-                        : 'RESPAWN';
+                        : kind === 'mana'
+                          ? 'MANA'
+                          : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -627,7 +659,8 @@ type SystemToastKind =
   | 'trade'
   | 'vendor'
   | 'tonic'
-  | 'rest';
+  | 'rest'
+  | 'mana';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -674,7 +707,9 @@ function pushSystemToast(
                                 ? 'TONIC'
                                 : kind === 'rest'
                                   ? 'REST'
-                                  : 'SAY';
+                                  : kind === 'mana'
+                                    ? 'MANA'
+                                    : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1168,7 +1203,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top · mana pool',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -2145,6 +2180,21 @@ async function main(): Promise<void> {
             : latestStatus;
         return;
       }
+      const manaCost =
+        spellId === SPELL_SPARK
+          ? SPARK_MANA_COST
+          : spellId === SPELL_EMBERBOLT
+            ? EMBERBOLT_MANA_COST
+            : 0;
+      if (ch && manaCost > 0 && (ch.mana ?? 0) < manaCost) {
+        latestStatus =
+          latestStatus.state === 'connected'
+            ? { ...latestStatus, castFeedback: 'Insufficient mana' }
+            : latestStatus;
+        pushSystemToast('mana', `Insufficient mana · need ${manaCost}`, TOAST_VE_TTL_MS);
+        pushCombatLog('mana', `Insufficient mana · ${ch.mana ?? 0}/${ch.maxMana ?? 0}`);
+        return;
+      }
       const combat = net.getCombat();
       if (gcdRemainingMs(combat) > 0) {
         latestStatus =
@@ -2418,17 +2468,30 @@ async function main(): Promise<void> {
         pushSystemToast('rate', 'Cannot rest while dead');
         return;
       }
-      if (ch0.hp >= ch0.maxHp) {
-        pushSystemToast('rate', 'Already full HP');
+      const hpFull = ch0.hp >= ch0.maxHp;
+      const manaFull = (ch0.mana ?? 0) >= (ch0.maxMana ?? 0) && (ch0.maxMana ?? 0) > 0;
+      if (hpFull && manaFull) {
+        pushSystemToast('rate', 'Already full');
         return;
       }
-      const before = ch0.hp;
+      const beforeHp = ch0.hp;
+      const beforeMana = ch0.mana ?? 0;
       void g.rest().then(() => {
         const after = g.getCharacter();
         if (after) updateSelfFrame(after);
-        const healed = after ? Math.max(0, after.hp - before) : REST_HEAL_AMOUNT;
-        pushCombatLog('rest', `Rest +${healed} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'}`);
-        pushSystemToast('rest', `Rest · +${healed} HP`, TOAST_VE_TTL_MS);
+        const healed = after ? Math.max(0, after.hp - beforeHp) : 0;
+        const manaGain = after ? Math.max(0, (after.mana ?? 0) - beforeMana) : REST_MANA_RESTORE;
+        const bits: string[] = [];
+        if (healed > 0) bits.push(`+${healed} HP`);
+        if (manaGain > 0) bits.push(`+${manaGain} mana`);
+        pushCombatLog(
+          'rest',
+          `Rest ${bits.join(' · ') || 'ok'} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'} · mana ${after?.mana ?? '?'}/${after?.maxMana ?? '?'}`,
+        );
+        pushSystemToast('rest', `Rest · ${bits.join(' · ') || 'ok'}`, TOAST_VE_TTL_MS);
+        if (manaGain > 0) {
+          pushSystemToast('mana', `Mana · +${manaGain}`, TOAST_VE_TTL_MS);
+        }
         flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
@@ -2438,8 +2501,8 @@ async function main(): Promise<void> {
           pushSystemToast('rate', 'Rest on cooldown');
         } else if (/casting/i.test(msg)) {
           pushSystemToast('rate', 'Cannot rest while casting');
-        } else if (/full hp/i.test(msg)) {
-          pushSystemToast('rate', 'Already full HP');
+        } else if (/already full/i.test(msg)) {
+          pushSystemToast('rate', 'Already full');
         } else if (/dead/i.test(msg)) {
           pushSystemToast('rate', 'Cannot rest while dead');
         } else {
@@ -2868,6 +2931,7 @@ async function main(): Promise<void> {
         castingTotal: castTotalMs,
         castingSpell: lastCastSpell,
         staffEquipped: equipped,
+        mana: st.state === 'connected' ? (st.character?.mana ?? 0) : 999,
       });
       const ch =
         st.state === 'connected' ? st.character ?? null : null;
@@ -6881,6 +6945,224 @@ async function main(): Promise<void> {
       window.setTimeout(waitRest, 180);
     };
     window.setTimeout(waitRest, 700);
+  }
+
+
+  // ?ve=mana — drain Spark until low mana; show self-frame mana bar + dim hotbar + toast.
+  if (ve === 'mana') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'mana') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE mana: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let casts = 0;
+    let lastCastAt = 0;
+    let oomToasted = false;
+    let phase: 'drain' | 'done' = 'drain';
+    const waitMana = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE mana: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitMana, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE mana: equipping staff…';
+        window.setTimeout(waitMana, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE mana: seeding dummy…';
+        window.setTimeout(waitMana, 350);
+        return;
+      }
+
+      const ch = net.getCharacter();
+      const kinds = toastKindsPresent();
+      const manaLabel = document.getElementById('sfManaLabel')?.textContent ?? '';
+      const fill = document.getElementById('sfManaFill') as HTMLElement | null;
+      const fillW = fill?.style.width || '';
+      const selfVisible =
+        !!document.getElementById('selfFrame') &&
+        !document.getElementById('selfFrame')!.classList.contains('hidden');
+      const sparkSlot = document.getElementById('slotSpark');
+      const emberSlot = document.getElementById('slotEmberbolt');
+      const sparkDim = !!sparkSlot?.classList.contains('lowMana');
+      const emberDim = !!emberSlot?.classList.contains('lowMana');
+
+      const lowEnough =
+        !!ch &&
+        ch.maxMana > 0 &&
+        ch.mana < EMBERBOLT_MANA_COST;
+
+      if (
+        selfVisible &&
+        (kinds.has('mana') || oomToasted || lowEnough) &&
+        (sparkDim || emberDim || lowEnough) &&
+        fillW &&
+        fillW !== '100%' &&
+        fillW !== '100.0%'
+      ) {
+        if (!oomToasted && lowEnough) {
+          oomToasted = true;
+          pushSystemToast(
+            'mana',
+            `Insufficient mana · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0}`,
+            TOAST_VE_TTL_MS,
+          );
+          updateSpellHotbar({
+            gcdMs: 0,
+            castingMs: 0,
+            castingTotal: 0,
+            castingSpell: 0,
+            staffEquipped: ch?.staffEquipped ?? true,
+            mana: ch?.mana ?? 0,
+          });
+        }
+        phase = 'done';
+        if (!kinds.has('mana')) {
+          pushSystemToast(
+            'mana',
+            `Insufficient mana · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0}`,
+            TOAST_VE_TTL_MS,
+          );
+        }
+        if (mark) {
+          mark.textContent =
+            `Mana OK · ${ch?.mana ?? '?'}/${ch?.maxMana ?? '?'} · bar ${fillW || manaLabel} · hotbar dim · toast mana`;
+        }
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE mana: resetting dummy…';
+        window.setTimeout(waitMana, 300);
+        return;
+      }
+      camera.setTarget(new Vector3(dummy.x, 1.25, dummy.z));
+      camera.radius = 9.5;
+
+      if (phase === 'drain') {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const now = Date.now();
+        const mana = ch?.mana ?? 0;
+        const maxMana = ch?.maxMana ?? 0;
+        if (ch && mana < SPARK_MANA_COST) {
+          if (!oomToasted) {
+            oomToasted = true;
+            pushSystemToast(
+              'mana',
+              `Insufficient mana · ${mana}/${maxMana}`,
+              TOAST_VE_TTL_MS,
+            );
+            pushCombatLog('mana', `Insufficient mana · ${mana}/${maxMana}`);
+            updateSpellHotbar({
+              gcdMs: 0,
+              castingMs: 0,
+              castingTotal: 0,
+              castingSpell: 0,
+              staffEquipped: ch.staffEquipped,
+              mana,
+            });
+            updateSelfFrame(ch);
+          }
+          if (mark) {
+            mark.textContent =
+              `VE mana: OOM ${mana}/${maxMana} · dim spark=${sparkDim} ember=${emberDim} · toast`;
+          }
+          window.setTimeout(waitMana, 160);
+          return;
+        }
+        if (
+          ch &&
+          ch.hp > 0 &&
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          now - lastCastAt > 1300 &&
+          casts < 24
+        ) {
+          if (mana >= EMBERBOLT_MANA_COST) {
+            net.cast(SPELL_EMBERBOLT);
+            lastCastAt = now;
+            casts += 1;
+            if (mark) {
+              mark.textContent =
+                `VE mana: Emberbolt #${casts} · mana ${mana}/${maxMana}`;
+            }
+          } else if (mana >= SPARK_MANA_COST) {
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            casts += 1;
+            if (mark) {
+              mark.textContent =
+                `VE mana: Spark #${casts} · mana ${mana}/${maxMana}`;
+            }
+          }
+        } else if (mark && ch) {
+          mark.textContent =
+            `VE mana: draining… mana ${mana}/${maxMana} · casts ${casts}`;
+        }
+        if (ticks > 200) {
+          // Seed presentation: fake low mana bar + dim + toast.
+          const fakeMana = Math.max(0, SPARK_MANA_COST - 1);
+          const fakeMax = ch?.maxMana || 100;
+          const fillEl = document.getElementById('sfManaFill');
+          const lab = document.getElementById('sfManaLabel');
+          if (fillEl) {
+            const frac = fakeMana / fakeMax;
+            fillEl.style.width = `${(frac * 100).toFixed(1)}%`;
+            fillEl.classList.add('low');
+          }
+          if (lab) lab.textContent = `${fakeMana}/${fakeMax}`;
+          updateSpellHotbar({
+            gcdMs: 0,
+            castingMs: 0,
+            castingTotal: 0,
+            castingSpell: 0,
+            staffEquipped: true,
+            mana: fakeMana,
+          });
+          pushSystemToast(
+            'mana',
+            `Insufficient mana · ${fakeMana}/${fakeMax}`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('mana', `Insufficient mana · ${fakeMana}/${fakeMax}`);
+          if (mark) {
+            mark.textContent =
+              `Mana OK · ${fakeMana}/${fakeMax} · bar · hotbar dim · toast mana · seeded`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitMana, 140);
+        return;
+      }
+
+      window.setTimeout(waitMana, 180);
+    };
+    window.setTimeout(waitMana, 700);
   }
 
   void lastCastSpell;

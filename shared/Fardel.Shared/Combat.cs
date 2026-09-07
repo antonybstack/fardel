@@ -1,6 +1,6 @@
 namespace Fardel.Shared;
 
-/// <summary>POC combat tunables — Spark / Emberbolt / shared GCD.</summary>
+/// <summary>POC combat tunables — Spark / Emberbolt / shared GCD / mana.</summary>
 public static class Combat
 {
     public const int SpellSpark = 1;
@@ -12,6 +12,10 @@ public static class Combat
 
     public const int SparkDamage = 10;
     public const int EmberboltDamage = 25;
+
+    /// <summary>Mana spent when Cast starts (instant or windup).</summary>
+    public const int SparkManaCost = 5;
+    public const int EmberboltManaCost = 20;
 
     public const int DummyMaxHp = 50;
     public const int XpPerKill = 10;
@@ -29,6 +33,17 @@ public static class Combat
 
     /// <summary>Player Character.MaxHp seed (durable).</summary>
     public const int PlayerMaxHp = 100;
+
+    /// <summary>Player Character.MaxMana seed (durable).</summary>
+    public const int PlayerMaxMana = 100;
+
+    /// <summary>
+    /// Lazy mana regen: every ManaRegenIntervalMs of wall time between Cast/Rest
+    /// ticks restores ManaRegenPerTick (clamped to MaxMana). Sized so CombatSmoke
+    /// (~7 Sparks + Emberbolt) still fits from a full pool without relying on regen.
+    /// </summary>
+    public const int ManaRegenIntervalMs = 1000;
+    public const int ManaRegenPerTick = 2;
 
     /// <summary>
     /// Light thorns when a spell lands on the training dummy — single-client
@@ -58,4 +73,12 @@ public static class Combat
                 return false;
         }
     }
+
+    public static int ManaCost(int spellId) =>
+        spellId switch
+        {
+            SpellSpark => SparkManaCost,
+            SpellEmberbolt => EmberboltManaCost,
+            _ => 0,
+        };
 }

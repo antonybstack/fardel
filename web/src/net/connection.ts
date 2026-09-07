@@ -16,6 +16,11 @@ export const SPELL_EMBERBOLT = 2;
 export const GCD_MS = 1200;
 export const EMBERBOLT_CAST_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
+/** Match shared Combat mana costs / pool. */
+export const SPARK_MANA_COST = 5;
+export const EMBERBOLT_MANA_COST = 20;
+export const PLAYER_MAX_MANA = 100;
+export const REST_MANA_RESTORE = 40;
 
 /** Match shared/Fardel.Shared Movement.ChunkSizeMeters / Aoi constants. */
 export const CHUNK_SIZE_METERS = 32;
@@ -103,8 +108,11 @@ export type CharacterView = {
   tonicExpiresAtMicros: bigint;
   hp: number;
   maxHp: number;
+  mana: number;
+  maxMana: number;
   lastDamagedAtMicros: bigint;
   restReadyAtMicros: bigint;
+  lastManaTickAtMicros: bigint;
 };
 
 export type PartyMemberView = {
@@ -400,6 +408,9 @@ type CharacterRow = {
   level: number;
   lastDamagedAt: Timestamp;
   restReadyAt: Timestamp;
+  mana: number;
+  maxMana: number;
+  lastManaTickAt: Timestamp;
 };
 
 type CrowdProxyRow = {
@@ -516,8 +527,11 @@ function characterView(row: CharacterRow): CharacterView {
     tonicExpiresAtMicros: row.tonicExpiresAt.microsSinceUnixEpoch,
     hp: row.hp ?? 0,
     maxHp: row.maxHp ?? 0,
+    mana: row.mana ?? 0,
+    maxMana: row.maxMana ?? 0,
     lastDamagedAtMicros: row.lastDamagedAt?.microsSinceUnixEpoch ?? 0n,
     restReadyAtMicros: row.restReadyAt?.microsSinceUnixEpoch ?? 0n,
+    lastManaTickAtMicros: row.lastManaTickAt?.microsSinceUnixEpoch ?? 0n,
   };
 }
 
@@ -1510,6 +1524,17 @@ export async function connectToSpacetime(
                       : `Spell ${spellId}`;
                 if (latestCharacter && !latestCharacter.staffEquipped) {
                   castFeedback = 'Staff required';
+                  emitStatus(identityHex);
+                  return;
+                }
+                const cost =
+                  spellId === SPELL_SPARK
+                    ? SPARK_MANA_COST
+                    : spellId === SPELL_EMBERBOLT
+                      ? EMBERBOLT_MANA_COST
+                      : 0;
+                if (latestCharacter && cost > 0 && latestCharacter.mana < cost) {
+                  castFeedback = 'Insufficient mana';
                   emitStatus(identityHex);
                   return;
                 }

@@ -25,4 +25,7 @@ export default __t.row({
   level: __t.i32(),
   lastDamagedAt: __t.timestamp().name("last_damaged_at"),
   restReadyAt: __t.timestamp().name("rest_ready_at"),
+  mana: __t.i32(),
+  maxMana: __t.i32().name("max_mana"),
+  lastManaTickAt: __t.timestamp().name("last_mana_tick_at"),
 });

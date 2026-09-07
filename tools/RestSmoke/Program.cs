@@ -39,7 +39,7 @@ try
 
     // --- Full HP Rest rejects ---
     await EnsureFullHp(conn, id);
-    await ExpectRestFail(conn, "Already full HP", "full");
+    await ExpectRestFail(conn, "Already full", "full");
 
     // --- Take enough thorns that one Rest does not fill MaxHp (cooldown can fire) ---
     // Need Hp <= MaxHp - HealAmount - 1 after damage so Rest leaves room for a second attempt.
@@ -164,25 +164,29 @@ finally
 static async Task EnsureFullHp(DbConnection conn, Identity id)
 {
     var ch = conn.Db.Character.Identity.Find(id)!;
-    if (ch.Hp == ch.MaxHp && ch.Hp > 0) return;
+    bool Full(Character c) =>
+        c.Hp > 0 && c.Hp == c.MaxHp
+        && c.MaxMana > 0 && c.Mana >= c.MaxMana;
+    if (Full(ch)) return;
     if (ch.Hp <= 0)
     {
         await PumpUntil(() =>
-            conn.Db.Character.Identity.Find(id) is { Hp: var h, MaxHp: var m } && m > 0 && h == m,
+            conn.Db.Character.Identity.Find(id) is { } n && Full(n),
             timeoutMs, conn, "wait respawn full");
         return;
     }
-    // Wait out combat lock + cooldown and Rest up.
+    // Wait out combat lock + cooldown and Rest up (HP and/or mana).
     await DelayPump(conn, Rest.CombatLockMs + Rest.CooldownMs + 200);
     var guard = 0;
-    while (conn.Db.Character.Identity.Find(id) is { } cur && cur.Hp < cur.MaxHp && guard++ < 8)
+    while (conn.Db.Character.Identity.Find(id) is { } cur && !Full(cur) && guard++ < 10)
     {
         conn.Reducers.Rest();
-        var before = cur.Hp;
+        var beforeHp = cur.Hp;
+        var beforeMana = cur.Mana;
         await PumpUntil(() =>
         {
             var n = conn.Db.Character.Identity.Find(id);
-            return n is not null && (n.Hp > before || n.Hp == n.MaxHp);
+            return n is not null && (n.Hp > beforeHp || n.Mana > beforeMana || Full(n));
         }, timeoutMs, conn, "rest to full");
         await DelayPump(conn, Rest.CooldownMs + 100);
     }

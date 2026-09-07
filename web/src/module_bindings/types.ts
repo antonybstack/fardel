@@ -25,6 +25,9 @@ export const Character = __t.object("Character", {
   level: __t.i32(),
   lastDamagedAt: __t.timestamp(),
   restReadyAt: __t.timestamp(),
+  mana: __t.i32(),
+  maxMana: __t.i32(),
+  lastManaTickAt: __t.timestamp(),
 });
 export type Character = __Infer<typeof Character>;
 

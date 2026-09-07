@@ -1251,3 +1251,54 @@ body {
   color: #c8d0e4;
   font-size: 13px;
 }
+
+
+/* Self-frame mana bar (Character.Mana / MaxMana). */
+.sfManaBar {
+  position: relative;
+  margin-top: 4px;
+  height: 12px;
+  background: rgba(12, 12, 16, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.sfManaFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  background: linear-gradient(90deg, #2a3f9a, #5b7cff);
+  transition: width 80ms linear, background 120ms ease;
+}
+.sfManaFill.mid {
+  background: linear-gradient(90deg, #3a4fb0, #7a94ff);
+}
+.sfManaFill.low {
+  background: linear-gradient(90deg, #1e2a66, #4a5bb8);
+}
+.sfManaLabel {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 0 8px;
+  font-size: 10px;
+  line-height: 12px;
+  color: #e8eefc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  text-align: center;
+}
+
+.spellSlot.lowMana {
+  opacity: 0.42;
+  filter: saturate(0.45) brightness(0.75);
+}
+.spellSlot.lowMana .slotName {
+  color: #9ab0ff;
+}
+
+.sysToast.mana {
+  border-color: rgba(91, 124, 255, 0.55);
+}
+.sysToast.mana .toastTag { color: #9ab4ff; }

@@ -1,10 +1,13 @@
 namespace Fardel.Shared;
 
-/// <summary>Out-of-combat Rest (bandage-style) — instant heal + cooldown.</summary>
+/// <summary>Out-of-combat Rest (bandage-style) — instant heal + mana restore + cooldown.</summary>
 public static class Rest
 {
     /// <summary>HP restored per Rest reducer call (clamped to MaxHp).</summary>
     public const int HealAmount = 25;
+
+    /// <summary>Mana restored per Rest reducer call (clamped to MaxMana).</summary>
+    public const int ManaRestore = 40;
 
     /// <summary>Minimum interval between successful Rest calls (ms).</summary>
     public const int CooldownMs = 5000;

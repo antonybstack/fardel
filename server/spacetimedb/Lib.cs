@@ -91,6 +91,13 @@ public static partial class Module
         public Timestamp LastDamagedAt;
         /// <summary>Earliest time Rest may succeed again (cooldown after heal).</summary>
         public Timestamp RestReadyAt;
+        /// <summary>Spell resource pool (Spark/Emberbolt spend; Rest + lazy regen refill).</summary>
+        [SpacetimeDB.Default(100)]
+        public int Mana;
+        [SpacetimeDB.Default(100)]
+        public int MaxMana;
+        /// <summary>Last lazy mana-regen tick (Cast/Rest). 0 = never.</summary>
+        public Timestamp LastManaTickAt;
     }
 
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
@@ -406,6 +413,19 @@ public static partial class Module
         {
             throw new Exception("Staff required");
         }
+
+        TickManaRegen(ctx, ref character);
+        var manaCost = Combat.ManaCost(spellId);
+        if (manaCost > 0 && character.Mana < manaCost)
+        {
+            ctx.Db.Character.Identity.Update(character);
+            throw new Exception("Insufficient mana");
+        }
+        if (manaCost > 0)
+        {
+            character.Mana -= manaCost;
+        }
+        ctx.Db.Character.Identity.Update(character);
 
         var combat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerCombat missing");
@@ -772,6 +792,9 @@ public static partial class Module
             MaxHp = Combat.PlayerMaxHp,
             LastDamagedAt = default,
             RestReadyAt = ctx.Timestamp,
+            Mana = Combat.PlayerMaxMana,
+            MaxMana = Combat.PlayerMaxMana,
+            LastManaTickAt = ctx.Timestamp,
         });
     }
 
@@ -904,6 +927,12 @@ public static partial class Module
                 {
                     ch.MaxHp = Combat.PlayerMaxHp;
                 }
+                if (ch.MaxMana <= 0)
+                {
+                    ch.MaxMana = Combat.PlayerMaxMana;
+                }
+                ch.Mana = ch.MaxMana;
+                ch.LastManaTickAt = ctx.Timestamp;
                 ctx.Db.Character.Identity.Update(ch);
             }
         }
@@ -1605,8 +1634,8 @@ public static partial class Module
 
 
     /// <summary>
-    /// Out-of-combat Rest (bandage): restore HealAmount HP toward MaxHp.
-    /// Rejects while dead, casting, recently damaged, on cooldown, or already full.
+    /// Out-of-combat Rest (bandage): restore HealAmount HP and ManaRestore mana.
+    /// Rejects while dead, casting, recently damaged, on cooldown, or already full HP+mana.
     /// </summary>
     [SpacetimeDB.Reducer]
     public static void Rest(ReducerContext ctx)
@@ -1621,33 +1650,103 @@ public static partial class Module
         {
             character.MaxHp = Combat.PlayerMaxHp;
         }
-        if (character.Hp >= character.MaxHp)
+        if (character.MaxMana <= 0)
         {
-            throw new Exception("Already full HP");
+            character.MaxMana = Combat.PlayerMaxMana;
+        }
+
+        TickManaRegen(ctx, ref character);
+
+        var hpFull = character.Hp >= character.MaxHp;
+        var manaFull = character.Mana >= character.MaxMana;
+        if (hpFull && manaFull)
+        {
+            ctx.Db.Character.Identity.Update(character);
+            throw new Exception("Already full");
         }
 
         if (ctx.Db.PlayerCombat.Identity.Find(ctx.Sender) is { } combat
             && combat.CastingSpellId != 0)
         {
+            ctx.Db.Character.Identity.Update(character);
             throw new Exception("Casting");
         }
 
         if (character.LastDamagedAt.MicrosecondsSinceUnixEpoch > 0
             && ctx.Timestamp < character.LastDamagedAt + Ms(Fardel.Shared.Rest.CombatLockMs))
         {
+            ctx.Db.Character.Identity.Update(character);
             throw new Exception("Recently damaged");
         }
 
         if (ctx.Timestamp < character.RestReadyAt)
         {
+            ctx.Db.Character.Identity.Update(character);
             throw new Exception("Rest on cooldown");
         }
 
-        var before = character.Hp;
-        character.Hp = Math.Min(character.MaxHp, character.Hp + Fardel.Shared.Rest.HealAmount);
+        var beforeHp = character.Hp;
+        var beforeMana = character.Mana;
+        if (!hpFull)
+        {
+            character.Hp = Math.Min(character.MaxHp, character.Hp + Fardel.Shared.Rest.HealAmount);
+        }
+        if (!manaFull)
+        {
+            character.Mana = Math.Min(character.MaxMana, character.Mana + Fardel.Shared.Rest.ManaRestore);
+        }
         character.RestReadyAt = ctx.Timestamp + Ms(Fardel.Shared.Rest.CooldownMs);
+        character.LastManaTickAt = ctx.Timestamp;
         ctx.Db.Character.Identity.Update(character);
-        Log.Info($"Rest {ctx.Sender} hp {before}->{character.Hp}/{character.MaxHp}");
+        Log.Info(
+            $"Rest {ctx.Sender} hp {beforeHp}->{character.Hp}/{character.MaxHp} " +
+            $"mana {beforeMana}->{character.Mana}/{character.MaxMana}");
+    }
+
+    /// <summary>Lazy mana regen between Cast/Rest using LastManaTickAt wall time.</summary>
+    static void TickManaRegen(ReducerContext ctx, ref Character ch)
+    {
+        if (ch.MaxMana <= 0)
+        {
+            ch.MaxMana = Combat.PlayerMaxMana;
+        }
+        if (ch.Mana < 0)
+        {
+            ch.Mana = 0;
+        }
+        if (ch.Mana > ch.MaxMana)
+        {
+            ch.Mana = ch.MaxMana;
+        }
+
+        var last = ch.LastManaTickAt.MicrosecondsSinceUnixEpoch;
+        var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        if (last <= 0)
+        {
+            ch.LastManaTickAt = ctx.Timestamp;
+            return;
+        }
+        if (ch.Mana >= ch.MaxMana)
+        {
+            ch.LastManaTickAt = ctx.Timestamp;
+            return;
+        }
+
+        var elapsedMs = (now - last) / 1000L;
+        if (elapsedMs < Combat.ManaRegenIntervalMs)
+        {
+            return;
+        }
+
+        var ticks = (int)(elapsedMs / Combat.ManaRegenIntervalMs);
+        if (ticks <= 0)
+        {
+            return;
+        }
+
+        ch.Mana = Math.Min(ch.MaxMana, ch.Mana + ticks * Combat.ManaRegenPerTick);
+        // Advance by whole ticks so partial intervals accumulate.
+        ch.LastManaTickAt = new Timestamp(last + ticks * (long)Combat.ManaRegenIntervalMs * 1000L);
     }
 
     /// <summary>Spend XP at a nearby YardVendor to gain HasYardTonic.</summary>
