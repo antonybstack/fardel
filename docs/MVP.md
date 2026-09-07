@@ -1,6 +1,6 @@
 # MVP slices
 
-Goal: a **playable browser yard** with Fardel’s controls and a **simple starter loadout** — before art, before open world.
+Goal: a **playable browser yard** with Fardel’s controls, a **simple starter loadout**, and an **early atmosphere kit** (forest + mountains + humanoid) — before custom art pipeline, before open world. See [ASSETS.md](ASSETS.md).
 
 Long-term the game stays **classless** (bag / skills / gear). The POC does **not** invent a Wizard class lock — it ships one readable traveler kit so combat and persistence are testable.
 
@@ -8,7 +8,7 @@ Long-term the game stays **classless** (bag / skills / gear). The POC does **not
 
 | Piece | POC choice | Notes |
 |---|---|---|
-| Look | **Staff + wizard robes** | Placeholder meshes / capsules with props OK |
+| Look | **Staff + wizard robes** on a **simple humanoid** | RuneScape-default energy; not a capsule as the player fantasy ([ASSETS.md](ASSETS.md)) |
 | Skills | **Spellbook of 2 spells** | Both on hotbar (`1` / `2`); tab-target |
 | Timing | **Shared GCD** | Any cast starts the global cooldown; blocks the other spell until GCD ends |
 | Target | Tab-target dummy (+ later players) | Server resolves hits |
@@ -46,11 +46,12 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 **Done when:** editor play mode shows connected identity.
 
 ### 1 — Yard + move
-- Capsule (later: robed staff figure) in a flat yard
+- Forest clearing: **huge trees** + **distant mountains** backdrop (kitbash OK)
+- Player: **simple humanoid** with staff/robes intent (temp mesh OK if clearly a person)
 - RMB look + WASD
 - `Move` intent reducer → server pose → client reconcile/predict
 
-**Done when:** two editor instances (or editor + web) move without rubber-banding disasters.
+**Done when:** two clients move in a scene that already sells “grand clearing,” not a greybox void.
 
 ### 2 — Tab-target + cast + dummy
 - Tab cycles targets
@@ -80,7 +81,8 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - Full skill tree, professions, trading, housing
 - More than 2 spells / deep talenting
 - Open world streaming
-- Polished character art (robes/staff can be obvious placeholders)
+- Polished character art / character creator (POC humanoid can be pack-default)
+- Photoreal or high-poly cinema assets
 - Action-combat mode
 - Hard class selection screen
 

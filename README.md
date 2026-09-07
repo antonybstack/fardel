@@ -18,6 +18,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/STACK.md](docs/STACK.md) | Locked tech choices and why |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Netcode, AOI, sim authority, perf laws |
 | [docs/MVP.md](docs/MVP.md) | Slice plan to a playable yard |
+| [docs/ASSETS.md](docs/ASSETS.md) | POC art: forest, mountains, RS-like humanoid |
 | [docs/LEARNINGS.md](docs/LEARNINGS.md) | What we take from prior POCs + hordes/dek |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Cloudflare / sparkify.dev / Mac tunnel |
 | [docs/adr/0001-aoi-interest.md](docs/adr/0001-aoi-interest.md) | AOI: chunk neighborhood, hysteresis, load shed |
