@@ -37,8 +37,10 @@ namespace SpacetimeDB.Types
             AddTable(PlayerCombat = new(conn));
             AddTable(PlayerPose = new(conn));
             AddTable(TradeOffer = new(conn));
+            AddTable(VendorStock = new(conn));
             AddTable(WhisperMessage = new(conn));
             AddTable(WorldLoot = new(conn));
+            AddTable(YardVendor = new(conn));
         }
     }
 
@@ -545,8 +547,10 @@ namespace SpacetimeDB.Types
             new QueryBuilder().From.PlayerCombat().ToSql(),
             new QueryBuilder().From.PlayerPose().ToSql(),
             new QueryBuilder().From.TradeOffer().ToSql(),
+            new QueryBuilder().From.VendorStock().ToSql(),
             new QueryBuilder().From.WhisperMessage().ToSql(),
             new QueryBuilder().From.WorldLoot().ToSql(),
+            new QueryBuilder().From.YardVendor().ToSql(),
         }
         ;
     }
@@ -563,8 +567,10 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Table<PlayerCombat, PlayerCombatCols, PlayerCombatIxCols> PlayerCombat() => new("player_combat", new PlayerCombatCols("player_combat"), new PlayerCombatIxCols("player_combat"));
         public global::SpacetimeDB.Table<PlayerPose, PlayerPoseCols, PlayerPoseIxCols> PlayerPose() => new("player_pose", new PlayerPoseCols("player_pose"), new PlayerPoseIxCols("player_pose"));
         public global::SpacetimeDB.Table<TradeOffer, TradeOfferCols, TradeOfferIxCols> TradeOffer() => new("trade_offer", new TradeOfferCols("trade_offer"), new TradeOfferIxCols("trade_offer"));
+        public global::SpacetimeDB.Table<VendorStock, VendorStockCols, VendorStockIxCols> VendorStock() => new("vendor_stock", new VendorStockCols("vendor_stock"), new VendorStockIxCols("vendor_stock"));
         public global::SpacetimeDB.Table<WhisperMessage, WhisperMessageCols, WhisperMessageIxCols> WhisperMessage() => new("whisper_message", new WhisperMessageCols("whisper_message"), new WhisperMessageIxCols("whisper_message"));
         public global::SpacetimeDB.Table<WorldLoot, WorldLootCols, WorldLootIxCols> WorldLoot() => new("world_loot", new WorldLootCols("world_loot"), new WorldLootIxCols("world_loot"));
+        public global::SpacetimeDB.Table<YardVendor, YardVendorCols, YardVendorIxCols> YardVendor() => new("yard_vendor", new YardVendorCols("yard_vendor"), new YardVendorIxCols("yard_vendor"));
     }
 
     public sealed class TypedSubscriptionBuilder
@@ -648,10 +654,12 @@ namespace SpacetimeDB.Types
             {
                 Reducer.AcceptPartyInvite args => Reducers.InvokeAcceptPartyInvite(eventContext, args),
                 Reducer.AcceptTrade args => Reducers.InvokeAcceptTrade(eventContext, args),
+                Reducer.BuyFromVendor args => Reducers.InvokeBuyFromVendor(eventContext, args),
                 Reducer.CancelTrade args => Reducers.InvokeCancelTrade(eventContext, args),
                 Reducer.Cast args => Reducers.InvokeCast(eventContext, args),
                 Reducer.CreateParty args => Reducers.InvokeCreateParty(eventContext, args),
                 Reducer.EnsureTrainingDummy args => Reducers.InvokeEnsureTrainingDummy(eventContext, args),
+                Reducer.EnsureVendor args => Reducers.InvokeEnsureVendor(eventContext, args),
                 Reducer.EquipRobes args => Reducers.InvokeEquipRobes(eventContext, args),
                 Reducer.EquipStaff args => Reducers.InvokeEquipStaff(eventContext, args),
                 Reducer.InviteToParty args => Reducers.InvokeInviteToParty(eventContext, args),
@@ -663,6 +671,7 @@ namespace SpacetimeDB.Types
                 Reducer.Say args => Reducers.InvokeSay(eventContext, args),
                 Reducer.SeedCrowdProxies args => Reducers.InvokeSeedCrowdProxies(eventContext, args),
                 Reducer.SeedLoot args => Reducers.InvokeSeedLoot(eventContext, args),
+                Reducer.SellToVendor args => Reducers.InvokeSellToVendor(eventContext, args),
                 Reducer.SetTarget args => Reducers.InvokeSetTarget(eventContext, args),
                 Reducer.UnequipRobes args => Reducers.InvokeUnequipRobes(eventContext, args),
                 Reducer.UnequipStaff args => Reducers.InvokeUnequipStaff(eventContext, args),

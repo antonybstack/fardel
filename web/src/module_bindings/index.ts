@@ -36,6 +36,7 @@ import {
 // Import all reducer arg schemas
 import AcceptPartyInviteReducer from "./accept_party_invite_reducer";
 import AcceptTradeReducer from "./accept_trade_reducer";
+import BuyFromVendorReducer from "./buy_from_vendor_reducer";
 import CancelTradeReducer from "./cancel_trade_reducer";
 import CastReducer from "./cast_reducer";
 import CreatePartyReducer from "./create_party_reducer";
@@ -51,6 +52,7 @@ import PickupReducer from "./pickup_reducer";
 import SayReducer from "./say_reducer";
 import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
 import SeedLootReducer from "./seed_loot_reducer";
+import SellToVendorReducer from "./sell_to_vendor_reducer";
 import SetTargetReducer from "./set_target_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
@@ -71,6 +73,7 @@ import PlayerPoseRow from "./player_pose_table";
 import TradeOfferRow from "./trade_offer_table";
 import WhisperMessageRow from "./whisper_message_table";
 import WorldLootRow from "./world_loot_table";
+import YardVendorRow from "./yard_vendor_table";
 
 /** Type-only namespace exports for generated type groups. */
 
@@ -220,12 +223,24 @@ const tablesSchema = __schema({
       { name: 'world_loot_loot_id_key', constraint: 'unique', columns: ['lootId'] },
     ],
   }, WorldLootRow),
+  yardVendor: __table({
+    name: 'yard_vendor',
+    indexes: [
+      { accessor: 'VendorId', name: 'yard_vendor_vendor_id_idx_btree', algorithm: 'btree', columns: [
+        'vendorId',
+      ] },
+    ],
+    constraints: [
+      { name: 'yard_vendor_vendor_id_key', constraint: 'unique', columns: ['vendorId'] },
+    ],
+  }, YardVendorRow),
 });
 
 /** The schema information for all reducers in this module. This is defined the same way as the reducers would have been defined in the server, except the body of the reducer is omitted in code generation. */
 const reducersSchema = __reducers(
   __reducerSchema("accept_party_invite", AcceptPartyInviteReducer),
   __reducerSchema("accept_trade", AcceptTradeReducer),
+  __reducerSchema("buy_from_vendor", BuyFromVendorReducer),
   __reducerSchema("cancel_trade", CancelTradeReducer),
   __reducerSchema("cast", CastReducer),
   __reducerSchema("create_party", CreatePartyReducer),
@@ -241,6 +256,7 @@ const reducersSchema = __reducers(
   __reducerSchema("say", SayReducer),
   __reducerSchema("seed_crowd_proxies", SeedCrowdProxiesReducer),
   __reducerSchema("seed_loot", SeedLootReducer),
+  __reducerSchema("sell_to_vendor", SellToVendorReducer),
   __reducerSchema("set_target", SetTargetReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
@@ -277,6 +293,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
     readonly "WhisperMessage": Omit<typeof tablesSchema.schemaType.tables["whisperMessage"], "accessorName"> & { readonly accessorName: "WhisperMessage" };
     /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
     readonly "WorldLoot": Omit<typeof tablesSchema.schemaType.tables["worldLoot"], "accessorName"> & { readonly accessorName: "WorldLoot" };
+    /** @deprecated Use `yardVendor` instead. This alias will be removed in the next major version. */
+    readonly "YardVendor": Omit<typeof tablesSchema.schemaType.tables["yardVendor"], "accessorName"> & { readonly accessorName: "YardVendor" };
   };
 };
 
@@ -307,6 +325,7 @@ const tableAccessorAliases = {
   "TradeOffer": "tradeOffer",
   "WhisperMessage": "whisperMessage",
   "WorldLoot": "worldLoot",
+  "YardVendor": "yardVendor",
 } as const;
 
 function __withTableAccessorAliases<T extends object>(target: T, freeze = false): T {
@@ -351,6 +370,8 @@ export type DbView = __DbViewBase & {
   readonly "WhisperMessage": __DbViewBase["whisperMessage"];
   /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
   readonly "WorldLoot": __DbViewBase["worldLoot"];
+  /** @deprecated Use `yardVendor` instead. This alias will be removed in the next major version. */
+  readonly "YardVendor": __DbViewBase["yardVendor"];
 };
 
 type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
@@ -379,6 +400,8 @@ export type Tables = __TablesBase & {
   readonly "WhisperMessage": __TablesBase["whisperMessage"];
   /** @deprecated Use `worldLoot` instead. This alias will be removed in the next major version. */
   readonly "WorldLoot": __TablesBase["worldLoot"];
+  /** @deprecated Use `yardVendor` instead. This alias will be removed in the next major version. */
+  readonly "YardVendor": __TablesBase["yardVendor"];
 };
 
 /** The tables available in this remote SpacetimeDB module. Each table reference doubles as a query builder. */

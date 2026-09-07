@@ -27,6 +27,7 @@ import {
   type RemoteCombat,
   type RemotePose,
   type GroundItemView,
+  type VendorView,
 } from './net/connection';
 import { buildForestClearing } from './world/forest';
 import {
@@ -310,6 +311,7 @@ function updateBagPanel(character: {
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
+  hasYardTonic?: boolean;
 } | null | undefined): void {
   const setRow = (id: string, text: string, ok: boolean | null) => {
     const el = document.getElementById(id);
@@ -325,6 +327,7 @@ function updateBagPanel(character: {
     setRow('bagEmber', '—', null);
     setRow('bagXp', '—', null);
     setRow('bagShard', '—', null);
+    setRow('bagTonic', '—', null);
     return;
   }
   setRow(
@@ -349,6 +352,11 @@ function updateBagPanel(character: {
     character.hasEmberShard ? 'held' : 'empty',
     !!character.hasEmberShard,
   );
+  setRow(
+    'bagTonic',
+    character.hasYardTonic ? 'held' : 'empty',
+    !!character.hasYardTonic,
+  );
 }
 
 function setBagPanelOpen(open: boolean): void {
@@ -358,6 +366,27 @@ function setBagPanelOpen(open: boolean): void {
 }
 
 /** Compact party member frames: hex + leader tag + distance / pose hint. */
+function setVendorPanelOpen(open: boolean): void {
+  const panel = document.getElementById('vendorPanel');
+  if (!panel) return;
+  panel.classList.toggle('hidden', !open);
+}
+
+function updateVendorPanel(
+  stock: { itemId: string; qty: number; buyXpCost: number; sellShardXp: number } | null,
+  vendor: { label: string } | null,
+): void {
+  const qty = document.getElementById('vendorStockQty');
+  const buyXp = document.getElementById('vendorBuyXp');
+  const sellXp = document.getElementById('vendorSellXp');
+  const title = document.querySelector('#vendorPanel .bagTitle');
+  if (title && vendor) title.textContent = vendor.label || 'Vendor';
+  if (qty) qty.textContent = stock ? String(stock.qty) : '—';
+  if (buyXp) buyXp.textContent = stock ? `${stock.buyXpCost} XP` : '— XP';
+  if (sellXp) sellXp.textContent = stock ? `+${stock.sellShardXp} XP` : '+XP';
+}
+
+
 function updatePartyFrames(opts: {
   localHex: string | null;
   localPose: { x: number; z: number } | null;
@@ -425,7 +454,8 @@ function updatePartyFrames(opts: {
 
 const COMBAT_LOG_MAX = 14;
 
-type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot' | 'trade';
+type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn' | 'loot' | 'trade'
+  | 'vendor';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -449,7 +479,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                 ? 'LOOT'
                 : kind === 'trade'
                   ? 'TRADE'
-                  : 'RESPAWN';
+                  : kind === 'vendor'
+                    ? 'VENDOR'
+                    : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -492,7 +524,8 @@ type SystemToastKind =
   | 'whisper'
   | 'rate'
   | 'loot'
-  | 'trade';
+  | 'trade'
+  | 'vendor';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -531,7 +564,9 @@ function pushSystemToast(
                           ? 'LOOT'
                           : kind === 'trade'
                             ? 'TRADE'
-                            : 'SAY';
+                            : kind === 'vendor'
+                              ? 'VENDOR'
+                              : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -962,7 +997,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · F pickup · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1104,6 +1139,36 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   return { root, body, ring, remoteRing, mat, ringMat, remoteRingMat, nameplate };
 }
 
+
+function makeVendorMesh(scene: Scene, vendor: VendorView): { root: Mesh; mat: StandardMaterial; nameplate: Nameplate | null } {
+  const root = new Mesh(`vendor_${vendor.vendorId}`, scene);
+  root.position = new Vector3(vendor.x, 0, vendor.z);
+
+  const body = MeshBuilder.CreateBox(`vendorBody_${vendor.vendorId}`, { width: 0.9, height: 1.4, depth: 0.7 }, scene);
+  body.parent = root;
+  body.position.y = 0.7;
+  const mat = new StandardMaterial(`vendorMat_${vendor.vendorId}`, scene);
+  mat.diffuseColor = new Color3(0.25, 0.75, 0.45);
+  mat.emissiveColor = new Color3(0.05, 0.18, 0.1);
+  mat.specularColor = new Color3(0.1, 0.15, 0.1);
+  body.material = mat;
+
+  const awning = MeshBuilder.CreateBox(`vendorAwning_${vendor.vendorId}`, { width: 1.2, height: 0.12, depth: 1.0 }, scene);
+  awning.parent = root;
+  awning.position.y = 1.55;
+  const awningMat = new StandardMaterial(`vendorAwningMat_${vendor.vendorId}`, scene);
+  awningMat.diffuseColor = new Color3(0.85, 0.55, 0.2);
+  awningMat.emissiveColor = new Color3(0.15, 0.08, 0.02);
+  awning.material = awningMat;
+
+  const nameplate = createNameplate(scene, `vendor_${vendor.vendorId}`);
+  nameplate.mesh.parent = root;
+  nameplate.mesh.position.set(0, 2.05, 0);
+  paintNameplate(nameplate, vendor.label || 'Vendor', '#7dffb5', 1);
+
+  return { root, mat, nameplate };
+}
+
 function bindInput(opts: {
   onCycleTarget: () => void;
   onCast: (spellId: number) => void;
@@ -1116,6 +1181,7 @@ function bindInput(opts: {
   onUnequipRobes: () => void;
   onEquipRobes: () => void;
   onToggleBag: () => void;
+  onVendorInteract: () => void;
   onPickupNearest: () => void;
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
@@ -1186,6 +1252,11 @@ function bindInput(opts: {
     if (k === 'b') {
       e.preventDefault();
       opts.onToggleBag();
+      return;
+    }
+    if (k === 'e') {
+      e.preventDefault();
+      opts.onVendorInteract();
       return;
     }
     if (k === 'f') {
@@ -1572,6 +1643,8 @@ async function main(): Promise<void> {
   let castTotalMs = 0;
   let lastCastSpell = 0;
   const npcMeshes = new Map<string, NpcMesh>();
+  const vendorMeshes = new Map<string, { root: Mesh; mat: StandardMaterial; nameplate: Nameplate | null }>();
+  let vendorOpen = false;
   const groundSparkles = new Map<string, GroundSparkle>();
   let latestGround: GroundItemView[] = [];
   const npcLastHp = new Map<string, number>();
@@ -1962,6 +2035,66 @@ async function main(): Promise<void> {
           const msg = err instanceof Error ? err.message : String(err);
           pushSystemToast('rate', msg.slice(0, 96) || 'Accept trade failed');
         });
+
+  const wireVendorButtons = () => {
+    const buyXp = document.getElementById('vendorBuyXpBtn');
+    const buyShard = document.getElementById('vendorBuyShardBtn');
+    const sell = document.getElementById('vendorSellBtn');
+    buyXp?.addEventListener('click', () => {
+      const g = net;
+      if (!g) return;
+      void g.buyFromVendor(false).then(() => {
+        const ch = g.getCharacter();
+        if (ch) updateBagPanel(ch);
+        const stocks = g.getVendorStock();
+        updateVendorPanel(stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null, g.nearestVendor(8));
+        pushCombatLog('vendor', 'Bought yard_tonic for XP');
+        pushSystemToast('vendor', 'Bought yard_tonic · bag updated', TOAST_VE_TTL_MS);
+        bagOpen = true;
+        setBagPanelOpen(true);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Buy failed');
+      });
+    });
+    buyShard?.addEventListener('click', () => {
+      const g = net;
+      if (!g) return;
+      void g.buyFromVendor(true).then(() => {
+        const ch = g.getCharacter();
+        if (ch) updateBagPanel(ch);
+        const stocks = g.getVendorStock();
+        updateVendorPanel(stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null, g.nearestVendor(8));
+        pushCombatLog('vendor', 'Bought yard_tonic for ember_shard');
+        pushSystemToast('vendor', 'Bought yard_tonic · shard spent', TOAST_VE_TTL_MS);
+        bagOpen = true;
+        setBagPanelOpen(true);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Buy failed');
+      });
+    });
+    sell?.addEventListener('click', () => {
+      const g = net;
+      if (!g) return;
+      void g.sellToVendor().then(() => {
+        const ch = g.getCharacter();
+        if (ch) updateBagPanel(ch);
+        const stocks = g.getVendorStock();
+        updateVendorPanel(stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null, g.nearestVendor(8));
+        pushCombatLog('vendor', 'Sold ember_shard to vendor');
+        pushSystemToast('vendor', 'Sold ember_shard · XP gained', TOAST_VE_TTL_MS);
+        bagOpen = true;
+        setBagPanelOpen(true);
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        pushSystemToast('rate', msg.slice(0, 96) || 'Sell failed');
+      });
+    });
+  };
+  wireVendorButtons();
+
+
         return;
       }
       void g.offerTradeNearestRemote().then((hex) => {
@@ -2011,6 +2144,31 @@ async function main(): Promise<void> {
     onToggleBag: () => {
       bagOpen = !bagOpen;
       setBagPanelOpen(bagOpen);
+    },
+    onVendorInteract: () => {
+      if (!net) return;
+      net.ensureVendor();
+      const near = net.nearestVendor(4);
+      if (!near) {
+        vendorOpen = false;
+        setVendorPanelOpen(false);
+        pushSystemToast('rate', 'No vendor in range');
+        return;
+      }
+      vendorOpen = !vendorOpen;
+      setVendorPanelOpen(vendorOpen);
+      if (vendorOpen) {
+        const stocks = net.getVendorStock();
+        const stock = stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null;
+        updateVendorPanel(stock, near);
+        // Nudge toward vendor for VE / convenience
+        const pose = net.getLocalPose();
+        if (pose) {
+          net.sendMove(near.x - pose.x, near.z - pose.z);
+        }
+        pushCombatLog('vendor', `Opened ${near.label} · E closes`);
+        pushSystemToast('vendor', `${near.label} · Buy tonic / Sell shard`, 4000);
+      }
     },
     onPickupNearest: () => {
       if (!net) return;
@@ -2084,6 +2242,32 @@ async function main(): Promise<void> {
       });
     },
   });
+
+
+  const syncVendorMeshes = (vendors: VendorView[]) => {
+    const seen = new Set<string>();
+    for (const v of vendors) {
+      const key = v.vendorId.toString();
+      seen.add(key);
+      let mesh = vendorMeshes.get(key);
+      if (!mesh) {
+        mesh = makeVendorMesh(scene, v);
+        vendorMeshes.set(key, mesh);
+      }
+      mesh.root.position.x = v.x;
+      mesh.root.position.z = v.z;
+      if (mesh.nameplate) {
+        paintNameplate(mesh.nameplate, v.label || 'Vendor', '#7dffb5', 1);
+      }
+    }
+    for (const [key, mesh] of [...vendorMeshes.entries()]) {
+      if (!seen.has(key)) {
+        mesh.nameplate?.mesh.dispose();
+        mesh.root.dispose();
+        vendorMeshes.delete(key);
+      }
+    }
+  };
 
   const syncNpcMeshes = (npcs: NpcView[]) => {
     const seen = new Set<string>();
@@ -2388,6 +2572,7 @@ async function main(): Promise<void> {
       const c = net.getCombat();
       if (c) selectedTargetId = c.targetNpcId;
       syncNpcMeshes(net.getNpcs());
+      syncVendorMeshes(net.getVendors());
       syncProxyMeshes(net.getProxies());
       syncRemoteMeshes(net.getRemotes());
       syncRemoteCastFx(net.getRemoteCombats());
@@ -4847,6 +5032,133 @@ async function main(): Promise<void> {
       window.setTimeout(waitTrade, 220);
     };
     window.setTimeout(waitTrade, 700);
+  }
+
+
+
+
+  // ?ve=vendor — EnsureVendor → approach → open panel → BuyFromVendor(XP) → toast/bag tonic.
+  if (ve === 'vendor') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'vendor') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE vendor: waiting for Connected…';
+    let ticks = 0;
+    let ensured = false;
+    let approached = false;
+    let bought = false;
+    let bagShown = false;
+    const waitVendor = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE vendor: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitVendor, 200);
+        return;
+      }
+      if (!ensured) {
+        ensured = true;
+        net.ensureVendor();
+        if (mark) mark.textContent = 'VE vendor: EnsureVendor…';
+        window.setTimeout(waitVendor, 350);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const vendors = net.getVendors();
+      const v0 = vendors[0] ?? null;
+      if (!v0) {
+        if (mark) mark.textContent = 'VE vendor: waiting YardVendor…';
+        if (ticks < 240) window.setTimeout(waitVendor, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(v0.x, 1.0, v0.z));
+      camera.radius = 10;
+      if (!approached) {
+        const pose = net.getLocalPose();
+        if (pose) {
+          for (let i = 0; i < 8; i++) {
+            net.sendMove(v0.x + 0.9 - (net.getLocalPose()?.x ?? pose.x), v0.z + 0.4 - (net.getLocalPose()?.z ?? pose.z));
+          }
+        }
+        approached = true;
+        if (mark) mark.textContent = 'VE vendor: approaching…';
+        window.setTimeout(waitVendor, 450);
+        return;
+      }
+      const near = net.nearestVendor(5);
+      if (!near) {
+        // keep nudging
+        const pose = net.getLocalPose();
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
+        if (mark) mark.textContent = 'VE vendor: out of range, nudging…';
+        if (ticks < 280) window.setTimeout(waitVendor, 220);
+        return;
+      }
+      if (!bagShown) {
+        bagShown = true;
+        bagOpen = true;
+        setBagPanelOpen(true);
+        vendorOpen = true;
+        setVendorPanelOpen(true);
+      }
+      const stocks = net.getVendorStock();
+      const stock = stocks.find((s) => s.itemId === 'yard_tonic') ?? stocks[0] ?? null;
+      updateVendorPanel(stock, near);
+      const ch = net.getCharacter();
+      if (ch) updateBagPanel(ch);
+      const toastOk = toastKindsPresent().has('vendor');
+      const tonic = !!ch?.hasYardTonic;
+
+      if (!bought && ch && ch.xp >= 10 && !tonic) {
+        bought = true;
+        if (mark) mark.textContent = 'VE vendor: BuyFromVendor(XP)…';
+        void net.buyFromVendor(false).then(() => {
+          pushCombatLog('vendor', 'Bought yard_tonic for XP');
+          pushSystemToast('vendor', 'Vendor OK · yard_tonic · bag', TOAST_VE_TTL_MS);
+        }).catch(() => {
+          bought = false;
+        });
+        window.setTimeout(waitVendor, 400);
+        return;
+      }
+      // If not enough XP yet, seed via dummy kill quickly is heavy — grant by SeedLoot? XP from kill.
+      if (!bought && ch && ch.xp < 10) {
+        // Fast XP: SeedLoot + Pickup (+5) until BuyXpCost; keep vendor panel open.
+        if (mark) mark.textContent = `VE vendor: need XP (${ch.xp}/10) — SeedLoot/Pickup…`;
+        const pose = net.getLocalPose();
+        if (pose && (Math.abs(pose.x) > 1.5 || Math.abs(pose.z) > 1.5)) {
+          net.sendMove(-pose.x, -pose.z);
+        }
+        net.seedLoot();
+        void net.pickup().catch(() => undefined);
+        window.setTimeout(waitVendor, 500);
+        return;
+      }
+      if (tonic && (toastOk || bought)) {
+        setVendorPanelOpen(true);
+        setBagPanelOpen(true);
+        if (ch) updateBagPanel(ch);
+        if (mark) {
+          mark.textContent =
+            `Vendor OK · yard_tonic · E panel · Buy XP/shard · Sell shard · toast/bag`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE vendor: tonic ${tonic ? 'y' : 'n'} · stock ${stock?.qty ?? '—'} · toast ${toastOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 360) {
+        if (mark) mark.textContent = `VE vendor: timed out · tonic ${tonic ? 'y' : 'n'}`;
+        return;
+      }
+      window.setTimeout(waitVendor, 220);
+    };
+    window.setTimeout(waitVendor, 700);
   }
 
 

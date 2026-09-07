@@ -1059,3 +1059,42 @@ body {
 
 .clLine.trade,
 .clLine.loot .clTag { color: #ffb04a; }
+
+
+#vendorPanel {
+  pointer-events: auto;
+  min-width: 220px;
+  max-width: min(280px, 90vw);
+  background: rgba(8, 18, 14, 0.86);
+  border: 1px solid rgba(80, 220, 160, 0.35);
+  border-radius: 8px;
+  padding: 8px 10px 10px;
+  color: #e8fcf4;
+  font-size: 12px;
+}
+.vendorActions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.vendorActions button {
+  flex: 1;
+  min-width: 64px;
+  cursor: pointer;
+  border-radius: 6px;
+  border: 1px solid rgba(80, 220, 160, 0.45);
+  background: rgba(20, 48, 36, 0.9);
+  color: #d8ffe8;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+.vendorActions button:hover {
+  border-color: rgba(120, 255, 190, 0.7);
+  background: rgba(28, 70, 50, 0.95);
+}
+.sysToast.vendor,
+.clLine.vendor .clTag { color: #6dffb0; }
+.sysToast.vendor {
+  border-color: rgba(80, 220, 160, 0.55);
+}

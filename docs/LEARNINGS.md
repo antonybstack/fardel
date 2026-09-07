@@ -101,5 +101,4 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 - `Whisper` + `WhisperMessage` uses RLS `sender = :sender OR recipient = :sender` (BTree on both identity columns). Headless ChatSmoke: A→B visible to A+B, hidden from C. Web `/w <hexprefix> text` resolves via live `player_pose` hex prefix (must be unique).
 - Web `/p ` (or `/party `) prefix routes compose to `partySay`; party lines use `[P]` + green styling; toast kind `partySay`. Solo `CreateParty` is enough for `?ve=party-chat` screenshot; outsider proof stays headless. Whisper VE needs `tools/SecondClient` for a remote target (`?ve=whisper`).
 - Minimal player trade: session-scoped `TradeOffer` (PK = recipient) mirrors `PartyInvite`; Offer/Accept re-check XZ range; transfer `HasEmberShard` and/or capped XP on `Character` — no new inventory table. Headless `TradeSmoke` proves range reject + cancel + shard/XP transfer; browser `?ve=trade` + `TradeMate` auto-accept for bag/toast shot.
-
-
+- Minimal yard vendor: `YardVendor` marker + `VendorStock` (yard_tonic); `BuyFromVendor(payWithShard)` spends XP or ember_shard for `HasYardTonic`; `SellToVendor` sells shard for XP; range-checked. Headless `VendorSmoke`; Babylon E panel + `?ve=vendor`.

@@ -4,7 +4,7 @@
  *
  * Subscriptions follow ADR 0001: Moore neighborhood filters on hot tables
  * (player_pose, crowd_proxy); cold/small tables (character, combat, npc,
- * party_member, party_invite, chat_message, party_chat_message, whisper_message, trade_offer) wholesale; always-relevant party identity poses.
+ * party_member, party_invite, chat_message, party_chat_message, whisper_message, trade_offer, yard_vendor) wholesale; always-relevant party identity poses.
  */
 
 import { DbConnection, type EventContext, type SubscriptionHandle } from '../module_bindings';
@@ -122,6 +122,15 @@ export type TradeView = {
   pendingTo: string | null;
 };
 
+export type VendorView = {
+  vendorId: bigint;
+  x: number;
+  y: number;
+  z: number;
+  label: string;
+};
+
+
 export type GroundItemView = {
   lootId: bigint;
   x: number;
@@ -204,6 +213,11 @@ export type GameNet = {
   /** Offer shard (if held) or small XP to nearest remote in range; returns partner hex or null. */
   offerTradeNearestRemote: () => Promise<string | null>;
   getTrade: () => TradeView;
+  buyFromVendor: () => Promise<void>;
+  sellToVendor: () => Promise<void>;
+  getVendors: () => VendorView[];
+  /** Nearest YardVendor within interact range, or null. */
+  nearestVendor: (rangeMeters?: number) => VendorView | null;
   /** Resolve live PlayerPose identity by hex prefix (case-insensitive); null if ambiguous/missing. */
   findIdentityByHexPrefix: (prefix: string) => Identity | null;
   getRecentChat: () => ChatMessageView[];
@@ -310,6 +324,7 @@ export function buildNeighborhoodSqls(
     'SELECT * FROM chat_message',
     'SELECT * FROM world_loot',
     'SELECT * FROM trade_offer',
+    'SELECT * FROM yard_vendor',
   ];
   for (const { x: cx, z: cz } of fillMooreNeighborhood(interestCx, interestCz)) {
     sqls.push(`SELECT * FROM crowd_proxy WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
@@ -1394,6 +1409,48 @@ export async function connectToSpacetime(
                   offeredXp: offerXp,
                 });
                 return best.identityHex;
+              },
+              buyFromVendor: () => conn.reducers.buyFromVendor({}),
+              sellToVendor: () => conn.reducers.sellToVendor({}),
+              getVendors: () => {
+                const out: VendorView[] = [];
+                const table = (conn.db as any).yardVendor;
+                if (!table) return out;
+                for (const row of table.iter()) {
+                  out.push({
+                    vendorId: BigInt(row.vendorId),
+                    x: row.x,
+                    y: row.y,
+                    z: row.z,
+                    label: String(row.label ?? 'Vendor'),
+                  });
+                }
+                return out;
+              },
+              nearestVendor: (rangeMeters = 4.5) => {
+                const pose = latestPose;
+                if (!pose) return null;
+                const r2 = rangeMeters * rangeMeters;
+                let best: VendorView | null = null;
+                let bestD = Number.POSITIVE_INFINITY;
+                const vtable = (conn.db as any).yardVendor;
+                if (!vtable) return null;
+                for (const row of vtable.iter()) {
+                  const dx = row.x - pose.x;
+                  const dz = row.z - pose.z;
+                  const d = dx * dx + dz * dz;
+                  if (d <= r2 && d < bestD) {
+                    bestD = d;
+                    best = {
+                      vendorId: BigInt(row.vendorId),
+                      x: row.x,
+                      y: row.y,
+                      z: row.z,
+                      label: String(row.label ?? 'Vendor'),
+                    };
+                  }
+                }
+                return best;
               },
               getTrade: () => ({
                 pendingFrom: pendingTradeFrom,

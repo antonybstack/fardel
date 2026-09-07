@@ -133,3 +133,12 @@ export const WorldLoot = __t.object("WorldLoot", {
 });
 export type WorldLoot = __Infer<typeof WorldLoot>;
 
+export const YardVendor = __t.object("YardVendor", {
+  vendorId: __t.u64(),
+  x: __t.f32(),
+  y: __t.f32(),
+  z: __t.f32(),
+  label: __t.string(),
+});
+export type YardVendor = __Infer<typeof YardVendor>;
+
