@@ -100,6 +100,93 @@ function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number)
   }
 }
 
+
+/** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
+const MINIMAP_RANGE_M = 48;
+
+function drawMinimap(opts: {
+  local: { x: number; z: number } | null;
+  remotes: RemotePose[];
+  npcs: NpcView[];
+  proxies: CrowdProxyView[];
+}): void {
+  const canvas = document.getElementById('minimap') as HTMLCanvasElement | null;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width;
+  const h = canvas.height;
+  const cx = w / 2;
+  const cy = h / 2;
+  const scale = (Math.min(w, h) * 0.42) / MINIMAP_RANGE_M;
+
+  ctx.clearRect(0, 0, w, h);
+  // Disc background
+  ctx.fillStyle = 'rgba(8, 12, 24, 0.55)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, Math.min(w, h) * 0.46, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Range ring
+  ctx.strokeStyle = 'rgba(106,162,255,0.22)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, MINIMAP_RANGE_M * scale, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Compass N
+  ctx.fillStyle = '#c8d6f0';
+  ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('N', cx, 12);
+
+  const originX = opts.local?.x ?? 0;
+  const originZ = opts.local?.z ?? 0;
+
+  const plot = (wx: number, wz: number, color: string, r: number, alpha = 1) => {
+    const dx = (wx - originX) * scale;
+    // World +Z forward → screen up (north-up).
+    const dy = -(wz - originZ) * scale;
+    const dist = Math.hypot(dx, dy);
+    const maxR = Math.min(w, h) * 0.44;
+    let px = cx + dx;
+    let py = cy + dy;
+    if (dist > maxR && dist > 1e-6) {
+      const s = maxR / dist;
+      px = cx + dx * s;
+      py = cy + dy * s;
+    }
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  };
+
+  for (const p of opts.proxies) {
+    plot(p.x, p.z, p.far ? '#a86a2a' : '#f08a28', p.far ? 2.2 : 2.8, p.far ? 0.55 : 0.9);
+  }
+  for (const n of opts.npcs) {
+    if (n.hp <= 0) continue;
+    const dummy = n.kind === NPC_KIND_DUMMY;
+    plot(n.x, n.z, dummy ? '#c4a06a' : '#c45a5a', dummy ? 3.4 : 3.0);
+  }
+  for (const r of opts.remotes) {
+    plot(r.x, r.z, r.party ? '#5ed68a' : '#d46ad8', 3.6);
+  }
+  // Local on top
+  plot(originX, originZ, '#6aa2ff', 4.2);
+  ctx.strokeStyle = 'rgba(232,238,252,0.85)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
 function formatLoadout(ch: NonNullable<Extract<ConnectionStatus, { state: 'connected' }>['character']>): string {
   const gear = [
     ch.staffEquipped ? 'staff' : null,
@@ -962,6 +1049,16 @@ async function main(): Promise<void> {
       setStaffMeshVisible(humanoid.staff, equipped);
     }
 
+    drawMinimap({
+      local: net?.getLocalPose() ?? {
+        x: player.position.x,
+        z: player.position.z,
+      },
+      remotes: net?.getRemotes() ?? [],
+      npcs: net?.getNpcs() ?? [],
+      proxies: net?.getProxies() ?? [],
+    });
+
     camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
     scene.render();
   });
@@ -1445,6 +1542,63 @@ async function main(): Promise<void> {
       window.setTimeout(waitStaff, 200);
     };
     window.setTimeout(waitStaff, 600);
+  }
+
+
+  // ?ve=minimap — seed crowd + dummy; prove top-right 2D dots (local/remote/dummy/proxies).
+  if (ve === 'minimap') {
+    camera.radius = 22;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.3;
+  }
+  if (net && ve === 'minimap') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE minimap: waiting for Connected + proxies…';
+    let ticks = 0;
+    const waitMinimap = () => {
+      if (!net) return;
+      ticks += 1;
+      net.seedCrowdProxies();
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const proxies = net.getProxies();
+      const near = proxies.filter((p) => !p.far);
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const remotes = net.getRemotes();
+      syncProxyMeshes(proxies);
+      syncNpcMeshes(npcs);
+      syncRemoteMeshes(remotes);
+      drawMinimap({
+        local: net.getLocalPose() ?? {
+          x: player.position.x,
+          z: player.position.z,
+        },
+        remotes,
+        npcs,
+        proxies,
+      });
+      if (
+        st.state === 'connected' &&
+        near.length >= 1 &&
+        dummy &&
+        document.getElementById('minimap')
+      ) {
+        if (mark) {
+          mark.textContent = `Minimap OK · local+dummy+proxies ${proxies.length} (near ${near.length}) · remotes ${remotes.length} · top-right HUD`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE minimap: Connected · proxies ${proxies.length} near ${near.length} · dummy ${dummy ? 'yes' : 'no'} (waiting…)`;
+      }
+      if (ticks > 120) {
+        if (mark) mark.textContent = 'VE minimap: timed out waiting for proxies/dummy';
+        return;
+      }
+      window.setTimeout(waitMinimap, 250);
+    };
+    window.setTimeout(waitMinimap, 700);
   }
 
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).

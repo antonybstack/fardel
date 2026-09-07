@@ -105,3 +105,18 @@ body {
 .persistMark:empty {
   display: none;
 }
+
+
+#minimap {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  z-index: 10;
+  width: 160px;
+  height: 160px;
+  pointer-events: none;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(6, 10, 20, 0.72);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}

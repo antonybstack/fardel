@@ -151,6 +151,7 @@ See `web/README.md` for exact commands.
   also wholesale-subscribes `party_member` + per-identity `player_pose` for party
   mates outside Moore; green party remote tint; HUD `party: N`; hotkeys P/O;
   `?ve=party` + `tools/PartySmoke` / `tools/PartyMate` (`ve/babylon-party.png`)
+- **Minimap / compass HUD (presentation):** top-right 2D canvas minimap — local (blue), remotes (magenta / party green), training dummy (tan), crowd proxies (amber near / dim far); north-up; `?ve=minimap` (`ve/babylon-minimap.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)

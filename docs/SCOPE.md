@@ -118,5 +118,5 @@ Before starting work, answer:
 - **Phase:** **post-slice-4 invent** — AOI presentation green; forest kitbash in Babylon yard
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
-- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (`ve/babylon-forest.png`); **humanoid+staff**; **second-client shared yard** green (`ve/babylon-two-client.png`); **remote cast/target telegraphs** (`ve/babylon-remote-cast.png`); **floating damage numbers** (`ve/babylon-damage-text.png`); **party / always-relevant** (`ve/babylon-party.png`); **staff unequip gates casts** (`ve/babylon-staff-equip.png`)
-- **POC north-star:** closer — remaining invent: credited art packs for humanoid; redeploy Pages (staff-unequip invent done)
+- **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (`ve/babylon-forest.png`); **humanoid+staff**; **second-client shared yard** green (`ve/babylon-two-client.png`); **remote cast/target telegraphs** (`ve/babylon-remote-cast.png`); **floating damage numbers** (`ve/babylon-damage-text.png`); **party / always-relevant** (`ve/babylon-party.png`); **staff unequip gates casts** (`ve/babylon-staff-equip.png`); **minimap / compass HUD** (`ve/babylon-minimap.png`)
+- **POC north-star:** closer — remaining invent: credited art packs for humanoid (minimap invent done; Pages redeployed)
