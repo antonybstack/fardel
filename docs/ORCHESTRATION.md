@@ -13,7 +13,7 @@ Related docs: [TEAM_SEATS.md](TEAM_SEATS.md) · [BACKLOG.md](BACKLOG.md) · [DEV
 - SpacetimeDB **C#** module as authority
 - **Babylon.js + TypeScript / Vite** client (`web/`)
 - Headless C# smokes as the first proof of Done-when
-- Visual evidence via GitHub `user-attachments` embeds on every user-facing PR (no routine `ve/*.png` commits)
+- Visual evidence hosted on **sparkify/Cloudflare** (`ve.sparkify.dev`) on every user-facing PR (no routine `ve/*.png` commits; never ask Antony for GitHub sign-in)
 
 **Unbound Team Lead** (parent) coordinates Devs, QA, Reviewer, Release, and **Art**. The Lead:
 
@@ -76,7 +76,7 @@ Grok Bot / Grok CLI agents talk through channels and 1:1 messages. Hard constrai
 2. Branch name (`dev1/bandage`)
 3. Base tip SHA of `develop` at assign time
 4. Done-when (smokes + `?ve=…` name)
-5. VE expectation (GitHub `user-attachments` embed in PR body/comment; **no** new `ve/*.png` commits)
+5. VE expectation (upload PNG to Cloudflare VE host → embed `https://ve.sparkify.dev/...` in PR; **no** new `ve/*.png` commits; **never** ask Antony to sign into GitHub for VE)
 6. Explicit “do not invent past this Issue”
 
 Prefer **GitHub Issues as source of truth** over maintaining parallel markdown backlogs ([BACKLOG.md](BACKLOG.md)).
@@ -99,11 +99,16 @@ Do not re-ping Reviewer or Lead about a PR that is already merged — check `gh 
 
 - Target **`develop`**, never `main` (except Release’s promote PR).
 - Body includes `Fixes #N` (or `Closes #N`) so merge closes the Issue.
-- **VE required** for user-visible changes: embed a real screenshot in the PR body (or a sticky PR comment) hosted on **GitHub `user-attachments`**.
-  Example: `<img … src="https://github.com/user-attachments/assets/<uuid>" />` or markdown pointing at that URL.
-- **Do not** commit routine `ve/*.png` into the repo (bloat). Existing historical `ve/` files may remain; new work must not add more.
-- How to upload: paste/drop the PNG into the GitHub PR description or a PR comment in the browser (GitHub stores it under `user-attachments`). Agents may drive the PR page paste flow; do not force-add binary VE into git.
-- Reviewer bar: image URL must be `https://github.com/user-attachments/assets/…` (or equivalent GitHub-hosted attachment) and render in the PR UI. Reject relative `ve/` links, `raw.githubusercontent.com` VE embeds for new work, and text placeholders pretending to be PNGs.
+- **VE required** for user-visible changes: embed a real screenshot in the PR body (or sticky comment) hosted on **Cloudflare / sparkify** at `https://ve.sparkify.dev/<pr-or-slug>/<name>.png`.
+  Example: `![chat-read](https://ve.sparkify.dev/98/chat-read.png)` or `<img src="https://ve.sparkify.dev/98/chat-read.png" />`.
+- **Do not** commit routine `ve/*.png` into the git repo (bloat). Do **not** use GitHub `user-attachments` / browser paste (does not scale — each agent desktop has its own login).
+- **Never ask Antony to sign into GitHub** for VE. All seats share box Cloudflare credentials (`CLOUDFLARE_API_TOKEN`) and upload via `tools/scripts/ve-upload.sh`.
+- How to upload:
+  1. Capture a real PNG (seat browser / `?ve=…`).
+  2. `tools/scripts/ve-upload.sh <local.png> <pr-or-slug>/<name>.png`
+  3. Embed the printed `https://ve.sparkify.dev/…` URL in the PR.
+- Interim if CF upload is down: drop PNG at `/workspace/ve-capture/<pr>-<name>.png` and ping **Lead only** (Lead uploads). Never ping Antony for a login wall.
+- Reviewer bar: image URL must be `https://ve.sparkify.dev/…` (HTTP 200 `image/png`) and render in the PR UI. Reject relative `ve/` links, GitHub `user-attachments` for new work, `raw.githubusercontent.com` VE embeds for new work, and text placeholders.
 - Optional Cursor/local paths are never enough alone — the GitHub PR must show the image.
 - Serialize **schema / reducer / Spacetime module** edits to **one Dev at a time**. Client-only Cosmetics can parallel.
 - After merge: Lead broadcasts new `develop` tip SHA; open branches rebase onto it before next push.
@@ -166,7 +171,7 @@ A PR is merge-ready when **all** of:
 
 1. Reviewer has reviewed (approve or feedback addressed)
 2. Relevant headless smokes green on the seat (or Lead/QA Bugs verification)
-3. VE present (GitHub `user-attachments` embed in PR) when UI/feel changed — **no** new `ve/*.png` commits
+3. VE present (`https://ve.sparkify.dev/…` embed in PR) when UI/feel changed — **no** new `ve/*.png` commits; never ask Antony for GitHub sign-in
 4. `Fixes #N` present
 5. No open schema collision with another in-flight server PR
 
@@ -238,7 +243,7 @@ flowchart LR
 1. **Lead** scans open Issues (priority, `lane:*`, open PRs, who is idle).
 2. **Assign** one non-colliding ticket per idle Dev; serialize `lane:server` schema work.
 3. **Seat** fetches latest `develop`, branches, implements, runs seat-local smokes + Vite `?ve=…`.
-4. **Open PR** → `develop` with `Fixes #N` + VE screenshot embedded via GitHub `user-attachments` (paste PNG into PR body/comment — **no** force-add `ve/*.png`).
+4. **Open PR** → `develop` with `Fixes #N` + VE screenshot embedded via `https://ve.sparkify.dev/…` (upload with `tools/scripts/ve-upload.sh` — **no** force-add `ve/*.png`, **no** GitHub browser paste).
 5. **Reviewer** reviews; author pushes fixes.
 6. **Lead** merges, closes Issue, broadcasts tip SHA, asks open branches to rebase.
 7. **QA Feel / QA Bugs** pick follow-on Issues (`feel`, `flake`) as assigned — not invent.
@@ -398,7 +403,7 @@ Branch: <seat>/<slug> off develop @ <sha>
 Seat: <slug> (ports/DB per TEAM_SEATS)
 Done-when:
   - headless: <Smoke> green
-  - VE: ?ve=<name> → paste PNG into PR as GitHub `user-attachments` embed (do **not** `git add -f` ve/*.png)
+  - VE: ?ve=<name> → `ve-upload.sh` → embed `https://ve.sparkify.dev/…` (do **not** `git add -f` ve/*.png; never ask Antony to sign into GitHub)
   - PR → develop with Fixes #<N>
 No invent past this Issue. Rebase if tip moves.
 ```
