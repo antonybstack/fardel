@@ -63,27 +63,47 @@ body {
   display: none;
 }
 
-/* Main Emberbolt cast bar — taller, glowing, unmistakable mid-combat. */
+/* Main Emberbolt cast bar — fog-immune warm chrome vs #39 cyan fog. */
 #castBar {
-  height: 28px;
+  height: 30px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 186, 90, 0.72);
-  background: rgba(18, 10, 4, 0.88);
+  border: 2px solid rgba(255, 176, 64, 0.98);
+  background: rgba(12, 6, 2, 0.96);
   box-shadow:
-    0 0 18px rgba(255, 140, 40, 0.42),
-    0 4px 16px rgba(0, 0, 0, 0.45),
-    inset 0 0 0 1px rgba(255, 210, 130, 0.28);
+    0 0 0 2px rgba(6, 4, 2, 0.96),
+    0 0 20px rgba(255, 140, 40, 0.55),
+    0 4px 18px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 220, 150, 0.38);
 }
 
 #castBar .barLabel {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 26px;
-  letter-spacing: 0.02em;
-  color: #fff4e0;
+  letter-spacing: 0.03em;
+  color: #fff8e8;
   text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.85),
-    0 0 10px rgba(255, 160, 60, 0.45);
+    0 1px 3px rgba(0, 0, 0, 0.95),
+    0 0 12px rgba(255, 160, 50, 0.55);
+}
+
+/* GCD bar — cool blue secondary chrome; distinct from warm cast / crimson lockout. */
+#gcdBar {
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 170, 255, 0.72);
+  background: rgba(6, 10, 22, 0.94);
+  box-shadow:
+    0 0 0 1px rgba(4, 6, 14, 0.92),
+    0 2px 10px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px rgba(140, 190, 255, 0.18);
+}
+
+#gcdBar .barLabel {
+  font-size: 11px;
+  font-weight: 650;
+  color: #dce8ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 .barFill {
@@ -105,13 +125,13 @@ body {
 .barFill.cast {
   background: linear-gradient(
     90deg,
-    rgba(170, 55, 8, 0.95) 0%,
-    rgba(255, 130, 28, 0.92) 55%,
-    rgba(255, 220, 130, 0.95) 100%
+    rgba(190, 50, 0, 1) 0%,
+    rgba(255, 128, 18, 1) 50%,
+    rgba(255, 230, 120, 1) 100%
   );
   box-shadow:
-    inset 0 0 12px rgba(255, 120, 30, 0.35),
-    2px 0 10px rgba(255, 200, 100, 0.55);
+    inset 0 0 14px rgba(255, 110, 20, 0.45),
+    2px 0 14px rgba(255, 190, 80, 0.7);
   animation: castFillPulse 900ms ease-in-out infinite;
 }
 
@@ -1730,20 +1750,22 @@ body {
 }
 .sysToast.mana .toastTag { color: #9ab4ff; }
 
-/* CANCEL = soft amber player interrupt (refund). LOCKOUT = harsh crimson hard-interrupt. */
+/* CANCEL = soft amber refund. LOCKOUT = harsh crimson hard-interrupt. Fog-immune fills. */
 .sysToast.castCancel {
-  border-color: rgba(255, 196, 110, 0.85);
-  background: linear-gradient(180deg, rgba(42, 28, 10, 0.94), rgba(18, 12, 6, 0.92));
+  border: 2px solid rgba(255, 190, 90, 0.98);
+  background: linear-gradient(180deg, rgba(48, 30, 8, 0.97), rgba(16, 10, 4, 0.96));
   box-shadow:
-    0 4px 18px rgba(0, 0, 0, 0.45),
-    0 0 14px rgba(255, 170, 70, 0.28);
+    0 0 0 1px rgba(8, 5, 2, 0.9),
+    0 4px 18px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(255, 170, 60, 0.38);
 }
 .sysToast.castCancel .toastTag {
-  color: #ffd090;
-  background: rgba(255, 170, 70, 0.18);
-  padding: 2px 7px;
+  color: #ffe2a8;
+  background: rgba(255, 160, 50, 0.28);
+  padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 190, 100, 0.45);
+  border: 1px solid rgba(255, 200, 100, 0.7);
+  font-weight: 750;
 }
 
 .clLine.castCancel .clTag { color: #b8c0cc; }
@@ -1756,19 +1778,21 @@ body {
 .clLine.castPushback .clTag { color: #b8c0cc; }
 
 .sysToast.castHardInterrupt {
-  border-color: rgba(255, 60, 90, 0.95);
-  background: linear-gradient(180deg, rgba(55, 8, 18, 0.96), rgba(22, 4, 10, 0.94));
+  border: 2px solid rgba(255, 48, 78, 1);
+  background: linear-gradient(180deg, rgba(64, 4, 16, 0.98), rgba(20, 2, 8, 0.97));
   box-shadow:
-    0 4px 20px rgba(0, 0, 0, 0.5),
-    0 0 18px rgba(255, 40, 70, 0.42);
+    0 0 0 1px rgba(10, 0, 4, 0.95),
+    0 4px 22px rgba(0, 0, 0, 0.55),
+    0 0 22px rgba(255, 30, 60, 0.55);
 }
 .sysToast.castHardInterrupt .toastTag {
-  color: #ff8a9a;
-  background: rgba(255, 40, 70, 0.28);
-  padding: 2px 7px;
+  color: #ffd0d6;
+  background: rgba(220, 20, 55, 0.42);
+  padding: 2px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 80, 100, 0.65);
-  letter-spacing: 0.08em;
+  border: 1px solid rgba(255, 70, 95, 0.85);
+  letter-spacing: 0.1em;
+  font-weight: 800;
 }
 
 .clLine.castHardInterrupt .clTag { color: #b8c0cc; }

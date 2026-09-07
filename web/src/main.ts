@@ -182,14 +182,15 @@ function setGcdBar(
   const label = document.getElementById('gcdLabel');
   const castFill = document.getElementById('castFill');
   const castLabel = document.getElementById('castLabel');
+  const gcdLeft = veGcdPresent?.gcdMs ?? remainingMs;
   if (fill) {
-    const pct = Math.min(100, (remainingMs / 1200) * 100);
+    const pct = Math.min(100, (gcdLeft / 1200) * 100);
     fill.style.width = `${pct}%`;
-    fill.classList.toggle('ready', remainingMs <= 0);
+    fill.classList.toggle('ready', gcdLeft <= 0);
   }
   if (label) {
     label.textContent =
-      remainingMs > 0 ? `GCD ${ (remainingMs / 1000).toFixed(1) }s` : 'GCD ready';
+      gcdLeft > 0 ? `GCD ${ (gcdLeft / 1000).toFixed(1) }s` : 'GCD ready';
   }
   if (castFill && castLabel) {
     const ve = veCastFeedbackPresent;
@@ -10841,6 +10842,117 @@ async function main(): Promise<void> {
       if (ticks < 40) window.setTimeout(waitFb, 400);
     };
     window.setTimeout(waitFb, 600);
+  }
+
+  // ?ve=castbar-read — casting + CANCEL vs LOCKOUT chrome readable over #39 cyan fog (#74).
+  if (ve === 'castbar-read' || ve === 'castbarread') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'castbar-read' || ve === 'castbarread')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE castbar-read: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE castbar-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRead, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE castbar-read: equipping staff…';
+        window.setTimeout(waitRead, 280);
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE castbar-read: seeding dummy…';
+        window.setTimeout(waitRead, 320);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.15,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 11;
+      }
+      const ch = net.getCharacter();
+      if (ch) updateSelfFrame(ch);
+
+      // Mid-Emberbolt cast bar + GCD + distinct CANCEL vs LOCKOUT toasts (fog chrome proof).
+      const seedLeft = Math.round(EMBERBOLT_CAST_MS * 0.52);
+      const gcdSeed = 780;
+      veCastFeedbackPresent = {
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        spellName: 'Emberbolt',
+      };
+      veGcdPresent = {
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+      };
+      lastCastSpell = SPELL_EMBERBOLT;
+      castTotalMs = EMBERBOLT_CAST_MS;
+      castUntilMs = Date.now() + seedLeft;
+      setGcdBar(gcdSeed, seedLeft, EMBERBOLT_CAST_MS, 'Emberbolt');
+      updateSpellHotbar({
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        castingSpell: SPELL_EMBERBOLT,
+        staffEquipped: true,
+        mana: ch?.mana ?? 999,
+        knowsSpark: true,
+        knowsEmberbolt: true,
+      });
+
+      const stack = document.getElementById('toastStack');
+      if (stack) stack.replaceChildren();
+      pushSystemToast(
+        'castCancel',
+        `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'castHardInterrupt',
+        `LOCKOUT · hard interrupt · no mana refund`,
+        TOAST_VE_TTL_MS,
+      );
+
+      const castBar = document.getElementById('castBar');
+      const gcdBar = document.getElementById('gcdBar');
+      const barOk = !!castBar && !castBar.classList.contains('hidden');
+      const gcdOk = !!gcdBar;
+      const kinds = toastKindsPresent();
+      const distinct = kinds.has('castCancel') && kinds.has('castHardInterrupt');
+      if (mark) {
+        mark.textContent =
+          `Castbar-read OK · casting ${barOk ? 'on' : 'off'} · gcd ${gcdOk ? 'on' : 'off'} · CANCEL≠LOCKOUT ${distinct ? 'ok' : '…'} · fog chrome`;
+      }
+      if (ticks < 45) window.setTimeout(waitRead, 400);
+    };
+    window.setTimeout(waitRead, 600);
   }
 
   // ?ve=cast-silence — hard interrupt → CastLockedUntil → Emberbolt Cast rejects (toast silenced).
