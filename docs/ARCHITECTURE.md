@@ -49,15 +49,30 @@ Do **not** build full shooter-style rollback for v1. Tab-target MMOs tolerate si
 
 `Fardel.Shared` (name TBD in code):
 
-- Pure C#
-- No Unity, no SpacetimeDB attributes
+- Pure C# on **.NET 10** / **C# 14** (or the newest TFM SpacetimeDB + Unity can both consume)
+- No `UnityEngine`, no SpacetimeDB attributes
 - Movement clamps, skill validation helpers, damage formulas used by both module reducers and client prediction
+- **Span-first:** public hot APIs take/return `Span<T>` / `ReadOnlySpan<T>` (or `ref`/`in` structs) instead of allocating arrays/strings per call
+- **Zero heap on the sim tick:** no LINQ in combat/move; no per-call `List<T>` unless pooled; prefer `stackalloc` / pooled buffers for scratch
 
 Module references Shared. Client references Shared. Duplication is a bug.
 
+## C# hot-path rules (all surfaces)
+
+These apply to reducers, shared sim, and Unity `Update` / net apply:
+
+1. **Measure allocations** in player/web builds (Unity Profiler / `dotnet-trace` / BenchmarkDotNet) — editor GC lies.
+2. Prefer **`Span`/`ReadOnlySpan`**, `ref struct`, and value-type state over class graphs on the tick.
+3. **Pool** anything larger than a stack frame (`ArrayPool<T>`, reusable buffers on components/systems).
+4. Ban on hot paths unless ADR: LINQ, `foreach` on non-struct enumerators that allocate, string interpolation for gameplay net, boxing enums/interfaces per entity.
+5. Batch work: one pass over entities beats per-entity helper that allocates.
+6. When .NET 10 APIs exist on that surface, prefer them over older allocating equivalents (search/span helpers, growable value buffers, etc.).
+
+Unity may not expose every desktop .NET 10 API — keep Shared on full .NET 10 so tools/tests prove the zero-alloc design, then adapt call sites to Unity’s subset.
+
 ## Presentation laws (Unity)
 
-- Hot paths allocate **nothing** (no LINQ, no per-frame `new`, pool lists/buffers).
+- Hot paths allocate **nothing** on the heap (Span/stackalloc/pooling; no LINQ; no per-frame `new`; see C# hot-path rules).
 - Crowds: GPU instancing; animation via VAT or compute — not 300 full Mecanim skeletons.
 - Treat Unity as **host** (input, UI, builds). Entity presentation should feel closer to a batched hordes renderer than a deep `MonoBehaviour` hierarchy.
 - Profile Web builds early; editor FPS lies.
