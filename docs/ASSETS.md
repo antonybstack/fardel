@@ -109,7 +109,7 @@ Until a credited **free** pack lands, the Babylon client uses **procedural kitba
 - `web/src/world/forest.ts` — cylinder/cone hero trees, GPU-instanced mid trees,
   distant mountain cones with snow caps, sky dome + fog + hemi/sun mood.
 - `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
-  silhouette); CrowdProxies remain amber capsules; training dummy stays cylinder.
+  silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy stays cylinder.
 
 Visual north star is locked above / in Issue #31. Devs execute presentation Issues **#32–#34** while free packs (or further DIY) are chosen. No third-party mesh packs are vendored yet — replace with licensed **free** kits when credits are chosen (see ledger below).
 

@@ -133,7 +133,8 @@ See `web/README.md` for exact commands.
   hemi/sun mood lighting (`web/src/world/forest.ts`); (`ve/babylon-forest.png`)
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
   staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
-  (`ve/babylon-humanoid.png`)
+  (`ve/babylon-humanoid.png`); readability polish #33 (`?ve=humanoid-polish`,
+  `ve/babylon-humanoid-polish.png`)
 - **Second-client shared yard (presentation):** remote `PlayerPose` identities
   render as distinct tinted humanoids; HUD `remotes:` line; `?ve=two-client` +
   `tools/SecondClient` headless mover (`ve/babylon-two-client.png`)
