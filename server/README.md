@@ -18,3 +18,11 @@ Generate Unity bindings (after publish):
 ```bash
 spacetime generate --lang csharp --out-dir ../client/Assets/Scripts/Spacetime/Generated
 ```
+
+## wasm-opt caveat (Mac)
+
+Homebrew `binaryen` 132's `wasm-opt` can corrupt SpacetimeDB C# WASI modules (invalid external kind on publish). If publish fails after "Optimising module with wasm-opt", rename it aside:
+
+```bash
+mv /opt/homebrew/bin/wasm-opt /opt/homebrew/bin/wasm-opt.fardel-disabled
+```

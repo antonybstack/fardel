@@ -38,7 +38,8 @@ obj/
 *.user
 *.DotSettings.user
 .vs/
-packages/
+# NuGet (do not use bare packages/ — matches Unity Packages/ on macOS)
+**/[Nn]uGet/
 TestResults/
 *.nupkg
 
@@ -64,3 +65,7 @@ unity-*.log
 spacetime-*.log
 module-build.log
 docker-module-build.log
+
+# Unity project packages manifest must be tracked
+!client/Packages/
+!client/Packages/**
