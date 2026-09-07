@@ -1330,3 +1330,18 @@ body {
 .sysToast.silenced .toastTag { color: #c49bff; }
 
 .clLine.silenced .clTag { color: #c49bff; }
+
+.spellSlot.outOfRange {
+  opacity: 0.42;
+  filter: saturate(0.4) brightness(0.7);
+}
+.spellSlot.outOfRange .slotName {
+  color: #ffb07a;
+}
+
+.sysToast.outOfRange {
+  border-color: rgba(255, 160, 90, 0.65);
+}
+.sysToast.outOfRange .toastTag { color: #ffb07a; }
+
+.clLine.outOfRange .clTag { color: #ffb07a; }
