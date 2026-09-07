@@ -5,6 +5,7 @@
  * Subscriptions follow ADR 0001: Moore neighborhood filters on hot tables
  * (player_pose, crowd_proxy); cold/small tables (character, combat, npc,
  * party_member, party_invite, chat_message, party_chat_message, whisper_message, trade_offer, yard_vendor) wholesale; always-relevant party identity poses.
+ * Character is Public + wholesale — party frames read mate Hp/MaxHp from the cache (no extra always-relevant Character SQL needed).
  */
 
 import { DbConnection, type EventContext, type SubscriptionHandle } from '../module_bindings';
@@ -234,6 +235,8 @@ export type GameNet = {
   getRemoteCombats: () => RemoteCombat[];
   getCombat: () => CombatView | null;
   getCharacter: () => CharacterView | null;
+  /** Character row for any subscribed identity (wholesale Character; party mates included). */
+  getCharacterFor: (identityHex: string) => CharacterView | null;
   getParty: () => PartyView | null;
   getNpcs: () => NpcView[];
   getProxies: () => CrowdProxyView[];
@@ -575,7 +578,9 @@ export async function connectToSpacetime(
     let localIdentity: Identity | null = null;
     let latestPose: Pose | null = null;
     let latestCombat: CombatView | null = null;
-    let latestCharacter: CharacterView | null = null;
+        let latestCharacter: CharacterView | null = null;
+    /** identityHex → CharacterView (wholesale Character; party frames read mates here). */
+    const characterMap = new Map<string, CharacterView>();
     let castFeedback = '';
     const npcMap = new Map<string, NpcView>();
     const proxyMap = new Map<string, CrowdProxyView>();
@@ -847,9 +852,13 @@ export async function connectToSpacetime(
           };
 
           const emitCharacterRow = (row: CharacterRow) => {
-            if (!localIdentity || !row.identity.isEqual(localIdentity)) return;
-            latestCharacter = characterView(row);
-            onCharacter?.(latestCharacter);
+            const hex = row.identity.toHexString();
+            const view = characterView(row);
+            characterMap.set(hex, view);
+            if (localIdentity && row.identity.isEqual(localIdentity)) {
+              latestCharacter = view;
+              onCharacter?.(latestCharacter);
+            }
             emitStatus(identityHex);
           };
 
@@ -922,6 +931,8 @@ export async function connectToSpacetime(
               emitCombatRow(row as CombatRow);
             }
             onRemoteCombats?.(listRemoteCombats());
+            characterMap.clear();
+            latestCharacter = null;
             for (const row of conn.db.character.iter()) {
               emitCharacterRow(row as CharacterRow);
             }
@@ -1622,6 +1633,13 @@ export async function connectToSpacetime(
               getRemoteCombats: () => listRemoteCombats(),
               getCombat: () => latestCombat,
               getCharacter: () => latestCharacter,
+              getCharacterFor: (hex: string) => {
+                const key = hex.toLowerCase();
+                for (const [h, v] of characterMap) {
+                  if (h.toLowerCase() === key) return v;
+                }
+                return null;
+              },
               getParty: () => buildPartyView(),
               getNpcs: () => listNpcs(),
               getProxies: () => listProxies(),

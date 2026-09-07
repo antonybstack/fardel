@@ -2,8 +2,9 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// Long-lived party mate for browser ?ve=party:
-// invite online identities (skip stale no-accept), wait for party size>=2, move far, hold.
+// Long-lived party mate for browser ?ve=party / ?ve=party-hp / ?ve=party-frames:
+// invite online identities (skip stale no-accept), wait for party size>=2,
+// take a few dummy-thorn Sparks (mate HP mid for party-hp frames), move far, hold.
 const string uri = "http://127.0.0.1:3000";
 const string db = "fardel";
 const float farX = 120f;
@@ -48,6 +49,7 @@ try
     Console.WriteLine("READY waiting for other PlayerPose to invite…");
 
     var moved = false;
+    var thornsTaken = false;
     var skipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     var soloSince = DateTime.UtcNow;
     Identity? lastInvitee = null;
@@ -133,6 +135,44 @@ try
             {
                 if (m.PartyId == self.PartyId) partyCount++;
             }
+        }
+
+        if (self is not null && partyCount >= 2 && !thornsTaken)
+        {
+            // Drop mate HP via dummy thorns so browser party frames show non-full mate bar.
+            Console.WriteLine($"Party size {partyCount} — taking thorns for party-hp VE…");
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is not null && !ch.StaffEquipped)
+            {
+                conn.Reducers.EquipStaff();
+                await Frame(conn, 200);
+            }
+            for (var t = 0; t < 3; t++)
+            {
+                try { conn.Reducers.EnsureTrainingDummy(); } catch { /* ignore */ }
+                await Frame(conn, 120);
+                Npc? dummy = null;
+                foreach (var n in conn.Db.Npc.Iter())
+                {
+                    if (n.Hp > 0) { dummy = n; break; }
+                }
+                if (dummy is null) break;
+                try
+                {
+                    conn.Reducers.SetTarget(dummy.NpcId);
+                    await Frame(conn, 80);
+                    conn.Reducers.Cast(Combat.SpellSpark);
+                }
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine("thorn cast: " + e.Message);
+                }
+                await Frame(conn, Combat.GcdMs + 40);
+            }
+            ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is not null)
+                Console.WriteLine($"mate HP after thorns {ch.Hp}/{ch.MaxHp}");
+            thornsTaken = true;
         }
 
         if (self is not null && partyCount >= 2 && !moved)

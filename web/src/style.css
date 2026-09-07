@@ -295,7 +295,7 @@ body {
 }
 
 
-/* Player self-frame — You + XP (no player HP table yet). */
+/* Player self-frame — You + XP + Character.Hp bar. */
 #selfFrame {
   position: absolute;
   left: 12px;
@@ -518,7 +518,7 @@ body {
 }
 
 
-/* Party member frames — compact roster under status (name/hex + dist/pose). */
+/* Party member frames — compact roster under status (name/hex + HP + dist/pose). */
 #partyFrames {
   display: flex;
   flex-direction: column;
@@ -596,6 +596,50 @@ body {
   color: #8aa0c8;
 }
 
+/* Party-frame HP bar (Character.Hp / MaxHp for You + mates). */
+.pfHpBar {
+  position: relative;
+  margin-top: 3px;
+  height: 12px;
+  background: rgba(12, 12, 16, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.pfHpFill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  background: linear-gradient(90deg, #2f8f5a, #5ed68a);
+  transition: width 80ms linear, background 120ms ease;
+}
+.pfRow.self .pfHpFill {
+  background: linear-gradient(90deg, #2f6f8f, #5eb8d6);
+}
+.pfHpFill.mid {
+  background: linear-gradient(90deg, #a87a12, #e6be37);
+}
+.pfHpFill.low {
+  background: linear-gradient(90deg, #a02820, #dc463c);
+}
+.pfHpLabel {
+  position: relative;
+  z-index: 1;
+  display: block;
+  padding: 0 6px;
+  font-size: 9px;
+  line-height: 12px;
+  color: #e8eefc;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pfRow.dead {
+  opacity: 0.72;
+  border-color: rgba(180, 80, 80, 0.45);
+}
 
 /* Scrolling combat log — right column under minimap (client-only). */
 #combatLog {

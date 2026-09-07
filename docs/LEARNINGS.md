@@ -86,7 +86,7 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 
 - Self-frame/bag HUD reads Character (XP, Hp/MaxHp, staff/robes, known spells, tonic); HP bar is authority-backed — do not invent client-only health.
 
-- Party member frames are client-only Cosmetics over `PartyMember` + remote poses (hex, leader, distance); no party HP table yet — omit health rather than invent fake HP.
+- Party member frames are client-only Cosmetics over `PartyMember` + remotes + wholesale `Character` (hex, leader, distance, **Hp/MaxHp** bars for You + mates). Character is Public wholesale — no separate always-relevant Character SQL; cache via `getCharacterFor`. Do not invent client-only health.
 - Robes mesh follows `Character.robesEquipped` like staff: hide hood/skirt/shoulders group; tint torso/arms drab when unequipped (casts remain staff-gated).
 
 - Combat log is client-only Cosmetics over existing signals (cast intent, npc HP deltas, Character equip flips, PartyMember size) — no new combat-event table; keeps module/smokes unchanged.
@@ -106,3 +106,4 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 - Yard tonic use: `Character.HasYardTonic` + `TonicExpiresAt`; `BuyYardTonic` (vendor XP) grants bag flag; `UseYardTonic` consumes it for a 15s move-speed buff (`Tonic.MoveSpeedMult` on Move clamp). Headless `TonicSmoke` proves empty/range reject + buffed step; Babylon **V** use + self-frame buff timer (`?ve=tonic`).
 
 - Player HP / death/respawn: durable `Character.Hp`/`MaxHp` + dummy thorns on `ApplyDamage` (keeps Cast NPC-only so CombatSmoke stays green); `PendingPlayerRespawn` schedules yard-origin full-HP revive; Move/Cast gate on `Hp≤0`. Headless `PlayerHpSmoke`; Babylon self-frame HP + death greyout + self thorns floaters + ghost robe tint while dead (`?ve=player-hp`).
+- Party frames HP: same `Character.Hp`/`MaxHp` wired into left-column party roster (`?ve=party-hp` + PartyMate thorns so mate bar is mid); keep `PartySmoke` / `PlayerHpSmoke` green — no module change.

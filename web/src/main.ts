@@ -445,6 +445,7 @@ function updateVendorPanel(vendor: { label: string } | null): void {
 }
 
 
+/** Compact party member frames: hex + leader + Character.Hp/MaxHp + distance. */
 function updatePartyFrames(opts: {
   localHex: string | null;
   localPose: { x: number; z: number } | null;
@@ -454,6 +455,8 @@ function updatePartyFrames(opts: {
     members: { identityHex: string; isLeader: boolean }[];
   } | null | undefined;
   remotes: RemotePose[];
+  /** Look up Character.Hp/MaxHp for a party identity (wholesale Character cache). */
+  getCharacterFor?: (identityHex: string) => { hp: number; maxHp: number } | null;
 }): void {
   const root = document.getElementById('partyFrames');
   if (!root) return;
@@ -490,10 +493,28 @@ function updatePartyFrames(opts: {
     } else if (!isSelf) {
       meta = 'pose pending…';
     }
+    const ch = opts.getCharacterFor?.(m.identityHex) ?? null;
+    const hp = ch?.hp ?? 0;
+    const maxHp = ch?.maxHp ?? 0;
+    const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
+    const fillCls = [
+      'pfHpFill',
+      frac > 0.25 && frac <= 0.55 ? 'mid' : '',
+      frac <= 0.25 ? 'low' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const hpLabel = maxHp > 0 ? `${hp}/${maxHp}` : '—';
+    const hpBar =
+      `<div class="pfHpBar" aria-label="Party HP">` +
+      `<div class="${fillCls}" style="width:${(frac * 100).toFixed(1)}%"></div>` +
+      `<span class="pfHpLabel">${hpLabel}</span>` +
+      `</div>`;
     const cls = [
       'pfRow',
       isSelf ? 'self' : '',
       m.isLeader ? 'leader' : '',
+      maxHp > 0 && hp <= 0 ? 'dead' : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -502,6 +523,7 @@ function updatePartyFrames(opts: {
     rows.push(
       `<div class="${cls}" data-hex="${m.identityHex}">` +
         `<div class="pfNameRow"><span class="pfName">${name}</span>${tag}</div>` +
+        hpBar +
         `<div class="pfMeta">${meta}</div>` +
         `</div>`,
     );
@@ -2709,6 +2731,7 @@ async function main(): Promise<void> {
             ? latestStatus.party ?? null
             : null,
         remotes: net?.getRemotes() ?? [],
+        getCharacterFor: (hex) => net?.getCharacterFor(hex) ?? null,
       });
       // Combat log: staff/robes equip flips + party join.
       if (ch) {
@@ -4159,6 +4182,7 @@ async function main(): Promise<void> {
         localPose: local,
         party,
         remotes,
+        getCharacterFor: (hex) => net.getCharacterFor(hex),
       });
       if (st.state !== 'connected') {
         if (mark) mark.textContent = `VE party-frames: ${st.state}…`;
@@ -4229,6 +4253,148 @@ async function main(): Promise<void> {
     };
     window.setTimeout(waitFrames, 800);
   }
+
+
+  // ?ve=party-hp — party size>=2 + Character.Hp bars on You + mate frames (PartyMate).
+  if (ve === 'party-hp') {
+    camera.radius = 28;
+    camera.beta = Math.PI / 3.15;
+    camera.alpha = Math.PI / 2.25;
+  }
+  if (net && ve === 'party-hp') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE party-hp: waiting for party invite / remotes…';
+    try {
+      const p0 = net.getParty();
+      if (p0 && p0.size > 0 && p0.size < 2) net.leaveParty();
+    } catch { /* ignore */ }
+    let ticks = 0;
+    let invited = false;
+    let localThorns = 0;
+    let lastThornAt = 0;
+    const waitHpFrames = () => {
+      ticks += 1;
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const party = net.getParty();
+      const st = latestStatus;
+      const local = net.getLocalPose();
+      updatePartyFrames({
+        localHex: net.identityHex,
+        localPose: local,
+        party,
+        remotes,
+        getCharacterFor: (hex) => net.getCharacterFor(hex),
+      });
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE party-hp: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitHpFrames, 200);
+        return;
+      }
+      if (party?.pendingInviteFrom) {
+        if ((party.size ?? 0) > 0 && (party.size ?? 0) < 2) {
+          net.leaveParty();
+          if (mark) mark.textContent = 'VE party-hp: left solo party to accept inbound invite…';
+          window.setTimeout(waitHpFrames, 250);
+          return;
+        }
+        if ((party.size ?? 0) === 0) {
+          net.acceptPartyInvite();
+          if (mark) {
+            mark.textContent = `VE party-hp: accepting invite from ${party.pendingInviteFrom.slice(0, 12)}…`;
+          }
+          window.setTimeout(waitHpFrames, 300);
+          return;
+        }
+      }
+      if (
+        !party?.pendingInviteFrom &&
+        remotes.length >= 1 &&
+        (party?.size ?? 0) < 2 &&
+        ticks % 4 === 0
+      ) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) {
+            mark.textContent = `VE party-hp: invited ${hex.slice(0, 12)}… waiting accept…`;
+          }
+        }
+      }
+
+      // Take a couple of dummy thorns so You bar is visibly mid (mate may also be mid via PartyMate).
+      const chSelf = net.getCharacter();
+      if (
+        (party?.size ?? 0) >= 2 &&
+        chSelf &&
+        chSelf.hp > 70 &&
+        localThorns < 3 &&
+        Date.now() - lastThornAt > 1100
+      ) {
+        if (!chSelf.staffEquipped) {
+          net.equipStaff();
+        } else {
+          net.ensureTrainingDummy();
+          const dummy = (net.getNpcs() ?? []).find((n) => n.hp > 0);
+          if (dummy) {
+            net.setTarget(dummy.npcId);
+            net.cast(SPELL_SPARK);
+            localThorns += 1;
+            lastThornAt = Date.now();
+            if (mark) {
+              mark.textContent = `VE party-hp: thorns ${localThorns} · HP ${chSelf.hp}/${chSelf.maxHp}…`;
+            }
+          }
+        }
+      }
+
+      const frames = document.getElementById('partyFrames');
+      const framesVisible = !!(frames && !frames.classList.contains('hidden'));
+      const rowCount = frames ? frames.querySelectorAll('.pfRow').length : 0;
+      const hpLabels = frames
+        ? Array.from(frames.querySelectorAll('.pfHpLabel')).map((el) => el.textContent ?? '')
+        : [];
+      const hpOk =
+        hpLabels.length >= 2 &&
+        hpLabels.every((t) => /^\d+\/\d+$/.test(t.trim()));
+      const mate = party?.members.find((m) => m.identityHex !== net.identityHex);
+      const mateCh = mate ? net.getCharacterFor(mate.identityHex) : null;
+      const farOrAnyParty = remotes.find((r) => r.party);
+      if ((party?.size ?? 0) >= 2 && framesVisible && rowCount >= 2 && hpOk && mateCh && mateCh.maxHp > 0) {
+        if (local && farOrAnyParty) {
+          camera.setTarget(
+            new Vector3(
+              (local.x + farOrAnyParty.x) * 0.35,
+              1.2,
+              (local.z + farOrAnyParty.z) * 0.35,
+            ),
+          );
+          camera.radius = 36;
+        }
+        // Prefer a shot once You took at least one thorn OR mate is not full.
+        const selfMid = !!(chSelf && chSelf.maxHp > 0 && chSelf.hp < chSelf.maxHp);
+        const mateMid = mateCh.hp < mateCh.maxHp;
+        if (selfMid || mateMid || ticks > 90) {
+          if (mark) {
+            mark.textContent =
+              `Party HP OK · size ${party!.size} · You ${chSelf?.hp ?? '?'}/${chSelf?.maxHp ?? '?'} · mate ${mateCh.hp}/${mateCh.maxHp} · frames`;
+          }
+          return;
+        }
+      }
+      if (mark) {
+        mark.textContent =
+          `VE party-hp: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · rows ${rowCount} · hp=[${hpLabels.join(',')}] · invited=${invited} (waiting…)`;
+      }
+      if (ticks > 240) {
+        if (mark) mark.textContent = 'VE party-hp: timed out waiting for party HP frames';
+        return;
+      }
+      window.setTimeout(waitHpFrames, 200);
+    };
+    window.setTimeout(waitHpFrames, 800);
+  }
+
 
   // ?ve=robes-equip — unequip robes → hood/skirt hidden + drab tunic tint.
   if (ve === 'robes-equip') {
