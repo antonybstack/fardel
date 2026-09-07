@@ -66,6 +66,11 @@ try
     var rateFailed = new TaskCompletionSource();
     void OnSay(ReducerEventContext ctx, string text)
     {
+        // Ignore late events for other Say texts (e.g. first hello yard).
+        if (text != "too soon")
+        {
+            return;
+        }
         switch (ctx.Event.Status)
         {
             case Status.Failed(var reason):
@@ -73,10 +78,6 @@ try
                 rateFailed.TrySetResult();
                 break;
             case Status.Committed:
-                if (text == sayText2)
-                {
-                    break;
-                }
                 rateFailed.TrySetException(new Exception($"Say committed while rate-limited: {text}"));
                 break;
             case Status.OutOfEnergy(_):
