@@ -26,6 +26,8 @@ import {
   CAST_HARD_INTERRUPT_REMAIN_MS,
   CAST_SILENCE_MS,
   CAST_RANGE_METERS,
+  KICK_MANA_COST,
+  KICK_RANGE_METERS,
   castSilenceRemainingMs,
   isTargetOutOfCastRange,
   REST_MANA_RESTORE,
@@ -1492,6 +1494,63 @@ function createScene(engine: Engine): {
   return { scene, camera, player, humanoid, proxySource, setLocalGhost };
 }
 
+
+/** Client-only ground indicator: cast-reach disc+torus around the local player. */
+type CastRangeRing = {
+  root: Mesh;
+  disc: Mesh;
+  rim: Mesh;
+  discMat: StandardMaterial;
+  rimMat: StandardMaterial;
+};
+
+function createCastRangeRing(scene: Scene): CastRangeRing {
+  const root = new Mesh('castRangeRing', scene);
+  root.isPickable = false;
+
+  const disc = MeshBuilder.CreateDisc(
+    'castRangeDisc',
+    { radius: CAST_RANGE_METERS, tessellation: 64 },
+    scene,
+  );
+  disc.parent = root;
+  disc.rotation.x = Math.PI / 2;
+  disc.position.y = 0.03;
+  disc.isPickable = false;
+  const discMat = new StandardMaterial('castRangeDiscMat', scene);
+  discMat.diffuseColor = new Color3(0.95, 0.28, 0.18);
+  discMat.emissiveColor = new Color3(0.55, 0.12, 0.06);
+  discMat.specularColor = new Color3(0.05, 0.02, 0.01);
+  discMat.alpha = 0.18;
+  discMat.transparencyMode = Material.MATERIAL_ALPHABLEND;
+  discMat.backFaceCulling = false;
+  discMat.disableLighting = true;
+  disc.material = discMat;
+
+  const rim = MeshBuilder.CreateTorus(
+    'castRangeRim',
+    {
+      diameter: CAST_RANGE_METERS * 2,
+      thickness: 0.22,
+      tessellation: 64,
+    },
+    scene,
+  );
+  rim.parent = root;
+  rim.position.y = 0.06;
+  rim.rotation.x = Math.PI / 2;
+  rim.isPickable = false;
+  const rimMat = new StandardMaterial('castRangeRimMat', scene);
+  rimMat.diffuseColor = new Color3(1.0, 0.35, 0.18);
+  rimMat.emissiveColor = new Color3(0.95, 0.28, 0.1);
+  rimMat.specularColor = new Color3(0.2, 0.08, 0.04);
+  rimMat.disableLighting = true;
+  rim.material = rimMat;
+
+  root.setEnabled(false);
+  return { root, disc, rim, discMat, rimMat };
+}
+
 function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   const root = new Mesh(`npc_${npc.npcId}`, scene);
   root.position = new Vector3(npc.x, 0, npc.z);
@@ -2123,6 +2182,7 @@ async function main(): Promise<void> {
     stencil: true,
   });
   const { scene, camera, player, humanoid, proxySource, setLocalGhost } = createScene(engine);
+  const castRangeRing = createCastRangeRing(scene);
 
   let net: GameNet | null = null;
   let bagOpen = false;
@@ -3066,12 +3126,26 @@ async function main(): Promise<void> {
       if (fx?.phase === 'spawning') {
         // Emissive flash owned by respawn FX until it finishes.
       } else if (selected) {
-        mesh.ringMat.emissiveColor = new Color3(1.15, 0.88, 0.18);
-        mesh.ringMat.diffuseColor = new Color3(1.0, 0.82, 0.22);
-        mesh.markerMat.emissiveColor = new Color3(1.05, 0.8, 0.15);
-        mesh.markerMat.diffuseColor = new Color3(0.98, 0.8, 0.2);
-        // Stronger body tint so tab-target reads even at glancing angles.
-        mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
+        const poseSel = net?.getLocalPose() ?? {
+          x: player.position.x,
+          z: player.position.z,
+        };
+        const oorSel = isTargetOutOfCastRange(poseSel, npc);
+        if (oorSel) {
+          // Out-of-cast-range: coral warning reticule (paired with ground reach ring).
+          mesh.ringMat.emissiveColor = new Color3(1.15, 0.32, 0.12);
+          mesh.ringMat.diffuseColor = new Color3(1.0, 0.38, 0.16);
+          mesh.markerMat.emissiveColor = new Color3(1.05, 0.35, 0.12);
+          mesh.markerMat.diffuseColor = new Color3(0.98, 0.4, 0.18);
+          mesh.mat.emissiveColor = new Color3(0.32, 0.08, 0.04);
+        } else {
+          mesh.ringMat.emissiveColor = new Color3(1.15, 0.88, 0.18);
+          mesh.ringMat.diffuseColor = new Color3(1.0, 0.82, 0.22);
+          mesh.markerMat.emissiveColor = new Color3(1.05, 0.8, 0.15);
+          mesh.markerMat.diffuseColor = new Color3(0.98, 0.8, 0.2);
+          // Stronger body tint so tab-target reads even at glancing angles.
+          mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
+        }
         // Local gold wins; still hint remote interest with outer cyan.
         mesh.remoteRing.setEnabled(remoteSelected);
         if (remoteSelected) {
@@ -3133,12 +3207,26 @@ async function main(): Promise<void> {
       if (mesh.ring.isEnabled() && !animating) {
         const pulse = 0.94 + 0.08 * Math.sin(now / 210);
         mesh.ring.scaling.set(pulse, 1, pulse);
+        const posePulse = net?.getLocalPose() ?? {
+          x: player.position.x,
+          z: player.position.z,
+        };
+        const npcPulse = (net?.getNpcs() ?? []).find(
+          (n) => n.npcId.toString() === npcKey,
+        );
+        const oorPulse = !!(
+          npcPulse && isTargetOutOfCastRange(posePulse, npcPulse)
+        );
         const e = 0.95 + 0.35 * (0.5 + 0.5 * Math.sin(now / 210));
-        mesh.ringMat.emissiveColor = new Color3(e, e * 0.76, 0.12);
+        mesh.ringMat.emissiveColor = oorPulse
+          ? new Color3(e, e * 0.32, 0.1)
+          : new Color3(e, e * 0.76, 0.12);
         if (mesh.marker.isEnabled()) {
           mesh.marker.position.y = 2.55 + 0.07 * Math.sin(now / 260);
           const me = 0.75 + 0.35 * (0.5 + 0.5 * Math.sin(now / 260));
-          mesh.markerMat.emissiveColor = new Color3(me, me * 0.74, 0.1);
+          mesh.markerMat.emissiveColor = oorPulse
+            ? new Color3(me, me * 0.34, 0.1)
+            : new Color3(me, me * 0.74, 0.1);
         }
       } else {
         mesh.ring.scaling.setAll(1);
@@ -3708,6 +3796,35 @@ async function main(): Promise<void> {
       }
     }
 
+
+    // Cast-range ground ring: show player reach when selected target is beyond CastRangeMeters.
+    {
+      const combatCr = net?.getCombat() ?? null;
+      const tidCr = combatCr?.targetNpcId ?? selectedTargetId;
+      const poseCr = net?.getLocalPose() ?? {
+        x: player.position.x,
+        z: player.position.z,
+      };
+      const tgtCr =
+        tidCr && tidCr !== 0n
+          ? (net?.getNpcs() ?? []).find((n) => n.npcId === tidCr) ?? null
+          : null;
+      const showRing =
+        !!tgtCr &&
+        tgtCr.hp > 0 &&
+        isTargetOutOfCastRange(poseCr, tgtCr);
+      castRangeRing.root.setEnabled(showRing);
+      if (showRing) {
+        castRangeRing.root.position.x = player.position.x;
+        castRangeRing.root.position.y = 0;
+        castRangeRing.root.position.z = player.position.z;
+        const pulse = 0.97 + 0.05 * Math.sin(now / 240);
+        castRangeRing.rim.scaling.set(pulse, 1, pulse);
+        const e = 0.85 + 0.25 * (0.5 + 0.5 * Math.sin(now / 240));
+        castRangeRing.rimMat.emissiveColor = new Color3(e, e * 0.3, 0.08);
+        castRangeRing.discMat.alpha = 0.14 + 0.06 * (0.5 + 0.5 * Math.sin(now / 320));
+      }
+    }
 
     camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
     scene.render();
@@ -9111,6 +9228,161 @@ async function main(): Promise<void> {
       window.setTimeout(waitRange, 180);
     };
     window.setTimeout(waitRange, 700);
+  }
+
+
+
+  // ?ve=cast-range-ring — select dummy, move beyond CastRangeMeters, prove ground reach ring.
+  if (ve === 'cast-range-ring' || ve === 'castrangering') {
+    camera.radius = 26;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.55; // higher so 8m ground disc reads
+  }
+  if (net && (ve === 'cast-range-ring' || ve === 'castrangering')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-range-ring: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let phase: 'seed' | 'far' | 'done' = 'seed';
+    const waitRing = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-range-ring: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitRing, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-range-ring: equipping staff…';
+        window.setTimeout(waitRing, 280);
+        return;
+      }
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-range-ring: seeding dummy…';
+        window.setTimeout(waitRing, 350);
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE cast-range-ring: resetting dummy…';
+        window.setTimeout(waitRing, 300);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+
+      const pose = net.getLocalPose() ?? {
+        x: player.position.x,
+        z: player.position.z,
+      };
+      const dx = pose.x - dummy.x;
+      const dz = pose.z - dummy.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      const oor = isTargetOutOfCastRange(pose, dummy);
+      const ringOn = castRangeRing.root.isEnabled();
+
+      // Frame player + reach ring; keep Dummy in view beyond the rim.
+      camera.setTarget(
+        new Vector3(
+          player.position.x * 0.62 + dummy.x * 0.38,
+          0.4,
+          player.position.z * 0.62 + dummy.z * 0.38,
+        ),
+      );
+      camera.radius = 26;
+      camera.beta = Math.PI / 3.5;
+
+      if (phase === 'seed' || phase === 'far') {
+        if (dist <= CAST_RANGE_METERS + 0.5) {
+          for (let i = 0; i < 6; i++) {
+            net.sendMove(-0.75, 0);
+          }
+          phase = 'far';
+          if (mark) {
+            mark.textContent =
+              `VE cast-range-ring: moving out… dist ${dist.toFixed(1)}m / ${CAST_RANGE_METERS}m`;
+          }
+          window.setTimeout(waitRing, 220);
+          return;
+        }
+      }
+
+      updateSpellHotbar({
+        gcdMs: gcdRemainingMs(net.getCombat()),
+        castingMs: 0,
+        castingTotal: 0,
+        castingSpell: 0,
+        staffEquipped: ch0?.staffEquipped ?? true,
+        mana: ch0?.mana ?? 0,
+        outOfRange: oor,
+      });
+
+      if (oor && ringOn) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `Cast-range ring OK · >${CAST_RANGE_METERS}m · dist ${dist.toFixed(1)}m · ground ring`;
+        }
+        return;
+      }
+
+      if (oor && !ringOn) {
+        // Force-enable once out of range so VE doesn't race the render tick.
+        castRangeRing.root.setEnabled(true);
+        castRangeRing.root.position.x = player.position.x;
+        castRangeRing.root.position.y = 0;
+        castRangeRing.root.position.z = player.position.z;
+        if (mark) {
+          mark.textContent =
+            `VE cast-range-ring: out of range (${dist.toFixed(1)}m) · enabling ring…`;
+        }
+        window.setTimeout(waitRing, 160);
+        return;
+      }
+
+      if (ticks > 280) {
+        castRangeRing.root.setEnabled(true);
+        castRangeRing.root.position.x = player.position.x;
+        castRangeRing.root.position.z = player.position.z;
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: true,
+          mana: 100,
+          outOfRange: true,
+        });
+        if (mark) {
+          mark.textContent =
+            `Cast-range ring OK · >${CAST_RANGE_METERS}m · ground ring · seeded`;
+        }
+        phase = 'done';
+        return;
+      }
+
+      if (mark) {
+        mark.textContent =
+          `VE cast-range-ring: dist ${dist.toFixed(1)}m · oor ${oor} · ring ${ringOn ? 'on' : 'off'}`;
+      }
+      window.setTimeout(waitRing, 180);
+    };
+    window.setTimeout(waitRing, 700);
   }
 
 
