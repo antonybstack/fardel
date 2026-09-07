@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Fardel.Shared</RootNamespace>
+    <Description>Pure shared rules for Fardel module + Unity client. No UnityEngine, no SpacetimeDB attributes.</Description>
+  </PropertyGroup>
+</Project>

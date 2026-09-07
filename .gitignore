@@ -9,6 +9,8 @@
 [Mm]emoryCaptures/
 [Rr]ecordings/
 *.csproj
+!server/**/*.csproj
+!shared/**/*.csproj
 *.unityproj
 *.sln
 *.suo
@@ -56,3 +58,9 @@ Thumbs.db
 .env.*
 !.env.example
 **/identity.token
+
+# Local agent / tooling logs
+unity-*.log
+spacetime-*.log
+module-build.log
+docker-module-build.log

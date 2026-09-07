@@ -97,5 +97,5 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** docs-first → next execution = **slice 0 (Connect)**
+- **Phase:** **slice 0 (Connect) in progress**
 - **POC north-star:** not started
