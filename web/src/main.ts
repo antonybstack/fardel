@@ -4043,6 +4043,77 @@ async function main(): Promise<void> {
     window.setTimeout(waitChat, 700);
   }
 
+  // ?ve=rate — Connected → Say twice quickly → second rejects → RATE toast.
+  if (ve === 'rate') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'rate') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rate: waiting for Connected…';
+    let ticks = 0;
+    let fired = false;
+    const waitRate = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE rate: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRate, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 13;
+      if (!fired) {
+        fired = true;
+        if (mark) mark.textContent = 'VE rate: double Say…';
+        const pushRate = (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/rate.?limit/i.test(msg)) {
+            pushSystemToast(
+              'rate',
+              'Say too fast — wait a moment',
+              TOAST_VE_TTL_MS,
+            );
+          } else {
+            pushSystemToast(
+              'rate',
+              msg.slice(0, 96) || 'Say failed',
+              TOAST_VE_TTL_MS,
+            );
+          }
+        };
+        void net
+          .say(`rate ve first ${Date.now() % 100000}`)
+          .then(() => {
+            void net.say('rate ve too soon').catch(pushRate);
+          })
+          .catch(pushRate);
+        window.setTimeout(waitRate, 300);
+        return;
+      }
+      const toastOk = toastKindsPresent().has('rate');
+      if (toastOk) {
+        if (mark) mark.textContent = 'Say rate-limit OK · toast rate';
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE rate: toast ${toastOk ? 'rate' : '∅'} · waiting reject`;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          mark.textContent =
+            `VE rate: timed out · toast ${toastOk ? 'rate' : '∅'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitRate, 220);
+    };
+    window.setTimeout(waitRate, 700);
+  }
+
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
   if (ve === 'xp-float') {
     camera.radius = 11;
