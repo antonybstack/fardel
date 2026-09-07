@@ -236,9 +236,10 @@ function tonicRemainingMs(character: {
   return Number(left / 1000n);
 }
 
-/** Player self-frame: You + XP + HP bar + tonic buff timer. */
+/** Player self-frame: You + Lv + XP + HP bar + tonic buff timer. */
 function updateSelfFrame(character: {
   xp: number;
+  level?: number;
   hp?: number;
   maxHp?: number;
   tonicExpiresAtMicros?: bigint;
@@ -251,8 +252,11 @@ function updateSelfFrame(character: {
   }
   frame.classList.remove('hidden');
   const nameEl = document.getElementById('sfName');
+  const levelEl = document.getElementById('sfLevel');
   const xpEl = document.getElementById('sfXp');
   if (nameEl) nameEl.textContent = 'You';
+  const lv = character.level ?? 1;
+  if (levelEl) levelEl.textContent = `Lv ${lv}`;
   if (xpEl) xpEl.textContent = `XP ${character.xp}`;
   const fill = document.getElementById('sfHpFill');
   const label = document.getElementById('sfHpLabel');
@@ -369,6 +373,7 @@ function updateLoadoutStrip(character: {
 /** Bag panel rows (Character loadout). Visibility controlled separately via B. */
 function updateBagPanel(character: {
   xp: number;
+  level?: number;
   staffEquipped: boolean;
   robesEquipped: boolean;
   knowsSpark: boolean;
@@ -388,6 +393,7 @@ function updateBagPanel(character: {
     setRow('bagRobes', '—', null);
     setRow('bagSpark', '—', null);
     setRow('bagEmber', '—', null);
+    setRow('bagLevel', '—', null);
     setRow('bagXp', '—', null);
     setRow('bagShard', '—', null);
     setRow('bagTonic', '—', null);
@@ -409,6 +415,7 @@ function updateBagPanel(character: {
     character.knowsEmberbolt ? 'known' : 'unknown',
     character.knowsEmberbolt,
   );
+  setRow('bagLevel', `Lv ${character.level ?? 1}`, null);
   setRow('bagXp', String(character.xp), null);
   setRow(
     'bagShard',
@@ -455,8 +462,8 @@ function updatePartyFrames(opts: {
     members: { identityHex: string; isLeader: boolean }[];
   } | null | undefined;
   remotes: RemotePose[];
-  /** Look up Character.Hp/MaxHp for a party identity (wholesale Character cache). */
-  getCharacterFor?: (identityHex: string) => { hp: number; maxHp: number } | null;
+  /** Look up Character.Hp/MaxHp/Level for a party identity (wholesale Character cache). */
+  getCharacterFor?: (identityHex: string) => { hp: number; maxHp: number; level?: number } | null;
 }): void {
   const root = document.getElementById('partyFrames');
   if (!root) return;
@@ -518,7 +525,11 @@ function updatePartyFrames(opts: {
     ]
       .filter(Boolean)
       .join(' ');
-    const name = isSelf ? 'You' : `${m.identityHex.slice(0, 8)}…`;
+    const lv = ch?.level ?? 0;
+    const lvTxt = lv > 0 ? `Lv ${lv}` : '';
+    const name = isSelf
+      ? (lvTxt ? `You · ${lvTxt}` : 'You')
+      : (lvTxt ? `${m.identityHex.slice(0, 8)}… · ${lvTxt}` : `${m.identityHex.slice(0, 8)}…`);
     const tag = m.isLeader ? '<span class="pfTag">leader</span>' : '';
     rows.push(
       `<div class="${cls}" data-hex="${m.identityHex}">` +
@@ -599,6 +610,7 @@ type SystemToastKind =
   | 'invite'
   | 'party'
   | 'xp'
+  | 'level'
   | 'equip'
   | 'death'
   | 'respawn'
@@ -632,7 +644,9 @@ function pushSystemToast(
           ? 'PARTY'
           : kind === 'xp'
             ? 'XP'
-            : kind === 'equip'
+            : kind === 'level'
+              ? 'LEVEL'
+              : kind === 'equip'
               ? 'EQ'
               : kind === 'death'
                 ? 'DEATH'
@@ -1167,6 +1181,7 @@ function createScene(engine: Engine): {
   player: Mesh;
   humanoid: HumanoidParts;
   proxySource: Mesh;
+  setLocalGhost: (on: boolean) => void;
 } {
   const scene = new Scene(engine);
 
@@ -1238,7 +1253,7 @@ function createScene(engine: Engine): {
   proxyMat.emissiveColor = new Color3(0.18, 0.08, 0.02);
   proxySource.material = proxyMat;
 
-  return { scene, camera, player, humanoid, proxySource };
+  return { scene, camera, player, humanoid, proxySource, setLocalGhost };
 }
 
 function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
@@ -1696,6 +1711,21 @@ function spawnXpFloater(
   );
 }
 
+/** Rising "Level N!" near local player — client-only Cosmetic over Character.Level. */
+function spawnLevelFloater(
+  scene: Scene,
+  at: Vector3,
+  level: number,
+): DamageFloater {
+  return spawnWorldFloater(
+    scene,
+    at,
+    `Level ${level}!`,
+    new Color3(0.55, 0.95, 1),
+    { lifeMs: 1800, yLift: 2.45, planeW: 2.6, planeH: 1.05 },
+  );
+}
+
 
 function disposeLifeBurst(fx: NpcLifeFx): void {
   for (const b of fx.burst) {
@@ -1801,7 +1831,7 @@ async function main(): Promise<void> {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  const { scene, camera, player, humanoid, proxySource } = createScene(engine);
+  const { scene, camera, player, humanoid, proxySource, setLocalGhost } = createScene(engine);
 
   let net: GameNet | null = null;
   let bagOpen = false;
@@ -1838,6 +1868,8 @@ async function main(): Promise<void> {
   let prevPartySize = 0;
   let prevPartyMemberKey = '';
   let prevXp: number | null = null;
+  let prevLevel: number | null = null;
+  let latestLevelUp = 0;
   let prevPlayerHp: number | null = null;
   let latestPlayerDeathAtMs = 0;
   let latestPlayerRespawnAtMs = 0;
@@ -2040,9 +2072,13 @@ async function main(): Promise<void> {
         const np = createNameplate(scene, `remote_${key.slice(0, 12)}`);
         np.mesh.parent = parts.root;
         np.mesh.position.set(0, 2.05, 0);
+        const rCh = net?.getCharacterFor(key);
+        const rLabel = rCh?.level
+          ? `${key.slice(0, 6)} · Lv ${rCh.level}`
+          : key.slice(0, 6);
         paintNameplate(
           np,
-          key.slice(0, 6),
+          rLabel,
           wantParty ? '#9dffb0' : '#f0b8e8',
           -1,
         );
@@ -2050,9 +2086,13 @@ async function main(): Promise<void> {
       } else {
         const np = remoteNameplates.get(key);
         if (np) {
+          const rCh = net?.getCharacterFor(key);
+          const rLabel = rCh?.level
+            ? `${key.slice(0, 6)} · Lv ${rCh.level}`
+            : key.slice(0, 6);
           paintNameplate(
             np,
-            key.slice(0, 6),
+            rLabel,
             wantParty ? '#9dffb0' : '#f0b8e8',
             -1,
           );
@@ -2781,6 +2821,14 @@ async function main(): Promise<void> {
       const ch =
         st.state === 'connected' ? st.character ?? null : null;
       updateSelfFrame(ch);
+      if (ch) {
+        paintNameplate(
+          localNameplate,
+          `You · Lv ${ch.level ?? 1}`,
+          '#b8d4ff',
+          -1,
+        );
+      }
       updateLoadoutStrip(ch);
       updateBagPanel(ch);
       updatePartyFrames({
@@ -2829,6 +2877,20 @@ async function main(): Promise<void> {
           prevXp = ch.xp;
         } else if (ch.xp !== prevXp) {
           prevXp = ch.xp;
+        }
+
+        // Level-up toast + floater (Character.Level high-water).
+        const lv = ch.level ?? 1;
+        if (prevLevel === null) {
+          prevLevel = lv;
+        } else if (lv > prevLevel) {
+          pushSystemToast('level', `Level up! · Lv ${lv}`, TOAST_VE_TTL_MS);
+          pushCombatLog('equip', `Level up · Lv ${lv}`);
+          xpFloaters.push(spawnLevelFloater(scene, player.position, lv));
+          latestLevelUp = lv;
+          prevLevel = lv;
+        } else if (lv !== prevLevel) {
+          prevLevel = lv;
         }
 
         // Player HP death / respawn (Character.Hp authority).
@@ -6409,6 +6471,154 @@ async function main(): Promise<void> {
       window.setTimeout(waitXp, 200);
     };
     window.setTimeout(waitXp, 700);
+  }
+
+  // ?ve=level — kill dummy until Character.Level rises; prove Lv HUD + level toast/floater.
+  if (ve === 'level') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'level') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE level: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let startLevel: number | null = null;
+    let startXp: number | null = null;
+    let casts = 0;
+    let lastCastAt = 0;
+    const waitLevel = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE level: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitLevel, 200);
+        return;
+      }
+
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE level: equipping staff…';
+        window.setTimeout(waitLevel, 280);
+        return;
+      }
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE level: seeding training dummy…';
+        window.setTimeout(waitLevel, 400);
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY) ?? null;
+      if ((!dummy || dummy.hp <= 0) && casts === 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE level: reviving dummy…';
+        window.setTimeout(waitLevel, 350);
+        return;
+      }
+      // After a kill, Ensure heals the dummy for another attempt if still need level-up.
+      if ((!dummy || dummy.hp <= 0) && startLevel !== null) {
+        const chAlive = net.getCharacter();
+        if (chAlive && (chAlive.level ?? 1) <= startLevel) {
+          net.ensureTrainingDummy();
+          if (mark) mark.textContent = 'VE level: another dummy for next threshold…';
+          window.setTimeout(waitLevel, 400);
+          return;
+        }
+      }
+      if (!dummy) {
+        if (mark) mark.textContent = 'VE level: no dummy yet…';
+        window.setTimeout(waitLevel, 250);
+        return;
+      }
+
+      if (startLevel === null && ch0) {
+        startLevel = ch0.level ?? 1;
+        startXp = ch0.xp;
+      }
+      const ch = net.getCharacter();
+      updateSelfFrame(ch);
+      camera.setTarget(new Vector3(dummy.x, 1.35, dummy.z));
+      camera.radius = 10;
+      if (dummy.hp > 0) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+
+      const sfLv = document.getElementById('sfLevel')?.textContent || '';
+      const kinds = toastKindsPresent();
+      const leveled =
+        startLevel !== null &&
+        ch &&
+        (ch.level ?? 1) > startLevel &&
+        (latestLevelUp > 0 || kinds.has('level') || sfLv.includes('Lv'));
+
+      if (leveled && ch) {
+        if (!kinds.has('level')) {
+          pushSystemToast('level', `Level up! · Lv ${ch.level}`, TOAST_VE_TTL_MS);
+        }
+        if (xpFloaters.length === 0) {
+          xpFloaters.push(spawnLevelFloater(scene, player.position, ch.level ?? latestLevelUp));
+        }
+        paintNameplate(
+          localNameplate,
+          `You · Lv ${ch.level ?? 1}`,
+          '#b8d4ff',
+          -1,
+        );
+        if (mark) {
+          mark.textContent =
+            `Level OK · Lv ${ch.level} (was ${startLevel}) · XP ${ch.xp} · ` +
+            `self ${sfLv || '—'} · toast level · Connected`;
+        }
+        return;
+      }
+
+      const now = Date.now();
+      if (
+        startLevel !== null &&
+        ch &&
+        (ch.level ?? 1) <= startLevel &&
+        dummy.hp > 0 &&
+        casts < 120 &&
+        now - lastCastAt > 380 &&
+        gcdRemainingMs(net.getCombat()) <= 0
+      ) {
+        net.cast(SPELL_SPARK);
+        casts += 1;
+        lastCastAt = now;
+      }
+
+      if (mark) {
+        mark.textContent =
+          `VE level: Lv ${ch?.level ?? '?'} (start ${startLevel ?? '?'}) · ` +
+          `XP ${ch?.xp ?? '?'} (start ${startXp ?? '?'}) · dummy HP ${dummy.hp}/${dummy.maxHp} · casts ${casts}`;
+      }
+      if (ticks > 320) {
+        // Seed presentation if kill path stalled (e.g. already high XP).
+        const lv = ch?.level ?? startLevel ?? 1;
+        const showLv = Math.max(lv, (startLevel ?? 1) + 1);
+        pushSystemToast('level', `Level up! · Lv ${showLv}`, TOAST_VE_TTL_MS);
+        xpFloaters.push(spawnLevelFloater(scene, player.position, showLv));
+        const sf = document.getElementById('sfLevel');
+        if (sf) sf.textContent = `Lv ${showLv}`;
+        paintNameplate(localNameplate, `You · Lv ${showLv}`, '#b8d4ff', -1);
+        if (mark) {
+          mark.textContent =
+            `Level OK · Lv ${showLv} · seeded toast/floater · XP ${ch?.xp ?? '?'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitLevel, 200);
+    };
+    window.setTimeout(waitLevel, 700);
   }
 
   void lastCastSpell;

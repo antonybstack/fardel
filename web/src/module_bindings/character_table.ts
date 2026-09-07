@@ -22,4 +22,5 @@ export default __t.row({
   tonicExpiresAt: __t.timestamp().name("tonic_expires_at"),
   hp: __t.i32(),
   maxHp: __t.i32().name("max_hp"),
+  level: __t.i32(),
 });

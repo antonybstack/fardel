@@ -93,6 +93,7 @@ export type RemoteCombat = CombatView & {
 
 export type CharacterView = {
   xp: number;
+  level: number;
   knowsSpark: boolean;
   knowsEmberbolt: boolean;
   staffEquipped: boolean;
@@ -393,6 +394,7 @@ type CharacterRow = {
   tonicExpiresAt: Timestamp;
   hp: number;
   maxHp: number;
+  level: number;
 };
 
 type CrowdProxyRow = {
@@ -499,6 +501,7 @@ function combatView(row: CombatRow): CombatView {
 function characterView(row: CharacterRow): CharacterView {
   return {
     xp: row.xp,
+    level: row.level ?? 1,
     knowsSpark: row.knowsSpark,
     knowsEmberbolt: row.knowsEmberbolt,
     staffEquipped: row.staffEquipped,

@@ -50,6 +50,7 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp> TonicExpiresAt { get; }
         public global::SpacetimeDB.Col<Character, int> Hp { get; }
         public global::SpacetimeDB.Col<Character, int> MaxHp { get; }
+        public global::SpacetimeDB.Col<Character, int> Level { get; }
 
         public CharacterCols(string tableName)
         {
@@ -64,6 +65,7 @@ namespace SpacetimeDB.Types
             TonicExpiresAt = new global::SpacetimeDB.Col<Character, SpacetimeDB.Timestamp>(tableName, "tonic_expires_at");
             Hp = new global::SpacetimeDB.Col<Character, int>(tableName, "hp");
             MaxHp = new global::SpacetimeDB.Col<Character, int>(tableName, "max_hp");
+            Level = new global::SpacetimeDB.Col<Character, int>(tableName, "level");
         }
     }
 

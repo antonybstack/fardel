@@ -35,6 +35,8 @@ namespace SpacetimeDB.Types
         public int Hp;
         [DataMember(Name = "max_hp")]
         public int MaxHp;
+        [DataMember(Name = "level")]
+        public int Level;
 
         public Character(
             SpacetimeDB.Identity Identity,
@@ -47,7 +49,8 @@ namespace SpacetimeDB.Types
             bool HasYardTonic,
             SpacetimeDB.Timestamp TonicExpiresAt,
             int Hp,
-            int MaxHp
+            int MaxHp,
+            int Level
         )
         {
             this.Identity = Identity;
@@ -61,6 +64,7 @@ namespace SpacetimeDB.Types
             this.TonicExpiresAt = TonicExpiresAt;
             this.Hp = Hp;
             this.MaxHp = MaxHp;
+            this.Level = Level;
         }
 
         public Character()

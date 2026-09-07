@@ -331,6 +331,11 @@ body {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
+.sfLevel {
+  color: #9fe7ff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
 .sfXp {
   color: #e8eefc;
   font-size: 12px;
@@ -868,6 +873,8 @@ body {
   border-color: rgba(255, 196, 100, 0.55);
 }
 .sysToast.xp .toastTag { color: #ffc464; }
+.sysToast.level .toastTag { color: #9fe7ff; }
+.sysToast.level { border-color: rgba(159, 231, 255, 0.45); }
 
 .sysToast.equip {
   border-color: rgba(232, 200, 154, 0.5);

@@ -22,6 +22,7 @@ export const Character = __t.object("Character", {
   tonicExpiresAt: __t.timestamp(),
   hp: __t.i32(),
   maxHp: __t.i32(),
+  level: __t.i32(),
 });
 export type Character = __Infer<typeof Character>;
 

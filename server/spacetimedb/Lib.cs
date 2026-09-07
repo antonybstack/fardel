@@ -84,6 +84,9 @@ public static partial class Module
         public int Hp;
         [SpacetimeDB.Default(100)]
         public int MaxHp;
+        /// <summary>Persisted level (high-water from cumulative XP). Party/self share the same number.</summary>
+        [SpacetimeDB.Default(1)]
+        public int Level;
     }
 
     [SpacetimeDB.Table(Accessor = "PlayerCombat", Public = true)]
@@ -241,6 +244,16 @@ public static partial class Module
         EnsureVendor(ctx);
         EnsureCharacter(ctx, ctx.Sender);
         EnsureSession(ctx, ctx.Sender);
+        // Sync Level for pre-schema rows (Default 1) that already hold XP.
+        if (ctx.Db.Character.Identity.Find(ctx.Sender) is { } connectedChar)
+        {
+            var before = connectedChar.Level;
+            SyncLevelFromXp(ref connectedChar);
+            if (connectedChar.Level != before)
+            {
+                ctx.Db.Character.Identity.Update(connectedChar);
+            }
+        }
     }
 
     [SpacetimeDB.Reducer(ReducerKind.ClientDisconnected)]
@@ -697,6 +710,41 @@ public static partial class Module
         }
     }
 
+
+    /// <summary>
+    /// Grant XP and raise persisted Level when cumulative thresholds are crossed.
+    /// Level is high-water (XP spent as currency does not de-level).
+    /// </summary>
+    static void AddCharacterXp(ref Character ch, int amount)
+    {
+        if (amount == 0)
+        {
+            return;
+        }
+
+        ch.Xp += amount;
+        if (ch.Xp < 0)
+        {
+            ch.Xp = 0;
+        }
+
+        SyncLevelFromXp(ref ch);
+    }
+
+    static void SyncLevelFromXp(ref Character ch)
+    {
+        var computed = Progression.LevelFromXp(ch.Xp);
+        if (computed > ch.Level)
+        {
+            ch.Level = computed;
+        }
+
+        if (ch.Level < 1)
+        {
+            ch.Level = 1;
+        }
+    }
+
     static void EnsureCharacter(ReducerContext ctx, Identity id)
     {
         if (ctx.Db.Character.Identity.Find(id) is not null)
@@ -708,6 +756,7 @@ public static partial class Module
         {
             Identity = id,
             Xp = 0,
+            Level = 1,
             KnowsSpark = true,
             KnowsEmberbolt = true,
             StaffEquipped = true,
@@ -787,9 +836,9 @@ public static partial class Module
 
         if (row.Hp == 0 && ctx.Db.Character.Identity.Find(caster) is { } character)
         {
-            character.Xp += Combat.XpPerKill;
+            AddCharacterXp(ref character, Combat.XpPerKill);
             ctx.Db.Character.Identity.Update(character);
-            Log.Info($"Dummy killed by {caster}, xp={character.Xp}");
+            Log.Info($"Dummy killed by {caster}, xp={character.Xp} level={character.Level}");
             SharePartyKillXp(ctx, caster);
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
             SharePartyLootDrop(ctx, caster, row.X, row.Y, row.Z);
@@ -946,9 +995,9 @@ public static partial class Module
                 continue;
             }
 
-            mate.Xp += Combat.PartyXpSharePerMate;
+            AddCharacterXp(ref mate, Combat.PartyXpSharePerMate);
             ctx.Db.Character.Identity.Update(mate);
-            Log.Info($"Party XP share +{Combat.PartyXpSharePerMate} to {m.Identity} (killer {killer}, total={mate.Xp})");
+            Log.Info($"Party XP share +{Combat.PartyXpSharePerMate} to {m.Identity} (killer {killer}, total={mate.Xp} level={mate.Level})");
         }
     }
 
@@ -1332,7 +1381,13 @@ public static partial class Module
                 throw new Exception("Not enough XP");
             }
             fromChar.Xp -= offer.OfferedXp;
-            toChar.Xp += offer.OfferedXp;
+            if (fromChar.Xp < 0)
+            {
+                fromChar.Xp = 0;
+            }
+            // Spend keeps high-water Level; recipient may level up.
+            SyncLevelFromXp(ref fromChar);
+            AddCharacterXp(ref toChar, offer.OfferedXp);
         }
 
         ctx.Db.Character.Identity.Update(fromChar);
@@ -1451,7 +1506,7 @@ public static partial class Module
 
         if (item.ItemId == Loot.EmberShardItemId)
         {
-            character.Xp += Loot.XpPerEmberShard;
+            AddCharacterXp(ref character, Loot.XpPerEmberShard);
             character.HasEmberShard = true;
             ctx.Db.Character.Identity.Update(character);
         }
@@ -1508,6 +1563,11 @@ public static partial class Module
         }
 
         character.Xp -= Fardel.Shared.Vendor.BuyPriceXp;
+        if (character.Xp < 0)
+        {
+            character.Xp = 0;
+        }
+        SyncLevelFromXp(ref character);
         character.HasEmberShard = true;
         ctx.Db.Character.Identity.Update(character);
         Log.Info($"BuyFromVendor {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
@@ -1531,7 +1591,7 @@ public static partial class Module
         }
 
         character.HasEmberShard = false;
-        character.Xp += Fardel.Shared.Vendor.SellPriceXp;
+        AddCharacterXp(ref character, Fardel.Shared.Vendor.SellPriceXp);
         ctx.Db.Character.Identity.Update(character);
         Log.Info($"SellToVendor {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
     }
