@@ -57,6 +57,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 **Done when:** two clients move in a scene that already sells “grand clearing,” not a greybox void.
 
 ### 2 — Tab-target + cast + dummy
+- **Headless gate:** `tools/CombatSmoke` — Spark kill + XP, GCD block, Emberbolt windup
 - Tab cycles targets
 - Hotbar: **Spark** + **Emberbolt**
 - **Shared GCD** after cast start (server-authoritative; client may predict UI)

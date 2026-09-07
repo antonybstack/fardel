@@ -111,5 +111,5 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 1 (Move)** — Unity Editor deferred; headless smokes are the gate
+- **Phase:** **slice 2 (Combat) proven** via `tools/CombatSmoke`; next **slice 3 (Persist)**
 - **POC north-star:** not started
