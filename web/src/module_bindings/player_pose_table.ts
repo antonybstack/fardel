@@ -20,4 +20,6 @@ export default __t.row({
   chunkZ: __t.i32().name("chunk_z"),
   interestChunkX: __t.i32().name("interest_chunk_x"),
   interestChunkZ: __t.i32().name("interest_chunk_z"),
+  velY: __t.f32().name("vel_y"),
+  lastGroundedMicros: __t.i64().name("last_grounded_micros"),
 });

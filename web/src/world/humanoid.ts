@@ -84,19 +84,6 @@ export function preloadPlayerHumanoid(scene: Scene): Promise<AssetContainer> {
   return sharedLoad;
 }
 
-function findAnim(
-  groups: AnimationGroup[],
-  ...needles: string[]
-): AnimationGroup | null {
-  for (const n of needles) {
-    const hit = groups.find((g) =>
-      g.name.toLowerCase().includes(n.toLowerCase()),
-    );
-    if (hit) return hit;
-  }
-  return null;
-}
-
 function bareName(name: string, prefix: string): string {
   const p = `${prefix}__`;
   return name.startsWith(p) ? name.slice(p.length) : name;

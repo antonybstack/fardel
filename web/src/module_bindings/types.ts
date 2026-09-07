@@ -126,6 +126,8 @@ export const PlayerPose = __t.object("PlayerPose", {
   chunkZ: __t.i32(),
   interestChunkX: __t.i32(),
   interestChunkZ: __t.i32(),
+  velY: __t.f32(),
+  lastGroundedMicros: __t.i64(),
 });
 export type PlayerPose = __Infer<typeof PlayerPose>;
 

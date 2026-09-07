@@ -5889,7 +5889,7 @@ async function main(): Promise<void> {
         if (ticks < 200) window.setTimeout(waitMinimapRead, 200);
         return;
       }
-      const party = net.getPartyState();
+      const party = net.getParty();
       const local = net.getLocalPose();
       const remotes = net.getRemotes();
       if (!local) {
@@ -6046,10 +6046,10 @@ async function main(): Promise<void> {
         ? npcMeshes.get(dummy.npcId.toString())
         : undefined;
       const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
-      const goodDist =
-        !!dummy &&
-        Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z);
-      const inRange = goodDist >= 10 && goodDist <= 18;
+      const goodDist = dummy
+        ? Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z)
+        : 0;
+      const inRange = !!dummy && goodDist >= 10 && goodDist <= 18;
       if (
         st.state === 'connected' &&
         hasDummyPlate &&
@@ -7016,7 +7016,6 @@ async function main(): Promise<void> {
       const root = document.getElementById('partyFrames');
       if (root) {
         root.classList.remove('hidden');
-        const localHex = (net?.identityHex ?? 'local').slice(0, 8);
         root.innerHTML =
           `<div class="pfHead">Party · 3</div>` +
           `<div class="pfRow self leader" data-hex="self">` +
