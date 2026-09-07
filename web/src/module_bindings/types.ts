@@ -20,6 +20,14 @@ export const Character = __t.object("Character", {
 });
 export type Character = __Infer<typeof Character>;
 
+export const ChatMessage = __t.object("ChatMessage", {
+  messageId: __t.u64(),
+  sender: __t.identity(),
+  text: __t.string(),
+  sentAt: __t.timestamp(),
+});
+export type ChatMessage = __Infer<typeof ChatMessage>;
+
 export const CrowdProxy = __t.object("CrowdProxy", {
   proxyId: __t.u64(),
   x: __t.f32(),

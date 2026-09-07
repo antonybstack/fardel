@@ -833,7 +833,7 @@ body {
 }
 
 
-/* Compact chat / local say strip — bottom-left above loadout (client-only). */
+/* Compact chat / say strip — bottom-left above loadout (server ChatMessage). */
 #chatPanel {
   position: absolute;
   left: 12px;
@@ -909,6 +909,14 @@ body {
   color: #9ec0ff;
   font-weight: 700;
   margin-right: 4px;
+}
+
+.chatLine.say.remote .chatWho {
+  color: #c9a0ff;
+}
+
+.chatLine.say.local .chatWho {
+  color: #9ec0ff;
 }
 
 .chatLine .chatTag {

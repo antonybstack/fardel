@@ -28,6 +28,7 @@ namespace SpacetimeDB.Types
         public RemoteTables(DbConnection conn)
         {
             AddTable(Character = new(conn));
+            AddTable(ChatMessage = new(conn));
             AddTable(CrowdProxy = new(conn));
             AddTable(Npc = new(conn));
             AddTable(PartyInvite = new(conn));
@@ -531,6 +532,7 @@ namespace SpacetimeDB.Types
         internal static string[] AllTablesSqlQueries() => new string[]
         {
             new QueryBuilder().From.Character().ToSql(),
+            new QueryBuilder().From.ChatMessage().ToSql(),
             new QueryBuilder().From.CrowdProxy().ToSql(),
             new QueryBuilder().From.Npc().ToSql(),
             new QueryBuilder().From.PartyInvite().ToSql(),
@@ -544,6 +546,7 @@ namespace SpacetimeDB.Types
     public sealed class From
     {
         public global::SpacetimeDB.Table<Character, CharacterCols, CharacterIxCols> Character() => new("character", new CharacterCols("character"), new CharacterIxCols("character"));
+        public global::SpacetimeDB.Table<ChatMessage, ChatMessageCols, ChatMessageIxCols> ChatMessage() => new("chat_message", new ChatMessageCols("chat_message"), new ChatMessageIxCols("chat_message"));
         public global::SpacetimeDB.Table<CrowdProxy, CrowdProxyCols, CrowdProxyIxCols> CrowdProxy() => new("crowd_proxy", new CrowdProxyCols("crowd_proxy"), new CrowdProxyIxCols("crowd_proxy"));
         public global::SpacetimeDB.Table<Npc, NpcCols, NpcIxCols> Npc() => new("npc", new NpcCols("npc"), new NpcIxCols("npc"));
         public global::SpacetimeDB.Table<PartyInvite, PartyInviteCols, PartyInviteIxCols> PartyInvite() => new("party_invite", new PartyInviteCols("party_invite"), new PartyInviteIxCols("party_invite"));
@@ -640,6 +643,7 @@ namespace SpacetimeDB.Types
                 Reducer.InviteToParty args => Reducers.InvokeInviteToParty(eventContext, args),
                 Reducer.LeaveParty args => Reducers.InvokeLeaveParty(eventContext, args),
                 Reducer.Move args => Reducers.InvokeMove(eventContext, args),
+                Reducer.Say args => Reducers.InvokeSay(eventContext, args),
                 Reducer.SeedCrowdProxies args => Reducers.InvokeSeedCrowdProxies(eventContext, args),
                 Reducer.SetTarget args => Reducers.InvokeSetTarget(eventContext, args),
                 Reducer.UnequipRobes args => Reducers.InvokeUnequipRobes(eventContext, args),

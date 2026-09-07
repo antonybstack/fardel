@@ -4,7 +4,7 @@
  *
  * Subscriptions follow ADR 0001: Moore neighborhood filters on hot tables
  * (player_pose, crowd_proxy); cold/small tables (character, combat, npc,
- * party_member, party_invite) wholesale; always-relevant party identity poses.
+ * party_member, party_invite, chat_message) wholesale; always-relevant party identity poses.
  */
 
 import { DbConnection, type EventContext, type SubscriptionHandle } from '../module_bindings';
@@ -112,6 +112,13 @@ export type PartyView = {
   pendingInviteFrom: string | null;
 };
 
+export type ChatMessageView = {
+  messageId: string;
+  senderHex: string;
+  text: string;
+  sentAtMicros: bigint;
+};
+
 export type ConnectionStatus =
   | { state: 'connecting'; uri: string; database: string; restoredToken: boolean }
   | {
@@ -141,6 +148,7 @@ export type NpcsListener = (npcs: NpcView[]) => void;
 export type ProxiesListener = (proxies: CrowdProxyView[]) => void;
 export type CombatListener = (combat: CombatView | null) => void;
 export type CharacterListener = (character: CharacterView | null) => void;
+export type ChatListener = (messages: ChatMessageView[]) => void;
 
 export type GameNet = {
   identityHex: string;
@@ -158,6 +166,9 @@ export type GameNet = {
   inviteToParty: (invitee: Identity) => void;
   acceptPartyInvite: () => void;
   leaveParty: () => void;
+  /** Public Say reducer — server-authoritative ChatMessage row. */
+  say: (text: string) => void;
+  getRecentChat: () => ChatMessageView[];
   /** Invite nearest remote (create party if needed); auto-accept path is invitee-side. */
   inviteNearestRemote: () => string | null;
   getLocalPose: () => Pose | null;
@@ -257,6 +268,7 @@ export function buildNeighborhoodSqls(
     'SELECT * FROM npc',
     'SELECT * FROM party_member',
     'SELECT * FROM party_invite',
+    'SELECT * FROM chat_message',
   ];
   for (const { x: cx, z: cz } of fillMooreNeighborhood(interestCx, interestCz)) {
     sqls.push(`SELECT * FROM crowd_proxy WHERE chunk_x = ${cx} AND chunk_z = ${cz}`);
@@ -335,6 +347,13 @@ type PartyInviteRow = {
   inviter: Identity;
 };
 
+type ChatMessageRow = {
+  messageId: bigint;
+  sender: Identity;
+  text: string;
+  sentAt: Timestamp;
+};
+
 function poseView(row: PoseRow): Pose {
   return {
     x: row.x,
@@ -403,6 +422,16 @@ function asBigInt(v: bigint | number | string): bigint {
  * ensure training dummy, return net handle.
  * Reuses localStorage auth token when present so refresh restores identity + Character.
  */
+
+function chatView(row: ChatMessageRow): ChatMessageView {
+  return {
+    messageId: row.messageId.toString(),
+    senderHex: row.sender.toHexString(),
+    text: row.text,
+    sentAtMicros: row.sentAt.microsSinceUnixEpoch,
+  };
+}
+
 export async function connectToSpacetime(
   onStatus: StatusListener,
   onLocalPose?: PoseListener,
@@ -412,6 +441,7 @@ export async function connectToSpacetime(
   onProxies?: ProxiesListener,
   onRemotes?: RemotesListener,
   onRemoteCombats?: RemoteCombatsListener,
+  onChat?: ChatListener,
 ): Promise<GameNet | null> {
   const uri = resolveUri();
   const database = resolveDatabaseName();
@@ -434,6 +464,8 @@ export async function connectToSpacetime(
     const remoteCombatMap = new Map<string, RemoteCombat>();
     /** identityHex → PartyMemberView for wholesale party_member rows. */
     const partyMemberMap = new Map<string, PartyMemberView>();
+    /** messageId → ChatMessageView (wholesale chat_message). */
+    const chatMessageMap = new Map<string, ChatMessageView>();
     let pendingInviteFrom: string | null = null;
     /** Hex set currently included as always-relevant pose filters in the active sub. */
     let subscribedAlwaysHexes = new Set<string>();
@@ -455,6 +487,18 @@ export async function connectToSpacetime(
     const listProxies = (): CrowdProxyView[] => Array.from(proxyMap.values());
     const listRemotes = (): RemotePose[] => Array.from(remotePoseMap.values());
     const listRemoteCombats = (): RemoteCombat[] => Array.from(remoteCombatMap.values());
+    const listChat = (): ChatMessageView[] => {
+      const rows = Array.from(chatMessageMap.values());
+      rows.sort((a, b) => {
+        const aid = BigInt(a.messageId);
+        const bid = BigInt(b.messageId);
+        return aid < bid ? -1 : aid > bid ? 1 : 0;
+      });
+      return rows;
+    };
+    const emitChat = () => {
+      onChat?.(listChat());
+    };
 
     const localPartyId = (): string | null => {
       if (!localIdentity) return null;
@@ -723,6 +767,12 @@ export async function connectToSpacetime(
             for (const row of conn.db.crowdProxy.iter()) {
               upsertProxy(row as CrowdProxyRow);
             }
+            chatMessageMap.clear();
+            for (const row of conn.db.chatMessage.iter()) {
+              const view = chatView(row as ChatMessageRow);
+              chatMessageMap.set(view.messageId, view);
+            }
+            emitChat();
             } finally {
               syncingCaches = false;
             }
@@ -927,6 +977,28 @@ export async function connectToSpacetime(
             removePartyInvite(row as PartyInviteRow);
           });
 
+          const upsertChat = (row: ChatMessageRow) => {
+            const view = chatView(row);
+            chatMessageMap.set(view.messageId, view);
+            emitChat();
+          };
+          const removeChat = (row: ChatMessageRow) => {
+            const id = row.messageId.toString();
+            if (chatMessageMap.delete(id)) {
+              emitChat();
+            }
+          };
+
+          conn.db.chatMessage.onInsert((_ctx: EventContext, row) => {
+            upsertChat(row as ChatMessageRow);
+          });
+          conn.db.chatMessage.onUpdate((_ctx: EventContext, _old, row) => {
+            upsertChat(row as ChatMessageRow);
+          });
+          conn.db.chatMessage.onDelete((_ctx: EventContext, row) => {
+            removeChat(row as ChatMessageRow);
+          });
+
           // Spawn interest is (0,0) until pose arrives / hysteresis adopts.
           applySubscription(0, 0);
 
@@ -1006,6 +1078,10 @@ export async function connectToSpacetime(
                 emitStatus(identityHex);
                 void conn.reducers.leaveParty({});
               },
+              say: (text: string) => {
+                void conn.reducers.say({ text });
+              },
+              getRecentChat: () => listChat(),
               inviteNearestRemote: () => {
                 const remotes = listRemotes();
                 const local = latestPose;

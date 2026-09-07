@@ -521,15 +521,28 @@ function setChatComposing(open: boolean): void {
   }
 }
 
-/** Client-only local say: echo into chat strip + short toast (no server Chat table yet). */
-function pushChatSay(who: string, text: string, toastTtlMs: number = TOAST_TTL_MS): void {
+/** Server-backed say line (ChatMessage insert). Dedupe by messageId; toast once. */
+function pushChatSay(
+  who: string,
+  text: string,
+  toastTtlMs: number = TOAST_TTL_MS,
+  opts?: { messageId?: string; local?: boolean },
+): void {
   const trimmed = text.trim();
   if (!trimmed) return;
   const root = document.getElementById('chatLines');
+  const messageId = opts?.messageId;
   if (root) {
+    if (messageId) {
+      for (const el of Array.from(root.children)) {
+        if ((el as HTMLElement).getAttribute('data-message-id') === messageId) return;
+      }
+    }
     const line = document.createElement('div');
-    line.className = 'chatLine say';
+    const local = opts?.local ?? who.startsWith('You');
+    line.className = local ? 'chatLine say local' : 'chatLine say remote';
     line.setAttribute('data-kind', 'say');
+    if (messageId) line.setAttribute('data-message-id', messageId);
     const time = new Date();
     const hh = String(time.getHours()).padStart(2, '0');
     const mm = String(time.getMinutes()).padStart(2, '0');
@@ -560,7 +573,10 @@ function chatSayKindsPresent(): Set<string> {
   return kinds;
 }
 
-function bindChatUi(opts: { whoLabel: () => string }): () => void {
+function bindChatUi(opts: {
+  whoLabel: () => string;
+  sendSay: (text: string) => void;
+}): () => void {
   const form = document.getElementById('chatForm') as HTMLFormElement | null;
   const input = document.getElementById('chatInput') as HTMLInputElement | null;
   if (!form || !input) return () => {};
@@ -596,8 +612,13 @@ function bindChatUi(opts: { whoLabel: () => string }): () => void {
 
   const onSubmit = (e: Event) => {
     e.preventDefault();
-    const text = input.value;
-    pushChatSay(opts.whoLabel(), text);
+    const text = input.value.trim();
+    if (!text) {
+      setChatComposing(false);
+      return;
+    }
+    // Server-authoritative: render when ChatMessage insert arrives (no optimistic echo).
+    opts.sendSay(text);
     setChatComposing(false);
   };
 
@@ -1731,6 +1752,10 @@ async function main(): Promise<void> {
       const hex = latestStatus.state === 'connected' ? latestStatus.identityHex : '';
       return hex ? `You(${hex.slice(0, 6)})` : 'You';
     },
+    sendSay: (text) => {
+      if (!net) return;
+      net.say(text);
+    },
   });
 
   const syncNpcMeshes = (npcs: NpcView[]) => {
@@ -2191,6 +2216,26 @@ async function main(): Promise<void> {
     setStatus(formatStatus(s, Date.now()));
   };
 
+  const renderedChatIds = new Set<string>();
+  const onChatMessages = (messages: import('./net/connection').ChatMessageView[]) => {
+    const localHex =
+      latestStatus.state === 'connected' ? latestStatus.identityHex : net?.identityHex ?? '';
+    for (const msg of messages) {
+      if (renderedChatIds.has(msg.messageId)) continue;
+      renderedChatIds.add(msg.messageId);
+      const local = !!localHex && msg.senderHex === localHex;
+      const who = local
+        ? `You(${msg.senderHex.slice(0, 6)})`
+        : msg.senderHex.slice(0, 6);
+      const veChat =
+        new URLSearchParams(window.location.search).get('ve') === 'chat';
+      pushChatSay(who, msg.text, veChat ? TOAST_VE_TTL_MS : TOAST_TTL_MS, {
+        messageId: msg.messageId,
+        local,
+      });
+    }
+  };
+
   net = await connectToSpacetime(
     onStatus,
     (pose) => {
@@ -2221,6 +2266,7 @@ async function main(): Promise<void> {
     (combats) => {
       syncRemoteCastFx(combats);
     },
+    onChatMessages,
   );
 
   // Optional VE / autotest hooks.
@@ -3656,7 +3702,7 @@ async function main(): Promise<void> {
   }
 
 
-  // ?ve=chat — open say strip + seed local echo + toast.
+  // ?ve=chat — Connected → public Say reducer → ChatMessage insert → strip + toast.
   if (ve === 'chat') {
     camera.radius = 13;
     camera.alpha = Math.PI / 2.15;
@@ -3665,8 +3711,9 @@ async function main(): Promise<void> {
   if (net && ve === 'chat') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE chat: waiting for Connected…';
+    const sayProof = `Hello yard — server say ${Date.now() % 100000}`;
     let ticks = 0;
-    let phase: 'wait' | 'seed' | 'done' = 'wait';
+    let said = false;
     const waitChat = () => {
       if (!net) return;
       ticks += 1;
@@ -3678,37 +3725,31 @@ async function main(): Promise<void> {
       }
       camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
       camera.radius = 13;
+      if (!said) {
+        said = true;
+        if (mark) mark.textContent = 'VE chat: calling Say reducer…';
+        net.say(sayProof);
+        window.setTimeout(waitChat, 200);
+        return;
+      }
       const kinds = chatSayKindsPresent();
       const toastOk = toastKindsPresent().has('say');
       const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
-      if ((kinds.has('say') && toastOk && lineCount >= 1) || phase === 'done') {
+      const linesText = document.getElementById('chatLines')?.textContent ?? '';
+      const hasProof = linesText.includes('Hello yard — server say');
+      if (kinds.has('say') && toastOk && lineCount >= 1 && hasProof) {
         setChatComposing(true);
         const input = document.getElementById('chatInput') as HTMLInputElement | null;
         if (input) input.value = 'Yard looks clear.';
         if (mark) {
           mark.textContent =
-            `Chat say OK · lines ${lineCount} · local echo + toast · Enter strip`;
+            `Chat say OK · lines ${lineCount} · server Say + ChatMessage · Enter strip`;
         }
-        phase = 'done';
-        return;
-      }
-      if (phase === 'wait') {
-        phase = 'seed';
-        if (mark) mark.textContent = 'VE chat: seeding local say…';
-        window.setTimeout(waitChat, 180);
-        return;
-      }
-      if (phase === 'seed') {
-        const who = `You(${st.identityHex.slice(0, 6)})`;
-        pushChatSay(who, 'Hello yard — local say.', TOAST_VE_TTL_MS);
-        pushChatSay(who, 'Enter opens chat · Esc closes.', TOAST_VE_TTL_MS);
-        phase = 'done';
-        window.setTimeout(waitChat, 200);
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE chat: lines ${lineCount} · toast ${toastOk ? 'say' : '∅'} · phase ${phase}`;
+          `VE chat: lines ${lineCount} · toast ${toastOk ? 'say' : '∅'} · waiting insert`;
       }
       if (ticks > 220) {
         if (mark) {

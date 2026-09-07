@@ -99,6 +99,17 @@ public static partial class Module
         public int MaxHp;
     }
 
+    /// <summary>Public yard chat — Say reducer inserts; clients wholesale-subscribe.</summary>
+    [SpacetimeDB.Table(Accessor = "ChatMessage", Public = true)]
+    public partial struct ChatMessage
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong MessageId;
+        public Identity Sender;
+        public string Text;
+        public Timestamp SentAt;
+    }
+
     [SpacetimeDB.Table(Accessor = "PendingCast", Scheduled = nameof(ResolveCast), ScheduledAt = nameof(ScheduledAt))]
     public partial struct PendingCast
     {
@@ -697,6 +708,58 @@ public static partial class Module
             next.IsLeader = true;
             ctx.Db.PartyMember.Identity.Update(next);
         }
+    }
+
+
+    /// <summary>Public say — trim, truncate to 120, insert ChatMessage; prune oldest beyond 50.</summary>
+    [SpacetimeDB.Reducer]
+    public static void Say(ReducerContext ctx, string text)
+    {
+        var trimmed = (text ?? string.Empty).Trim();
+        if (trimmed.Length == 0)
+        {
+            throw new Exception("Empty say");
+        }
+
+        if (trimmed.Length > 120)
+        {
+            trimmed = trimmed.Substring(0, 120);
+        }
+
+        ctx.Db.ChatMessage.Insert(new ChatMessage
+        {
+            Sender = ctx.Sender,
+            Text = trimmed,
+            SentAt = ctx.Timestamp,
+        });
+
+        // Nice-to-have: keep a short rolling window so wholesale sub stays small.
+        var count = 0;
+        foreach (var _ in ctx.Db.ChatMessage.Iter())
+        {
+            count++;
+        }
+        while (count > 50)
+        {
+            ulong oldestId = 0;
+            var found = false;
+            foreach (var m in ctx.Db.ChatMessage.Iter())
+            {
+                if (!found || m.MessageId < oldestId)
+                {
+                    oldestId = m.MessageId;
+                    found = true;
+                }
+            }
+            if (!found)
+            {
+                break;
+            }
+            ctx.Db.ChatMessage.MessageId.Delete(oldestId);
+            count--;
+        }
+
+        Log.Info($"Say {ctx.Sender}: {trimmed}");
     }
 
     static ulong PartyIdFrom(Identity leader, Timestamp ts)

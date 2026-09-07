@@ -43,6 +43,7 @@ import EquipStaffReducer from "./equip_staff_reducer";
 import InviteToPartyReducer from "./invite_to_party_reducer";
 import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
+import SayReducer from "./say_reducer";
 import SeedCrowdProxiesReducer from "./seed_crowd_proxies_reducer";
 import SetTargetReducer from "./set_target_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
@@ -52,6 +53,7 @@ import UnequipStaffReducer from "./unequip_staff_reducer";
 
 // Import all table schema definitions
 import CharacterRow from "./character_table";
+import ChatMessageRow from "./chat_message_table";
 import CrowdProxyRow from "./crowd_proxy_table";
 import NpcRow from "./npc_table";
 import PartyInviteRow from "./party_invite_table";
@@ -74,6 +76,17 @@ const tablesSchema = __schema({
       { name: 'character_identity_key', constraint: 'unique', columns: ['identity'] },
     ],
   }, CharacterRow),
+  chatMessage: __table({
+    name: 'chat_message',
+    indexes: [
+      { accessor: 'MessageId', name: 'chat_message_message_id_idx_btree', algorithm: 'btree', columns: [
+        'messageId',
+      ] },
+    ],
+    constraints: [
+      { name: 'chat_message_message_id_key', constraint: 'unique', columns: ['messageId'] },
+    ],
+  }, ChatMessageRow),
   crowdProxy: __table({
     name: 'crowd_proxy',
     indexes: [
@@ -153,6 +166,7 @@ const reducersSchema = __reducers(
   __reducerSchema("invite_to_party", InviteToPartyReducer),
   __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
+  __reducerSchema("say", SayReducer),
   __reducerSchema("seed_crowd_proxies", SeedCrowdProxiesReducer),
   __reducerSchema("set_target", SetTargetReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
@@ -167,6 +181,8 @@ type __SchemaWithTableAccessorAliases = Omit<typeof tablesSchema.schemaType, "ta
   tables: typeof tablesSchema.schemaType.tables & {
     /** @deprecated Use `character` instead. This alias will be removed in the next major version. */
     readonly "Character": Omit<typeof tablesSchema.schemaType.tables["character"], "accessorName"> & { readonly accessorName: "Character" };
+    /** @deprecated Use `chatMessage` instead. This alias will be removed in the next major version. */
+    readonly "ChatMessage": Omit<typeof tablesSchema.schemaType.tables["chatMessage"], "accessorName"> & { readonly accessorName: "ChatMessage" };
     /** @deprecated Use `crowdProxy` instead. This alias will be removed in the next major version. */
     readonly "CrowdProxy": Omit<typeof tablesSchema.schemaType.tables["crowdProxy"], "accessorName"> & { readonly accessorName: "CrowdProxy" };
     /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
@@ -198,6 +214,7 @@ const REMOTE_MODULE = {
 
 const tableAccessorAliases = {
   "Character": "character",
+  "ChatMessage": "chatMessage",
   "CrowdProxy": "crowdProxy",
   "Npc": "npc",
   "PartyInvite": "partyInvite",
@@ -226,6 +243,8 @@ type __DbViewBase = __DbConnectionImpl<typeof REMOTE_MODULE>["db"];
 export type DbView = __DbViewBase & {
   /** @deprecated Use `character` instead. This alias will be removed in the next major version. */
   readonly "Character": __DbViewBase["character"];
+  /** @deprecated Use `chatMessage` instead. This alias will be removed in the next major version. */
+  readonly "ChatMessage": __DbViewBase["chatMessage"];
   /** @deprecated Use `crowdProxy` instead. This alias will be removed in the next major version. */
   readonly "CrowdProxy": __DbViewBase["crowdProxy"];
   /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */
@@ -244,6 +263,8 @@ type __TablesBase = __QueryBuilder<typeof tablesSchema.schemaType>;
 export type Tables = __TablesBase & {
   /** @deprecated Use `character` instead. This alias will be removed in the next major version. */
   readonly "Character": __TablesBase["character"];
+  /** @deprecated Use `chatMessage` instead. This alias will be removed in the next major version. */
+  readonly "ChatMessage": __TablesBase["chatMessage"];
   /** @deprecated Use `crowdProxy` instead. This alias will be removed in the next major version. */
   readonly "CrowdProxy": __TablesBase["crowdProxy"];
   /** @deprecated Use `npc` instead. This alias will be removed in the next major version. */

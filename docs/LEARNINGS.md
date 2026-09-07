@@ -90,5 +90,5 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 
 - Combat log is client-only Cosmetics over existing signals (cast intent, npc HP deltas, Character equip flips, PartyMember size) — no new combat-event table; keeps module/smokes unchanged.
 
-- Chat/say strip is client-only Cosmetics: Enter compose → local echo in bottom-left panel + toast `say`. Prefer this over a Chat/Say reducer until multi-client chat is required (avoids module publish + bindings churn).
+- Public `Say` + `ChatMessage` is the multi-client chat path: Enter compose → reducer → wholesale `chat_message` insert → strip/toast (no optimistic echo). `tools/ChatSmoke` proves A→B.
 
