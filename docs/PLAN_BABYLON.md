@@ -132,11 +132,13 @@ See `web/README.md` for exact commands.
   ThinInstanced mid-tree variety + far LOD ring, distant snow-capped mountain
   silhouette, dusk sky/fog + hemi/sun mood (`web/src/world/forest.ts`);
   (`ve/babylon-forest.png`, `?ve=forest`); path/ground polish #44
-  (`?ve=path-ground`, `ve/babylon-path-ground.png`)
+  (`?ve=path-ground`, `ve/babylon-path-ground.png`); sky/horizon silhouette #55
+  (`?ve=sky-horizon`, `ve/babylon-sky-horizon.png`)
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
-  staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
+  staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; training dummy scarecrow (`web/src/world/dummy.ts`, #45, `?ve=dummy`)
   (`ve/babylon-humanoid.png`); readability polish #33 (`?ve=humanoid-polish`,
-  `ve/babylon-humanoid-polish.png`)
+  `ve/babylon-humanoid-polish.png`); training dummy scarecrow #45 (`?ve=dummy`,
+  `ve/babylon-dummy.png`)
 - **Second-client shared yard (presentation):** remote `PlayerPose` identities
   render as distinct tinted humanoids; HUD `remotes:` line; `?ve=two-client` +
   `tools/SecondClient` headless mover (`ve/babylon-two-client.png`)
@@ -152,6 +154,9 @@ See `web/README.md` for exact commands.
 - **Combat floater stacking clarity (presentation):** nearby live floaters get
   stack-slot Y offsets + deterministic damage/heal/XP lanes (no random X drift);
   `?ve=floaters` (`ve/babylon-floaters.png`)
+- **Combat floater readability (presentation):** thicker outline/shadow + matte
+  damage/heal/XP fills under #39 fog/grass; capped emissive (no neon bloom); no
+  lighting lock edits; `?ve=floater-read` (`ve/babylon-floater-read.png`)
 - **Party / always-relevant (presentation):** `PartyMember` + `PartyInvite` tables;
   CreateParty / InviteToParty / AcceptPartyInvite / LeaveParty; neighborhood SQL
   also wholesale-subscribes `party_member` + per-identity `player_pose` for party
@@ -160,7 +165,7 @@ See `web/README.md` for exact commands.
 - **Minimap / compass HUD (presentation):** top-right 2D canvas minimap — local (blue), remotes (magenta), **party mates (distinct green + halo; rim chevron when far / always-relevant)**, training dummy (tan), crowd proxies (amber near / dim far); north-up; You/Party legend; `?ve=minimap` (`ve/babylon-minimap.png`); party proof `?ve=minimap-party` (`ve/babylon-minimap-party.png`)
 - **World nameplates (presentation):** billboard labels — local **You**, remotes hex prefix (party green tint), training dummy **Dummy** + HP pip; `?ve=nameplates` (`ve/babylon-nameplates.png`)
 - **Selected-target frame HUD (presentation):** compact DOM name + HP bar (+ short npc id) for current Tab target, stacked above combat GCD/cast bars; client-only; `?ve=target-frame` (`ve/babylon-target-frame.png`)
-- **Target frame + spell hotbar HUD (presentation):** bottom-center Spark (1) / Emberbolt (2) + empty slots 3–6; distinct **disabled** (STAFF / no staff) vs **OOM** (`lowMana`) vs empty dashed affordances; thicker GCD sweep + Emberbolt cast fill (bright top edge); `?ve=hotbar` / `?ve=target-frame` (`ve/babylon-hotbar.png`); readability proof `?ve=gcd` (`ve/babylon-gcd.png`)
+- **Target frame + spell hotbar HUD (presentation):** bottom-center Spark (1) / Emberbolt (2) + empty slots 3–6; distinct **disabled** (STAFF / no staff) vs **OOM** (`lowMana`) vs empty dashed affordances (polish #63: stronger badges/borders); thicker GCD sweep + Emberbolt cast fill (bright top edge); `?ve=hotbar` / `?ve=target-frame` (`ve/babylon-hotbar.png`); affordance polish `?ve=hotbar-afford` (`ve/babylon-hotbar-afford.png`); readability proof `?ve=gcd` (`ve/babylon-gcd.png`)
 - **Player self-frame + bag/loadout strip (presentation):** bottom-left **You** + XP self-frame; compact staff/Spark/Emberbolt loadout chips from Character; **B** toggles bag panel; self-frame includes Character.Hp bar; `?ve=bag` (`ve/babylon-bag.png`)
 - **Party member frames HUD (presentation):** compact left-column roster from `PartyMember` + remotes — You/hex, leader tag, distance + pose hint; `?ve=party-frames` + PartyMate/SecondClient (`ve/babylon-party-frames.png`)
 - **Party frames HP (invent/presentation):** wire `Character.Hp`/`MaxHp` into party member frames for You + mates (wholesale Character cache / `getCharacterFor`); PartyMate takes dummy thorns so mate bar is mid; `?ve=party-hp` (`ve/babylon-party-hp.png`)
@@ -196,9 +201,9 @@ See `web/README.md` for exact commands.
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- **World loot / pickup (invent):** `WorldLoot` + `SeedLoot` / dummy-death drop + `Pickup` (nearest in range → XP + `HasEmberShard`); sparkle meshes, **F** pickup, toast/combat-log; `tools/LootSmoke`; `?ve=loot` (`ve/babylon-loot.png`)
+- **World loot / pickup (invent):** `WorldLoot` + `SeedLoot` / dummy-death drop + `Pickup` (nearest in range → XP + `HasEmberShard`); sparkle meshes, **F** pickup, toast/combat-log; `tools/LootSmoke`; `?ve=loot` (`ve/babylon-loot.png`); readability polish #56 (warm amber markers at 8–20m under #39 fog); `?ve=loot-sparkle` (`ve/babylon-loot-sparkle.png`)
 - **Player trade (invent):** `TradeOffer` + `OfferTrade` / `AcceptTrade` / `CancelTrade` (range check; transfer `HasEmberShard` and/or small XP); **T** offer/accept nearest remote, **Y** cancel; toast/bag; `tools/TradeSmoke` / `tools/TradeMate`; `?ve=trade` (`ve/babylon-trade.png`)
-- **Yard vendor shop (invent):** `YardVendor` + `BuyFromVendor` / `SellToVendor` (range check; XP↔`HasEmberShard`); green/gold stall mesh + **E** buy/sell; toast/bag; `tools/VendorSmoke`; `?ve=vendor` (`ve/babylon-vendor.png`)
+- **Yard vendor shop (invent):** `YardVendor` + `BuyFromVendor` / `SellToVendor` (range check; XP↔`HasEmberShard`); procedural shop stall (posts+counter+awning, #58) + **E** buy/sell; toast/bag; `tools/VendorSmoke`; `?ve=vendor` (`ve/babylon-vendor.png`); stall silhouette `?ve=vendor-stall` (`ve/babylon-vendor-stall.png`)
 - **Yard tonic use (invent):** `HasYardTonic` + `TonicExpiresAt` on Character; `BuyYardTonic` / `UseYardTonic` (consume → move-speed buff); bag/loadout + **V** use, toast/VFX, self-frame buff timer; `tools/TonicSmoke`; `?ve=tonic` (`ve/babylon-tonic.png`)
 - **Player HP / death-respawn (invent):** `Character.Hp`/`MaxHp`; dummy thorns on Spark/Emberbolt apply; death clears target + schedules yard respawn; Babylon self-frame HP bar + death greyout/toast; self thorns damage floaters + local ghost tint while dead; `tools/PlayerHpSmoke`; `?ve=player-hp` (`ve/babylon-player-hp.png`); death UX clarity `?ve=death-ux` (`ve/babylon-death-ux.png`)
 - **Party frames HP (follow-on):** party roster HP bars from same Character rows; `?ve=party-hp` (`ve/babylon-party-hp.png`)

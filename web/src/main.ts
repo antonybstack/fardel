@@ -54,6 +54,7 @@ import {
   ROBE_EMISSIVE_SCALE,
   type HumanoidParts,
 } from './world/humanoid';
+import { createTrainingDummy } from './world/dummy';
 import {
   casterMuzzle,
   createEmberBeam,
@@ -88,6 +89,7 @@ import {
   syncGroundSparkles,
   type GroundSparkle,
 } from './world/sparkles';
+import { createVendorStall } from './world/vendorStall';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -107,6 +109,8 @@ type NpcMesh = {
   /** Overhead chevron for local selection reticule. */
   marker: Mesh;
   mat: StandardMaterial;
+  /** Extra mats faded/flashed with primary (scarecrow wood/head). */
+  extraMats: StandardMaterial[];
   ringMat: StandardMaterial;
   remoteRingMat: StandardMaterial;
   markerMat: StandardMaterial;
@@ -235,7 +239,7 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   if (label) label.textContent = `${target.hp}/${target.maxHp}`;
 }
 
-/** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots visible. */
+/** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots (?ve=hotbar / hotbar-afford). */
 let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = null;
 
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
@@ -1297,11 +1301,16 @@ function drawMinimap(opts: {
   ctx.arc(cx, cy, MINIMAP_RANGE_M * scale, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Compass N
-  ctx.fillStyle = '#c8d6f0';
+  // Compass N with shadow for readability
   ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  // Dark outline
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+  ctx.lineWidth = 3.0;
+  ctx.strokeText('N', cx, 12);
+  // Bright fill
+  ctx.fillStyle = '#f0f4fc';
   ctx.fillText('N', cx, 12);
 
   const originX = opts.local?.x ?? 0;
@@ -1324,9 +1333,16 @@ function drawMinimap(opts: {
     return { px, py, clamped, dist };
   };
 
-  const plot = (wx: number, wz: number, color: string, r: number, alpha = 1) => {
+  const plot = (wx: number, wz: number, color: string, r: number, alpha = 1, outline = true) => {
     const { px, py, clamped } = project(wx, wz);
     ctx.globalAlpha = alpha;
+    // Dark outline for contrast
+    if (outline) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.beginPath();
+      ctx.arc(px, py, r + 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
@@ -1354,6 +1370,13 @@ function drawMinimap(opts: {
     if (!r.party) continue;
     partyCount += 1;
     const { px, py, clamped } = plot(r.x, r.z, '#5ed68a', 4.6);
+    // Dark outline ring for contrast
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.arc(px, py, 6.4, 0, Math.PI * 2);
+    ctx.stroke();
+    // Bright green ring
     ctx.strokeStyle = 'rgba(94, 214, 138, 0.95)';
     ctx.lineWidth = 1.6;
     ctx.beginPath();
@@ -1362,6 +1385,21 @@ function drawMinimap(opts: {
     if (clamped) {
       const ang = Math.atan2(py - cy, px - cx);
       const tip = 9.5;
+      // Dark outline for chevron
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+      ctx.beginPath();
+      ctx.moveTo(px + Math.cos(ang) * (tip + 1.5), py + Math.sin(ang) * (tip + 1.5));
+      ctx.lineTo(
+        px + Math.cos(ang + 2.2) * 6.0,
+        py + Math.sin(ang + 2.2) * 6.0,
+      );
+      ctx.lineTo(
+        px + Math.cos(ang - 2.2) * 6.0,
+        py + Math.sin(ang - 2.2) * 6.0,
+      );
+      ctx.closePath();
+      ctx.fill();
+      // Bright green chevron
       ctx.fillStyle = '#5ed68a';
       ctx.beginPath();
       ctx.moveTo(px + Math.cos(ang) * tip, py + Math.sin(ang) * tip);
@@ -1379,6 +1417,13 @@ function drawMinimap(opts: {
   }
   // Local on top
   plot(originX, originZ, '#6aa2ff', 4.2);
+  // Dark outline ring for contrast
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+  ctx.stroke();
+  // Bright white ring
   ctx.strokeStyle = 'rgba(232,238,252,0.85)';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
@@ -1674,26 +1719,30 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   root.position = new Vector3(npc.x, 0, npc.z);
 
   const isDummy = npc.kind === NPC_KIND_DUMMY;
-  const body = isDummy
-    ? MeshBuilder.CreateCylinder(
-        `npcBody_${npc.npcId}`,
-        { height: 1.6, diameter: 0.9 },
-        scene,
-      )
-    : MeshBuilder.CreateCapsule(
-        `npcBody_${npc.npcId}`,
-        { height: 1.6, radius: 0.32 },
-        scene,
-      );
-  body.parent = root;
-  body.position.y = 0.8;
-
-  const mat = new StandardMaterial(`npcMat_${npc.npcId}`, scene);
-  mat.diffuseColor = isDummy
-    ? new Color3(0.75, 0.55, 0.35)
-    : new Color3(0.7, 0.35, 0.35);
-  mat.specularColor = new Color3(0.1, 0.1, 0.1);
-  body.material = mat;
+  let body: Mesh;
+  let mat: StandardMaterial;
+  let extraMats: StandardMaterial[] = [];
+  if (isDummy) {
+    // Scarecrow / practice dummy — wood post + crossbeam + canvas (not a cylinder).
+    const dummy = createTrainingDummy(scene, `npc_${npc.npcId}`);
+    body = dummy.body;
+    body.parent = root;
+    body.position.y = 0;
+    mat = dummy.mat;
+    extraMats = dummy.extraMats;
+  } else {
+    body = MeshBuilder.CreateCapsule(
+      `npcBody_${npc.npcId}`,
+      { height: 1.6, radius: 0.32 },
+      scene,
+    );
+    body.parent = root;
+    body.position.y = 0.8;
+    mat = new StandardMaterial(`npcMat_${npc.npcId}`, scene);
+    mat.diffuseColor = new Color3(0.7, 0.35, 0.35);
+    mat.specularColor = new Color3(0.1, 0.1, 0.1);
+    body.material = mat;
+  }
 
   // Local selection reticule — thicker/brighter gold torus (distinct from remote cyan).
   const ring = MeshBuilder.CreateTorus(
@@ -1732,7 +1781,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     scene,
   );
   marker.parent = root;
-  marker.position.y = 2.55;
+  marker.position.y = isDummy ? 2.45 : 2.55;
   marker.rotation.z = Math.PI; // tip points at dummy
   marker.isPickable = false;
   const markerMat = new StandardMaterial(`npcMarkMat_${npc.npcId}`, scene);
@@ -1746,7 +1795,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   if (isDummy) {
     nameplate = createNameplate(scene, `npc_${npc.npcId}`);
     nameplate.mesh.parent = root;
-    nameplate.mesh.position.set(0, 2.0, 0);
+    nameplate.mesh.position.set(0, 2.15, 0);
     paintNameplate(nameplate, 'Dummy', '#e8c89a', npc.maxHp > 0 ? npc.hp / npc.maxHp : 1);
   }
 
@@ -1757,6 +1806,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     remoteRing,
     marker,
     mat,
+    extraMats,
     ringMat,
     remoteRingMat,
     markerMat,
@@ -1769,26 +1819,15 @@ function makeVendorMesh(scene: Scene, vendor: VendorView): { root: Mesh; mat: St
   const root = new Mesh(`vendor_${vendor.vendorId}`, scene);
   root.position = new Vector3(vendor.x, 0, vendor.z);
 
-  const body = MeshBuilder.CreateBox(`vendorBody_${vendor.vendorId}`, { width: 0.9, height: 1.4, depth: 0.7 }, scene);
-  body.parent = root;
-  body.position.y = 0.7;
-  const mat = new StandardMaterial(`vendorMat_${vendor.vendorId}`, scene);
-  mat.diffuseColor = new Color3(0.25, 0.75, 0.45);
-  mat.emissiveColor = new Color3(0.05, 0.18, 0.1);
-  mat.specularColor = new Color3(0.1, 0.15, 0.1);
-  body.material = mat;
-
-  const awning = MeshBuilder.CreateBox(`vendorAwning_${vendor.vendorId}`, { width: 1.2, height: 0.12, depth: 1.0 }, scene);
-  awning.parent = root;
-  awning.position.y = 1.55;
-  const awningMat = new StandardMaterial(`vendorAwningMat_${vendor.vendorId}`, scene);
-  awningMat.diffuseColor = new Color3(0.85, 0.55, 0.2);
-  awningMat.emissiveColor = new Color3(0.15, 0.08, 0.02);
-  awning.material = awningMat;
+  // Procedural shop stall — posts + counter + cloth awning (#58). Warm wood /
+  // desaturated canvas under locked #39 fog/sun; readable at 8–20m play cam.
+  const stall = createVendorStall(scene, `vendorStall_${vendor.vendorId}`);
+  stall.body.parent = root;
+  const mat = stall.mat;
 
   const nameplate = createNameplate(scene, `vendor_${vendor.vendorId}`);
   nameplate.mesh.parent = root;
-  nameplate.mesh.position.set(0, 2.05, 0);
+  nameplate.mesh.position.set(0, 2.45, 0);
   paintNameplate(nameplate, vendor.label || 'Vendor', '#7dffb5', 1);
 
   return { root, mat, nameplate };
@@ -2113,9 +2152,19 @@ function disposeNameplate(np: Nameplate | null | undefined): void {
 }
 
 /** Vertical gap between stacked floaters near the same anchor. */
-const FLOATER_STACK_DY = 0.5;
+const FLOATER_STACK_DY = 0.58;
 /** XZ radius (m) for counting live floaters toward a stack slot. */
 const FLOATER_NEAR_XZ = 2.8;
+/** Dim unlit emissive so digits stay readable without neon bloom over #39 fog. */
+const FLOATER_EMISSIVE = 0.72;
+
+/** Tuned fills for cyan fog + lush grass (matte, not neon). */
+const FLOATER_TINT_SPARK = new Color3(1.0, 0.9, 0.48);
+const FLOATER_TINT_EMBER = new Color3(1.0, 0.58, 0.22);
+const FLOATER_TINT_THORNS = new Color3(0.96, 0.4, 0.36);
+const FLOATER_TINT_HEAL = new Color3(0.7, 0.96, 0.86);
+const FLOATER_TINT_XP = new Color3(1.0, 0.86, 0.4);
+const FLOATER_TINT_LEVEL = new Color3(0.72, 0.9, 1.0);
 
 /** Count still-visible floaters near `at` across one or more live lists. */
 function countNearbyLiveFloaters(
@@ -2158,34 +2207,48 @@ function spawnWorldFloater(
 ): DamageFloater {
   const slot = countNearbyLiveFloaters(opts?.stackWith, at);
   const lifeMs = opts?.lifeMs ?? 1250;
-  const yLift = (opts?.yLift ?? 1.85) + slot * FLOATER_STACK_DY;
-  const planeW = opts?.planeW ?? 1.7;
-  const planeH = opts?.planeH ?? 0.85;
+  const yLift = (opts?.yLift ?? 1.9) + slot * FLOATER_STACK_DY;
+  const planeW = opts?.planeW ?? 1.85;
+  const planeH = opts?.planeH ?? 0.95;
   const laneX = opts?.laneX ?? 0;
+  const texW = 320;
+  const texH = 160;
   const tex = new DynamicTexture(
     `fltTex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    { width: 256, height: 128 },
+    { width: texW, height: texH },
     scene,
     false,
   );
   tex.hasAlpha = true;
   const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
-  ctx.clearRect(0, 0, 256, 128);
-  const fontPx = label.length > 6 ? 64 : 84;
+  ctx.clearRect(0, 0, texW, texH);
+  const cx = texW / 2;
+  const cy = texH / 2;
+  const fontPx = label.length > 6 ? 72 : 96;
   ctx.font = `bold ${fontPx}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 12;
-  ctx.strokeStyle = 'rgba(0,0,0,0.92)';
-  ctx.strokeText(label, 128, 64);
+  // Soft drop shadow + thick dark outline so digits read over grass / cyan fog.
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillText(label, cx + 3, cy + 4);
+  ctx.lineJoin = 'round';
+  ctx.miterLimit = 2;
+  ctx.lineWidth = 18;
+  ctx.strokeStyle = 'rgba(0,0,0,0.88)';
+  ctx.strokeText(label, cx, cy);
+  ctx.lineWidth = 10;
+  ctx.strokeStyle = 'rgba(8,10,14,0.98)';
+  ctx.strokeText(label, cx, cy);
   ctx.fillStyle = `rgb(${Math.round(tint.r * 255)},${Math.round(tint.g * 255)},${Math.round(tint.b * 255)})`;
-  ctx.fillText(label, 128, 64);
+  ctx.fillText(label, cx, cy);
   tex.update();
 
   const mat = new StandardMaterial(`fltMat_${label}_${Date.now()}`, scene);
   mat.diffuseTexture = tex;
   mat.emissiveTexture = tex;
   mat.opacityTexture = tex;
+  // Cap emissive so floaters stay matte/readable (no neon bloom under #39 fog).
+  mat.emissiveColor = new Color3(FLOATER_EMISSIVE, FLOATER_EMISSIVE, FLOATER_EMISSIVE);
   mat.disableLighting = true;
   mat.useAlphaFromDiffuseTexture = true;
   mat.backFaceCulling = false;
@@ -2201,7 +2264,7 @@ function spawnWorldFloater(
   mesh.position = at.clone();
   mesh.position.y += yLift;
   // Deterministic lane + tiny per-slot zigzag (no random horizontal wander).
-  mesh.position.x += laneX + (slot % 2 === 0 ? -1 : 1) * 0.04 * Math.min(slot, 3);
+  mesh.position.x += laneX + (slot % 2 === 0 ? -1 : 1) * 0.05 * Math.min(slot, 3);
   mesh.isPickable = false;
 
   return {
@@ -2240,12 +2303,12 @@ function spawnXpFloater(
     scene,
     at,
     `+${gained} XP`,
-    new Color3(1, 0.82, 0.28),
+    FLOATER_TINT_XP,
     {
       lifeMs: 1500,
-      yLift: 2.15,
-      planeW: 2.2,
-      planeH: 0.95,
+      yLift: 2.2,
+      planeW: 2.35,
+      planeH: 1.0,
       laneX: 0.34,
       stackWith,
     },
@@ -2263,12 +2326,12 @@ function spawnLevelFloater(
     scene,
     at,
     `Level ${level}!`,
-    new Color3(0.55, 0.95, 1),
+    FLOATER_TINT_LEVEL,
     {
       lifeMs: 1900,
-      yLift: 2.45,
-      planeW: 2.6,
-      planeH: 1.05,
+      yLift: 2.5,
+      planeW: 2.7,
+      planeH: 1.1,
       laneX: 0.06,
       stackWith,
     },
@@ -2313,26 +2376,33 @@ function spawnDeathBurst(scene: Scene, at: Vector3): NpcLifeFx['burst'] {
   return burst;
 }
 
+/** Fade / restore all npc presentation mats (dummy cloth+wood+head). */
+function npcPresentationMats(mesh: NpcMesh): StandardMaterial[] {
+  return [mesh.mat, ...mesh.extraMats];
+}
+
 function beginNpcDeathFx(
   scene: Scene,
   mesh: NpcMesh,
 ): NpcLifeFx {
   mesh.root.setEnabled(true);
   mesh.root.scaling.setAll(1);
-  mesh.body.position.y = 0.8;
-  mesh.mat.alpha = 1;
-  mesh.mat.transparencyMode = 2; // ALPHA_BLEND
+  const baseBodyY = mesh.body.position.y;
+  for (const m of npcPresentationMats(mesh)) {
+    m.alpha = 1;
+    m.transparencyMode = 2; // ALPHA_BLEND
+  }
   mesh.ring.setEnabled(false);
   mesh.remoteRing.setEnabled(false);
   mesh.marker.setEnabled(false);
   if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
   const at = mesh.root.position.clone();
-  at.y += 0.8;
+  at.y += 0.9;
   return {
     phase: 'dying',
     bornMs: Date.now(),
     lifeMs: DEATH_FX_MS,
-    baseBodyY: 0.8,
+    baseBodyY,
     baseEmissive: mesh.mat.emissiveColor.clone(),
     burst: spawnDeathBurst(scene, at),
   };
@@ -2341,16 +2411,18 @@ function beginNpcDeathFx(
 function beginNpcRespawnFx(mesh: NpcMesh): NpcLifeFx {
   mesh.root.setEnabled(true);
   mesh.root.scaling.setAll(0.12);
-  mesh.body.position.y = 0.8;
-  mesh.mat.alpha = 1;
-  mesh.mat.transparencyMode = 0;
-  mesh.mat.emissiveColor = new Color3(0.85, 0.75, 0.35);
+  const baseBodyY = mesh.body.position.y;
+  for (const m of npcPresentationMats(mesh)) {
+    m.alpha = 1;
+    m.transparencyMode = 0;
+    m.emissiveColor = new Color3(0.85, 0.75, 0.35);
+  }
   if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(true);
   return {
     phase: 'spawning',
     bornMs: Date.now(),
     lifeMs: RESPAWN_FX_MS,
-    baseBodyY: 0.8,
+    baseBodyY,
     baseEmissive: new Color3(0, 0, 0),
     burst: [],
   };
@@ -2360,9 +2432,11 @@ function finishNpcLifeFx(mesh: NpcMesh, fx: NpcLifeFx): void {
   disposeLifeBurst(fx);
   mesh.root.scaling.setAll(1);
   mesh.body.position.y = fx.baseBodyY;
-  mesh.mat.alpha = 1;
-  mesh.mat.transparencyMode = 0;
-  mesh.mat.emissiveColor = fx.baseEmissive.clone();
+  for (const m of npcPresentationMats(mesh)) {
+    m.alpha = 1;
+    m.transparencyMode = 0;
+    m.emissiveColor = fx.baseEmissive.clone();
+  }
   if (fx.phase === 'dying') {
     mesh.root.setEnabled(false);
     if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
@@ -3077,8 +3151,8 @@ async function main(): Promise<void> {
             scene,
             player.position,
             `+${healed}`,
-            new Color3(0.45, 0.95, 0.7),
-            { lifeMs: 1400, yLift: 2.05 },
+            FLOATER_TINT_HEAL,
+            { lifeMs: 1400, yLift: 2.05, laneX: 0.16 },
           ),
         );
       }).catch((err: unknown) => {
@@ -3324,9 +3398,7 @@ async function main(): Promise<void> {
         if (prevHp != null && npc.hp < prevHp) {
           const delta = prevHp - npc.hp;
           const ember = delta >= 20;
-          const tint = ember
-            ? new Color3(1, 0.55, 0.15)
-            : new Color3(1, 0.95, 0.45);
+          const tint = ember ? FLOATER_TINT_EMBER : FLOATER_TINT_SPARK;
           damageFloaters.push(
             spawnDamageFloater(
               scene,
@@ -3623,8 +3695,10 @@ async function main(): Promise<void> {
         const scale = 1 - t * 0.88;
         mesh.root.scaling.setAll(Math.max(0.08, scale));
         mesh.body.position.y = fx.baseBodyY - sink;
-        mesh.mat.alpha = Math.max(0, 1 - t);
-        mesh.mat.emissiveColor = new Color3(0.55 * (1 - t), 0.12 * (1 - t), 0.02);
+        for (const m of npcPresentationMats(mesh)) {
+          m.alpha = Math.max(0, 1 - t);
+          m.emissiveColor = new Color3(0.55 * (1 - t), 0.12 * (1 - t), 0.02);
+        }
         for (const b of fx.burst) {
           b.mesh.position.x += b.vx * dt;
           b.mesh.position.y += b.vy * dt;
@@ -3643,11 +3717,10 @@ async function main(): Promise<void> {
         const scale = 0.12 + ease * 0.88;
         mesh.root.scaling.setAll(scale);
         const flash = 1 - t;
-        mesh.mat.emissiveColor = new Color3(
-          0.85 * flash,
-          0.7 * flash,
-          0.25 * flash,
-        );
+        const spawnEm = new Color3(0.85 * flash, 0.7 * flash, 0.25 * flash);
+        for (const m of npcPresentationMats(mesh)) {
+          m.emissiveColor = spawnEm.clone();
+        }
         if (age >= fx.lifeMs) {
           finishNpcLifeFx(mesh, fx);
           npcLifeFx.delete(key);
@@ -3923,7 +3996,7 @@ async function main(): Promise<void> {
                   scene,
                   player.position,
                   dmg,
-                  new Color3(1.0, 0.35, 0.45),
+                  FLOATER_TINT_THORNS,
                   [damageFloaters, xpFloaters],
                 ),
               );
@@ -3936,12 +4009,12 @@ async function main(): Promise<void> {
                   scene,
                   player.position,
                   `+${healed}`,
-                  new Color3(0.35, 1.0, 0.55),
+                  FLOATER_TINT_HEAL,
                   {
                     lifeMs: 1350,
-                    yLift: 2.0,
-                    planeW: 1.55,
-                    planeH: 0.8,
+                    yLift: 2.05,
+                    planeW: 1.7,
+                    planeH: 0.88,
                     laneX: 0.16,
                     stackWith: [damageFloaters, xpFloaters],
                   },
@@ -4153,11 +4226,15 @@ async function main(): Promise<void> {
     // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
     // radius from current cam position → target; walking forward increases that
     // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
+    // Skip follow for ?ve=vendor-stall so the shop silhouette stays framed.
     {
-      const follow = player.position.add(new Vector3(0, 1.35, 0));
-      const radius = camera.radius;
-      camera.setTarget(follow);
-      camera.radius = radius;
+      const veFollow = new URLSearchParams(window.location.search).get('ve');
+      if (veFollow !== 'vendor-stall') {
+        const follow = player.position.add(new Vector3(0, 1.35, 0));
+        const radius = camera.radius;
+        camera.setTarget(follow);
+        camera.radius = radius;
+      }
     }
     scene.render();
   });
@@ -4230,7 +4307,7 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '-12',
-              new Color3(1, 0.35, 0.4),
+              FLOATER_TINT_THORNS,
               { lifeMs: 2400, laneX: -0.28, stackWith: lists },
             ),
           );
@@ -4239,7 +4316,7 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '-8',
-              new Color3(1, 0.9, 0.4),
+              FLOATER_TINT_SPARK,
               { lifeMs: 2400, laneX: -0.28, stackWith: lists },
             ),
           );
@@ -4248,12 +4325,12 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '+25',
-              new Color3(0.35, 1.0, 0.55),
+              FLOATER_TINT_HEAL,
               {
                 lifeMs: 2400,
-                yLift: 2.0,
-                planeW: 1.55,
-                planeH: 0.8,
+                yLift: 2.05,
+                planeW: 1.7,
+                planeH: 0.88,
                 laneX: 0.18,
                 stackWith: lists,
               },
@@ -4264,12 +4341,12 @@ async function main(): Promise<void> {
               scene,
               player.position,
               '+10 XP',
-              new Color3(1, 0.82, 0.28),
+              FLOATER_TINT_XP,
               {
                 lifeMs: 2400,
-                yLift: 2.15,
-                planeW: 2.2,
-                planeH: 0.95,
+                yLift: 2.2,
+                planeW: 2.35,
+                planeH: 1.0,
                 laneX: 0.42,
                 stackWith: lists,
               },
@@ -4285,6 +4362,95 @@ async function main(): Promise<void> {
         if (ticks < 50) window.setTimeout(pulse, 320);
       };
       window.setTimeout(pulse, 250);
+    }
+
+    // ?ve=floater-read — readability proof under #39 fog (outline + matte tints).
+    if (earlyVe === 'floater-read') {
+      camera.radius = 9.5;
+      camera.alpha = Math.PI / 2.2;
+      camera.beta = Math.PI / 3.0;
+      camera.setTarget(player.position.clone().add(new Vector3(0, 1.4, 0)));
+      const mark = document.getElementById('persistMark');
+      if (mark) mark.textContent = 'VE floater-read: seeding…';
+      let ticks = 0;
+      const pulseRead = () => {
+        ticks += 1;
+        camera.setTarget(player.position.clone().add(new Vector3(0, 1.4, 0)));
+        const lists = [damageFloaters, xpFloaters] as DamageFloater[][];
+        const liveNow =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (liveNow < 5) {
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-14',
+              FLOATER_TINT_THORNS,
+              { lifeMs: 3200, laneX: -0.3, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-9',
+              FLOATER_TINT_SPARK,
+              { lifeMs: 3200, laneX: -0.3, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-22',
+              FLOATER_TINT_EMBER,
+              { lifeMs: 3200, laneX: -0.3, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+30',
+              FLOATER_TINT_HEAL,
+              {
+                lifeMs: 3200,
+                yLift: 2.05,
+                planeW: 1.75,
+                planeH: 0.9,
+                laneX: 0.16,
+                stackWith: lists,
+              },
+            ),
+          );
+          xpFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+10 XP',
+              FLOATER_TINT_XP,
+              {
+                lifeMs: 3200,
+                yLift: 2.25,
+                planeW: 2.4,
+                planeH: 1.05,
+                laneX: 0.44,
+                stackWith: lists,
+              },
+            ),
+          );
+        }
+        const live =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (mark) {
+          mark.textContent =
+            `Floater-read OK · outline · damage/heal/XP · #39 fog · live ${live}`;
+        }
+        if (ticks < 55) window.setTimeout(pulseRead, 340);
+      };
+      window.setTimeout(pulseRead, 220);
     }
   }
 
@@ -4555,6 +4721,36 @@ async function main(): Promise<void> {
     window.setTimeout(waitPathGround, 600);
   }
 
+  // ?ve=sky-horizon — play-cam frame of layered mountain silhouette + sky gradient (#55).
+  if (ve === 'sky-horizon') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.55;
+  }
+
+  if (net && ve === 'sky-horizon') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE sky-horizon: waiting for Connected…';
+    const waitSkyHorizon = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        // Face distant N mountains; mid play-cam so ridges read through cyan fog.
+        camera.setTarget(player.position.add(new Vector3(0, 2.5, -12)));
+        camera.radius = 18;
+        camera.alpha = Math.PI / 2.05;
+        camera.beta = Math.PI / 2.55;
+        if (mark) {
+          mark.textContent =
+            'Sky-horizon OK · layered ridges + fog-matched sky · Connected';
+        }
+        return;
+      }
+      window.setTimeout(waitSkyHorizon, 300);
+    };
+    window.setTimeout(waitSkyHorizon, 600);
+  }
+
   // ?ve=humanoid — frame local player (humanoid+staff) clearly for VE shot.
   if (ve === 'humanoid') {
     camera.radius = 8;
@@ -4634,6 +4830,85 @@ async function main(): Promise<void> {
       window.setTimeout(waitPolish, 200);
     };
     window.setTimeout(waitPolish, 600);
+  }
+
+  // ?ve=dummy — frame scarecrow/practice dummy at play-cam under canonical #39 lights.
+  if (ve === 'dummy') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 2.75;
+  }
+  if (net && ve === 'dummy') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE dummy: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitDummy = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        // Stand ~5.5–7m out so scarecrow fills play-cam (reads as TARGET / hit-me).
+        if (dist > 7.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - 5.8);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        } else if (dist < 4.8) {
+          const step = Math.min(MAX_STEP_METERS, 5.8 - dist);
+          net.sendMove((-dx / dist) * step, (-dz / dist) * step);
+        }
+        // Bias toward dummy so wood post + X-pad + sack head dominate the shot.
+        camera.setTarget(
+          new Vector3(
+            player.position.x * 0.15 + dummy.x * 0.85,
+            1.2,
+            player.position.z * 0.15 + dummy.z * 0.85,
+          ),
+        );
+        camera.radius = 9.5;
+        camera.alpha = Math.PI / 2.15;
+        camera.beta = Math.PI / 2.75;
+      }
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const scarecrow =
+        !!(mesh && mesh.extraMats.length >= 2 && mesh.body.getChildMeshes().length >= 5);
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        mesh &&
+        scarecrow &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent =
+            `Dummy OK · scarecrow silhouette · wood+canvas · canonical forest lights · #${dummy.npcId}`;
+        }
+        if (okTicks < 6 && ticks < 140) {
+          window.setTimeout(waitDummy, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE dummy: Connected · dummy ${dummy ? 'yes' : 'no'} · parts ${scarecrow ? 'ok' : '…'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE dummy: timed out waiting for scarecrow dummy';
+        return;
+      }
+      window.setTimeout(waitDummy, 200);
+    };
+    window.setTimeout(waitDummy, 700);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
@@ -5499,6 +5774,72 @@ async function main(): Promise<void> {
     window.setTimeout(waitMinimapParty, 800);
   }
 
+  // ?ve=minimap-read — Readability test: party + self blips + compass vs grass/fog (cyan #39 palette).
+  if (ve === 'minimap-read') {
+    camera.radius = 28;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'minimap-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE minimap-read: waiting for party + blips vs grass/fog…';
+    let ticks = 0;
+    let invited = false;
+    const waitMinimapRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE minimap-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitMinimapRead, 200);
+        return;
+      }
+      const party = net.getPartyState();
+      const local = net.getLocalPose();
+      const remotes = net.getRemotes();
+      if (!local) {
+        if (mark) mark.textContent = 'VE minimap-read: waiting for local pose…';
+        window.setTimeout(waitMinimapRead, 250);
+        return;
+      }
+      if (!invited && !party?.pendingInviteFrom && remotes.length >= 1 && (party?.size ?? 0) < 2) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) mark.textContent = `VE minimap-read: invited ${hex.slice(0, 12)}… waiting accept…`;
+        }
+      }
+      syncRemoteMeshes(remotes);
+      drawMinimap({
+        local: { x: local.x, z: local.z },
+        remotes,
+        npcs: net.getNpcs(),
+        proxies: net.getProxies(),
+      });
+      const partyMate = remotes.find((r) => r.party);
+      if ((party?.size ?? 0) >= 2 && partyMate && document.getElementById('minimap')) {
+        camera.setTarget(new Vector3(local.x, 1.1, local.z));
+        if (mark) {
+          mark.textContent =
+            `Minimap read OK · blips + compass vs grass/cyan fog · party ${party?.size} · ` +
+            `remotes ${remotes.length} · contrast readable`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE minimap-read: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · ` +
+          `invited=${invited} · pending=${party?.pendingInviteFrom?.slice(0, 8) ?? '—'} (waiting party…)`;
+      }
+      if (ticks > 220) {
+        if (mark) mark.textContent = 'VE minimap-read: timed out waiting for party mate';
+        return;
+      }
+      window.setTimeout(waitMinimapRead, 200);
+    };
+    window.setTimeout(waitMinimapRead, 800);
+  }
+
   // ?ve=nameplates — You + Dummy (+ remotes) billboard labels; dummy HP pip.
   if (ve === 'nameplates') {
     camera.radius = 12;
@@ -5566,13 +5907,13 @@ async function main(): Promise<void> {
     window.setTimeout(waitPlates, 700);
   }
 
-  // ?ve=hotbar / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
-  if (ve === 'hotbar' || ve === 'target-frame') {
+  // ?ve=hotbar / ?ve=hotbar-afford / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
+  if (ve === 'hotbar' || ve === 'hotbar-afford' || ve === 'target-frame') {
     camera.radius = 12;
     camera.alpha = Math.PI / 2.4;
     camera.beta = Math.PI / 3.2;
   }
-  if (net && (ve === 'hotbar' || ve === 'target-frame')) {
+  if (net && (ve === 'hotbar' || ve === 'hotbar-afford' || ve === 'target-frame')) {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE hotbar: waiting for Connected + Dummy…';
     let ticks = 0;
@@ -5611,7 +5952,10 @@ async function main(): Promise<void> {
           window.setTimeout(waitHotbar, 250);
           return;
         }
-        if (gcdRemainingMs(net.getCombat()) <= 0) {
+        // hotbar-afford: skip cast — proof is empty/STAFF/OOM chrome only.
+        if (ve === 'hotbar-afford') {
+          castSent = true;
+        } else if (gcdRemainingMs(net.getCombat()) <= 0) {
           lastCastSpell = SPELL_SPARK;
           net.cast(SPELL_SPARK);
           castSent = true;
@@ -5633,17 +5977,19 @@ async function main(): Promise<void> {
       const gcdLeftNow = gcdRemainingMs(combat);
       const nameTxt = document.getElementById('tfName')?.textContent || '';
       const nameOk = nameTxt.length > 0 && nameTxt !== '—';
+      const affordReady =
+        ve === 'hotbar-afford' ||
+        (castSent && (gcdLeftNow > 0 || castUntilMs > Date.now() || veHotbarPresent));
       if (
         st.state === 'connected' &&
         dummy &&
         frameVisible &&
         nameOk &&
         hotbar &&
-        castSent &&
-        (gcdLeftNow > 0 || castUntilMs > Date.now() || veHotbarPresent)
+        affordReady
       ) {
-        // Seed distinct affordances for hotbar proof: empty 3–6 + Spark STAFF + Emberbolt OOM.
-        if (ve === 'hotbar') {
+        // Seed distinct affordances: empty 3–6 + Spark STAFF + Emberbolt OOM (hotbar + hotbar-afford).
+        if (ve === 'hotbar' || ve === 'hotbar-afford') {
           veHotbarPresent = { sparkDisabled: true, emberLowMana: true };
           updateSpellHotbar({
             gcdMs: 0,
@@ -5657,8 +6003,9 @@ async function main(): Promise<void> {
           });
           const emptyCount = hotbar.querySelectorAll('.spellSlot.empty').length;
           if (mark) {
+            const tag = ve === 'hotbar-afford' ? 'Hotbar-afford OK' : 'Hotbar OK';
             mark.textContent =
-              `Hotbar OK · empty ${emptyCount} · Spark STAFF (disabled) · Emberbolt OOM · target Dummy #${dummy.npcId}`;
+              `${tag} · empty ${emptyCount} · Spark STAFF (disabled) · Emberbolt OOM · target Dummy #${dummy.npcId}`;
           }
         } else if (mark) {
           mark.textContent = `Hotbar OK · target Dummy #${dummy.npcId} HP ${dummy.hp}/${dummy.maxHp} · Spark/Emberbolt slots · GCD ${(gcdLeftNow / 1000).toFixed(1)}s`;
@@ -7286,6 +7633,57 @@ async function main(): Promise<void> {
     window.setTimeout(waitRate, 700);
   }
 
+  // ?ve=loot-sparkle — ground loot sparkle readability at play-cam 8–20m under locked #39 fog (yard bags / #56).
+  if (ve === 'loot-sparkle') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.5;
+  }
+  if (net && ve === 'loot-sparkle') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE loot-sparkle: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitLootSparkle = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE loot-sparkle: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitLootSparkle, 200);
+        return;
+      }
+      camera.setTarget(new Vector3(1.5, 0.9, 1.2));
+      camera.radius = 12;
+      if (!seeded) {
+        seeded = true;
+        if (mark) mark.textContent = 'VE loot-sparkle: seeding ember_shard…';
+        net.seedLoot();
+        window.setTimeout(waitLootSparkle, 350);
+        return;
+      }
+      const items = net.getGroundItems();
+      if (items.length >= 1) {
+        if (mark) {
+          mark.textContent =
+            'Loot sparkle OK · warm amber marker readable at play-cam under #39 cyan fog (8–20m)';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE loot-sparkle: ground ${items.length} · waiting…`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent = `VE loot-sparkle: timed out · ground ${items.length}`;
+        }
+        return;
+      }
+      window.setTimeout(waitLootSparkle, 220);
+    };
+    window.setTimeout(waitLootSparkle, 700);
+  }
+
   // ?ve=loot — seed ground ember_shard sparkle (keep visible for VE), toast/log + bag row; then F-pickup proof.
   if (ve === 'loot') {
     camera.radius = 12;
@@ -7528,6 +7926,53 @@ async function main(): Promise<void> {
 
 
 
+
+  // ?ve=vendor-stall — play-cam frame of shop silhouette (posts+counter+awning) under #39 fog (#58).
+  if (ve === 'vendor-stall') {
+    // Face stall front (counter/-Z); play-cam height so awning+counter read.
+    camera.radius = 11;
+    camera.alpha = -Math.PI / 2.15;
+    camera.beta = Math.PI / 2.35;
+    // Presentation preview at known YardVendor spawn — independent of syncVendorMeshes
+    // so empty yard_vendor sub cannot dispose it mid-shot.
+    const STALL_X = -2.5;
+    const STALL_Z = 2.0;
+    const preview = createVendorStall(scene, 'veVendorStall');
+    preview.body.position.set(STALL_X, 0, STALL_Z);
+    const plate = createNameplate(scene, 'veVendorStall');
+    plate.mesh.parent = preview.body;
+    plate.mesh.position.set(0, 2.45, 0);
+    paintNameplate(plate, 'Vendor', '#7dffb5', 1);
+    camera.setTarget(new Vector3(STALL_X, 1.1, STALL_Z));
+  }
+  if (net && ve === 'vendor-stall') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE vendor-stall: waiting for Connected…';
+    const STALL_X = -2.5;
+    const STALL_Z = 2.0;
+    const waitStall = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE vendor-stall: ${st.state}…`;
+        window.setTimeout(waitStall, 300);
+        return;
+      }
+      // Prefer live YardVendor pose if subscribed; else keep spawn frame.
+      const live = net.getVendors()[0];
+      const x = live?.x ?? STALL_X;
+      const z = live?.z ?? STALL_Z;
+      camera.setTarget(new Vector3(x, 1.1, z));
+      camera.radius = 11;
+      camera.alpha = -Math.PI / 2.15;
+      camera.beta = Math.PI / 2.35;
+      if (mark) {
+        mark.textContent =
+          'Vendor-stall OK · shop silhouette · Connected';
+      }
+    };
+    window.setTimeout(waitStall, 600);
+  }
 
   // ?ve=vendor — approach YardVendor, BuyFromVendor (XP→shard) or Sell, toast/bag proof.
   if (ve === 'vendor') {
@@ -8033,8 +8478,8 @@ async function main(): Promise<void> {
               scene,
               player.position,
               `+${healed}`,
-              new Color3(0.45, 0.95, 0.7),
-              { lifeMs: 1400, yLift: 2.05 },
+              FLOATER_TINT_HEAL,
+              { lifeMs: 1400, yLift: 2.05, laneX: 0.16 },
             ),
           );
         }).catch((err: unknown) => {
@@ -8072,8 +8517,8 @@ async function main(): Promise<void> {
             scene,
             player.position,
             `+${BANDAGE_HEAL_AMOUNT}`,
-            new Color3(0.45, 0.95, 0.7),
-            { lifeMs: 1400, yLift: 2.05 },
+            FLOATER_TINT_HEAL,
+            { lifeMs: 1400, yLift: 2.05, laneX: 0.16 },
           ),
         );
         const fillEl = document.getElementById('sfHpFill');
@@ -8854,7 +9299,7 @@ async function main(): Promise<void> {
               scene,
               player.position,
               `+${REST_HEAL_AMOUNT}`,
-              new Color3(0.35, 1.0, 0.55),
+              FLOATER_TINT_HEAL,
               {
                 lifeMs: 1400,
                 yLift: 2.05,
@@ -8888,11 +9333,16 @@ async function main(): Promise<void> {
 
 
 
-  // ?ve=floaters post-connect: early pre-connect seed owns the mark/stack.
+  // ?ve=floaters / floater-read post-connect: early pre-connect seed owns the mark/stack.
   if (ve === 'floaters') {
     camera.radius = 9.2;
     camera.alpha = Math.PI / 2.25;
     camera.beta = Math.PI / 3.05;
+  }
+  if (ve === 'floater-read') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.0;
   }
 
   // ?ve=mana — drain Spark until low mana; show self-frame mana bar + dim hotbar + toast.

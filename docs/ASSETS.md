@@ -51,6 +51,9 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Cloth vs skin vs wood staff material separation; staff orb readable
 - Still kitbash-OK until free packs land; must read as a *person*
 - VE: `?ve=humanoid-polish`
+- Training dummy scarecrow (#45): `?ve=dummy` (`ve/babylon-dummy.png`)
+- Combat floater readability (#59): thick outline + matte tints under #39 fog; `?ve=floater-read` (`ve/babylon-floater-read.png`)
+- Hotbar affordance polish (#63): empty vs STAFF vs OOM clarity; `?ve=hotbar-afford` (`ve/babylon-hotbar-afford.png`)
 
 ### Path / ground targets (Issue #44)
 
@@ -58,6 +61,29 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Warm grey-brown path albedo ~`(0.45–0.52, 0.34–0.40, 0.24–0.30)`; soft moss/dirt edge; matte / low specular / no bright emissive
 - Keep lush grass `~(0.26, 0.52, 0.18)`; procedural DIY (trail strip, stone flecks, faint moss patches); no paid packs
 - VE: `?ve=path-ground`
+
+### Sky / horizon silhouette targets (Issue #55)
+
+- Distant cool grey-blue mountain silhouettes readable through locked #39 cyan fog at 8–30m play cam
+- 2–3 soft layered ranges (near/mid/far value steps); low detail / mood backdrop; soft snow caps (not neon)
+- Sky dome soft gradient into fog color `(0.34, 0.55, 0.7)` — no harsh horizon seam; slightly warmer zenith OK
+- Do **not** change fog dens / fogColor / hemi / sun lock; procedural DIY only
+- VE: `?ve=sky-horizon`
+
+### Loot sparkle / pickup readability targets (Issue #56)
+
+- Ground loot bags/sparkles read clearly at play-cam (8–20m) under #39 fog without neon bloom
+- Warm amber markers contrast vs cyan fog; distinct from path/grass; low emissive (0.03–0.04 range)
+- Keep locked #39 atmosphere (fog dens/color, hemi, sun) intact
+- Procedural DIY only; preserve existing pickup UX
+- VE: `?ve=loot-sparkle`
+
+### Vendor stall targets (Issue #58)
+
+- Yard vendor reads as a **shop** at play cam under locked #39 fog — upright posts + counter + cloth awning (not green block, not scarecrow)
+- Warm wood posts/counter (dirt-path warmth family); desaturated canvas/stripe awning (mid value, pops in cyan fog without neon); matte / low specular
+- Footprint on path/clearing edge; readable vs lush grass at 8–20m; procedural DIY only; do **not** touch fog/sun/hemi
+- VE: `?ve=vendor-stall`
 
 ### Forest targets (Issue #34)
 
@@ -103,6 +129,7 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
 |---|---|---|
 | Player | Simple humanoid + **staff** + **wizard robes** | RS-default readability; one skinned mesh or simple modular set; idle/walk/cast enough |
 | Dummy | Obvious training dummy / scarecrow | Readable target, low cost |
+| Vendor / stall | Shop silhouette: posts + counter + cloth awning | Warm wood + canvas; buy cue, not attack |
 | Ground | Flat or gentle clearing | Dirt/grass material; no full open-world terrain system yet |
 | Forest | **Huge** tree hero meshes (few uniques) + instanced mid trees | Scale sells grandeur; don’t place 10k unique high-poly trunks |
 | Mountains | Distant **mesh or skybox + silhouette** range | Overwhelming backdrop; not a hikeable alpine sim in MVP |
@@ -116,7 +143,9 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
   distant mountains stay **procedural**; sky dome + locked #32/#39 cyan fog / warm sun / cool hemi.
   Procedural fallback keeps post-#40 ThinInstance density + LOD if the pack fails to load.
 - `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
-  silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy stays cylinder.
+  silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy is procedural scarecrow (wood post + crossbeam + canvas/sack; `web/src/world/dummy.ts`, #45).
+- `web/src/world/vendorStall.ts` — procedural yard **shop stall** (posts + counter + cloth awning +
+  crate/goods hints); warm wood / desaturated canvas under locked #39 fog (#58).
 
 Vendored under `web/public/third-party/quaternius-stylized-nature/` (see ledger). Visual north star remains Issue #31 / mood brief above.
 

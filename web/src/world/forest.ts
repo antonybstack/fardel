@@ -3,6 +3,7 @@ import {
   Color3,
   Color4,
   DirectionalLight,
+  DynamicTexture,
   HemisphericLight,
   ImportMeshAsync,
   Material,
@@ -356,88 +357,176 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
   mesh.thinInstanceRefreshBoundingInfo(true);
 }
 
+/**
+ * Distant mountain silhouettes (#55): cool grey-blue layered ranges that read
+ * through locked #39 cyan fog at play cam. Near/mid/far value steps — mood
+ * backdrop only (low lit faces, no busy ridge noise). Procedural DIY.
+ */
 function buildMountainBackdrop(scene: Scene): void {
-  const rockMat = new StandardMaterial('mountainMat', scene);
-  rockMat.diffuseColor = new Color3(0.26, 0.3, 0.36);
-  rockMat.specularColor = new Color3(0.02, 0.02, 0.03);
-  rockMat.emissiveColor = new Color3(0.03, 0.04, 0.06);
+  // Near range — darkest cool grey-blue ridge (readable silhouette, not black cutout).
+  const nearRock = new StandardMaterial('mountainNearMat', scene);
+  nearRock.diffuseColor = new Color3(0.14, 0.18, 0.24);
+  nearRock.specularColor = new Color3(0.01, 0.012, 0.016);
+  nearRock.emissiveColor = new Color3(0.018, 0.028, 0.042);
 
-  const snowMat = new StandardMaterial('snowCapMat', scene);
-  snowMat.diffuseColor = new Color3(0.72, 0.78, 0.86);
-  snowMat.specularColor = new Color3(0.12, 0.12, 0.15);
-  snowMat.emissiveColor = new Color3(0.06, 0.07, 0.09);
+  // Mid range — medium value step.
+  const midRock = new StandardMaterial('mountainMidMat', scene);
+  midRock.diffuseColor = new Color3(0.2, 0.26, 0.34);
+  midRock.specularColor = new Color3(0.012, 0.014, 0.018);
+  midRock.emissiveColor = new Color3(0.032, 0.045, 0.062);
 
-  const peaks: Array<{ x: number; z: number; h: number; w: number; yaw: number }> = [
-    { x: -90, z: -140, h: 95, w: 70, yaw: 0.1 },
-    { x: -20, z: -155, h: 120, w: 85, yaw: -0.15 },
-    { x: 55, z: -145, h: 105, w: 75, yaw: 0.25 },
-    { x: 120, z: -130, h: 80, w: 60, yaw: -0.3 },
-    { x: -140, z: -100, h: 70, w: 55, yaw: 0.4 },
-    { x: 30, z: -170, h: 88, w: 50, yaw: 0.05 },
+  // Far range — softest, fog-blended cool blue (still a ridge line through haze).
+  const farRock = new StandardMaterial('mountainFarMat', scene);
+  farRock.diffuseColor = new Color3(0.26, 0.34, 0.44);
+  farRock.specularColor = new Color3(0.01, 0.012, 0.016);
+  farRock.emissiveColor = new Color3(0.055, 0.078, 0.11);
+
+  // Soft snow — readable through cyan fog, not neon white.
+  const snowNear = new StandardMaterial('snowNearMat', scene);
+  snowNear.diffuseColor = new Color3(0.58, 0.66, 0.74);
+  snowNear.specularColor = new Color3(0.06, 0.07, 0.09);
+  snowNear.emissiveColor = new Color3(0.1, 0.12, 0.14);
+
+  const snowFar = new StandardMaterial('snowFarMat', scene);
+  snowFar.diffuseColor = new Color3(0.52, 0.62, 0.72);
+  snowFar.specularColor = new Color3(0.04, 0.05, 0.07);
+  snowFar.emissiveColor = new Color3(0.12, 0.145, 0.17);
+
+  type Peak = {
+    x: number;
+    z: number;
+    h: number;
+    w: number;
+    yaw: number;
+    layer: 'near' | 'mid' | 'far';
+    snow?: boolean;
+  };
+
+  // Far layer — tall soft peaks deeper in haze.
+  const farPeaks: Peak[] = [
+    { x: -95, z: -175, h: 115, w: 78, yaw: 0.12, layer: 'far', snow: true },
+    { x: -15, z: -190, h: 138, w: 92, yaw: -0.18, layer: 'far', snow: true },
+    { x: 70, z: -180, h: 122, w: 82, yaw: 0.22, layer: 'far', snow: true },
+    { x: 145, z: -160, h: 98, w: 68, yaw: -0.28, layer: 'far', snow: true },
+    { x: -155, z: -150, h: 88, w: 62, yaw: 0.35, layer: 'far' },
   ];
 
-  for (let i = 0; i < peaks.length; i++) {
-    const p = peaks[i]!;
+  // Mid layer — main readable silhouette ridge.
+  const midPeaks: Peak[] = [
+    { x: -70, z: -138, h: 78, w: 58, yaw: 0.08, layer: 'mid', snow: true },
+    { x: 10, z: -150, h: 95, w: 68, yaw: -0.12, layer: 'mid', snow: true },
+    { x: 85, z: -142, h: 86, w: 60, yaw: 0.2, layer: 'mid', snow: true },
+    { x: -125, z: -120, h: 62, w: 48, yaw: 0.4, layer: 'mid' },
+    { x: 130, z: -125, h: 70, w: 52, yaw: -0.32, layer: 'mid' },
+  ];
+
+  // Near foothills — darker foreground ridge steps (no snow clutter).
+  const nearPeaks: Peak[] = [
+    { x: -90, z: -108, h: 36, w: 42, yaw: 0.15, layer: 'near' },
+    { x: -35, z: -115, h: 44, w: 48, yaw: -0.1, layer: 'near' },
+    { x: 25, z: -112, h: 40, w: 45, yaw: 0.18, layer: 'near' },
+    { x: 80, z: -105, h: 34, w: 40, yaw: -0.22, layer: 'near' },
+    { x: -140, z: -95, h: 30, w: 38, yaw: 0.45, layer: 'near' },
+    { x: 120, z: -98, h: 32, w: 36, yaw: -0.35, layer: 'near' },
+  ];
+
+  const allPeaks = [...farPeaks, ...midPeaks, ...nearPeaks];
+  for (let i = 0; i < allPeaks.length; i++) {
+    const p = allPeaks[i]!;
+    const rock =
+      p.layer === 'near' ? nearRock : p.layer === 'mid' ? midRock : farRock;
     const mtn = MeshBuilder.CreateCylinder(
-      `mountain_${i}`,
+      `mountain_${p.layer}_${i}`,
       {
         height: p.h,
-        diameterTop: 0.5,
+        diameterTop: 0.4,
         diameterBottom: p.w,
         tessellation: 5,
       },
       scene,
     );
-    mtn.position.set(p.x, p.h * 0.42, p.z);
+    mtn.position.set(p.x, p.h * 0.4, p.z);
     mtn.rotation.y = p.yaw;
-    mtn.scaling.x = 1.4 + (i % 3) * 0.15;
-    mtn.scaling.z = 1.1;
-    mtn.material = rockMat;
+    mtn.scaling.x = 1.35 + (i % 3) * 0.12;
+    mtn.scaling.z = 1.05;
+    mtn.isPickable = false;
+    mtn.material = rock;
 
-    const cap = MeshBuilder.CreateCylinder(
-      `snow_${i}`,
-      {
-        height: p.h * 0.18,
-        diameterTop: 0.2,
-        diameterBottom: p.w * 0.28,
-        tessellation: 5,
-      },
-      scene,
-    );
-    cap.position.set(p.x, p.h * 0.78, p.z);
-    cap.rotation.y = p.yaw;
-    cap.scaling.x = mtn.scaling.x;
-    cap.scaling.z = mtn.scaling.z;
-    cap.material = snowMat;
+    if (p.snow) {
+      const snowMat = p.layer === 'far' ? snowFar : snowNear;
+      const cap = MeshBuilder.CreateCylinder(
+        `snow_${p.layer}_${i}`,
+        {
+          height: p.h * 0.14,
+          diameterTop: 0.15,
+          diameterBottom: p.w * 0.22,
+          tessellation: 5,
+        },
+        scene,
+      );
+      cap.position.set(p.x, p.h * 0.72, p.z);
+      cap.rotation.y = p.yaw;
+      cap.scaling.x = mtn.scaling.x;
+      cap.scaling.z = mtn.scaling.z;
+      cap.isPickable = false;
+      cap.material = snowMat;
+    }
   }
 
-  for (let i = 0; i < 8; i++) {
-    const x = -100 + i * 30 + hash01(i + 50) * 10;
-    const z = -105 - hash01(i + 70) * 20;
-    const h = 28 + hash01(i + 90) * 22;
+  // Soft near ridge band — darker value under mid peaks (layered read, low detail).
+  for (let i = 0; i < 7; i++) {
+    const x = -95 + i * 32 + hash01(i + 50) * 8;
+    const z = -96 - hash01(i + 70) * 12;
+    const h = 18 + hash01(i + 90) * 14;
     const ridge = MeshBuilder.CreateCylinder(
       `foothill_${i}`,
       {
         height: h,
-        diameterTop: 2,
-        diameterBottom: 38 + hash01(i) * 20,
-        tessellation: 6,
+        diameterTop: 1.5,
+        diameterBottom: 32 + hash01(i) * 16,
+        tessellation: 5,
       },
       scene,
     );
-    ridge.position.set(x, h * 0.35, z);
-    ridge.material = rockMat;
+    ridge.position.set(x, h * 0.32, z);
+    ridge.isPickable = false;
+    ridge.material = nearRock;
   }
 }
 
+/**
+ * Painterly sky dome (#55): soft vertical gradient into locked fog color
+ * (0.34/0.55/0.7) so horizon has no hard seam; slightly warmer/lighter zenith.
+ * Procedural DynamicTexture — no packs. Does not touch fog/sun/hemi constants.
+ */
 function buildSkyDome(scene: Scene): void {
-  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 420, segments: 16 }, scene);
+  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 420, segments: 20 }, scene);
   sky.infiniteDistance = true;
+  sky.isPickable = false;
+
+  // V-up gradient: zenith (top) → fog-matched horizon (bottom). Sphere UVs: v~1 at +Y.
+  const size = 64;
+  const tex = new DynamicTexture('skyGradTex', { width: 4, height: size }, scene, false);
+  const ctx = tex.getContext();
+  const grad = ctx.createLinearGradient(0, 0, 0, size);
+  // Fog lock color ~ rgb(87,140,179) — horizon / lower sky blends into EXP2 fog.
+  grad.addColorStop(0.0, 'rgb(118, 158, 198)'); // zenith: slightly warmer/lighter
+  grad.addColorStop(0.35, 'rgb(100, 148, 188)');
+  grad.addColorStop(0.62, 'rgb(90, 142, 182)');
+  grad.addColorStop(0.82, 'rgb(87, 140, 179)'); // → fogColor 0.34/0.55/0.7
+  grad.addColorStop(1.0, 'rgb(87, 140, 179)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 4, size);
+  tex.hasAlpha = false;
+  tex.update();
+
   const skyMat = new StandardMaterial('skyMat', scene);
   skyMat.backFaceCulling = false;
   skyMat.disableLighting = true;
-  skyMat.emissiveColor = new Color3(0.35, 0.48, 0.68);
   skyMat.diffuseColor = new Color3(0, 0, 0);
+  skyMat.specularColor = new Color3(0, 0, 0);
+  skyMat.emissiveColor = new Color3(1, 1, 1);
+  skyMat.emissiveTexture = tex;
   sky.material = skyMat;
 }
 
@@ -938,7 +1027,8 @@ function buildClearingPath(scene: Scene): void {
 /**
  * Forest clearing: Quaternius Standard heroes + mid + understory (CC0),
  * procedural mountain silhouettes, locked #32/#39 atmosphere (warm sun / cool hemi / cyan fog).
- * Path/ground polish #44 via buildClearingPath. Procedural fallback uses post-#40 ThinInstance density + LOD.
+ * Path/ground polish #44 via buildClearingPath; sky/horizon silhouette #55.
+ * Procedural fallback uses post-#40 ThinInstance density + LOD.
  */
 export async function buildForestClearing(scene: Scene): Promise<{
   ground: Mesh;
