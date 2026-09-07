@@ -46,7 +46,17 @@ try
     }, timeoutMs, conn, "moved far");
 
     conn.Reducers.SeedLoot();
-    await PumpUntil(() => CountLoot(conn, Loot.EmberShardItemId) >= 1, timeoutMs, conn, "seed loot");
+    // Wait for SeedLoot commit (exact seed pose) — leftover death drops must not win the race.
+    await PumpUntil(() =>
+    {
+        foreach (var row in conn.Db.WorldLoot.Iter())
+        {
+            if (row.ItemId != Loot.EmberShardItemId) continue;
+            if (MathF.Abs(row.X - Loot.SeedX) < 0.05f && MathF.Abs(row.Z - Loot.SeedZ) < 0.05f)
+                return CountLoot(conn, Loot.EmberShardItemId) == 1;
+        }
+        return false;
+    }, timeoutMs, conn, "seed loot");
     var seed = FindLoot(conn, Loot.EmberShardItemId) ?? throw new Exception("no seed loot");
     Console.WriteLine($"seed loot id={seed.LootId} at ({seed.X},{seed.Z}) item={seed.ItemId}");
 
@@ -128,7 +138,16 @@ try
     await PumpUntil(() => FindDummy(conn) is { Hp: var h } && h == Combat.DummyMaxHp, timeoutMs, conn, "dummy ready");
 
     conn.Reducers.SeedLoot();
-    await PumpUntil(() => CountLoot(conn, Loot.EmberShardItemId) >= 1, timeoutMs, conn, "seed before clear");
+    await PumpUntil(() =>
+    {
+        foreach (var row in conn.Db.WorldLoot.Iter())
+        {
+            if (row.ItemId != Loot.EmberShardItemId) continue;
+            if (MathF.Abs(row.X - Loot.SeedX) < 0.05f && MathF.Abs(row.Z - Loot.SeedZ) < 0.05f)
+                return true;
+        }
+        return false;
+    }, timeoutMs, conn, "seed before clear");
     var leftover = FindLoot(conn, Loot.EmberShardItemId)!;
     conn.Reducers.Pickup();
     await PumpUntil(() => FindLootById(conn, leftover.LootId) is null, timeoutMs, conn, "clear leftover");

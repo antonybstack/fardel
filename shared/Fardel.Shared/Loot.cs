@@ -19,4 +19,15 @@ public static class Loot
     /// <summary>Offset from dead dummy when auto-dropping ember_shard.</summary>
     public const float DeathDropOffsetX = 0.6f;
     public const float DeathDropOffsetZ = 0.4f;
+
+    /// <summary>
+    /// XZ radius from death position: other PartyMember mates inside this get an
+    /// extra ember_shard WorldLoot near their pose (party loot share invent).
+    /// Yard-scale so spawn mates cover dummy fights; far AOI mates do not.
+    /// </summary>
+    public const float PartyShareRangeMeters = 25f;
+
+    /// <summary>Offset from mate pose when spawning their share shard.</summary>
+    public const float PartyShareOffsetX = 0.8f;
+    public const float PartyShareOffsetZ = -0.5f;
 }

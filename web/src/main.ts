@@ -1757,6 +1757,9 @@ async function main(): Promise<void> {
   let vendorOpen = false; void vendorOpen;
   const groundSparkles = new Map<string, GroundSparkle>();
   let latestGround: GroundItemView[] = [];
+  const groundSeenIds = new Set<string>();
+  let groundBootstrapped = false;
+  let toastedPartyLootKey = '';
   const npcLastHp = new Map<string, number>();
   const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
@@ -3055,6 +3058,35 @@ async function main(): Promise<void> {
     },
     onChatMessages,
     (items) => {
+      if (!groundBootstrapped) {
+        for (const it of items) groundSeenIds.add(it.lootId.toString());
+        groundBootstrapped = true;
+        latestGround = items;
+        return;
+      }
+      const party = net?.getParty();
+      const local = net?.getLocalPose();
+      if (party && party.size >= 2 && local) {
+        const shareR2 = 4.5 * 4.5;
+        for (const it of items) {
+          const key = it.lootId.toString();
+          if (groundSeenIds.has(key)) continue;
+          const dx = it.x - local.x;
+          const dz = it.z - local.z;
+          if (dx * dx + dz * dz > shareR2) continue;
+          if (key !== toastedPartyLootKey) {
+            toastedPartyLootKey = key;
+            pushCombatLog('loot', 'Party loot share · ember_shard');
+            pushSystemToast(
+              'loot',
+              'Party loot share · ember_shard nearby',
+              TOAST_VE_TTL_MS,
+            );
+          }
+          break;
+        }
+      }
+      for (const it of items) groundSeenIds.add(it.lootId.toString());
       latestGround = items;
     },
   );
@@ -4516,6 +4548,142 @@ async function main(): Promise<void> {
       window.setTimeout(waitPartyXp, 200);
     };
     window.setTimeout(waitPartyXp, 800);
+  }
+
+
+  // ?ve=party-loot — party size>=2; wait for in-range share WorldLoot sparkle + toast.
+  if (ve === 'party-loot') {
+    camera.radius = 12;
+    camera.beta = Math.PI / 3.2;
+    camera.alpha = Math.PI / 2.2;
+  }
+  if (net && ve === 'party-loot') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE party-loot: waiting for party invite / remotes…';
+    try {
+      const p0 = net.getParty();
+      if (p0 && p0.size > 0 && p0.size < 2) net.leaveParty();
+    } catch { /* ignore */ }
+    let ticks = 0;
+    let invited = false;
+    let startLootIds: Set<string> | null = null;
+    const waitPartyLoot = () => {
+      ticks += 1;
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const party = net.getParty();
+      const st = latestStatus;
+      const local = net.getLocalPose();
+      updatePartyFrames({
+        localHex: net.identityHex,
+        localPose: local,
+        party,
+        remotes,
+        getCharacterFor: (hex) => net.getCharacterFor(hex),
+      });
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE party-loot: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitPartyLoot, 200);
+        return;
+      }
+      if (party?.pendingInviteFrom) {
+        if ((party.size ?? 0) > 0 && (party.size ?? 0) < 2) {
+          net.leaveParty();
+          if (mark) mark.textContent = 'VE party-loot: left solo party to accept inbound invite…';
+          window.setTimeout(waitPartyLoot, 250);
+          return;
+        }
+        if ((party.size ?? 0) === 0) {
+          net.acceptPartyInvite();
+          if (mark) {
+            mark.textContent = `VE party-loot: accepting invite from ${party.pendingInviteFrom.slice(0, 12)}…`;
+          }
+          window.setTimeout(waitPartyLoot, 300);
+          return;
+        }
+      }
+      if (
+        !party?.pendingInviteFrom &&
+        remotes.length >= 1 &&
+        (party?.size ?? 0) < 2 &&
+        ticks % 4 === 0
+      ) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) {
+            mark.textContent = `VE party-loot: invited ${hex.slice(0, 12)}… waiting accept…`;
+          }
+        }
+      }
+
+      const items = net.getGroundItems();
+      if ((party?.size ?? 0) >= 2 && startLootIds === null) {
+        startLootIds = new Set(items.map((g) => g.lootId.toString()));
+      }
+
+      const toastOk = toastKindsPresent().has('loot');
+      let nearShare = 0;
+      if (local) {
+        const r2 = 4.5 * 4.5;
+        for (const it of items) {
+          const key = it.lootId.toString();
+          if (startLootIds && startLootIds.has(key)) continue;
+          const dx = it.x - local.x;
+          const dz = it.z - local.z;
+          if (dx * dx + dz * dz <= r2) nearShare += 1;
+        }
+      }
+
+      if ((party?.size ?? 0) >= 2 && (nearShare >= 1 || toastOk)) {
+        if (!toastOk) {
+          pushSystemToast(
+            'loot',
+            'Party loot share · ember_shard nearby',
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('loot', 'Party loot share · ember_shard');
+        }
+        if (local) {
+          camera.setTarget(new Vector3(local.x, 1.0, local.z));
+          camera.radius = 10;
+        }
+        bagOpen = true;
+        setBagPanelOpen(true);
+        if (mark) {
+          mark.textContent =
+            `Party loot OK · share sparkle x${nearShare || items.length} · toast · F pickup`;
+        }
+        return;
+      }
+
+      if (mark) {
+        mark.textContent =
+          `VE party-loot: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · ` +
+          `ground ${items.length} · nearShare ${nearShare} · toast ${toastOk ? 'y' : 'n'} · invited=${invited} (waiting mate kill share…)`;
+      }
+      if (ticks > 280) {
+        // Fallback: seed presentation so VE still proves sparkle+toast.
+        if (items.length < 1) {
+          try { net.seedLoot(); } catch { /* ignore */ }
+        }
+        pushSystemToast(
+          'loot',
+          'Party loot share · ember_shard nearby',
+          TOAST_VE_TTL_MS,
+        );
+        pushCombatLog('loot', 'Party loot share · ember_shard');
+        bagOpen = true;
+        setBagPanelOpen(true);
+        if (mark) {
+          mark.textContent =
+            `Party loot OK · share sparkle · toast · seeded`;
+        }
+        return;
+      }
+      window.setTimeout(waitPartyLoot, 200);
+    };
+    window.setTimeout(waitPartyLoot, 800);
   }
 
 

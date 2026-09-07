@@ -792,6 +792,7 @@ public static partial class Module
             Log.Info($"Dummy killed by {caster}, xp={character.Xp}");
             SharePartyKillXp(ctx, caster);
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
+            SharePartyLootDrop(ctx, caster, row.X, row.Y, row.Z);
         }
 
         // Dummy thorns — light player HP proof without changing Cast targeting.
@@ -877,6 +878,50 @@ public static partial class Module
         Log.Info($"Player {pending.Player} respawned at yard origin");
     }
 
+
+
+    /// <summary>
+    /// Spawn an extra ember_shard near each other PartyMember mate within
+    /// <see cref="Loot.PartyShareRangeMeters"/> of the death position.
+    /// Killer still gets the primary death drop; solo kills invent nothing.
+    /// </summary>
+    static void SharePartyLootDrop(ReducerContext ctx, Identity killer, float deathX, float deathY, float deathZ)
+    {
+        if (ctx.Db.PartyMember.Identity.Find(killer) is not { } self)
+        {
+            return;
+        }
+
+        var range = Loot.PartyShareRangeMeters;
+        var rangeSq = range * range;
+
+        foreach (var m in ctx.Db.PartyMember.Iter())
+        {
+            if (m.PartyId != self.PartyId || m.Identity.Equals(killer))
+            {
+                continue;
+            }
+
+            if (ctx.Db.PlayerPose.Identity.Find(m.Identity) is not { } pose)
+            {
+                continue;
+            }
+
+            var dx = pose.X - deathX;
+            var dz = pose.Z - deathZ;
+            if (dx * dx + dz * dz > rangeSq)
+            {
+                continue;
+            }
+
+            SpawnEmberShardAt(
+                ctx,
+                pose.X + Loot.PartyShareOffsetX,
+                deathY + Loot.SeedY,
+                pose.Z + Loot.PartyShareOffsetZ);
+            Log.Info($"Party loot share ember_shard near {m.Identity} (killer {killer})");
+        }
+    }
 
     /// <summary>
     /// Grant <see cref="Combat.PartyXpSharePerMate"/> to each other PartyMember

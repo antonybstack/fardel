@@ -2,10 +2,10 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// Long-lived party mate for browser ?ve=party / ?ve=party-hp / ?ve=party-frames / ?ve=party-xp:
+// Long-lived party mate for browser ?ve=party / ?ve=party-hp / ?ve=party-frames / ?ve=party-xp / ?ve=party-loot:
 // invite online identities (skip stale no-accept), wait for party size>=2,
-// kill dummy once (party XP share to mates), take a few dummy-thorn Sparks
-// (mate HP mid for party-hp frames), move far, hold.
+// kill dummy once (party XP share + in-range loot share to mates), take a few
+// dummy-thorn Sparks (mate HP mid for party-hp frames), move far, hold.
 const string uri = "http://127.0.0.1:3000";
 const string db = "fardel";
 const float farX = 120f;
