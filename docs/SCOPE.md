@@ -27,7 +27,7 @@ That sentence is the finish line. Everything else is either a slice toward it or
 | Kitbash forest + mountains + humanoid ([ASSETS.md](ASSETS.md)) | Custom character creator, photoreal, cinema VFX |
 | Chunk AOI as designed ([ADR 0001](adr/0001-aoi-interest.md)) | Coarse network LOD, LOS interest, multiple shards |
 | SpacetimeDB module + Shared + headless smokes | Second client engine, custom WebGPU client |
-| Unity client (deferred until smokes green) | Editor/UI as slice gate |
+| Babylon.js web client (active) | Unity client (paused; see `checkpoint/unity-webgl`) |
 | `play` Pages + `dev-db` preview tunnel | Prod MainCloud / `db.sparkify.dev` hard cutover |
 | Span-first / zero-heap **discipline** in new code | Premature micro-optim hunt with no slice-4 numbers |
 
@@ -114,5 +114,6 @@ Before starting work, answer:
 ## Status
 
 - **Phase:** **slice 4 (AOI) proven** via `tools/AoiSmoke` (headless); Unity FPS floor still deferred with Editor
-- **Web milestone:** Unity WebGL Connect on `play.sparkify.dev` + local `serve-webgl.py` (headless smokes remain the slice gate)
+- **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`)
+- **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
 - **POC north-star:** not started
