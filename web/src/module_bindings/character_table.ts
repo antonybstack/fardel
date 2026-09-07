@@ -20,6 +20,8 @@ export default __t.row({
   hasEmberShard: __t.bool().name("has_ember_shard"),
   hasYardTonic: __t.bool().name("has_yard_tonic"),
   tonicExpiresAt: __t.timestamp().name("tonic_expires_at"),
+  hasYardBandage: __t.bool().name("has_yard_bandage"),
+  bandageReadyAt: __t.timestamp().name("bandage_ready_at"),
   hp: __t.i32(),
   maxHp: __t.i32().name("max_hp"),
   level: __t.i32(),

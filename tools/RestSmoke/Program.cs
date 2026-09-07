@@ -277,10 +277,12 @@ static void Fail(string msg)
 
 async Task<(DbConnection conn, Identity id)> ConnectAsync()
 {
+    var localUri = GameConstants.ResolveLocalUri();
+    var localDb = GameConstants.ResolveDatabaseName();
     var connected = new TaskCompletionSource<Identity>();
     var c = DbConnection.Builder()
-        .WithUri(uri)
-        .WithDatabaseName(db)
+        .WithUri(localUri)
+        .WithDatabaseName(localDb)
         .OnConnect((_, identity, _) => connected.TrySetResult(identity))
         .OnConnectError(e => connected.TrySetException(e))
         .Build();

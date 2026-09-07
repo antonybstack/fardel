@@ -79,6 +79,11 @@ public static partial class Module
         public bool HasYardTonic;
         /// <summary>Move-speed buff expiry (UseYardTonic). Inactive when &lt;= now.</summary>
         public Timestamp TonicExpiresAt;
+        /// <summary>Bag flag — yard_bandage bought via BuyYardBandage; consumed by UseBandage.</summary>
+        [SpacetimeDB.Default(false)]
+        public bool HasYardBandage;
+        /// <summary>Earliest time UseBandage may succeed again (own CD, distinct from RestReadyAt).</summary>
+        public Timestamp BandageReadyAt;
         /// <summary>Player hit points (dummy thorns / future PvE). Hp≤0 = dead until respawn.</summary>
         [SpacetimeDB.Default(100)]
         public int Hp;
@@ -1075,6 +1080,8 @@ public static partial class Module
             HasEmberShard = false,
             HasYardTonic = false,
             TonicExpiresAt = ctx.Timestamp,
+            HasYardBandage = false,
+            BandageReadyAt = ctx.Timestamp,
             Hp = Combat.PlayerMaxHp,
             MaxHp = Combat.PlayerMaxHp,
             LastDamagedAt = default,
@@ -1929,7 +1936,7 @@ public static partial class Module
 
 
     /// <summary>
-    /// Out-of-combat Rest (bandage): restore HealAmount HP and ManaRestore mana.
+    /// Out-of-combat Rest: restore HealAmount HP and ManaRestore mana (free; distinct from UseBandage).
     /// Rejects while dead, casting, recently damaged, on cooldown, or already full HP+mana.
     /// </summary>
     [SpacetimeDB.Reducer]
@@ -2183,6 +2190,89 @@ public static partial class Module
         ch.Mana = Math.Min(ch.MaxMana, ch.Mana + ticks * Combat.ManaRegenPerTick);
         // Advance by whole ticks so partial intervals accumulate.
         ch.LastManaTickAt = new Timestamp(last + ticks * (long)Combat.ManaRegenIntervalMs * 1000L);
+    }
+
+
+    /// <summary>Spend XP at a nearby YardVendor to gain HasYardBandage.</summary>
+    [SpacetimeDB.Reducer]
+    public static void BuyYardBandage(ReducerContext ctx)
+    {
+        var pose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+
+        var vendor = FindVendorInRange(ctx, pose)
+            ?? throw new Exception("Out of range");
+
+        if (character.HasYardBandage)
+        {
+            throw new Exception("Already have yard bandage");
+        }
+
+        if (character.Xp < Bandage.BuyXpCost)
+        {
+            throw new Exception("Not enough XP");
+        }
+
+        character.Xp -= Bandage.BuyXpCost;
+        character.HasYardBandage = true;
+        ctx.Db.Character.Identity.Update(character);
+        Log.Info($"BuyYardBandage {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
+    }
+
+    /// <summary>
+    /// Consume HasYardBandage for an HP-only heal (no mana). Own CD/combat-lock vs Rest.
+    /// Rejects while dead, casting, recently damaged, on cooldown, full HP, or no bandage.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void UseBandage(ReducerContext ctx)
+    {
+        var character = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (character.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+        if (character.MaxHp <= 0)
+        {
+            character.MaxHp = Combat.PlayerMaxHp;
+        }
+
+        if (!character.HasYardBandage)
+        {
+            throw new Exception("No yard bandage");
+        }
+
+        if (character.Hp >= character.MaxHp)
+        {
+            throw new Exception("Already full");
+        }
+
+        if (ctx.Db.PlayerCombat.Identity.Find(ctx.Sender) is { } combat
+            && combat.CastingSpellId != 0)
+        {
+            throw new Exception("Casting");
+        }
+
+        if (character.LastDamagedAt.MicrosecondsSinceUnixEpoch > 0
+            && ctx.Timestamp < character.LastDamagedAt + Ms(Bandage.CombatLockMs))
+        {
+            throw new Exception("Recently damaged");
+        }
+
+        if (ctx.Timestamp < character.BandageReadyAt)
+        {
+            throw new Exception("Bandage on cooldown");
+        }
+
+        var beforeHp = character.Hp;
+        character.HasYardBandage = false;
+        character.Hp = Math.Min(character.MaxHp, character.Hp + Bandage.HealAmount);
+        character.BandageReadyAt = ctx.Timestamp + Ms(Bandage.CooldownMs);
+        ctx.Db.Character.Identity.Update(character);
+        Log.Info(
+            $"UseBandage {ctx.Sender} hp {beforeHp}->{character.Hp}/{character.MaxHp}");
     }
 
     /// <summary>Spend XP at a nearby YardVendor to gain HasYardTonic.</summary>

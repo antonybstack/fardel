@@ -1,0 +1,56 @@
+name: Feature / enhancement
+description: New capability or improvement with a clear Done-when
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Propose work with a crisp Done-when so Team Lead can wave it.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What should change and why (one short paragraph).
+    validations:
+      required: true
+  - type: textarea
+    id: done_when
+    attributes:
+      label: Done-when
+      description: Acceptance criteria. Checklist preferred.
+      placeholder: |
+        - [ ] …
+        - [ ] …
+    validations:
+      required: true
+  - type: dropdown
+    id: lane
+    attributes:
+      label: Lane
+      description: Primary ownership lane.
+      options:
+        - server
+        - client
+        - qa
+      default: 0
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Suggested priority
+      options:
+        - P0
+        - P1
+        - P2
+      default: 1
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / links
+      description: Related issues, ADRs, or design notes.
+    validations:
+      required: false

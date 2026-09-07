@@ -1,0 +1,6 @@
+blank_issues_enabled: true
+# contact_links: optional — add community / Discord / docs links when ready
+# contact_links:
+#   - name: Docs
+#     url: https://github.com/antonybstack/fardel/blob/develop/README.md
+#     about: Project docs and quick start

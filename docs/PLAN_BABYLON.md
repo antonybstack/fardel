@@ -128,12 +128,15 @@ See `web/README.md` for exact commands.
   `player_pose` + `crowd_proxy`; `SeedCrowdProxies`; amber instanced capsules
   distinct from local blue player; HUD interest chunk + near/far proxy counts
   (`ve/babylon-aoi.png`); `tools/AoiSmoke` green
-- **Forest kitbash (presentation):** procedural clearing — huge hero trunks +
-  instanced mid trees, distant snow-capped mountain silhouette, dusk sky/fog +
-  hemi/sun mood lighting (`web/src/world/forest.ts`); (`ve/babylon-forest.png`)
+- **Forest kitbash (presentation):** procedural clearing — landmark hero trunks +
+  ThinInstanced mid-tree variety + far LOD ring, distant snow-capped mountain
+  silhouette, dusk sky/fog + hemi/sun mood (`web/src/world/forest.ts`);
+  (`ve/babylon-forest.png`, `?ve=forest`); path/ground polish #44
+  (`?ve=path-ground`, `ve/babylon-path-ground.png`)
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
   staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
-  (`ve/babylon-humanoid.png`)
+  (`ve/babylon-humanoid.png`); readability polish #33 (`?ve=humanoid-polish`,
+  `ve/babylon-humanoid-polish.png`)
 - **Second-client shared yard (presentation):** remote `PlayerPose` identities
   render as distinct tinted humanoids; HUD `remotes:` line; `?ve=two-client` +
   `tools/SecondClient` headless mover (`ve/babylon-two-client.png`)
@@ -146,6 +149,9 @@ See `web/README.md` for exact commands.
   rising billboard numbers above the target (Spark yellow / Emberbolt orange);
   cosmetic only — authority HP remains source of truth; `?ve=damage-text`
   (`ve/babylon-damage-text.png`)
+- **Combat floater stacking clarity (presentation):** nearby live floaters get
+  stack-slot Y offsets + deterministic damage/heal/XP lanes (no random X drift);
+  `?ve=floaters` (`ve/babylon-floaters.png`)
 - **Party / always-relevant (presentation):** `PartyMember` + `PartyInvite` tables;
   CreateParty / InviteToParty / AcceptPartyInvite / LeaveParty; neighborhood SQL
   also wholesale-subscribes `party_member` + per-identity `player_pose` for party
@@ -161,9 +167,10 @@ See `web/README.md` for exact commands.
 - **Party XP share (invent):** kill grants `XpPerKill` to killer + `PartyXpSharePerMate` to always-relevant `PartyMember` mates; `tools/PartyXpSmoke`; mate toast/floater; `?ve=party-xp` (`ve/babylon-party-xp.png`)
 - **Party loot share (invent):** death drop + extra `ember_shard` WorldLoot near each in-range mate (`Loot.PartyShareRangeMeters`); `tools/PartyLootSmoke`; toast; `?ve=party-loot` (`ve/babylon-party-loot.png`)
 - **Character level from XP (invent):** shared `Progression.LevelFromXp` curve; persist `Character.Level` (high-water on XP grants); self/nameplate/party/bag `Lv N` + toast `level` + floater; `tools/LevelSmoke`; `?ve=level` (`ve/babylon-level.png`)
-- **Out-of-combat Rest / bandage heal (invent):** `Rest` reducer restores `Character.Hp` toward `MaxHp` (`Rest.HealAmount`) with cooldown; rejects while casting / recently damaged / full / dead; tracks `LastDamagedAt` + `RestReadyAt`; hotkey **R**, heal VFX/toast, HP bar fill; `tools/RestSmoke`; `?ve=rest` (`ve/babylon-rest.png`)
+- **Yard bandage consumable (invent):** `HasYardBandage` + `BandageReadyAt`; `BuyYardBandage` / `UseBandage` (HP-only heal, own CD/gates ≠ Rest); bag/loadout + **N** use; `tools/BandageSmoke`; `?ve=bandage` (`ve/babylon-bandage.png`)
+- **Out-of-combat Rest (invent):** `Rest` reducer restores `Character.Hp` toward `MaxHp` (`Rest.HealAmount`) with cooldown; rejects while casting / recently damaged / full / dead; tracks `LastDamagedAt` + `RestReadyAt`; hotkey **R**, heal VFX/toast, HP bar fill; `tools/RestSmoke`; `?ve=rest` (`ve/babylon-rest.png`)
 - **Mana / focus pool (invent):** `Character.Mana`/`MaxMana`; Spark/Emberbolt spend + `Insufficient mana`; lazy regen + Rest `ManaRestore`; self-frame mana bar, hotbar dim, toast; `tools/ManaSmoke`; `?ve=mana` (`ve/babylon-mana.png`)
-- **Cast cancel / move-interrupt (invent):** Move or Esc/`CancelCast` during Emberbolt windup deletes `PendingCast`, clears casting, refunds mana; Babylon clears cast bar + toast `castCancel`; `tools/CastCancelSmoke`; `?ve=cast-cancel` (`ve/babylon-cast-cancel.png`)
+- **Cast cancel / move-interrupt (invent):** Move or Esc/`CancelCast` during Emberbolt windup deletes `PendingCast`, clears casting, refunds mana; Babylon clears cast bar + toast `castCancel`; `tools/CastCancelSmoke`; `?ve=cast-cancel` (`ve/babylon-cast-cancel.png`); feel polish `?ve=cast-feedback` (prominent cast bar + CANCEL≠LOCKOUT + Rest chrome, `ve/babylon-cast-feedback.png`)
 - **Cast pushback (invent):** non-lethal hit during Emberbolt windup delays `CastEndsAt` by `Combat.CastPushbackMs` (reschedule `PendingCast`, no cancel/refund); opt-in `DummyStrike`; Babylon rewound cast bar + toast `castPushback`; `tools/CastPushbackSmoke`; `?ve=cast-pushback` (`ve/babylon-cast-pushback.png`)
 - **Hard interrupt threshold (invent):** after `Combat.CastPushbackHardAfter` pushbacks (or remain < `CastHardInterruptRemainMs`), next non-lethal hit fully cancels windup with **no mana refund**; Babylon clears cast bar + toast `castHardInterrupt` (LOCKOUT); `tools/HardInterruptSmoke`; `?ve=hard-interrupt` (`ve/babylon-hard-interrupt.png`)
 - **Post-interrupt silence (invent):** hard interrupt sets `PlayerCombat.CastLockedUntil` (`Combat.CastSilenceMs`); `Cast` rejects `"silenced"` until expiry; Babylon toast `silenced`; `tools/CastSilenceSmoke`; `?ve=cast-silence` (`ve/babylon-cast-silence.png`)
@@ -172,6 +179,7 @@ See `web/README.md` for exact commands.
 - **Cast range gate (invent):** `Combat.CastRangeMeters` (8m XZ); `Cast` rejects `"out of range"` when caster pose is farther than range from targeted NPC; Babylon toast `outOfRange` + hotbar dim; `tools/CastRangeSmoke`; `?ve=cast-range` (`ve/babylon-cast-range.png`)
 - **Minimap party blips (invent/presentation):** client-only — always-relevant party remote poses already green on compass; distinct halo + rim chevron when beyond minimap range; `?ve=minimap-party` + PartyMate far pose (`ve/babylon-minimap-party.png`)
 - **Combat log strip (presentation):** client-only scrolling right-column log — Cast start, HP-delta damage, staff/robes equip, party join; `?ve=combat-log` (`ve/babylon-combat-log.png`)
+- **Debug HUD toggle (presentation):** hide identity/AOI/keys `#status` wall + `#fpsHud` by default; `?debug=1`/`true` or **F3** shows them; `#persistMark` stays for `?ve=`; `?ve=debug-hud` (`ve/babylon-debug-hud.png`)
 - **FPS / performance overlay (presentation):** live `engine.getFps()` HUD (green ≥ 30 floor / 60 target on box reference) + near/far crowd proxies, remotes, NPCs; `?ve=fps` seeds crowd for AOI proof (`ve/babylon-fps.png`)
 - **System toast banner (presentation):** client-only transient top-center toasts — Connected / identity restore, party invite received / accepted, XP gain, short staff/robes equip feedback; `?ve=toasts` (`ve/babylon-toasts.png`)
 - **Dummy death / respawn (presentation):** NPC HP >0→≤0 plays sink/scale/fade + burst VFX, combat-log **Dummy defeated**, toast kind `death`; HP ≤0→>0 pop-in flash + **Dummy respawned** / toast `respawn`; corpse hidden after VFX (no forever clickable body); `?ve=death` (`ve/babylon-death.png`)

@@ -27,6 +27,10 @@ body {
   gap: 8px;
 }
 
+#status.hidden {
+  display: none;
+}
+
 #status {
   color: #e8eefc;
   background: rgba(8, 12, 24, 0.72);
@@ -42,8 +46,8 @@ body {
 #combatBars {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: min(280px, 80vw);
+  gap: 7px;
+  width: min(340px, 86vw);
 }
 
 .bar {
@@ -57,6 +61,29 @@ body {
 
 .bar.hidden {
   display: none;
+}
+
+/* Main Emberbolt cast bar — taller, glowing, unmistakable mid-combat. */
+#castBar {
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 186, 90, 0.72);
+  background: rgba(18, 10, 4, 0.88);
+  box-shadow:
+    0 0 18px rgba(255, 140, 40, 0.42),
+    0 4px 16px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 1px rgba(255, 210, 130, 0.28);
+}
+
+#castBar .barLabel {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 26px;
+  letter-spacing: 0.02em;
+  color: #fff4e0;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.85),
+    0 0 10px rgba(255, 160, 60, 0.45);
 }
 
 .barFill {
@@ -76,7 +103,21 @@ body {
 }
 
 .barFill.cast {
-  background: linear-gradient(90deg, #c45a12, #ffb347);
+  background: linear-gradient(
+    90deg,
+    rgba(170, 55, 8, 0.95) 0%,
+    rgba(255, 130, 28, 0.92) 55%,
+    rgba(255, 220, 130, 0.95) 100%
+  );
+  box-shadow:
+    inset 0 0 12px rgba(255, 120, 30, 0.35),
+    2px 0 10px rgba(255, 200, 100, 0.55);
+  animation: castFillPulse 900ms ease-in-out infinite;
+}
+
+@keyframes castFillPulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.12); }
 }
 
 .barLabel {
@@ -458,6 +499,31 @@ body {
 .sfBuff.hidden { display: none; }
 .sfBuff.active {
   color: #a8ffd0;
+}
+
+/* Rest enter/exit — brief resting chrome on self-frame (client-only). */
+#selfFrame.resting {
+  border-color: rgba(90, 220, 140, 0.78);
+  box-shadow:
+    0 0 16px rgba(80, 220, 140, 0.38),
+    0 2px 12px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(125, 255, 181, 0.28);
+}
+
+.sfRest {
+  margin-top: 4px;
+  color: #7dffb5;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 0 8px rgba(80, 255, 160, 0.5);
+}
+.sfRest.hidden { display: none; }
+.sfRest.exiting {
+  color: #b8d0c4;
+  text-shadow: none;
+  opacity: 0.85;
 }
 
 
@@ -888,7 +954,11 @@ body {
 }
 
 
-/* FPS / AOI performance overlay — left of minimap (client-only). */
+/* FPS / AOI performance overlay — left of minimap (client-only; debug HUD). */
+#fpsHud.hidden {
+  display: none;
+}
+
 #fpsHud {
   position: absolute;
   right: 184px;
@@ -1323,12 +1393,28 @@ body {
 .sysToast.tonic .toastTag { color: #7dffb5; }
 
 .sysToast.rest {
-  border-color: rgba(90, 220, 140, 0.55);
+  border-color: rgba(90, 220, 140, 0.75);
+  background: linear-gradient(180deg, rgba(10, 36, 22, 0.94), rgba(8, 16, 14, 0.9));
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.45),
+    0 0 12px rgba(80, 220, 140, 0.28);
 }
-.sysToast.rest .toastTag { color: #7dffb5; }
+.sysToast.rest .toastTag {
+  color: #9fffc8;
+  background: rgba(80, 220, 140, 0.16);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(125, 255, 181, 0.4);
+}
+
+.sysToast.bandage {
+  border-color: rgba(120, 230, 170, 0.55);
+}
+.sysToast.bandage .toastTag { color: #7dffc0; }
 
 .clLine.rest,
-.clLine.tonic .clTag { color: #7dffb5; }
+.clLine.tonic .clTag,
+.clLine.bandage .clTag { color: #7dffb5; }
 .sysToast.vendor,
 .clLine.vendor .clTag { color: #6dffb0; }
 .sysToast.vendor {
@@ -1506,10 +1592,21 @@ body {
 }
 .sysToast.mana .toastTag { color: #9ab4ff; }
 
+/* CANCEL = soft amber player interrupt (refund). LOCKOUT = harsh crimson hard-interrupt. */
 .sysToast.castCancel {
-  border-color: rgba(255, 176, 90, 0.55);
+  border-color: rgba(255, 196, 110, 0.85);
+  background: linear-gradient(180deg, rgba(42, 28, 10, 0.94), rgba(18, 12, 6, 0.92));
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.45),
+    0 0 14px rgba(255, 170, 70, 0.28);
 }
-.sysToast.castCancel .toastTag { color: #ffb45a; }
+.sysToast.castCancel .toastTag {
+  color: #ffd090;
+  background: rgba(255, 170, 70, 0.18);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 190, 100, 0.45);
+}
 
 .clLine.castCancel .clTag { color: #ffb45a; }
 
@@ -1521,9 +1618,20 @@ body {
 .clLine.castPushback .clTag { color: #ff7860; }
 
 .sysToast.castHardInterrupt {
-  border-color: rgba(255, 70, 90, 0.65);
+  border-color: rgba(255, 60, 90, 0.95);
+  background: linear-gradient(180deg, rgba(55, 8, 18, 0.96), rgba(22, 4, 10, 0.94));
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.5),
+    0 0 18px rgba(255, 40, 70, 0.42);
 }
-.sysToast.castHardInterrupt .toastTag { color: #ff465a; }
+.sysToast.castHardInterrupt .toastTag {
+  color: #ff8a9a;
+  background: rgba(255, 40, 70, 0.28);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 80, 100, 0.65);
+  letter-spacing: 0.08em;
+}
 
 .clLine.castHardInterrupt .clTag { color: #ff465a; }
 

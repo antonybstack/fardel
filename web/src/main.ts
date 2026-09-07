@@ -51,18 +51,31 @@ import {
   createPlayerHumanoid,
   partyRobeColor,
   remoteRobeColor,
+  ROBE_EMISSIVE_SCALE,
   type HumanoidParts,
 } from './world/humanoid';
 import {
   casterMuzzle,
   createEmberBeam,
+  createEmberCharge,
+  EMBER_COLOR,
+  EMBER_CORE,
+  hideEmberCharge,
   placeBeam,
+  placeEmberCharge,
+  spawnCastFlash,
+  spawnEmberBolt,
   spawnImpactPop,
   spawnSparkBolt,
+  SPARK_COLOR,
+  SPARK_CORE,
   targetHitPoint,
+  tickCastFlashes,
   tickImpactPops,
   tickSparkBolts,
+  type CastFlash,
   type EmberBeam,
+  type EmberCharge,
   type ImpactPop,
   type SparkBolt,
 } from './world/castVfx';
@@ -82,6 +95,7 @@ const MAX_STEP_METERS = 0.75;
 const TONIC_MOVE_MULT = 1.75;
 /** Match shared/Fardel.Shared Rest.HealAmount. */
 const REST_HEAL_AMOUNT = 25;
+const BANDAGE_HEAL_AMOUNT = 40;
 /** Client wish speed (m/s); each reducer call is clamped server-side. */
 const MOVE_SPEED = 4.5;
 
@@ -102,6 +116,7 @@ type NpcMesh = {
 type RemoteFx = {
   beam: Mesh;
   beamMat: StandardMaterial;
+  charge: EmberCharge;
   bar: Mesh;
   barMat: StandardMaterial;
   lastCastAtMicros: bigint;
@@ -150,7 +165,12 @@ function setStatus(text: string): void {
   if (el) el.textContent = text;
 }
 
-function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number): void {
+function setGcdBar(
+  remainingMs: number,
+  castingMs: number,
+  castingTotal: number,
+  spellName?: string,
+): void {
   const fill = document.getElementById('gcdFill');
   const label = document.getElementById('gcdLabel');
   const castFill = document.getElementById('castFill');
@@ -165,10 +185,14 @@ function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number)
       remainingMs > 0 ? `GCD ${ (remainingMs / 1000).toFixed(1) }s` : 'GCD ready';
   }
   if (castFill && castLabel) {
-    if (castingTotal > 0 && castingMs > 0) {
-      const pct = Math.min(100, ((castingTotal - castingMs) / castingTotal) * 100);
+    const ve = veCastFeedbackPresent;
+    const cMs = ve?.castingMs ?? castingMs;
+    const cTotal = ve?.castingTotal ?? castingTotal;
+    const name = ve?.spellName ?? spellName ?? 'Casting';
+    if (cTotal > 0 && cMs > 0) {
+      const pct = Math.min(100, ((cTotal - cMs) / cTotal) * 100);
       castFill.style.width = `${pct}%`;
-      castLabel.textContent = `Casting… ${ (castingMs / 1000).toFixed(1) }s`;
+      castLabel.textContent = `${name}  ${(cMs / 1000).toFixed(1)}s`;
       castFill.parentElement?.classList.remove('hidden');
     } else {
       castFill.style.width = '0%';
@@ -176,6 +200,12 @@ function setGcdBar(remainingMs: number, castingMs: number, castingTotal: number)
       castFill.parentElement?.classList.add('hidden');
     }
   }
+}
+
+function castSpellDisplayName(spellId: number): string {
+  if (spellId === SPELL_EMBERBOLT) return 'Emberbolt';
+  if (spellId === SPELL_SPARK) return 'Spark';
+  return spellId > 0 ? `Spell${spellId}` : 'Casting';
 }
 
 
@@ -214,6 +244,47 @@ let veGcdPresent: null | {
   castingMs: number;
   castingTotal: number;
 } = null;
+
+/** VE presentation override: prominent main cast bar mid-Emberbolt (?ve=cast-feedback). */
+let veCastFeedbackPresent: null | {
+  castingMs: number;
+  castingTotal: number;
+  spellName: string;
+} = null;
+
+/** Client-only Rest enter/exit chrome on #selfFrame (not a server channel). */
+let restExitTimer: number | null = null;
+
+function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
+  const frame = document.getElementById('selfFrame');
+  const badge = document.getElementById('sfRest');
+  if (!frame || !badge) return;
+  if (restExitTimer != null) {
+    window.clearTimeout(restExitTimer);
+    restExitTimer = null;
+  }
+  if (mode === 'off') {
+    frame.classList.remove('resting');
+    badge.classList.add('hidden');
+    badge.classList.remove('exiting');
+    badge.textContent = 'Resting…';
+    return;
+  }
+  if (mode === 'enter') {
+    frame.classList.add('resting');
+    badge.classList.remove('hidden', 'exiting');
+    badge.textContent = 'Resting…';
+    // Auto-exit chrome after a short settle so enter vs exit is readable.
+    restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
+    return;
+  }
+  // exit
+  frame.classList.remove('resting');
+  badge.classList.remove('hidden');
+  badge.classList.add('exiting');
+  badge.textContent = 'Rest complete';
+  restExitTimer = window.setTimeout(() => setRestingState('off'), 1600);
+}
 
 /** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana/empty affordances. */
 function updateSpellHotbar(opts: {
@@ -503,6 +574,7 @@ function updateLoadoutStrip(character: {
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
   hasYardTonic?: boolean;
+  hasYardBandage?: boolean;
 } | null | undefined): void {
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
@@ -564,6 +636,13 @@ function updateLoadoutStrip(character: {
     'held',
     'empty',
   );
+  setChip(
+    'loBandage',
+    'loBandageState',
+    !!character.hasYardBandage,
+    'held',
+    'empty',
+  );
 }
 
 /** Bag panel rows (Character loadout). Visibility controlled separately via B. */
@@ -578,6 +657,7 @@ function updateBagPanel(character: {
   knowsEmberbolt: boolean;
   hasEmberShard?: boolean;
   hasYardTonic?: boolean;
+  hasYardBandage?: boolean;
 } | null | undefined): void {
   const setRow = (id: string, text: string, ok: boolean | null) => {
     const el = document.getElementById(id);
@@ -596,6 +676,7 @@ function updateBagPanel(character: {
     setRow('bagMana', '—', null);
     setRow('bagShard', '—', null);
     setRow('bagTonic', '—', null);
+    setRow('bagBandage', '—', null);
     return;
   }
   setRow(
@@ -629,6 +710,11 @@ function updateBagPanel(character: {
     character.hasYardTonic ? 'held' : 'empty',
     !!character.hasYardTonic,
   );
+  setRow(
+    'bagBandage',
+    character.hasYardBandage ? 'held' : 'empty',
+    !!character.hasYardBandage,
+  );
 }
 
 function setBagPanelOpen(open: boolean): void {
@@ -641,6 +727,14 @@ function setKeysLegendOpen(open: boolean): void {
   const panel = document.getElementById('keysLegend');
   if (!panel) return;
   panel.classList.toggle('hidden', !open);
+}
+
+/** Identity/AOI/keys #status wall + #fpsHud — hidden by default; F3 / ?debug=1. */
+function setDebugHudVisible(open: boolean): void {
+  const status = document.getElementById('status');
+  const fps = document.getElementById('fpsHud');
+  if (status) status.classList.toggle('hidden', !open);
+  if (fps) fps.classList.toggle('hidden', !open);
 }
 
 /** Compact party member frames: hex + leader tag + distance / pose hint. */
@@ -797,11 +891,11 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                         : kind === 'mana'
                           ? 'MANA'
                           : kind === 'castCancel'
-                            ? 'CANCEL'
+                            ? 'CANCEL ↩'
                             : kind === 'castPushback'
                               ? 'PUSH'
                               : kind === 'castHardInterrupt'
-                                ? 'LOCKOUT'
+                                ? 'LOCKOUT ⊘'
                                 : kind === 'silenced'
                                   ? 'SILENCE'
                                   : kind === 'kick'
@@ -915,11 +1009,11 @@ function pushSystemToast(
                                   : kind === 'mana'
                                     ? 'MANA'
                                     : kind === 'castCancel'
-                                      ? 'CANCEL'
+                                      ? 'CANCEL ↩'
                                       : kind === 'castPushback'
                                         ? 'PUSH'
                                         : kind === 'castHardInterrupt'
-                                          ? 'LOCKOUT'
+                                          ? 'LOCKOUT ⊘'
                                           : kind === 'silenced'
                                             ? 'SILENCE'
                                             : kind === 'kick'
@@ -1437,14 +1531,14 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
   return `Disconnected\nuri: ${s.uri}\ndb: ${s.database}`;
 }
 
-function createScene(engine: Engine): {
+async function createScene(engine: Engine): Promise<{
   scene: Scene;
   camera: ArcRotateCamera;
   player: Mesh;
   humanoid: HumanoidParts;
   proxySource: Mesh;
   setLocalGhost: (on: boolean) => void;
-} {
+}> {
   const scene = new Scene(engine);
 
   const camera = new ArcRotateCamera(
@@ -1474,8 +1568,8 @@ function createScene(engine: Engine): {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  // North-star yard: forest clearing + huge trees + distant mountains.
-  buildForestClearing(scene);
+  // North-star yard: Quaternius Standard forest + procedural mountains (#41).
+  await buildForestClearing(scene);
 
   // Local player: procedural humanoid + staff (crowd proxies stay capsules).
   const humanoid = createPlayerHumanoid(scene);
@@ -1495,7 +1589,7 @@ function createScene(engine: Engine): {
       mat.alpha = 1;
       mat.transparencyMode = Material.MATERIAL_OPAQUE;
       mat.diffuseColor = humanoid.robeBaseColor.clone();
-      mat.emissiveColor = humanoid.robeBaseColor.scale(0.08);
+      mat.emissiveColor = humanoid.robeBaseColor.scale(ROBE_EMISSIVE_SCALE);
     }
   };
   player.position = new Vector3(0, 0, 0);
@@ -1713,9 +1807,11 @@ function bindInput(opts: {
   onEquipRobes: () => void;
   onToggleBag: () => void;
   onToggleKeysLegend: () => void;
+  onToggleDebugHud: () => void;
   onVendorInteract: () => void;
   onPickupNearest: () => void;
   onUseYardTonic: () => void;
+  onUseBandage: () => void;
   onRest: () => void;
   onCancelCast: () => void;
   onKick: () => void;
@@ -1806,6 +1902,14 @@ function bindInput(opts: {
       opts.onToggleKeysLegend();
       return;
     }
+    if (e.key === 'F3' || e.code === 'F3') {
+      // Ignore when chat compose has focus (chatComposing early-return covers most cases).
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && ae.id === 'chatInput') return;
+      e.preventDefault();
+      opts.onToggleDebugHud();
+      return;
+    }
     if (k === 'e') {
       e.preventDefault();
       opts.onVendorInteract();
@@ -1819,6 +1923,11 @@ function bindInput(opts: {
     if (k === 'v') {
       e.preventDefault();
       opts.onUseYardTonic();
+      return;
+    }
+    if (k === 'n') {
+      e.preventDefault();
+      opts.onUseBandage();
       return;
     }
     if (k === 'r') {
@@ -1899,7 +2008,7 @@ function setRobesMeshVisible(parts: HumanoidParts, equipped: boolean): void {
   const drab = new Color3(0.42, 0.4, 0.38);
   const col = equipped ? parts.robeBaseColor : drab;
   parts.mat.diffuseColor.copyFrom(col);
-  parts.mat.emissiveColor.copyFrom(col.scale(equipped ? 0.08 : 0.04));
+  parts.mat.emissiveColor.copyFrom(col.scale(equipped ? ROBE_EMISSIVE_SCALE : 0.04));
 }
 
 function flashMesh(mat: StandardMaterial, color: Color3, ms: number): void {
@@ -2003,18 +2112,56 @@ function disposeNameplate(np: Nameplate | null | undefined): void {
   np.tex.dispose();
 }
 
+/** Vertical gap between stacked floaters near the same anchor. */
+const FLOATER_STACK_DY = 0.5;
+/** XZ radius (m) for counting live floaters toward a stack slot. */
+const FLOATER_NEAR_XZ = 2.8;
+
+/** Count still-visible floaters near `at` across one or more live lists. */
+function countNearbyLiveFloaters(
+  lists: DamageFloater[][] | undefined,
+  at: Vector3,
+  now = Date.now(),
+): number {
+  if (!lists) return 0;
+  const r2 = FLOATER_NEAR_XZ * FLOATER_NEAR_XZ;
+  let n = 0;
+  for (const list of lists) {
+    for (const f of list) {
+      if (now - f.bornMs >= f.lifeMs * 0.9) continue;
+      const dx = f.mesh.position.x - at.x;
+      const dz = f.mesh.position.z - at.z;
+      if (dx * dx + dz * dz <= r2) n += 1;
+    }
+  }
+  return n;
+}
+
+type FloaterSpawnOpts = {
+  lifeMs?: number;
+  yLift?: number;
+  planeW?: number;
+  planeH?: number;
+  /** Deterministic horizontal lane (replaces random drift). */
+  laneX?: number;
+  /** Live floater lists used to assign a stack slot near `at`. */
+  stackWith?: DamageFloater[][];
+};
+
 /** Rising world billboard text — damage numbers, XP floaters, etc. */
 function spawnWorldFloater(
   scene: Scene,
   at: Vector3,
   label: string,
   tint: Color3,
-  opts?: { lifeMs?: number; yLift?: number; planeW?: number; planeH?: number },
+  opts?: FloaterSpawnOpts,
 ): DamageFloater {
-  const lifeMs = opts?.lifeMs ?? 1100;
-  const yLift = opts?.yLift ?? 1.85;
+  const slot = countNearbyLiveFloaters(opts?.stackWith, at);
+  const lifeMs = opts?.lifeMs ?? 1250;
+  const yLift = (opts?.yLift ?? 1.85) + slot * FLOATER_STACK_DY;
   const planeW = opts?.planeW ?? 1.7;
   const planeH = opts?.planeH ?? 0.85;
+  const laneX = opts?.laneX ?? 0;
   const tex = new DynamicTexture(
     `fltTex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
     { width: 256, height: 128 },
@@ -2053,6 +2200,8 @@ function spawnWorldFloater(
   mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
   mesh.position = at.clone();
   mesh.position.y += yLift;
+  // Deterministic lane + tiny per-slot zigzag (no random horizontal wander).
+  mesh.position.x += laneX + (slot % 2 === 0 ? -1 : 1) * 0.04 * Math.min(slot, 3);
   mesh.isPickable = false;
 
   return {
@@ -2061,7 +2210,7 @@ function spawnWorldFloater(
     bornMs: Date.now(),
     lifeMs,
     startY: mesh.position.y,
-    driftX: (Math.random() - 0.5) * 0.55,
+    driftX: 0,
   };
 }
 
@@ -2071,8 +2220,13 @@ function spawnDamageFloater(
   at: Vector3,
   amount: number,
   tint: Color3,
+  stackWith?: DamageFloater[][],
 ): DamageFloater {
-  return spawnWorldFloater(scene, at, `-${amount}`, tint);
+  return spawnWorldFloater(scene, at, `-${amount}`, tint, {
+    lifeMs: 1250,
+    laneX: -0.22,
+    stackWith,
+  });
 }
 
 /** Rising "+N XP" near local player — client-only Cosmetic over Character.Xp. */
@@ -2080,13 +2234,21 @@ function spawnXpFloater(
   scene: Scene,
   at: Vector3,
   gained: number,
+  stackWith?: DamageFloater[][],
 ): DamageFloater {
   return spawnWorldFloater(
     scene,
     at,
     `+${gained} XP`,
     new Color3(1, 0.82, 0.28),
-    { lifeMs: 1400, yLift: 2.15, planeW: 2.2, planeH: 0.95 },
+    {
+      lifeMs: 1500,
+      yLift: 2.15,
+      planeW: 2.2,
+      planeH: 0.95,
+      laneX: 0.34,
+      stackWith,
+    },
   );
 }
 
@@ -2095,13 +2257,21 @@ function spawnLevelFloater(
   scene: Scene,
   at: Vector3,
   level: number,
+  stackWith?: DamageFloater[][],
 ): DamageFloater {
   return spawnWorldFloater(
     scene,
     at,
     `Level ${level}!`,
     new Color3(0.55, 0.95, 1),
-    { lifeMs: 1800, yLift: 2.45, planeW: 2.6, planeH: 1.05 },
+    {
+      lifeMs: 1900,
+      yLift: 2.45,
+      planeW: 2.6,
+      planeH: 1.05,
+      laneX: 0.06,
+      stackWith,
+    },
   );
 }
 
@@ -2211,12 +2381,16 @@ async function main(): Promise<void> {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  const { scene, camera, player, humanoid, proxySource, setLocalGhost } = createScene(engine);
+  const { scene, camera, player, humanoid, proxySource, setLocalGhost } = await createScene(engine);
   const castRangeRing = createCastRangeRing(scene);
 
   let net: GameNet | null = null;
   let bagOpen = false;
   let keysLegendOpen = false;
+  const bootParams = new URLSearchParams(window.location.search);
+  const debugParam = (bootParams.get('debug') || '').toLowerCase();
+  let debugHudVisible = debugParam === '1' || debugParam === 'true';
+  setDebugHudVisible(debugHudVisible);
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
@@ -2275,9 +2449,11 @@ async function main(): Promise<void> {
   let latestRemoteCombats: RemoteCombat[] = [];
   const sparkBolts: SparkBolt[] = [];
   const impactPops: ImpactPop[] = [];
+  const castFlashes: CastFlash[] = [];
   const localEmberBeam: EmberBeam = createEmberBeam(scene, 'local');
+  const localEmberCharge: EmberCharge = createEmberCharge(scene, 'local');
   let localBeamActive = false;
-  let castVfxStats = { bolts: 0, impacts: 0, beams: 0 };
+  let castVfxStats = { bolts: 0, impacts: 0, beams: 0, flashes: 0 };
   const localNameplate = createNameplate(scene, 'local');
   localNameplate.mesh.parent = player;
   localNameplate.mesh.position.set(0, 2.05, 0);
@@ -2289,6 +2465,7 @@ async function main(): Promise<void> {
     let fx = remoteFx.get(key);
     if (fx) return fx;
     const ember = createEmberBeam(scene, `remote_${key.slice(0, 10)}`);
+    const charge = createEmberCharge(scene, `remote_${key.slice(0, 10)}`);
     const barMat = new StandardMaterial(`remoteBarMat_${key.slice(0, 10)}`, scene);
     barMat.diffuseColor = new Color3(1, 0.7, 0.2);
     barMat.emissiveColor = new Color3(1.1, 0.45, 0.08);
@@ -2304,6 +2481,7 @@ async function main(): Promise<void> {
     fx = {
       beam: ember.beam,
       beamMat: ember.beamMat,
+      charge,
       bar,
       barMat,
       lastCastAtMicros: 0n,
@@ -2324,44 +2502,50 @@ async function main(): Promise<void> {
       const wind = castRemainingMs(rc, now);
       const casting = rc.castingSpellId !== 0 && wind > 0;
 
-      // Impact / Spark bolt when LastCastAt advances (unify with local cast VFX).
+      // Impact / projectile when LastCastAt advances (unify with local cast VFX).
       if (
         rc.lastCastAtMicros > 0n &&
         rc.lastCastAtMicros !== fx.lastCastAtMicros &&
         fx.lastCastAtMicros !== 0n
       ) {
         const spark = rc.lastSpellId === SPELL_SPARK;
-        const color = spark
-          ? new Color3(0.4, 0.75, 1)
-          : new Color3(1, 0.4, 0.1);
-        if (parts) flashMesh(parts.mat, color, spark ? 220 : 380);
+        const color = spark ? SPARK_COLOR : EMBER_COLOR;
+        if (parts) flashMesh(parts.mat, color, spark ? 180 : 380);
         const mesh = npcMeshes.get(rc.targetNpcId.toString());
         const from = parts
           ? casterMuzzle(parts.root.position)
           : null;
         const to = mesh ? targetHitPoint(mesh.root.position) : null;
         if (spark && from && to) {
+          castFlashes.push(
+            spawnCastFlash(scene, from, SPARK_COLOR, SPARK_CORE, {
+              key: `rflash_${key.slice(0, 8)}`,
+              scale: 0.5,
+            }),
+          );
+          castVfxStats.flashes += 1;
           sparkBolts.push(
             spawnSparkBolt(scene, from, to, {
               key: `r_${key.slice(0, 8)}_${Number(rc.lastCastAtMicros % 100000n)}`,
             }),
           );
           castVfxStats.bolts += 1;
-        } else if (!spark && to) {
-          impactPops.push(
-            spawnImpactPop(scene, to, new Color3(1.2, 0.45, 0.08), {
-              key: `rimp_${key.slice(0, 8)}`,
+        } else if (!spark && from && to) {
+          // Emberbolt release: warm projectile → impact (not instant pop).
+          sparkBolts.push(
+            spawnEmberBolt(scene, from, to, {
+              key: `rember_${key.slice(0, 8)}_${Number(rc.lastCastAtMicros % 100000n)}`,
             }),
           );
-          castVfxStats.impacts += 1;
+          castVfxStats.bolts += 1;
           if (mesh) {
-            flashMesh(mesh.mat, new Color3(1, 0.3, 0.05), 450);
+            flashMesh(mesh.mat, EMBER_COLOR, 420);
           }
         } else if (mesh) {
           flashMesh(
             mesh.mat,
-            spark ? new Color3(0.55, 0.85, 1) : new Color3(1, 0.3, 0.05),
-            spark ? 260 : 450,
+            spark ? SPARK_COLOR : EMBER_COLOR,
+            spark ? 220 : 420,
           );
         }
       }
@@ -2372,9 +2556,10 @@ async function main(): Promise<void> {
       if (!parts || !casting) {
         fx.beam.setEnabled(false);
         fx.bar.setEnabled(false);
+        hideEmberCharge(fx.charge);
         if (parts && !casting) {
           // Restore robe emissive after windup (match createPlayerHumanoid scale).
-          parts.mat.emissiveColor = parts.mat.diffuseColor.scale(0.08);
+          parts.mat.emissiveColor = parts.mat.diffuseColor.scale(ROBE_EMISSIVE_SCALE);
         }
         continue;
       }
@@ -2391,8 +2576,9 @@ async function main(): Promise<void> {
       fx.bar.scaling.x = 0.25 + progress * 0.75;
 
       const tgt = npcMeshes.get(rc.targetNpcId.toString());
+      const from = casterMuzzle(parts.root.position);
+      placeEmberCharge(fx.charge, from, now);
       if (tgt) {
-        const from = casterMuzzle(parts.root.position);
         const to = targetHitPoint(tgt.root.position);
         placeBeam(fx.beam, from, to);
       } else {
@@ -2403,6 +2589,8 @@ async function main(): Promise<void> {
       if (!seen.has(key)) {
         fx.beam.dispose();
         fx.bar.dispose();
+        fx.charge.glow.dispose();
+        fx.charge.core.dispose();
         remoteFx.delete(key);
       }
     }
@@ -2632,20 +2820,25 @@ async function main(): Promise<void> {
         );
       }
 
-      // Local cast VFX: Spark bolt + trail; Emberbolt thicker beam; impact pop on hit.
+      // Local cast VFX (Art #46): Spark cyan flash+bolt; Emberbolt staff charge + thin aim beam.
       const playerMat = player.material as StandardMaterial;
       flashMesh(
         playerMat,
-        spellId === SPELL_SPARK
-          ? new Color3(0.4, 0.7, 1)
-          : new Color3(1, 0.45, 0.15),
-        spellId === SPELL_SPARK ? 180 : 400,
+        spellId === SPELL_SPARK ? SPARK_COLOR : EMBER_COLOR,
+        spellId === SPELL_SPARK ? 160 : 400,
       );
       const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
       const mesh = npcMeshes.get(tid.toString());
       const from = casterMuzzle(player.position);
       if (spellId === SPELL_SPARK && mesh) {
         const to = targetHitPoint(mesh.root.position);
+        castFlashes.push(
+          spawnCastFlash(scene, from, SPARK_COLOR, SPARK_CORE, {
+            key: `local_spark_flash_${Date.now()}`,
+            scale: 0.55,
+          }),
+        );
+        castVfxStats.flashes += 1;
         sparkBolts.push(
           spawnSparkBolt(scene, from, to, {
             key: `local_spark_${Date.now()}`,
@@ -2654,24 +2847,24 @@ async function main(): Promise<void> {
         castVfxStats.bolts += 1;
         localBeamActive = false;
         localEmberBeam.beam.setEnabled(false);
+        hideEmberCharge(localEmberCharge);
       } else if (spellId === SPELL_EMBERBOLT && mesh) {
         localBeamActive = true;
         const to = targetHitPoint(mesh.root.position);
         placeBeam(localEmberBeam.beam, from, to);
+        placeEmberCharge(localEmberCharge, from, Date.now());
         castVfxStats.beams += 1;
-        // Soft target glow during windup; impact pop fires when bolt/cast lands.
+        // Soft target glow during windup; ember projectile + impact on release.
         flashMesh(
           mesh.mat,
-          new Color3(1, 0.35, 0.05),
+          EMBER_COLOR,
           Math.min(500, EMBERBOLT_CAST_MS),
         );
       } else if (mesh) {
         flashMesh(
           mesh.mat,
-          spellId === SPELL_SPARK
-            ? new Color3(0.6, 0.85, 1)
-            : new Color3(1, 0.35, 0.05),
-          spellId === SPELL_SPARK ? 220 : Math.min(800, EMBERBOLT_CAST_MS),
+          spellId === SPELL_SPARK ? SPARK_COLOR : EMBER_COLOR,
+          spellId === SPELL_SPARK ? 200 : Math.min(800, EMBERBOLT_CAST_MS),
         );
       }
     },
@@ -2761,6 +2954,10 @@ async function main(): Promise<void> {
     onToggleKeysLegend: () => {
       keysLegendOpen = !keysLegendOpen;
       setKeysLegendOpen(keysLegendOpen);
+    },
+    onToggleDebugHud: () => {
+      debugHudVisible = !debugHudVisible;
+      setDebugHudVisible(debugHudVisible);
     },
     onVendorInteract: () => {
       if (!net) return;
@@ -2853,18 +3050,65 @@ async function main(): Promise<void> {
         }
       });
     },
+    onUseBandage: () => {
+      if (!net) return;
+      const g = net;
+      const ch0 = g.getCharacter();
+      if (!ch0?.hasYardBandage) {
+        pushSystemToast('rate', 'No yard bandage in bag');
+        return;
+      }
+      const hpAt = ch0.hp;
+      void g.useBandage().then(() => {
+        const after = g.getCharacter();
+        if (after) {
+          updateBagPanel(after);
+          updateLoadoutStrip(after);
+          updateSelfFrame(after);
+        }
+        bagOpen = true;
+        setBagPanelOpen(true);
+        const healed = after ? Math.max(0, after.hp - hpAt) : BANDAGE_HEAL_AMOUNT;
+        pushCombatLog('bandage', `Bandage +${healed} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'}`);
+        pushSystemToast('bandage', `Bandage · +${healed} HP`, TOAST_VE_TTL_MS);
+        flashMesh(humanoid.mat, new Color3(0.45, 0.95, 0.7), 700);
+        damageFloaters.push(
+          spawnWorldFloater(
+            scene,
+            player.position,
+            `+${healed}`,
+            new Color3(0.45, 0.95, 0.7),
+            { lifeMs: 1400, yLift: 2.05 },
+          ),
+        );
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/no yard bandage/i.test(msg)) {
+          pushSystemToast('rate', 'No yard bandage in bag');
+        } else if (/recently damaged/i.test(msg)) {
+          pushSystemToast('rate', 'Too soon after damage');
+        } else if (/bandage on cooldown/i.test(msg)) {
+          pushSystemToast('rate', 'Bandage on cooldown');
+        } else if (/already full/i.test(msg)) {
+          pushSystemToast('rate', 'Already full HP');
+        } else {
+          pushSystemToast('rate', msg.slice(0, 96) || 'Use bandage failed');
+        }
+      });
+    },
     onRest: () => {
       if (!net) return;
       const g = net;
       const ch0 = g.getCharacter();
       if (!ch0 || ch0.hp <= 0) {
-        pushSystemToast('rate', 'Cannot rest while dead');
+        pushSystemToast('rest', 'Cannot rest while dead');
         return;
       }
       const hpFull = ch0.hp >= ch0.maxHp;
       const manaFull = (ch0.mana ?? 0) >= (ch0.maxMana ?? 0) && (ch0.maxMana ?? 0) > 0;
       if (hpFull && manaFull) {
-        pushSystemToast('rate', 'Already full');
+        pushSystemToast('rest', 'Already full — HP & mana topped');
+        setRestingState('exit');
         return;
       }
       const beforeHp = ch0.hp;
@@ -2879,27 +3123,29 @@ async function main(): Promise<void> {
         if (manaGain > 0) bits.push(`+${manaGain} mana`);
         pushCombatLog(
           'rest',
-          `Rest ${bits.join(' · ') || 'ok'} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'} · mana ${after?.mana ?? '?'}/${after?.maxMana ?? '?'}`,
+          `Rest enter · ${bits.join(' · ') || 'ok'} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'} · mana ${after?.mana ?? '?'}/${after?.maxMana ?? '?'}`,
         );
-        pushSystemToast('rest', `Rest · ${bits.join(' · ') || 'ok'}`, TOAST_VE_TTL_MS);
+        pushSystemToast('rest', `Rest enter · ${bits.join(' · ') || 'ok'}`, TOAST_VE_TTL_MS);
         if (manaGain > 0) {
           pushSystemToast('mana', `Mana · +${manaGain}`, TOAST_VE_TTL_MS);
         }
+        setRestingState('enter');
         flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/recently damaged/i.test(msg)) {
-          pushSystemToast('rate', 'Recently damaged — wait to rest');
+          pushSystemToast('rest', 'Recently damaged — wait to rest');
         } else if (/cooldown/i.test(msg)) {
-          pushSystemToast('rate', 'Rest on cooldown');
+          pushSystemToast('rest', 'Rest on cooldown');
         } else if (/casting/i.test(msg)) {
-          pushSystemToast('rate', 'Cannot rest while casting');
+          pushSystemToast('rest', 'Cannot rest while casting');
         } else if (/already full/i.test(msg)) {
-          pushSystemToast('rate', 'Already full');
+          pushSystemToast('rest', 'Already full — HP & mana topped');
+          setRestingState('exit');
         } else if (/dead/i.test(msg)) {
-          pushSystemToast('rate', 'Cannot rest while dead');
+          pushSystemToast('rest', 'Cannot rest while dead');
         } else {
-          pushSystemToast('rate', msg.slice(0, 96) || 'Rest failed');
+          pushSystemToast('rest', msg.slice(0, 96) || 'Rest failed');
         }
       });
     },
@@ -2931,8 +3177,8 @@ async function main(): Promise<void> {
         const refund = after ? Math.max(0, (after.mana ?? 0) - beforeMana) : EMBERBOLT_MANA_COST;
         const bit =
           refund > 0
-            ? `Cast cancelled · ${spellName} · +${refund} mana`
-            : `Cast cancelled · ${spellName}`;
+            ? `CANCEL · player interrupt · ${spellName} · +${refund} mana`
+            : `CANCEL · player interrupt · ${spellName}`;
         pushCombatLog('castCancel', bit);
         pushSystemToast('castCancel', bit, TOAST_VE_TTL_MS);
         setGcdBar(0, 0, 0);
@@ -3087,6 +3333,7 @@ async function main(): Promise<void> {
               mesh.root.position,
               delta,
               tint,
+              [damageFloaters, xpFloaters],
             ),
           );
           latestDamageAmount = delta;
@@ -3284,26 +3531,32 @@ async function main(): Promise<void> {
       }
     }
 
-    // Cast projectile / beam polish: Spark bolts + impact pops + local Emberbolt beam.
+    // Cast VFX: Spark/Ember bolts + flashes + impact pops + Emberbolt charge/beam.
     {
       const arrived = tickSparkBolts(sparkBolts, now, dt);
       for (const b of arrived) {
         impactPops.push(
           spawnImpactPop(scene, b.to, b.impactColor, {
             key: `imp_${now}_${impactPops.length}`,
+            scale: b.impactScale,
           }),
         );
         castVfxStats.impacts += 1;
         // Flash nearest NPC at impact point.
         for (const mesh of npcMeshes.values()) {
           const hit = targetHitPoint(mesh.root.position);
-          if (Vector3.Distance(hit, b.to) < 0.6) {
-            flashMesh(mesh.mat, new Color3(0.55, 0.9, 1.2), 260);
+          if (Vector3.Distance(hit, b.to) < 0.75) {
+            flashMesh(
+              mesh.mat,
+              b.kind === 'spark' ? SPARK_COLOR : EMBER_COLOR,
+              b.kind === 'spark' ? 220 : 380,
+            );
             break;
           }
         }
       }
       tickImpactPops(impactPops, now);
+      tickCastFlashes(castFlashes, now);
 
       const castLeftNow = Math.max(0, castUntilMs - now);
       if (
@@ -3313,32 +3566,43 @@ async function main(): Promise<void> {
       ) {
         const tid = net?.getCombat()?.targetNpcId ?? selectedTargetId;
         const mesh = npcMeshes.get(tid.toString());
+        const from = casterMuzzle(player.position);
+        placeEmberCharge(localEmberCharge, from, now);
         if (mesh) {
           placeBeam(
             localEmberBeam.beam,
-            casterMuzzle(player.position),
+            from,
             targetHitPoint(mesh.root.position),
           );
           const pulse = 0.85 + 0.2 * Math.sin(now / 80);
           localEmberBeam.beamMat.emissiveColor = new Color3(
-            1.35 * pulse,
-            0.4 * pulse,
-            0.05,
+            1.15 * pulse,
+            0.42 * pulse,
+            0.08,
           );
         }
       } else if (localBeamActive) {
-        // Windup finished — impact pop + hide beam.
+        // Windup finished — release warm ember projectile; impact on arrival.
         const tid = net?.getCombat()?.targetNpcId ?? selectedTargetId;
         const mesh = npcMeshes.get(tid.toString());
+        hideEmberCharge(localEmberCharge);
         if (mesh && lastCastSpell === SPELL_EMBERBOLT) {
+          const from = casterMuzzle(player.position);
           const to = targetHitPoint(mesh.root.position);
-          impactPops.push(
-            spawnImpactPop(scene, to, new Color3(1.25, 0.4, 0.06), {
-              key: `local_ember_imp_${now}`,
+          castFlashes.push(
+            spawnCastFlash(scene, from, EMBER_COLOR, EMBER_CORE, {
+              key: `local_ember_flash_${now}`,
+              scale: 0.7,
             }),
           );
-          castVfxStats.impacts += 1;
-          flashMesh(mesh.mat, new Color3(1, 0.35, 0.08), 420);
+          castVfxStats.flashes += 1;
+          sparkBolts.push(
+            spawnEmberBolt(scene, from, to, {
+              key: `local_ember_${now}`,
+            }),
+          );
+          castVfxStats.bolts += 1;
+          flashMesh(mesh.mat, EMBER_COLOR, 280);
         }
         localEmberBeam.beam.setEnabled(false);
         localBeamActive = false;
@@ -3489,7 +3753,7 @@ async function main(): Promise<void> {
           if (!castHardInterruptToasted) {
             castHardInterruptToasted = true;
             const bit =
-              `Cast interrupted · Emberbolt lockout · no mana refund` +
+              `LOCKOUT · hard interrupt · no mana refund` +
               (sawPushbackThisCast ? ' · after pushback' : '');
             pushCombatLog('castHardInterrupt', bit);
             pushSystemToast('castHardInterrupt', bit, TOAST_VE_TTL_MS);
@@ -3497,7 +3761,7 @@ async function main(): Promise<void> {
         } else if (!castCancelToasted) {
           castCancelToasted = true;
           const refundHint = EMBERBOLT_MANA_COST;
-          const bit = `Cast cancelled · Emberbolt · mana refunded (~${refundHint})`;
+          const bit = `CANCEL · player interrupt · mana refunded (~${refundHint})`;
           pushCombatLog('castCancel', bit);
           pushSystemToast('castCancel', bit, TOAST_VE_TTL_MS);
         }
@@ -3511,7 +3775,7 @@ async function main(): Promise<void> {
       prevLocalCasting = serverCasting || castUntilMs > now;
     }
     const castLeft = Math.max(0, castUntilMs - now);
-    setGcdBar(gcdLeft, castLeft, castTotalMs);
+    setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell));
     {
       const st = latestStatus;
       const tgt =
@@ -3600,7 +3864,9 @@ async function main(): Promise<void> {
         } else if (ch.xp > prevXp) {
           const gained = ch.xp - prevXp;
           pushSystemToast('xp', `+${gained} XP · total ${ch.xp}`);
-          xpFloaters.push(spawnXpFloater(scene, player.position, gained));
+          xpFloaters.push(
+            spawnXpFloater(scene, player.position, gained, [damageFloaters, xpFloaters]),
+          );
           latestXpGain = gained;
           _latestXpAtMs = Date.now();
           prevXp = ch.xp;
@@ -3615,7 +3881,9 @@ async function main(): Promise<void> {
         } else if (lv > prevLevel) {
           pushSystemToast('level', `Level up! · Lv ${lv}`, TOAST_VE_TTL_MS);
           pushCombatLog('equip', `Level up · Lv ${lv}`);
-          xpFloaters.push(spawnLevelFloater(scene, player.position, lv));
+          xpFloaters.push(
+            spawnLevelFloater(scene, player.position, lv, [damageFloaters, xpFloaters]),
+          );
           latestLevelUp = lv;
           prevLevel = lv;
         } else if (lv !== prevLevel) {
@@ -3656,6 +3924,7 @@ async function main(): Promise<void> {
                   player.position,
                   dmg,
                   new Color3(1.0, 0.35, 0.45),
+                  [damageFloaters, xpFloaters],
                 ),
               );
               flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
@@ -3668,7 +3937,14 @@ async function main(): Promise<void> {
                   player.position,
                   `+${healed}`,
                   new Color3(0.35, 1.0, 0.55),
-                  { lifeMs: 1200, yLift: 2.0, planeW: 1.55, planeH: 0.8 },
+                  {
+                    lifeMs: 1350,
+                    yLift: 2.0,
+                    planeW: 1.55,
+                    planeH: 0.8,
+                    laneX: 0.16,
+                    stackWith: [damageFloaters, xpFloaters],
+                  },
                 ),
               );
             }
@@ -3874,7 +4150,15 @@ async function main(): Promise<void> {
       }
     }
 
-    camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
+    // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
+    // radius from current cam position → target; walking forward increases that
+    // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
+    {
+      const follow = player.position.add(new Vector3(0, 1.35, 0));
+      const radius = camera.radius;
+      camera.setTarget(follow);
+      camera.radius = radius;
+    }
     scene.render();
   });
   window.addEventListener('resize', () => engine.resize());
@@ -3920,6 +4204,89 @@ async function main(): Promise<void> {
       });
     }
   };
+
+
+  // ?ve=floaters — seed before connect so the shot does not wait on WS.
+  {
+    const earlyVe = new URLSearchParams(window.location.search).get('ve');
+    if (earlyVe === 'floaters') {
+      camera.radius = 9.2;
+      camera.alpha = Math.PI / 2.25;
+      camera.beta = Math.PI / 3.05;
+      camera.setTarget(player.position.clone().add(new Vector3(0, 1.35, 0)));
+      const mark = document.getElementById('persistMark');
+      if (mark) mark.textContent = 'VE floaters: seeding stack…';
+      let ticks = 0;
+      const pulse = () => {
+        ticks += 1;
+        camera.setTarget(player.position.clone().add(new Vector3(0, 1.35, 0)));
+        const lists = [damageFloaters, xpFloaters] as DamageFloater[][];
+        const liveNow =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (liveNow < 4) {
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-12',
+              new Color3(1, 0.35, 0.4),
+              { lifeMs: 2400, laneX: -0.28, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '-8',
+              new Color3(1, 0.9, 0.4),
+              { lifeMs: 2400, laneX: -0.28, stackWith: lists },
+            ),
+          );
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+25',
+              new Color3(0.35, 1.0, 0.55),
+              {
+                lifeMs: 2400,
+                yLift: 2.0,
+                planeW: 1.55,
+                planeH: 0.8,
+                laneX: 0.18,
+                stackWith: lists,
+              },
+            ),
+          );
+          xpFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              '+10 XP',
+              new Color3(1, 0.82, 0.28),
+              {
+                lifeMs: 2400,
+                yLift: 2.15,
+                planeW: 2.2,
+                planeH: 0.95,
+                laneX: 0.42,
+                stackWith: lists,
+              },
+            ),
+          );
+        }
+        const live =
+          damageFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length +
+          xpFloaters.filter((f) => Date.now() - f.bornMs < f.lifeMs).length;
+        if (mark) {
+          mark.textContent = `Floaters OK · stacked · damage/heal/XP · live ${live}`;
+        }
+        if (ticks < 50) window.setTimeout(pulse, 320);
+      };
+      window.setTimeout(pulse, 250);
+    }
+  }
 
   net = await connectToSpacetime(
     onStatus,
@@ -4099,16 +4466,17 @@ async function main(): Promise<void> {
     window.setTimeout(tryAoi, 700);
   }
 
-  // ?ve=forest — pull camera back so hero trees + mountains + HUD are visible.
-  if (ve === 'forest' || ve === 'aoi') {
-    camera.radius = ve === 'forest' ? 36 : 22;
-    camera.alpha = Math.PI / 2.5;
-    camera.beta = Math.PI / 3.55;
+  // ?ve=forest / ?ve=quaternius-env — pull camera back so hero trees + mountains + HUD are visible.
+  if (ve === 'forest' || ve === 'quaternius-env' || ve === 'aoi') {
+    camera.radius = ve === 'aoi' ? 22 : ve === 'quaternius-env' ? 52 : 38;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.35;
   }
 
-  if (net && ve === 'forest') {
+  if (net && (ve === 'forest' || ve === 'quaternius-env')) {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE forest: waiting for Connected…';
+    const label = ve === 'quaternius-env' ? 'Quaternius env' : 'forest';
+    if (mark) mark.textContent = `VE ${label}: waiting for Connected…`;
     const waitForest = () => {
       if (!net) return;
       const st = latestStatus;
@@ -4117,15 +4485,74 @@ async function main(): Promise<void> {
         syncProxyMeshes(net.getProxies());
         if (mark) {
           const aoi = net.getAoi();
-          mark.textContent = aoi
-            ? `Forest OK · trees+mountains · Connected · AOI near ${aoi.nearCount}`
-            : 'Forest OK · trees+mountains · Connected';
+          const ok =
+            ve === 'quaternius-env'
+              ? 'Quaternius env OK · Standard CC0 heroes+mid+understory · mountains procedural'
+              : 'Forest OK · density+LOD · Connected';
+          mark.textContent = aoi ? `${ok} · AOI near ${aoi.nearCount}` : ok;
         }
         return;
       }
       window.setTimeout(waitForest, 300);
     };
     window.setTimeout(waitForest, 600);
+  }
+
+  // ?ve=atmosphere — yard mood shot: fog depth, warm sun, lush ground clearing.
+  if (ve === 'atmosphere') {
+    camera.radius = 42;
+    camera.alpha = Math.PI / 2.65;
+    camera.beta = Math.PI / 3.35;
+  }
+
+  if (net && ve === 'atmosphere') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE atmosphere: waiting for Connected…';
+    const waitAtmosphere = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        net.seedCrowdProxies();
+        syncProxyMeshes(net.getProxies());
+        if (mark) {
+          mark.textContent =
+            'Atmosphere OK · fog+warm sun+ground · Connected · yard mood';
+        }
+        return;
+      }
+      window.setTimeout(waitAtmosphere, 300);
+    };
+    window.setTimeout(waitAtmosphere, 600);
+  }
+
+  // ?ve=path-ground — play-cam frame of polished dirt/stone trail vs lush grass (#44).
+  if (ve === 'path-ground') {
+    camera.radius = 15;
+    camera.alpha = Math.PI / 3.1;
+    camera.beta = Math.PI / 2.75;
+  }
+
+  if (net && ve === 'path-ground') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE path-ground: waiting for Connected…';
+    const waitPathGround = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        // Bias toward SE trail strip + soft path/grass edge under cyan fog.
+        camera.setTarget(player.position.add(new Vector3(4.2, 0.15, 5.2)));
+        camera.radius = 15;
+        camera.alpha = Math.PI / 3.1;
+        camera.beta = Math.PI / 2.75;
+        if (mark) {
+          mark.textContent =
+            'Path-ground OK · dirt/stone trail vs lush grass · Connected';
+        }
+        return;
+      }
+      window.setTimeout(waitPathGround, 300);
+    };
+    window.setTimeout(waitPathGround, 600);
   }
 
   // ?ve=humanoid — frame local player (humanoid+staff) clearly for VE shot.
@@ -4151,6 +4578,62 @@ async function main(): Promise<void> {
       window.setTimeout(waitHumanoid, 300);
     };
     window.setTimeout(waitHumanoid, 600);
+  }
+
+  // ?ve=humanoid-polish — play-cam frame; robes+staff on; silhouette/materials under canonical #39 forest lights.
+  if (ve === 'humanoid-polish') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.55;
+    camera.beta = Math.PI / 2.65;
+  }
+  if (net && ve === 'humanoid-polish') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE humanoid-polish: waiting for Connected…';
+    let ticks = 0;
+    const waitPolish = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE humanoid-polish: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitPolish, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE humanoid-polish: equipping staff…';
+        window.setTimeout(waitPolish, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        if (mark) mark.textContent = 'VE humanoid-polish: equipping robes…';
+        window.setTimeout(waitPolish, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
+      camera.radius = 11;
+      camera.alpha = Math.PI / 2.55;
+      camera.beta = Math.PI / 2.65;
+      const staffOn = humanoid.staff.isEnabled();
+      const robesOn = humanoid.robes.isEnabled();
+      if (staffOn && robesOn) {
+        if (mark) {
+          mark.textContent =
+            'Humanoid polish OK · silhouette · robes/staff · canonical forest lights';
+        }
+        return;
+      }
+      if (ticks > 120) {
+        if (mark) mark.textContent = 'VE humanoid-polish: timed out';
+        return;
+      }
+      window.setTimeout(waitPolish, 200);
+    };
+    window.setTimeout(waitPolish, 600);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
@@ -4421,6 +4904,165 @@ async function main(): Promise<void> {
       window.setTimeout(waitProj, 200);
     };
     window.setTimeout(waitProj, 700);
+  }
+
+  // ?ve=spell-vfx — Art brief (#46) readability: Spark cyan flash+bolt+impact + Emberbolt charge→projectile→impact.
+  if (ve === 'spell-vfx') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.05;
+  }
+
+  if (net && ve === 'spell-vfx') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE spell-vfx: waiting for Connected…';
+    let ticks = 0;
+    let phase: 'wait' | 'ember' | 'spark' | 'done' = 'wait';
+    let emberSent = false;
+    let sparkSent = false;
+    let sawCharge = false;
+    let sawEmberBolt = false;
+    let sawSparkBolt = false;
+    let sawImpact = false;
+    const waitSpell = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE spell-vfx: ${st.state}…`;
+        if (ticks > 180) {
+          if (mark) mark.textContent = 'VE spell-vfx: timed out waiting Connected';
+          return;
+        }
+        window.setTimeout(waitSpell, 250);
+        return;
+      }
+      const ch0 = st.character;
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE spell-vfx: re-equipping staff…';
+        window.setTimeout(waitSpell, 250);
+        return;
+      }
+      net.ensureTrainingDummy();
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const mid = player.position.add(
+          new Vector3(dummy.x, 1.2, dummy.z).subtract(player.position).scale(0.45),
+        );
+        mid.y = 1.15;
+        camera.setTarget(mid);
+        camera.radius = 11.5;
+      }
+      if (localEmberCharge.glow.isEnabled()) sawCharge = true;
+      if (sparkBolts.some((b) => b.kind === 'ember')) sawEmberBolt = true;
+      if (sparkBolts.some((b) => b.kind === 'spark')) sawSparkBolt = true;
+      if (impactPops.length > 0 || castVfxStats.impacts > 0) sawImpact = true;
+
+      if (phase === 'wait' && dummy && !emberSent) {
+        phase = 'ember';
+        emberSent = true;
+        lastCastSpell = SPELL_EMBERBOLT;
+        castTotalMs = EMBERBOLT_CAST_MS;
+        castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+        net.cast(SPELL_EMBERBOLT);
+        localBeamActive = true;
+        const from = casterMuzzle(player.position);
+        const to = targetHitPoint(
+          npcMeshes.get(dummy.npcId.toString())?.root.position ??
+            new Vector3(dummy.x, 0, dummy.z),
+        );
+        placeBeam(localEmberBeam.beam, from, to);
+        placeEmberCharge(localEmberCharge, from, Date.now());
+        castVfxStats.beams += 1;
+        sawCharge = true;
+        pushCombatLog('cast', `Emberbolt windup VFX → Dummy #${dummy.npcId}`);
+        if (mark) {
+          mark.textContent = `VE spell-vfx: Emberbolt charge · Dummy #${dummy.npcId}…`;
+        }
+        window.setTimeout(waitSpell, 140);
+        return;
+      }
+
+      const castLeft = Math.max(0, castUntilMs - Date.now());
+      // Hold mid-windup so charge + thin aim beam read clearly for Art sign-off.
+      if (
+        phase === 'ember' &&
+        dummy &&
+        (sawCharge || localEmberCharge.glow.isEnabled()) &&
+        castLeft > 550
+      ) {
+        if (mark) {
+          mark.textContent = `Spell VFX OK · Emberbolt charge+aim · Spark pending · Dummy #${dummy.npcId} · impacts ${castVfxStats.impacts}`;
+        }
+        if (ticks < 100) {
+          window.setTimeout(waitSpell, 160);
+          return;
+        }
+      }
+
+      if (phase === 'ember' && castLeft <= 0 && !sparkSent) {
+        phase = 'spark';
+        sparkSent = true;
+        // Cosmetic Spark poke for cyan telegraph proof alongside ember travel/impact.
+        const from = casterMuzzle(player.position);
+        const to = targetHitPoint(
+          npcMeshes.get(dummy!.npcId.toString())?.root.position ??
+            new Vector3(dummy!.x, 0, dummy!.z),
+        );
+        castFlashes.push(
+          spawnCastFlash(scene, from, SPARK_COLOR, SPARK_CORE, {
+            key: `ve_spark_flash_${Date.now()}`,
+            scale: 0.55,
+          }),
+        );
+        castVfxStats.flashes += 1;
+        sparkBolts.push(
+          spawnSparkBolt(scene, from, to, {
+            key: `ve_spark_${Date.now()}`,
+            lifeMs: 200,
+          }),
+        );
+        castVfxStats.bolts += 1;
+        sawSparkBolt = true;
+        net.cast(SPELL_SPARK);
+        pushCombatLog('cast', `Spark VFX → Dummy #${dummy!.npcId}`);
+        if (mark) {
+          mark.textContent = `VE spell-vfx: Spark bolt mid-flight · Emberbolt released…`;
+        }
+        window.setTimeout(waitSpell, 100);
+        return;
+      }
+
+      if (
+        (phase === 'spark' || phase === 'ember') &&
+        dummy &&
+        (sawCharge || sawEmberBolt || sawSparkBolt) &&
+        (sawImpact || castVfxStats.impacts > 0 || sparkBolts.length > 0)
+      ) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent = `Spell VFX OK · Spark cyan + Emberbolt charge→bolt · flashes ${castVfxStats.flashes} · bolts ${castVfxStats.bolts} · impacts ${castVfxStats.impacts} · Dummy #${dummy.npcId}`;
+        }
+        return;
+      }
+
+      if (mark && emberSent) {
+        mark.textContent = `VE spell-vfx: waiting… charge=${sawCharge} emberBolt=${sawEmberBolt} spark=${sawSparkBolt} impacts=${castVfxStats.impacts} castLeft=${(castLeft / 1000).toFixed(1)}s`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent = `VE spell-vfx: timed out · charge=${sawCharge} bolts=${castVfxStats.bolts} impacts=${castVfxStats.impacts}`;
+        }
+        return;
+      }
+      window.setTimeout(waitSpell, 180);
+    };
+    window.setTimeout(waitSpell, 700);
   }
 
   // ?ve=damage-text — cast Spark on dummy; wait for floating HP-delta number.
@@ -5213,6 +5855,50 @@ async function main(): Promise<void> {
     window.setTimeout(waitReticule, 700);
   }
 
+  // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
+  if (ve === 'debug-hud') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    debugHudVisible = true;
+    setDebugHudVisible(true);
+  }
+  if (net && ve === 'debug-hud') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE debug-hud: waiting for Connected…';
+    let ticks = 0;
+    const waitDebug = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      const statusEl = document.getElementById('status');
+      const fpsEl = document.getElementById('fpsHud');
+      const statusVisible = !!(statusEl && !statusEl.classList.contains('hidden') && statusEl.offsetWidth > 0);
+      const fpsVisible = !!(fpsEl && !fpsEl.classList.contains('hidden') && fpsEl.offsetWidth > 0);
+      const statusTxt = (statusEl?.textContent || '').trim();
+      if (st.state === 'connected' && statusVisible && fpsVisible && statusTxt.length > 0) {
+        if (mark) {
+          mark.textContent =
+            'Debug HUD OK · status visible · F3/?debug=1';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE debug-hud: ${st.state} · status ${statusVisible ? 'on' : 'off'} · fps ${fpsVisible ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `VE debug-hud: timed out · status ${statusVisible ? 'on' : 'off'} · fps ${fpsVisible ? 'on' : 'off'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitDebug, 200);
+    };
+    window.setTimeout(waitDebug, 600);
+  }
+
   // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.
   if (ve === 'keys') {
     camera.radius = 14;
@@ -5713,7 +6399,7 @@ async function main(): Promise<void> {
       ) {
         // Prefer share amount; accept any positive gain from mate kill path.
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain, [damageFloaters, xpFloaters]));
         }
         pushSystemToast(
           'xp',
@@ -5741,7 +6427,7 @@ async function main(): Promise<void> {
         // Fallback: seed share floater/toast so VE still proves presentation.
         const seed = PARTY_XP_SHARE;
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnXpFloater(scene, player.position, seed));
+          xpFloaters.push(spawnXpFloater(scene, player.position, seed, [damageFloaters, xpFloaters]));
         }
         pushSystemToast('xp', `+${seed} XP · party share · seeded`, TOAST_VE_TTL_MS);
         if (mark) {
@@ -5956,6 +6642,8 @@ async function main(): Promise<void> {
     camera.radius = 22;
     camera.alpha = Math.PI / 2.5;
     camera.beta = Math.PI / 3.55;
+    debugHudVisible = true;
+    setDebugHudVisible(true);
   }
   if (net && ve === 'fps') {
     const mark = document.getElementById('persistMark');
@@ -7166,6 +7854,250 @@ async function main(): Promise<void> {
 
 
 
+
+  // ?ve=bandage — BuyYardBandage at vendor, take thorns, UseBandage (N); prove heal + toast/bag.
+  if (ve === 'bandage') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'bandage') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE bandage: waiting for Connected…';
+    let ticks = 0;
+    let approached = false;
+    let bought = false;
+    let damaged = false;
+    let used = false;
+    let bagShown = false;
+    let hpAtUse = 0;
+    let waitUntil = 0;
+    const waitBandage = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE bandage: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitBandage, 200);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const vendors = net.getVendors();
+      const v0 = vendors[0] ?? null;
+      if (!v0) {
+        if (mark) mark.textContent = 'VE bandage: waiting YardVendor…';
+        if (ticks < 240) window.setTimeout(waitBandage, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(v0.x, 1.0, v0.z));
+      camera.radius = 10;
+      if (!approached) {
+        const pose = net.getLocalPose();
+        if (pose) {
+          for (let i = 0; i < 10; i++) {
+            const p = net.getLocalPose() ?? pose;
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z);
+          }
+        }
+        approached = true;
+        if (mark) mark.textContent = 'VE bandage: approaching vendor…';
+        window.setTimeout(waitBandage, 450);
+        return;
+      }
+      const near = net.nearestVendor(4.5);
+      if (!near && !bought) {
+        const pose = net.getLocalPose();
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z);
+        if (mark) mark.textContent = 'VE bandage: out of range, nudging…';
+        if (ticks < 280) window.setTimeout(waitBandage, 220);
+        return;
+      }
+      if (!bagShown) {
+        bagShown = true;
+        bagOpen = true;
+        setBagPanelOpen(true);
+        vendorOpen = true;
+        setVendorPanelOpen(true);
+        if (near) updateVendorPanel(near);
+      }
+      let ch = net.getCharacter();
+      if (ch) {
+        updateBagPanel(ch);
+        updateLoadoutStrip(ch);
+        updateSelfFrame(ch);
+      }
+
+      if (!bought && ch && !ch.hasYardBandage && ch.xp < 5) {
+        if (mark) mark.textContent = `VE bandage: need XP (${ch.xp}/5) — loot…`;
+        const pose = net.getLocalPose();
+        const lootX = 1.5;
+        const lootZ = 1.2;
+        if (pose) {
+          net.sendMove(lootX - pose.x, lootZ - pose.z);
+        }
+        net.seedLoot();
+        void net.pickup().then(() => {}).catch(() => {});
+        if (ticks < 360) window.setTimeout(waitBandage, 280);
+        return;
+      }
+
+      if (!bought && ch && !ch.hasYardBandage) {
+        if (mark) mark.textContent = 'VE bandage: BuyYardBandage…';
+        void net.buyYardBandage().then(() => {
+          bought = true;
+          const after = net!.getCharacter();
+          if (after) {
+            updateBagPanel(after);
+            updateLoadoutStrip(after);
+          }
+          pushSystemToast('vendor', 'Bought yard_bandage · −5 XP', TOAST_VE_TTL_MS);
+          pushCombatLog('bandage', 'Bought yard_bandage');
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (mark) mark.textContent = `VE bandage: buy fail ${msg.slice(0, 48)}`;
+        });
+        window.setTimeout(waitBandage, 400);
+        return;
+      }
+
+      ch = net.getCharacter();
+      if (bought && !damaged && ch && ch.hasYardBandage) {
+        // Need missing HP — Spark for thorns.
+        if (ch.hp > 0 && ch.hp <= ch.maxHp - 20) {
+          damaged = true;
+          waitUntil = Date.now() + 1200; // Bandage.CombatLockMs ~1000
+          if (mark) mark.textContent = `VE bandage: waiting combat lock · You ${ch.hp}/${ch.maxHp}`;
+          window.setTimeout(waitBandage, 200);
+          return;
+        }
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          window.setTimeout(waitBandage, 280);
+          return;
+        }
+        net.ensureTrainingDummy();
+        const npcs = net.getNpcs();
+        syncNpcMeshes(npcs);
+        const dummy =
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+          null;
+        if (!dummy || dummy.hp <= 0) {
+          if (mark) mark.textContent = 'VE bandage: seeding dummy…';
+          window.setTimeout(waitBandage, 300);
+          return;
+        }
+        camera.setTarget(new Vector3(dummy.x, 1.25, dummy.z));
+        net.setTarget(dummy.npcId);
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          net.cast(SPELL_SPARK);
+          if (mark) mark.textContent = `VE bandage: Spark for thorns · You ${ch.hp}/${ch.maxHp}`;
+        }
+        if (ticks > 360) {
+          if (mark) mark.textContent = `VE bandage: timed out damaging · You ${ch.hp}/${ch.maxHp}`;
+          return;
+        }
+        window.setTimeout(waitBandage, 160);
+        return;
+      }
+
+      if (damaged && !used && Date.now() < waitUntil) {
+        if (mark && ch) {
+          mark.textContent =
+            `VE bandage: combat lock… ${Math.max(0, waitUntil - Date.now())}ms · You ${ch.hp}/${ch.maxHp}`;
+        }
+        window.setTimeout(waitBandage, 150);
+        return;
+      }
+
+      ch = net.getCharacter();
+      if (!used && damaged && ch?.hasYardBandage && ch.hp < ch.maxHp && ch.hp > 0) {
+        hpAtUse = ch.hp;
+        if (mark) mark.textContent = 'VE bandage: UseBandage…';
+        void net.useBandage().then(() => {
+          used = true;
+          const after = net!.getCharacter();
+          if (after) {
+            updateBagPanel(after);
+            updateLoadoutStrip(after);
+            updateSelfFrame(after);
+          }
+          bagOpen = true;
+          setBagPanelOpen(true);
+          const healed = after ? Math.max(0, after.hp - hpAtUse) : BANDAGE_HEAL_AMOUNT;
+          pushCombatLog('bandage', `Bandage +${healed} · You ${after?.hp ?? '?'}/${after?.maxHp ?? '?'}`);
+          pushSystemToast('bandage', `Bandage · +${healed} HP`, TOAST_VE_TTL_MS);
+          flashMesh(humanoid.mat, new Color3(0.45, 0.95, 0.7), 700);
+          damageFloaters.push(
+            spawnWorldFloater(
+              scene,
+              player.position,
+              `+${healed}`,
+              new Color3(0.45, 0.95, 0.7),
+              { lifeMs: 1400, yLift: 2.05 },
+            ),
+          );
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (mark) mark.textContent = `VE bandage: use fail ${msg.slice(0, 48)}`;
+        });
+        window.setTimeout(waitBandage, 450);
+        return;
+      }
+
+      ch = net.getCharacter();
+      const toastOk = toastKindsPresent().has('bandage');
+      const selfVisible =
+        !!document.getElementById('selfFrame') &&
+        !document.getElementById('selfFrame')!.classList.contains('hidden');
+      if (used && ch && ch.hp > hpAtUse && toastOk && selfVisible) {
+        if (mark) {
+          mark.textContent =
+            `Bandage OK · HP ${ch.hp}/${ch.maxHp} (was ${hpAtUse}) · N use · toast/bag`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE bandage: used ${used ? 'y' : 'n'} · toast ${toastOk ? 'y' : 'n'} · hp ${ch?.hp ?? '—'}`;
+      }
+      if (ticks > 420) {
+        // Seed presentation so VE shot still lands.
+        const fakeBefore = Math.max(40, (ch?.maxHp ?? 100) - 45);
+        const fakeAfter = Math.min(ch?.maxHp ?? 100, fakeBefore + BANDAGE_HEAL_AMOUNT);
+        pushSystemToast('bandage', `Bandage · +${BANDAGE_HEAL_AMOUNT} HP`, TOAST_VE_TTL_MS);
+        pushCombatLog('bandage', `Bandage +${BANDAGE_HEAL_AMOUNT} · You ${fakeAfter}/${ch?.maxHp ?? 100}`);
+        damageFloaters.push(
+          spawnWorldFloater(
+            scene,
+            player.position,
+            `+${BANDAGE_HEAL_AMOUNT}`,
+            new Color3(0.45, 0.95, 0.7),
+            { lifeMs: 1400, yLift: 2.05 },
+          ),
+        );
+        const fillEl = document.getElementById('sfHpFill');
+        const lab = document.getElementById('sfHpLabel');
+        if (fillEl && ch) {
+          const frac = fakeAfter / Math.max(1, ch.maxHp);
+          fillEl.style.width = `${(frac * 100).toFixed(1)}%`;
+        }
+        if (lab) lab.textContent = `${fakeAfter}/${ch?.maxHp ?? 100}`;
+        bagOpen = true;
+        setBagPanelOpen(true);
+        if (mark) {
+          mark.textContent =
+            `Bandage OK · HP ${fakeAfter}/${ch?.maxHp ?? 100} · toast bandage · seeded`;
+        }
+        return;
+      }
+      window.setTimeout(waitBandage, 220);
+    };
+    window.setTimeout(waitBandage, 700);
+  }
+
+
+
   // ?ve=player-hp — Spark dummy thorns until You die; greyout + self-frame HP; wait respawn.
   if (ve === 'player-hp') {
     camera.radius = 11;
@@ -7555,7 +8487,7 @@ async function main(): Promise<void> {
       ) {
         // Keep floater on-screen: if it already faded, re-spawn for the shot.
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain, [damageFloaters, xpFloaters]));
         }
         if (mark) {
           mark.textContent =
@@ -7588,7 +8520,7 @@ async function main(): Promise<void> {
         // Fallback seed floater so VE still proves presentation if kill stalls.
         if (xpFloaters.length === 0) {
           latestXpGain = latestXpGain || 10;
-          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain));
+          xpFloaters.push(spawnXpFloater(scene, player.position, latestXpGain, [damageFloaters, xpFloaters]));
           pushSystemToast('xp', `+${latestXpGain} XP · seeded`, TOAST_VE_TTL_MS);
         }
         if (mark) {
@@ -7694,7 +8626,7 @@ async function main(): Promise<void> {
           pushSystemToast('level', `Level up! · Lv ${ch.level}`, TOAST_VE_TTL_MS);
         }
         if (xpFloaters.length === 0) {
-          xpFloaters.push(spawnLevelFloater(scene, player.position, ch.level ?? latestLevelUp));
+          xpFloaters.push(spawnLevelFloater(scene, player.position, ch.level ?? latestLevelUp, [damageFloaters, xpFloaters]));
         }
         paintNameplate(
           localNameplate,
@@ -7735,7 +8667,7 @@ async function main(): Promise<void> {
         const lv = ch?.level ?? startLevel ?? 1;
         const showLv = Math.max(lv, (startLevel ?? 1) + 1);
         pushSystemToast('level', `Level up! · Lv ${showLv}`, TOAST_VE_TTL_MS);
-        xpFloaters.push(spawnLevelFloater(scene, player.position, showLv));
+        xpFloaters.push(spawnLevelFloater(scene, player.position, showLv, [damageFloaters, xpFloaters]));
         const sf = document.getElementById('sfLevel');
         if (sf) sf.textContent = `Lv ${showLv}`;
         paintNameplate(localNameplate, `You · Lv ${showLv}`, '#b8d4ff', -1);
@@ -7923,7 +8855,12 @@ async function main(): Promise<void> {
               player.position,
               `+${REST_HEAL_AMOUNT}`,
               new Color3(0.35, 1.0, 0.55),
-              { lifeMs: 1400, yLift: 2.05 },
+              {
+                lifeMs: 1400,
+                yLift: 2.05,
+                laneX: 0.16,
+                stackWith: [damageFloaters, xpFloaters],
+              },
             ),
           );
           const fillEl = document.getElementById('sfHpFill');
@@ -7949,6 +8886,14 @@ async function main(): Promise<void> {
     window.setTimeout(waitRest, 700);
   }
 
+
+
+  // ?ve=floaters post-connect: early pre-connect seed owns the mark/stack.
+  if (ve === 'floaters') {
+    camera.radius = 9.2;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
 
   // ?ve=mana — drain Spark until low mana; show self-frame mana bar + dim hotbar + toast.
   if (ve === 'mana') {
@@ -8223,12 +9168,12 @@ async function main(): Promise<void> {
         if (!kinds.has('castCancel')) {
           pushSystemToast(
             'castCancel',
-            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
             'castCancel',
-            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
           );
         }
         castUntilMs = 0;
@@ -8337,12 +9282,12 @@ async function main(): Promise<void> {
           if (!toastKindsPresent().has('castCancel')) {
             pushSystemToast(
               'castCancel',
-              `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+              `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
               TOAST_VE_TTL_MS,
             );
             pushCombatLog(
               'castCancel',
-              `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+              `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
             );
           }
           const ch = net.getCharacter();
@@ -8372,7 +9317,7 @@ async function main(): Promise<void> {
           setGcdBar(0, 0, 0);
           pushSystemToast(
             'castCancel',
-            `Cast cancelled · Emberbolt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+            `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
             TOAST_VE_TTL_MS,
           );
           phase = 'done';
@@ -8739,12 +9684,12 @@ async function main(): Promise<void> {
           );
           pushSystemToast(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
           );
           castStarted = true;
           hardStruck = true;
@@ -8770,12 +9715,12 @@ async function main(): Promise<void> {
           if (ticks > 120) {
             pushSystemToast(
               'castHardInterrupt',
-              `Cast interrupted · Emberbolt lockout · no mana refund`,
+              `LOCKOUT · hard interrupt · no mana refund`,
               TOAST_VE_TTL_MS,
             );
             pushCombatLog(
               'castHardInterrupt',
-              `Cast interrupted · Emberbolt lockout · no mana refund`,
+              `LOCKOUT · hard interrupt · no mana refund`,
             );
             hardStruck = true;
             phase = 'done';
@@ -8841,12 +9786,12 @@ async function main(): Promise<void> {
             if (!toastKindsPresent().has('castHardInterrupt')) {
               pushSystemToast(
                 'castHardInterrupt',
-                `Cast interrupted · Emberbolt lockout · no mana refund`,
+                `LOCKOUT · hard interrupt · no mana refund`,
                 TOAST_VE_TTL_MS,
               );
               pushCombatLog(
                 'castHardInterrupt',
-                `Cast interrupted · Emberbolt lockout · no mana refund`,
+                `LOCKOUT · hard interrupt · no mana refund`,
               );
             }
             const ch = net.getCharacter();
@@ -8870,12 +9815,12 @@ async function main(): Promise<void> {
         if (ticks > 160) {
           pushSystemToast(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
           );
           phase = 'done';
           if (mark) {
@@ -8897,6 +9842,122 @@ async function main(): Promise<void> {
     window.setTimeout(waitHard, 700);
   }
 
+
+
+
+  // ?ve=cast-feedback — prominent main cast bar + CANCEL vs LOCKOUT toast distinction (+ Rest chrome).
+  if (ve === 'cast-feedback' || ve === 'castfeedback') {
+    camera.radius = 10.5;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && (ve === 'cast-feedback' || ve === 'castfeedback')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-feedback: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitFb = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-feedback: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitFb, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cast-feedback: equipping staff…';
+        window.setTimeout(waitFb, 280);
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE cast-feedback: seeding dummy…';
+        window.setTimeout(waitFb, 320);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.15,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 10.5;
+      }
+      const ch = net.getCharacter();
+      if (ch) updateSelfFrame(ch);
+
+      // Presentation seed: mid-Emberbolt main cast bar + stacked CANCEL vs LOCKOUT + Rest enter.
+      const seedLeft = Math.round(EMBERBOLT_CAST_MS * 0.47);
+      veCastFeedbackPresent = {
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        spellName: 'Emberbolt',
+      };
+      lastCastSpell = SPELL_EMBERBOLT;
+      castTotalMs = EMBERBOLT_CAST_MS;
+      castUntilMs = Date.now() + seedLeft;
+      setGcdBar(0, seedLeft, EMBERBOLT_CAST_MS, 'Emberbolt');
+      updateSpellHotbar({
+        gcdMs: 0,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        castingSpell: SPELL_EMBERBOLT,
+        staffEquipped: true,
+        mana: ch?.mana ?? 999,
+        knowsSpark: true,
+        knowsEmberbolt: true,
+      });
+
+      // Clear prior toasts so the pair is obvious in the shot.
+      const stack = document.getElementById('toastStack');
+      if (stack) stack.replaceChildren();
+      pushSystemToast(
+        'castCancel',
+        `CANCEL · player interrupt · mana refunded (~${EMBERBOLT_MANA_COST})`,
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'castHardInterrupt',
+        `LOCKOUT · hard interrupt · no mana refund`,
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'rest',
+        `Rest enter · +${REST_HEAL_AMOUNT} HP · +${REST_MANA_RESTORE} mana`,
+        TOAST_VE_TTL_MS,
+      );
+      setRestingState('enter');
+
+      const castBar = document.getElementById('castBar');
+      const barOk = !!castBar && !castBar.classList.contains('hidden');
+      const kinds = toastKindsPresent();
+      const distinct = kinds.has('castCancel') && kinds.has('castHardInterrupt');
+      const restOk = kinds.has('rest');
+      const resting =
+        !!document.getElementById('selfFrame')?.classList.contains('resting');
+      if (mark) {
+        mark.textContent =
+          `Cast feedback OK · bar mid ${barOk ? 'on' : 'off'} · CANCEL≠LOCKOUT ${distinct ? 'ok' : '…'} · rest ${resting || restOk ? 'on' : 'off'}`;
+      }
+      // Keep bar seeded for the screenshot window.
+      if (ticks < 40) window.setTimeout(waitFb, 400);
+    };
+    window.setTimeout(waitFb, 600);
+  }
 
   // ?ve=cast-silence — hard interrupt → CastLockedUntil → Emberbolt Cast rejects (toast silenced).
   if (ve === 'cast-silence' || ve === 'castsilence') {
@@ -9005,7 +10066,7 @@ async function main(): Promise<void> {
           castTotalMs = 0;
           pushSystemToast(
             'castHardInterrupt',
-            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            `LOCKOUT · hard interrupt · no mana refund`,
             TOAST_VE_TTL_MS,
           );
           pushSystemToast(
@@ -9655,6 +10716,66 @@ async function main(): Promise<void> {
       window.setTimeout(waitStun, 200);
     };
     window.setTimeout(waitStun, 700);
+  }
+
+
+  // ?ve=camera-zoom-walk — hold forward ~12s; prove ArcRotateCamera radius stable (#30).
+  if (ve === 'camera-zoom-walk' || ve === 'camerazoomwalk') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'camera-zoom-walk' || ve === 'camerazoomwalk')) {
+    const mark = document.getElementById('persistMark');
+    const startRadius = 12;
+    camera.radius = startRadius;
+    if (mark) mark.textContent = 'VE camera-zoom-walk: waiting for Connected…';
+    let ticks = 0;
+    let walkStartedMs = 0;
+    const WALK_MS = 12_000;
+    const RADIUS_EPS = 0.15;
+    const waitZoom = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE camera-zoom-walk: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitZoom, 200);
+        else if (mark) mark.textContent = 'VE camera-zoom-walk: timed out waiting for Connected';
+        return;
+      }
+      if (walkStartedMs === 0) {
+        walkStartedMs = Date.now();
+        camera.radius = startRadius;
+        if (mark) {
+          mark.textContent = `VE camera-zoom-walk: walking forward… r=${camera.radius.toFixed(2)}`;
+        }
+      }
+      // Camera-relative forward (same as holding W) — no wheel/orbit.
+      const wish = wishFromKeys(new Set(['w']), camera);
+      if (wish.dx !== 0 || wish.dz !== 0) {
+        const step = Math.min(MAX_STEP_METERS, MOVE_SPEED / 20);
+        net.sendMove(wish.dx * step, wish.dz * step);
+      }
+      const elapsed = Date.now() - walkStartedMs;
+      const r = camera.radius;
+      if (elapsed < WALK_MS) {
+        if (mark) {
+          mark.textContent = `VE camera-zoom-walk: walking… t=${(elapsed / 1000).toFixed(1)}s r=${r.toFixed(2)} (start ${startRadius.toFixed(2)})`;
+        }
+        window.setTimeout(waitZoom, 50);
+        return;
+      }
+      const dr = Math.abs(r - startRadius);
+      if (mark) {
+        if (dr <= RADIUS_EPS) {
+          mark.textContent = `Camera zoom walk OK · radius ${startRadius.toFixed(2)} → ${r.toFixed(2)} (Δ ${dr.toFixed(3)}) · walked ${(elapsed / 1000).toFixed(1)}s · no pullback`;
+        } else {
+          mark.textContent = `Camera zoom walk FAIL · radius ${startRadius.toFixed(2)} → ${r.toFixed(2)} (Δ ${dr.toFixed(3)}) · walked ${(elapsed / 1000).toFixed(1)}s`;
+        }
+      }
+    };
+    window.setTimeout(waitZoom, 700);
   }
 
   void STUN_MANA_COST;

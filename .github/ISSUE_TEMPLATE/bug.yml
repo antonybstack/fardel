@@ -1,0 +1,61 @@
+name: Bug report
+description: Something broken or flaky — repro, expected vs actual
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        File a concrete bug. Prefer a minimal repro and environment details so seats can pick it up.
+  - type: textarea
+    id: repro
+    attributes:
+      label: Repro steps
+      description: Minimal steps to reproduce. Numbered list preferred.
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happens instead (include errors / logs if useful).
+    validations:
+      required: true
+  - type: input
+    id: seat_env
+    attributes:
+      label: Seat / env
+      description: Which seat, host, or env (e.g. local box, play.sparkify.dev, seat ports).
+      placeholder: e.g. local seat-A / play.sparkify.dev
+    validations:
+      required: false
+  - type: dropdown
+    id: ve
+    attributes:
+      label: VE (visual evidence)
+      description: Is a screenshot / recording needed to confirm the bug?
+      options:
+        - "Not needed"
+        - "Helpful"
+        - "Required"
+      default: 0
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Paste links, logs, or attach screenshots if available.
+    validations:
+      required: false

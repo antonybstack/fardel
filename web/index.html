@@ -56,7 +56,8 @@
         <span class="sfManaLabel" id="sfManaLabel">—</span>
       </div>
       <div id="sfBuff" class="sfBuff hidden">Tonic —</div>
-      <div class="sfHint">GCD on hotbar · B bag · V tonic · R rest · mana pool</div>
+      <div id="sfRest" class="sfRest hidden" aria-live="polite">Resting…</div>
+      <div class="sfHint">GCD on hotbar · B bag · V tonic · N bandage · R rest · mana pool</div>
     </div>
     <div id="loadoutStrip" class="hidden" aria-label="Loadout strip">
       <div class="loChip" id="loStaff" data-kind="staff">
@@ -89,7 +90,12 @@
         <span class="loLabel">Tonic</span>
         <span class="loState" id="loTonicState">—</span>
       </div>
-    </div>
+          <div class="loChip" id="loBandage" data-kind="bandage">
+        <span class="loIcon bandage" aria-hidden="true">🩹</span>
+        <span class="loLabel">Bandage</span>
+        <span class="loState" id="loBandageState">—</span>
+      </div>
+</div>
     <div id="bagPanel" class="hidden" aria-label="Bag / loadout">
       <div class="bagHead">
         <span class="bagTitle">Bag / loadout</span>
@@ -104,7 +110,8 @@
       <div class="bagRow"><span>Mana</span><span id="bagMana">—</span></div>
       <div class="bagRow"><span>Ember shard</span><span id="bagShard">—</span></div>
       <div class="bagRow"><span>Yard tonic</span><span id="bagTonic">—</span></div>
-      <div class="bagFoot">Casts need staff + known spell · U/I staff · J/K robes · E vendor · V use tonic</div>
+      <div class="bagRow"><span>Yard bandage</span><span id="bagBandage">—</span></div>
+      <div class="bagFoot">Casts need staff + known spell · U/I staff · J/K robes · E vendor · V tonic · N bandage</div>
     </div>
     <div id="keysLegend" class="hidden" aria-label="Keybind legend">
       <div class="bagHead">
@@ -127,6 +134,7 @@
           <span class="klChip"><kbd>E</kbd> vendor</span>
           <span class="klChip"><kbd>F</kbd> pickup</span>
           <span class="klChip"><kbd>V</kbd> tonic</span>
+          <span class="klChip"><kbd>N</kbd> bandage</span>
           <span class="klChip"><kbd>R</kbd> rest</span>
         </div>
         <div class="klRow">
@@ -136,9 +144,10 @@
           <span class="klChip"><kbd>Y</kbd> cancel trade</span>
           <span class="klChip"><kbd>Enter</kbd> say</span>
           <span class="klChip"><kbd>H</kbd> this legend</span>
+          <span class="klChip"><kbd>F3</kbd> debug HUD</span>
         </div>
       </div>
-      <div class="bagFoot">/p party · /w hex whisper · combat log right · FPS overlay · system toasts top</div>
+      <div class="bagFoot">/p party · /w hex whisper · combat log right · F3 debug HUD · system toasts top</div>
     </div>
     <div id="vendorPanel" class="hidden" aria-label="Vendor">
       <div class="bagHead">
@@ -147,13 +156,14 @@
       </div>
       <div class="bagRow"><span>Buy shard</span><span id="vendorBuyXp">5 XP</span></div>
       <div class="bagRow"><span>Sell shard</span><span id="vendorSellXp">+5 XP</span></div>
-      <div class="bagFoot">E nearby: no shard → buy · has shard → sell</div>
+      <div class="bagRow"><span>Buy bandage</span><span id="vendorBuyBandageXp">5 XP</span></div>
+      <div class="bagFoot">E nearby: no shard → buy · has shard → sell · N use bandage</div>
     </div>
     <div id="combatLog" aria-label="Combat log">
       <div class="clHead">Combat log</div>
       <div id="combatLogLines" class="clLines"></div>
     </div>
-    <div id="fpsHud" aria-label="FPS performance overlay">
+    <div id="fpsHud" class="hidden" aria-label="FPS performance overlay">
       <div class="fpsRow">
         <span class="fpsLabel">FPS</span>
         <span id="fpsValue" class="fpsValue">—</span>
@@ -186,7 +196,7 @@
     </div>
     <div id="toastStack" aria-live="polite" aria-label="System toasts"></div>
     <div id="hud">
-      <div id="status">Booting…</div>
+      <div id="status" class="hidden">Booting…</div>
       <div id="persistMark" class="persistMark"></div>
       <div id="partyFrames" class="hidden" aria-label="Party member frames"></div>
       <div id="targetFrame" class="hidden" aria-label="Selected target">
