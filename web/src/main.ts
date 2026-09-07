@@ -4920,11 +4920,12 @@ async function main(): Promise<void> {
         st.state === 'connected' &&
         dummy &&
         ringOn &&
+        markerOn &&
         selectedTargetId === dummy.npcId
       ) {
         okTicks += 1;
         if (mark) {
-          mark.textContent = `Reticule OK · Dummy #${dummy.npcId} · gold ring${markerOn ? '+marker' : ''} · HP ${dummy.hp}/${dummy.maxHp}`;
+          mark.textContent = `Reticule OK · Dummy #${dummy.npcId} · gold ring+marker · HP ${dummy.hp}/${dummy.maxHp}`;
         }
         // Hold a few ticks so pulse/marker settle in the VE screenshot.
         if (okTicks < 8 && ticks < 140) {
@@ -4933,15 +4934,16 @@ async function main(): Promise<void> {
         return;
       }
       if (mark && st.state === 'connected') {
-        mark.textContent = `VE reticule: Connected · dummy ${dummy ? 'yes' : 'no'} · ring ${ringOn ? 'on' : 'off'} (waiting…)`;
+        mark.textContent = `VE reticule: Connected · dummy ${dummy ? 'yes' : 'no'} · ring ${ringOn ? 'on' : 'off'} · marker ${markerOn ? 'on' : 'off'} (waiting…)`;
       }
       if (ticks > 160) {
-        if (mark) mark.textContent = 'VE reticule: timed out waiting for selection reticule';
+        if (mark) mark.textContent = 'VE reticule: timed out waiting for selection reticule + marker';
         return;
       }
       window.setTimeout(waitReticule, 200);
     };
     window.setTimeout(waitReticule, 700);
+  }
 
   // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.
   if (ve === 'keys') {
