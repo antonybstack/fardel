@@ -109,6 +109,10 @@ Validate early:
 
 Reuses the existing **`sparkify`** cloudflared LaunchDaemon (`com.cloudflare.sparkify`), config in `/etc/cloudflared/config.yml` (mirror: `~/.cloudflared/config.fardel.yml`). Apex `sparkify.dev` / `sparkify.com` still → `:80`. SpacetimeDB must be **2.10+** if the local data dir was created by 2.10.
 
+### Play on Pages
+
+`play.sparkify.dev` is served by Cloudflare Pages project `fardel` (also https://fardel.pages.dev). The Mac tunnel no longer routes `play`.
+
 `play.sparkify.dev` no longer needs tunnel ingress (DNS points at Pages). **Follow-up:** remove the `play.sparkify.dev` → `:8787` ingress block from the Mac cloudflared configs / LaunchDaemon when convenient (needs sudo on the Studio); interim Mac tunnel can drop play ingress without affecting Pages.
 
 ### Play placeholder (Pages)
