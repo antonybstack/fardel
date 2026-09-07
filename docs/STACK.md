@@ -10,8 +10,8 @@ Locked for Fardel v1. Change only with an explicit architecture decision record.
 | Server module | **C# → WASM** (.NET 10 NativeAOT-LLVM preferred) | Language symmetry; SpacetimeDB supports .NET 10 AOT alongside legacy .NET 8 |
 | Shared rules | **Pure C# class library** (no `UnityEngine`) | Same move/combat/skill math on module + client prediction |
 | C# / .NET target | **.NET 10 + C# 14** where the host allows | Span-first, zero-heap hot paths; SpacetimeDB module prefers .NET 10 NativeAOT-LLVM |
-| Client host | **Unity 6.6+** | Official SpacetimeDB C# / Unity path; WebGPU no longer experimental |
-| Graphics | **WebGPU primary, WebGL 2 fallback** | Compute + modern GPU path; keep WebGL2 for reach |
+| Client host | **Unity 6.6+** (v1 host) | Official SpacetimeDB C# path; not forever — see [ADR 0002](adr/0002-client-host-webgpu.md) |
+| Graphics | **WebGPU primary, WebGL 2 fallback** | Fast path + playable fallback; ship criteria = fallback ([ADR 0002](adr/0002-client-host-webgpu.md)) |
 | Client compile | **IL2CPP** web builds | No Mono-interpreted browser client |
 | Net SDK | **SpacetimeDB C# SDK** | Call `FrameTick()` every frame; do not invent a second protocol |
 | Presentation law | **Data-oriented** | GPU instancing + VAT/compute skinning for crowds; zero alloc in hot loops |
@@ -58,6 +58,10 @@ Fardel C# is written for **high-throughput, low-allocation** code — not “idi
 - Unity Hub + Unity 6.6+ with Web platform support
 - `gh` + this repo as source of truth
 - Headless / scripted proofs before art (see [MVP.md](MVP.md))
+
+## Client host policy
+
+Unity is the **v1** browser host. WebGPU preferred; **WebGL 2 must stay playable**. Replace Unity only after Shared is stable and a documented kill criterion fails (payload, crowd ceiling, or funded custom client). Details: [ADR 0002](adr/0002-client-host-webgpu.md).
 
 ## Reference projects
 

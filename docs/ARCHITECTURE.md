@@ -87,7 +87,8 @@ Unity may not expose every desktop .NET 10 API — keep Shared on full .NET 10 s
 
 - Hot paths allocate **nothing** on the heap (Span/stackalloc/pooling; no LINQ; no per-frame `new`; see C# hot-path rules).
 - Crowds: GPU instancing; animation via VAT or compute — not 300 full Mecanim skeletons.
-- Treat Unity as **host** (input, UI, builds). Entity presentation should feel closer to a batched hordes renderer than a deep `MonoBehaviour` hierarchy.
+- Treat Unity as **host** (input, UI, builds) per [ADR 0002](adr/0002-client-host-webgpu.md). Entity presentation should feel closer to a batched hordes renderer than a deep `MonoBehaviour` hierarchy.
+- **WebGPU** preferred; **WebGL 2** remains a playable ship path. Profile player/web builds, not editor FPS.
 - Profile Web builds early; editor FPS lies.
 
 ## Identity & persistence

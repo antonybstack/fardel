@@ -64,3 +64,8 @@ Treat **.NET 10 / C# 14 Span-first, zero-heap hot paths** as a first-class desig
 ## AOI (interest management)
 
 Fardel follows dek/hordes **bucket culling + dynamic tick** ideas via SpacetimeDB subscriptions: stable chunks, Moore neighborhood, hysteresis, pose-rate load shed. Decision: [ADR 0001](adr/0001-aoi-interest.md).
+
+## Client host / WebGPU
+
+Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible later. WebGL2 stays playable. Decision: [ADR 0002](adr/0002-client-host-webgpu.md).
+

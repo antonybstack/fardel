@@ -21,6 +21,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/LEARNINGS.md](docs/LEARNINGS.md) | What we take from prior POCs + hordes/dek |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Cloudflare / sparkify.dev / Mac tunnel |
 | [docs/adr/0001-aoi-interest.md](docs/adr/0001-aoi-interest.md) | AOI: chunk neighborhood, hysteresis, load shed |
+| [docs/adr/0002-client-host-webgpu.md](docs/adr/0002-client-host-webgpu.md) | Unity v1 host; WebGPU + WebGL2; exit criteria |
 
 ## Prior art (not this repo)
 
