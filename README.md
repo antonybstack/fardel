@@ -17,6 +17,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Netcode, AOI, sim authority, perf laws |
 | [docs/MVP.md](docs/MVP.md) | Slice plan to a playable yard |
 | [docs/LEARNINGS.md](docs/LEARNINGS.md) | What we take from prior POCs + hordes/dek |
+| [docs/DEPLOY.md](docs/DEPLOY.md) | Cloudflare / sparkify.dev / Mac tunnel |
 
 ## Prior art (not this repo)
 
