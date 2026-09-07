@@ -449,7 +449,8 @@ type SystemToastKind =
   | 'xp'
   | 'equip'
   | 'death'
-  | 'respawn';
+  | 'respawn'
+  | 'say';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -476,7 +477,9 @@ function pushSystemToast(
               ? 'EQ'
               : kind === 'death'
                 ? 'DEATH'
-                : 'RESPAWN';
+                : kind === 'respawn'
+                  ? 'RESPAWN'
+                  : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -498,6 +501,112 @@ function toastKindsPresent(): Set<string> {
     if (k) kinds.add(k);
   }
   return kinds;
+}
+
+const CHAT_LOG_MAX = 10;
+let chatComposing = false;
+
+function setChatComposing(open: boolean): void {
+  chatComposing = open;
+  const panel = document.getElementById('chatPanel');
+  const input = document.getElementById('chatInput') as HTMLInputElement | null;
+  if (panel) panel.classList.toggle('composing', open);
+  if (!input) return;
+  if (open) {
+    input.focus();
+    input.select();
+  } else {
+    input.blur();
+    input.value = '';
+  }
+}
+
+/** Client-only local say: echo into chat strip + short toast (no server Chat table yet). */
+function pushChatSay(who: string, text: string, toastTtlMs: number = TOAST_TTL_MS): void {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const root = document.getElementById('chatLines');
+  if (root) {
+    const line = document.createElement('div');
+    line.className = 'chatLine say';
+    line.setAttribute('data-kind', 'say');
+    const time = new Date();
+    const hh = String(time.getHours()).padStart(2, '0');
+    const mm = String(time.getMinutes()).padStart(2, '0');
+    const ss = String(time.getSeconds()).padStart(2, '0');
+    const safeWho = who.replace(/</g, '&lt;');
+    const safeText = trimmed.replace(/</g, '&lt;');
+    line.innerHTML =
+      `<span class="chatTag">[${hh}:${mm}:${ss}]</span>` +
+      `<span class="chatWho">${safeWho}</span>` +
+      safeText;
+    root.appendChild(line);
+    while (root.children.length > CHAT_LOG_MAX) {
+      root.removeChild(root.firstChild!);
+    }
+    root.scrollTop = root.scrollHeight;
+  }
+  pushSystemToast('say', `${who}: ${trimmed}`, toastTtlMs);
+}
+
+function chatSayKindsPresent(): Set<string> {
+  const root = document.getElementById('chatLines');
+  const kinds = new Set<string>();
+  if (!root) return kinds;
+  for (const el of Array.from(root.children)) {
+    const k = (el as HTMLElement).getAttribute('data-kind');
+    if (k) kinds.add(k);
+  }
+  return kinds;
+}
+
+function bindChatUi(opts: { whoLabel: () => string }): () => void {
+  const form = document.getElementById('chatForm') as HTMLFormElement | null;
+  const input = document.getElementById('chatInput') as HTMLInputElement | null;
+  if (!form || !input) return () => {};
+
+  const onKey = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    const typingInField =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      (target?.isContentEditable ?? false);
+
+    if (e.key === 'Escape' && chatComposing) {
+      e.preventDefault();
+      setChatComposing(false);
+      return;
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (chatComposing) {
+        // Form submit handles send when focused on input.
+        if (typingInField && target === input) return;
+        e.preventDefault();
+        form.requestSubmit();
+        return;
+      }
+      if (typingInField) return;
+      if (e.repeat) return;
+      e.preventDefault();
+      setChatComposing(true);
+      return;
+    }
+  };
+
+  const onSubmit = (e: Event) => {
+    e.preventDefault();
+    const text = input.value;
+    pushChatSay(opts.whoLabel(), text);
+    setChatComposing(false);
+  };
+
+  window.addEventListener('keydown', onKey, true);
+  form.addEventListener('submit', onSubmit);
+  return () => {
+    window.removeEventListener('keydown', onKey, true);
+    form.removeEventListener('submit', onSubmit);
+  };
 }
 
 /** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
@@ -692,7 +801,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · combat log right · FPS overlay · system toasts top',
+      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · B bag · U/I staff · J/K robes · P invite/accept · O leave · Enter say · combat log right · FPS overlay · system toasts top',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -847,6 +956,7 @@ function bindInput(opts: {
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
+    if (chatComposing) return;
     if (e.repeat) return;
     const k = e.key.toLowerCase();
     if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
@@ -1613,6 +1723,13 @@ async function main(): Promise<void> {
     onToggleBag: () => {
       bagOpen = !bagOpen;
       setBagPanelOpen(bagOpen);
+    },
+  });
+
+  bindChatUi({
+    whoLabel: () => {
+      const hex = latestStatus.state === 'connected' ? latestStatus.identityHex : '';
+      return hex ? `You(${hex.slice(0, 6)})` : 'You';
     },
   });
 
@@ -3536,6 +3653,73 @@ async function main(): Promise<void> {
       window.setTimeout(waitToasts, 220);
     };
     window.setTimeout(waitToasts, 700);
+  }
+
+
+  // ?ve=chat — open say strip + seed local echo + toast.
+  if (ve === 'chat') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'chat') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE chat: waiting for Connected…';
+    let ticks = 0;
+    let phase: 'wait' | 'seed' | 'done' = 'wait';
+    const waitChat = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE chat: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitChat, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 13;
+      const kinds = chatSayKindsPresent();
+      const toastOk = toastKindsPresent().has('say');
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      if ((kinds.has('say') && toastOk && lineCount >= 1) || phase === 'done') {
+        setChatComposing(true);
+        const input = document.getElementById('chatInput') as HTMLInputElement | null;
+        if (input) input.value = 'Yard looks clear.';
+        if (mark) {
+          mark.textContent =
+            `Chat say OK · lines ${lineCount} · local echo + toast · Enter strip`;
+        }
+        phase = 'done';
+        return;
+      }
+      if (phase === 'wait') {
+        phase = 'seed';
+        if (mark) mark.textContent = 'VE chat: seeding local say…';
+        window.setTimeout(waitChat, 180);
+        return;
+      }
+      if (phase === 'seed') {
+        const who = `You(${st.identityHex.slice(0, 6)})`;
+        pushChatSay(who, 'Hello yard — local say.', TOAST_VE_TTL_MS);
+        pushChatSay(who, 'Enter opens chat · Esc closes.', TOAST_VE_TTL_MS);
+        phase = 'done';
+        window.setTimeout(waitChat, 200);
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE chat: lines ${lineCount} · toast ${toastOk ? 'say' : '∅'} · phase ${phase}`;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          mark.textContent =
+            `VE chat: timed out · lines ${lineCount} · toast ${toastOk ? 'say' : '∅'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitChat, 220);
+    };
+    window.setTimeout(waitChat, 700);
   }
 
 

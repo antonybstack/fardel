@@ -89,3 +89,6 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 - Robes mesh follows `Character.robesEquipped` like staff: hide hood/skirt/shoulders group; tint torso/arms drab when unequipped (casts remain staff-gated).
 
 - Combat log is client-only Cosmetics over existing signals (cast intent, npc HP deltas, Character equip flips, PartyMember size) — no new combat-event table; keeps module/smokes unchanged.
+
+- Chat/say strip is client-only Cosmetics: Enter compose → local echo in bottom-left panel + toast `say`. Prefer this over a Chat/Say reducer until multi-client chat is required (avoids module publish + bindings churn).
+

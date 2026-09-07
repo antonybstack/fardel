@@ -81,6 +81,17 @@
         · npcs <span id="fpsNpcs">0</span>
       </div>
     </div>
+    <div id="chatPanel" aria-label="Chat say">
+      <div class="chatHead">
+        <span class="chatTitle">Chat</span>
+        <span class="chatHint">Enter · local say</span>
+      </div>
+      <div id="chatLines" class="chatLines"></div>
+      <form id="chatForm" class="chatForm" autocomplete="off">
+        <span class="chatPrompt">Say</span>
+        <input id="chatInput" type="text" maxlength="120" spellcheck="false" placeholder="type a message…" />
+      </form>
+    </div>
     <div id="toastStack" aria-live="polite" aria-label="System toasts"></div>
     <div id="hud">
       <div id="status">Booting…</div>

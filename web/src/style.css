@@ -831,3 +831,135 @@ body {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-6px); }
 }
+
+
+/* Compact chat / local say strip — bottom-left above loadout (client-only). */
+#chatPanel {
+  position: absolute;
+  left: 12px;
+  bottom: 118px;
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 48vw);
+  max-height: min(168px, 28vh);
+  background: rgba(8, 12, 24, 0.82);
+  border: 1px solid rgba(140, 180, 255, 0.28);
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#chatPanel.composing {
+  pointer-events: auto;
+  border-color: rgba(140, 180, 255, 0.55);
+  box-shadow: 0 0 16px rgba(80, 130, 255, 0.22);
+}
+
+.chatHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 9px 3px;
+  color: #9ec0ff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(140, 180, 255, 0.16);
+  pointer-events: none;
+}
+
+.chatHint {
+  opacity: 0.7;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-size: 10px;
+  color: #a8b8d8;
+}
+
+.chatLines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 9px 6px;
+  overflow: hidden;
+  max-height: min(110px, 18vh);
+  pointer-events: none;
+}
+
+.chatLine {
+  color: #c8d6f0;
+  font-size: 11px;
+  line-height: 1.35;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatLine.say {
+  color: #d4e4ff;
+}
+
+.chatLine .chatWho {
+  color: #9ec0ff;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.chatLine .chatTag {
+  opacity: 0.7;
+  margin-right: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.chatForm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 6px;
+  border-top: 1px solid rgba(140, 180, 255, 0.14);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+#chatPanel.composing .chatForm {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.chatPrompt {
+  color: #9ec0ff;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+#chatInput {
+  flex: 1;
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(140, 180, 255, 0.28);
+  border-radius: 5px;
+  color: #e8eefc;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 7px;
+  outline: none;
+}
+
+#chatInput:focus {
+  border-color: rgba(140, 180, 255, 0.65);
+}
+
+.sysToast.say {
+  border-color: rgba(140, 180, 255, 0.5);
+}
+.sysToast.say .toastTag { color: #9ec0ff; }
