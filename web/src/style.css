@@ -542,15 +542,24 @@ body {
 
 .sfBuff {
   margin-top: 4px;
-  color: #7dffb5;
+  color: #b89a6e;
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 0 8px rgba(80, 255, 160, 0.45);
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 .sfBuff.hidden { display: none; }
 .sfBuff.active {
-  color: #a8ffd0;
+  color: #e0b878;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.8),
+    0 0 6px rgba(180, 120, 50, 0.28);
+  animation: sfBuffPulse 1.7s ease-in-out infinite;
+}
+@keyframes sfBuffPulse {
+  0%, 100% { opacity: 0.86; }
+  50% { opacity: 1; }
 }
 
 /* Rest enter/exit — brief resting chrome on self-frame (client-only). */
@@ -601,23 +610,32 @@ body {
   align-items: center;
   gap: 5px;
   padding: 5px 8px;
-  background: rgba(8, 12, 24, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(10, 8, 6, 0.94);
+  border: 1px solid rgba(110, 98, 78, 0.42);
   border-radius: 7px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  /* Matte plate — no plastic specular highlight */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.48);
   min-width: 0;
 }
 
 .loChip.on {
-  border-color: rgba(94, 214, 138, 0.65);
-  background: rgba(12, 20, 16, 0.94);
+  /* Warm bronze equipped/owned */
+  border-color: rgba(196, 148, 88, 0.82);
+  background: rgba(22, 15, 9, 0.96);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.48),
+    inset 0 0 0 1px rgba(196, 148, 88, 0.2);
 }
 
 .loChip.off {
-  opacity: 0.65;
-  filter: grayscale(0.5);
-  border-color: rgba(220, 70, 60, 0.5);
-  background: rgba(18, 8, 8, 0.92);
+  /* Cool hollow empty/missing — not red alarm */
+  opacity: 0.82;
+  filter: none;
+  border-color: rgba(110, 140, 178, 0.4);
+  background: rgba(8, 12, 20, 0.52);
+  box-shadow:
+    inset 0 0 0 1px rgba(90, 120, 160, 0.14),
+    0 1px 4px rgba(0, 0, 0, 0.28);
 }
 
 .loIcon {
@@ -639,31 +657,51 @@ body {
 }
 
 .loIcon.ember {
-  color: #ffb347;
+  color: #e0a050;
 }
 
 .loIcon.shard {
-  color: #ff9a3c;
+  color: #d4924a;
+}
+
+.loIcon.tonic {
+  color: #c9a060;
+}
+
+.loIcon.bandage {
+  color: #c8b8a0;
+}
+
+.loChip.off .loIcon {
+  color: #7a90b0;
+  opacity: 0.75;
 }
 
 .loLabel {
   color: #f0f6ff;
   font-size: 11px;
   font-weight: 650;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+
+.loChip.off .loLabel {
+  color: #a8b8d0;
 }
 
 .loState {
   color: #aec4e8;
   font-size: 10px;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
 
 .loChip.on .loState {
-  color: #6ee89a;
+  color: #d4a878;
 }
 
 .loChip.off .loState {
-  color: #ec564c;
+  color: #8aa0c0;
 }
 
 /* Bag / loadout panel — toggled with B. */
