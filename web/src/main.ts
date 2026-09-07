@@ -2128,12 +2128,12 @@ function paintNameplate(
   ctx.clearRect(0, 0, w, h);
   const showPip = hpFrac >= 0;
   const textY = showPip ? 34 : 48;
-  // Soft dark pill so labels read over bright sky / trees.
+  // Opaque dark pill for legibility over cyan fog / lush grass.
   const pillW = Math.min(236, 40 + label.length * 20);
   const pillH = showPip ? 78 : 56;
   const pillX = (w - pillW) / 2;
   const pillY = showPip ? 8 : 20;
-  ctx.fillStyle = 'rgba(8,10,16,0.55)';
+  ctx.fillStyle = 'rgba(6,8,14,0.88)';
   ctx.beginPath();
   const r = 14;
   ctx.moveTo(pillX + r, pillY);
@@ -2143,12 +2143,17 @@ function paintNameplate(
   ctx.arcTo(pillX, pillY, pillX + pillW, pillY, r);
   ctx.closePath();
   ctx.fill();
+  ctx.shadowColor = 'rgba(0,0,0,0.85)';
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 2;
   ctx.font = 'bold 40px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.lineWidth = 7;
-  ctx.strokeStyle = 'rgba(0,0,0,0.92)';
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = 'rgba(0,0,0,0.96)';
   ctx.strokeText(label, w / 2, textY);
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
   ctx.fillStyle = fillCss;
   ctx.fillText(label, w / 2, textY);
   if (showPip) {
@@ -5979,6 +5984,77 @@ async function main(): Promise<void> {
       window.setTimeout(waitPlates, 200);
     };
     window.setTimeout(waitPlates, 700);
+  }
+
+  // ?ve=nameplate-read — prove nameplate legibility over #39 fog at 8–20m play cam.
+  if (ve === 'nameplate-read') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'nameplate-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE nameplate-read: waiting for Connected + Dummy…';
+    let ticks = 0;
+    const waitNameplateRead = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const remotes = net.getRemotes();
+      syncNpcMeshes(npcs);
+      syncRemoteMeshes(remotes);
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 10 || dist > 18) {
+          const targetDist = 14;
+          const step = Math.min(MAX_STEP_METERS, Math.abs(dist - targetDist));
+          if (dist < targetDist) {
+            net.sendMove(-(dx / dist) * step, -(dz / dist) * step);
+          } else {
+            net.sendMove((dx / dist) * step, (dz / dist) * step);
+          }
+        }
+        const mid = new Vector3(
+          (player.position.x + dummy.x) * 0.5,
+          1.2,
+          (player.position.z + dummy.z) * 0.5,
+        );
+        camera.setTarget(mid);
+      }
+      const dummyMesh = dummy
+        ? npcMeshes.get(dummy.npcId.toString())
+        : undefined;
+      const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
+      const goodDist =
+        !!dummy &&
+        Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z);
+      const inRange = goodDist >= 10 && goodDist <= 18;
+      if (
+        st.state === 'connected' &&
+        hasDummyPlate &&
+        inRange &&
+        localNameplate.mesh.isEnabled()
+      ) {
+        if (mark) {
+          mark.textContent = `Nameplate readability OK · You + Dummy at ${goodDist.toFixed(1)}m · HP ${dummy.hp}/${dummy.maxHp} chips legible · remotes ${remotes.length}`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE nameplate-read: Connected · dummy ${dummy ? 'yes' : 'no'} · dist ${goodDist ? goodDist.toFixed(1) : '?'}m (target 10–18m) · remotes ${remotes.length} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE nameplate-read: timed out';
+        return;
+      }
+      window.setTimeout(waitNameplateRead, 200);
+    };
+    window.setTimeout(waitNameplateRead, 700);
   }
 
   // ?ve=hotbar / ?ve=hotbar-afford / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
