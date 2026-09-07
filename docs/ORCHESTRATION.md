@@ -37,7 +37,7 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 | **QA Feel** | Feel / UX playtests; `feel`-labeled Issues; Mac/Pages FPS truth (not box SwiftShader) | Feature invent |
 | **Reviewer** | Review PRs targeting `develop`: correctness, smoke coverage, schema-collision risk, lane conflicts; concrete feedback | Own features; push merges |
 | **Release** | On Lead greenlight: promote pinned `develop` SHA → `main`, Mac smoke, Cloudflare Pages deploy, VE + release beat | Cut without greenlight; expand tip silently; invent features; run two cuts at once |
-| **Art** | Visual north star vs [ASSETS.md](ASSETS.md); art-direction briefs; **free OSS/CC0 or original-only** shortlists; break visual work into Issues for Devs; look-language coherence | Invent gameplay systems; propose **paid** asset packs; leave Devs idle on visuals |
+| **Art** | Visual north star vs [ASSETS.md](ASSETS.md); art-direction briefs; **free OSS/CC0 or original-only** shortlists; break visual work into Issues for Devs; look-language coherence | Invent gameplay; propose **paid** packs; **flip Issue open/close or Fix numbers** after Lead locked an assign; leave Devs idle |
 
 ### Seat map (shared computer)
 
@@ -398,5 +398,21 @@ No invent past this Issue. Rebase if tip moves.
 ```
 
 ---
+
+
+## 15. Lead autonomy and Issue lifecycle
+
+Team Lead has Antony’s mandate to reorganize seats, correct agents, use Cloud Agents, and change GitHub process to hit the product vision.
+
+**Issue lifecycle (hard):**
+
+1. Art/QA may **file** Issues.
+2. Lead **assigns** (Issue number + seat + branch). That Fix number is locked.
+3. Nobody reopens/closes a sibling duplicate to redirect a Dev mid-flight — Lead only.
+4. Devs ship `Fixes #N` for the locked N; stop ack-pinging Lead once confirmed.
+5. Prefer one Issue per PR; if a duplicate appears, Lead picks the survivor and comments the lock on both.
+
+**Noise control:** seats report when blocked or when a PR is up — not every “still shipping” beat.
+
 
 *This document describes the live Bot team loop as of 2026-09-07 (includes Fardel Art + no-idle rule) and the intended Mac Studio / Grok CLI recreation. When process drifts, update this file in the same PR as the process change.*
