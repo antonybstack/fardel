@@ -65,6 +65,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - Dummy with HP; server applies damage
 - Cast windup VFX for Emberbolt (client predict ok); Spark can be near-instant
 - Cast projectile / beam polish: Spark bolt+trail + Emberbolt thicker beam (local+remote) + impact pop (`web/src/world/castVfx.ts`; `?ve=projectile`)
+- Selection reticule polish: thicker gold ring + pulse + overhead marker (`?ve=reticule`)
 - Cast cancel / move-interrupt: Move or Esc/`CancelCast` during Emberbolt windup refunds mana + clears cast bar (`CastCancelSmoke`, `?ve=cast-cancel`)
 - Cast pushback: dummy thorns (`DummyStrike`) during Emberbolt windup delays `CastEndsAt` without cancel/refund (`CastPushbackSmoke`, `?ve=cast-pushback`)
 - Hard interrupt threshold: after `CastPushbackHardAfter` pushbacks (or remain < `CastHardInterruptRemainMs`), next `DummyStrike` cancels windup with **no mana refund** (`HardInterruptSmoke`, `?ve=hard-interrupt`)

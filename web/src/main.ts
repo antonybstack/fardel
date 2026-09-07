@@ -84,9 +84,12 @@ type NpcMesh = {
   body: Mesh;
   ring: Mesh;
   remoteRing: Mesh;
+  /** Overhead chevron for local selection reticule. */
+  marker: Mesh;
   mat: StandardMaterial;
   ringMat: StandardMaterial;
   remoteRingMat: StandardMaterial;
+  markerMat: StandardMaterial;
   nameplate: Nameplate | null;
 };
 
@@ -1371,23 +1374,25 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   mat.specularColor = new Color3(0.1, 0.1, 0.1);
   body.material = mat;
 
+  // Local selection reticule — thicker/brighter gold torus (distinct from remote cyan).
   const ring = MeshBuilder.CreateTorus(
     `npcRing_${npc.npcId}`,
-    { diameter: 1.4, thickness: 0.06, tessellation: 32 },
+    { diameter: 1.55, thickness: 0.12, tessellation: 36 },
     scene,
   );
   ring.parent = root;
-  ring.position.y = 0.05;
+  ring.position.y = 0.06;
   ring.rotation.x = Math.PI / 2;
   const ringMat = new StandardMaterial(`npcRingMat_${npc.npcId}`, scene);
   ringMat.diffuseColor = new Color3(0.2, 0.2, 0.2);
   ringMat.emissiveColor = new Color3(0, 0, 0);
+  ringMat.specularColor = new Color3(0.35, 0.28, 0.08);
   ring.material = ringMat;
   ring.setEnabled(false);
 
   const remoteRing = MeshBuilder.CreateTorus(
     `npcRemoteRing_${npc.npcId}`,
-    { diameter: 1.7, thickness: 0.05, tessellation: 32 },
+    { diameter: 1.85, thickness: 0.05, tessellation: 32 },
     scene,
   );
   remoteRing.parent = root;
@@ -1399,6 +1404,23 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   remoteRing.material = remoteRingMat;
   remoteRing.setEnabled(false);
 
+  // Overhead chevron (tip down) — readable without neon spam.
+  const marker = MeshBuilder.CreateCylinder(
+    `npcMark_${npc.npcId}`,
+    { height: 0.34, diameterTop: 0, diameterBottom: 0.28, tessellation: 6 },
+    scene,
+  );
+  marker.parent = root;
+  marker.position.y = 2.55;
+  marker.rotation.z = Math.PI; // tip points at dummy
+  marker.isPickable = false;
+  const markerMat = new StandardMaterial(`npcMarkMat_${npc.npcId}`, scene);
+  markerMat.diffuseColor = new Color3(0.95, 0.78, 0.2);
+  markerMat.emissiveColor = new Color3(0.75, 0.55, 0.08);
+  markerMat.specularColor = new Color3(0.2, 0.15, 0.04);
+  marker.material = markerMat;
+  marker.setEnabled(false);
+
   let nameplate: Nameplate | null = null;
   if (isDummy) {
     nameplate = createNameplate(scene, `npc_${npc.npcId}`);
@@ -1407,7 +1429,18 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     paintNameplate(nameplate, 'Dummy', '#e8c89a', npc.maxHp > 0 ? npc.hp / npc.maxHp : 1);
   }
 
-  return { root, body, ring, remoteRing, mat, ringMat, remoteRingMat, nameplate };
+  return {
+    root,
+    body,
+    ring,
+    remoteRing,
+    marker,
+    mat,
+    ringMat,
+    remoteRingMat,
+    markerMat,
+    nameplate,
+  };
 }
 
 
@@ -1882,6 +1915,7 @@ function beginNpcDeathFx(
   mesh.mat.transparencyMode = 2; // ALPHA_BLEND
   mesh.ring.setEnabled(false);
   mesh.remoteRing.setEnabled(false);
+  mesh.marker.setEnabled(false);
   if (mesh.nameplate) mesh.nameplate.mesh.setEnabled(false);
   const at = mesh.root.position.clone();
   at.y += 0.8;
@@ -2864,20 +2898,25 @@ async function main(): Promise<void> {
       const remoteSelected =
         isAlive &&
         latestRemoteCombats.some((rc) => rc.targetNpcId === npc.npcId);
-      // Suppress rings while dying; keep corpse non-targetable visually.
+      // Suppress rings/marker while dying; keep corpse non-targetable visually.
       if (fx?.phase === 'dying') {
         mesh.ring.setEnabled(false);
         mesh.remoteRing.setEnabled(false);
+        mesh.marker.setEnabled(false);
       } else {
         mesh.ring.setEnabled(selected);
+        mesh.marker.setEnabled(selected);
         mesh.remoteRing.setEnabled(remoteSelected && !selected);
       }
       if (fx?.phase === 'spawning') {
         // Emissive flash owned by respawn FX until it finishes.
       } else if (selected) {
-        mesh.ringMat.emissiveColor = new Color3(0.95, 0.75, 0.2);
-        mesh.ringMat.diffuseColor = new Color3(0.95, 0.75, 0.2);
-        mesh.mat.emissiveColor = new Color3(0.15, 0.1, 0.02);
+        mesh.ringMat.emissiveColor = new Color3(1.15, 0.88, 0.18);
+        mesh.ringMat.diffuseColor = new Color3(1.0, 0.82, 0.22);
+        mesh.markerMat.emissiveColor = new Color3(1.05, 0.8, 0.15);
+        mesh.markerMat.diffuseColor = new Color3(0.98, 0.8, 0.2);
+        // Stronger body tint so tab-target reads even at glancing angles.
+        mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
         // Local gold wins; still hint remote interest with outer cyan.
         mesh.remoteRing.setEnabled(remoteSelected);
         if (remoteSelected) {
@@ -2887,9 +2926,11 @@ async function main(): Promise<void> {
         mesh.remoteRingMat.emissiveColor = new Color3(0.15, 0.7, 0.85);
         mesh.remoteRingMat.diffuseColor = new Color3(0.2, 0.85, 0.95);
         mesh.mat.emissiveColor = new Color3(0.02, 0.08, 0.12);
+        mesh.marker.setEnabled(false);
       } else if (fx?.phase !== 'dying') {
         mesh.ringMat.emissiveColor = new Color3(0, 0, 0);
         mesh.mat.emissiveColor = new Color3(0, 0, 0);
+        mesh.marker.setEnabled(false);
       }
     }
     for (const [key, mesh] of npcMeshes) {
@@ -2929,6 +2970,28 @@ async function main(): Promise<void> {
     };
     tickFloaters(damageFloaters);
     tickFloaters(xpFloaters);
+
+    // Local selection reticule pulse (scale + emissive) — skip while death/respawn owns root scale.
+    for (const [npcKey, mesh] of npcMeshes) {
+      const life = npcLifeFx.get(npcKey);
+      const animating = !!life && (life.phase === 'dying' || life.phase === 'spawning');
+      if (mesh.ring.isEnabled() && !animating) {
+        const pulse = 0.94 + 0.08 * Math.sin(now / 210);
+        mesh.ring.scaling.set(pulse, 1, pulse);
+        const e = 0.95 + 0.35 * (0.5 + 0.5 * Math.sin(now / 210));
+        mesh.ringMat.emissiveColor = new Color3(e, e * 0.76, 0.12);
+        if (mesh.marker.isEnabled()) {
+          mesh.marker.position.y = 2.55 + 0.07 * Math.sin(now / 260);
+          const me = 0.75 + 0.35 * (0.5 + 0.5 * Math.sin(now / 260));
+          mesh.markerMat.emissiveColor = new Color3(me, me * 0.74, 0.1);
+        }
+      } else {
+        mesh.ring.scaling.setAll(1);
+        if (!mesh.marker.isEnabled()) {
+          mesh.marker.position.y = 2.55;
+        }
+      }
+    }
 
     // Cast projectile / beam polish: Spark bolts + impact pops + local Emberbolt beam.
     {
@@ -4629,6 +4692,80 @@ async function main(): Promise<void> {
       window.setTimeout(waitHotbar, 200);
     };
     window.setTimeout(waitHotbar, 700);
+  }
+
+  // ?ve=reticule — select Dummy; prove gold selection reticule + overhead marker.
+  if (ve === 'reticule') {
+    camera.radius = 8.5;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.4; // slightly higher so ground ring reads
+  }
+  if (net && ve === 'reticule') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE reticule: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitReticule = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        // Close the gap so player + Dummy share the frame with the ring readable.
+        if (dist > 4.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - 2.8);
+          net.sendMove((dx / dist) * step, (dz / dist) * step);
+        }
+        // Bias target toward Dummy so gold ring + overhead marker dominate the shot.
+        camera.setTarget(
+          new Vector3(
+            player.position.x * 0.28 + dummy.x * 0.72,
+            1.25,
+            player.position.z * 0.28 + dummy.z * 0.72,
+          ),
+        );
+        camera.radius = 8.5;
+        camera.beta = Math.PI / 3.35;
+      }
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const markerOn = !!(mesh && mesh.marker.isEnabled());
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        ringOn &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent = `Reticule OK · Dummy #${dummy.npcId} · gold ring${markerOn ? '+marker' : ''} · HP ${dummy.hp}/${dummy.maxHp}`;
+        }
+        // Hold a few ticks so pulse/marker settle in the VE screenshot.
+        if (okTicks < 8 && ticks < 140) {
+          window.setTimeout(waitReticule, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE reticule: Connected · dummy ${dummy ? 'yes' : 'no'} · ring ${ringOn ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE reticule: timed out waiting for selection reticule';
+        return;
+      }
+      window.setTimeout(waitReticule, 200);
+    };
+    window.setTimeout(waitReticule, 700);
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
