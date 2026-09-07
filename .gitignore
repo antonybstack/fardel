@@ -1,4 +1,4 @@
-# Unity
+# Unity (historical / local leftovers)
 [Ll]ibrary/
 [Tt]emp/
 [Oo]bj/
@@ -8,7 +8,6 @@
 [Uu]ser[Ss]ettings/
 [Mm]emoryCaptures/
 [Rr]ecordings/
-# Unity-generated project files (keep hand-authored under server/shared/tools)
 *.unityproj
 *.sln
 *.suo
@@ -29,6 +28,7 @@
 *.unitypackage
 sysinfo.txt
 crashlytics-build-properties
+ve/
 
 # .NET / SpacetimeDB build outputs
 bin/
@@ -39,10 +39,17 @@ TestResults/
 *.nupkg
 
 # Hand-authored csproj must stay tracked
-# (do NOT ignore *.csproj globally — macOS + Unity Packages clash)
+# (do NOT ignore *.csproj globally)
 
 # SpacetimeDB local
 .spacetime/
+.spacetime-standalone.pid
+
+# Web client (Vite)
+web/node_modules/
+web/dist/
+node_modules/
+dist/
 
 # OS / editors
 .DS_Store

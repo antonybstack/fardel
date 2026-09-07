@@ -41,11 +41,12 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 
 ### 0 — Connect
 - SpacetimeDB `basic-cs` (or equivalent) module publishes locally — prefer **.NET 10** when scaffolding
-- Unity project connects with C# SDK
-- `FrameTick()` in `Update`
+- **Headless gate:** `tools/ConnectSmoke` connects and prints identity
+- Babylon/`web/` client connects with SpacetimeDB JS/TS SDK
+- Frame tick every animation frame
 - Empty scene + connection HUD
 
-**Done when:** editor play mode shows connected identity.
+**Done when:** headless ConnectSmoke is green; browser HUD shows connected identity.
 
 ### 1 — Yard + move
 - **Headless gate:** `tools/MoveSmoke` connects, sends `Move`, asserts server pose updates (Unity not required)
@@ -81,9 +82,9 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - AOI chunk-neighborhood subscriptions per [ADR 0001](adr/0001-aoi-interest.md) documented and enforced
 - InterestChunk hysteresis on `PlayerPose`; `CrowdProxy` seed; Moore SQL subscribe
 - **Headless gate:** `tools/AoiSmoke` — hysteresis + neighborhood subscribe excludes far proxies
-- Unity FPS floor: deferred with Editor (presentation), not a headless blocker
+- Browser FPS floor: track with Babylon presentation (not a headless blocker)
 
-**Done when:** headless neighborhood subscribe proven; N proxies on-screen with a stated FPS floor on a reference machine when Editor resumes; clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
+**Done when:** headless neighborhood subscribe proven; N proxies on-screen with a stated FPS floor on a reference machine; clients subscribe only the chunk neighborhood (+ always-relevant), not the whole map.
 
 ## Out of MVP
 
@@ -99,4 +100,4 @@ Full anti-goal list and distraction triggers: [SCOPE.md](SCOPE.md).
 
 ## Proof culture
 
-Prefer a `scripts/` smoke (connect → move → cast both spells under GCD → persist) over manual “seems fine.” Carry unbound’s `mvp_check` attitude into C#.
+Prefer a smoke (connect → move → cast both spells under GCD → persist) over manual “seems fine.” Carry unbound’s `mvp_check` attitude into C# headless tools + browser checks.

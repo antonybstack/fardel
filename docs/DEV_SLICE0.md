@@ -2,34 +2,28 @@
 
 ## Prereqs
 
-1. Unity **6000.6+** (installed)
-2. SpacetimeDB CLI 2.10+
-3. .NET 8 + WASI workload (macOS module publish):
+1. SpacetimeDB CLI 2.10+
+2. .NET 10 SDK (+ WASI workload if macOS module publish requires it):
 
 ```bash
 sudo dotnet workload install wasi-experimental
 ```
 
-## Run
+3. JS runtime 22+ (for `web/` Vite client)
+4. Pin `@babylonjs/core@9.0.0` in `web/`
+
+## Run (authority)
 
 ```bash
-# Terminal A
-spacetime start
+# Terminal A — prefer keepalive helper
+./tools/scripts/ensure-local-spacetime.sh
 
 # Terminal B
 cd server
 spacetime publish
-spacetime generate --lang csharp --out-dir ../client/Assets/Scripts/Spacetime/Generated
 ```
 
-Open `client/` in Unity 6000.6, menu **Fardel → Setup Connect Scene** (or open `Assets/Scenes/Connect.unity`), Play.
-
-**Done when:** Play Mode HUD shows **Connected** and an identity.
-
-
-## Autonomous smoke (preferred)
-
-With local `spacetime start` + published `fardel`:
+Headless gate:
 
 ```bash
 dotnet run --project tools/ConnectSmoke
@@ -37,7 +31,20 @@ dotnet run --project tools/ConnectSmoke
 
 Expect: `OK: connected identity …`
 
-Unity Play on `Assets/Scenes/Connect` is the visual check; the smoke is the slice gate.
+## Run (Babylon presentation)
+
+```bash
+# Generate TS bindings when local module is up:
+spacetime generate --lang typescript --out-dir web/src/module_bindings --project-path server
+
+cd web
+# install deps via package manager, then:
+#   run the Vite dev script (see web/README.md)
+```
+
+**Done when:** ConnectSmoke is green; browser HUD shows **Connected** and an identity.
+
+Unity Editor / `client/` is **not** required on `main` (see `checkpoint/unity-webgl`).
 
 ## Local SpacetimeDB keepalive
 

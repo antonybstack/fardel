@@ -7,8 +7,11 @@
 
 **Checkpoint:** Unity work frozen at `checkpoint/unity-webgl` (commit `ca9b7d5` and ancestors). May resume later; not on the MVP critical path.
 
+**Main branch:** The Unity project tree (`client/`) and Unity-only tooling (`tools/scripts/serve-webgl.py`, `webgl-pages-headers`) are **removed from `main`**. Recover history from `checkpoint/unity-webgl` if needed. Do **not** delete that remote branch.
+
 **Consequences:**
-- New client lives under something like `web/` (Vite + Babylon), deploys to `play.sparkify.dev`.
+- Active client lives under `web/` (Vite + Babylon `@babylonjs/core@9.0.0`), deploys to `play.sparkify.dev`.
 - Reuse existing module tables/reducers (Connect → Move → Combat → Persist → AOI).
 - Prefer CLI/browser smokes over Editor VE.
 - bitECS optional later; start with simple Maps/typed arrays until AOI load demands it.
+- See [PLAN_BABYLON.md](../PLAN_BABYLON.md) for the full plan.

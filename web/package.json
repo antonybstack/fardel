@@ -1,0 +1,19 @@
+{
+  "name": "fardel-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@babylonjs/core": "9.0.0",
+    "spacetimedb": "2.10.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.2",
+    "vite": "7.1.5"
+  }
+}

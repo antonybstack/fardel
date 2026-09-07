@@ -6,7 +6,7 @@ If a task does not move the current slice’s **Done when**, it waits.
 
 ## North-star demo (POC complete)
 
-> Two browser (or editor) clients in a **forest clearing** with huge trees and distant mountains: **RS-simple** staff/robe humans, WASD + RMB camera, tab-target a dummy, cast **Spark** and **Emberbolt** on a **shared GCD**, refresh and keep XP + loadout, without subscribing the whole map.
+> Two browser clients in a **forest clearing** with huge trees and distant mountains: **RS-simple** staff/robe humans, WASD + RMB camera, tab-target a dummy, cast **Spark** and **Emberbolt** on a **shared GCD**, refresh and keep XP + loadout, without subscribing the whole map.
 
 That sentence is the finish line. Everything else is either a slice toward it or **out of scope**.
 
@@ -26,10 +26,10 @@ That sentence is the finish line. Everything else is either a slice toward it or
 | Staff/robes + 2 spells + GCD | Skill trees, more spells, talents |
 | Kitbash forest + mountains + humanoid ([ASSETS.md](ASSETS.md)) | Custom character creator, photoreal, cinema VFX |
 | Chunk AOI as designed ([ADR 0001](adr/0001-aoi-interest.md)) | Coarse network LOD, LOS interest, multiple shards |
-| SpacetimeDB module + Shared + headless smokes | Second client engine, custom WebGPU client |
-| Babylon.js web client (active) | Unity client (paused; see `checkpoint/unity-webgl`) |
+| SpacetimeDB module + Shared + headless smokes | Second client engine / custom WebGPU from scratch |
+| Babylon.js web client (active) — [ADR 0003](adr/0003-babylon-web-client.md) | Unity client (paused on `checkpoint/unity-webgl`) |
 | `play` Pages + `dev-db` preview tunnel | Prod MainCloud / `db.sparkify.dev` hard cutover |
-| Span-first / zero-heap **discipline** in new code | Premature micro-optim hunt with no slice-4 numbers |
+| Span-first / zero-heap **discipline** in new C# | Premature micro-optim hunt with no slice-4 numbers |
 
 ### Next (after north-star — still not “now”)
 
@@ -46,7 +46,7 @@ Do **not** start these until the north-star demo exists:
 - Full classless skillscape / RS skill list
 - Auction house, clans, quests, housing
 - Action combat / lock-on souls hybrid
-- Dual client (Stride / custom engine) — [ADR 0002](adr/0002-client-host-webgpu.md)
+- Dual client (Unity + Babylon in parallel for players)
 - Replacing SpacetimeDB or rewriting in Rust “for perf”
 - Perfect UI chrome, settings menus, tutorial systems
 - World editor / content pipeline beyond placing pack assets in one yard scene
@@ -63,6 +63,7 @@ If an idea sounds like any of these, park it in a note — don’t branch the pl
 - “We need 20 spells so combat isn’t boring.”
 - “Prod scale / 10k CCU design before two clients share a dummy.”
 - “General-purpose engine framework for future games.”
+- “Bring Unity back onto main before Babylon Connect is green.”
 
 ## Decision gate
 
@@ -84,16 +85,15 @@ If an idea sounds like any of these, park it in a note — don’t branch the pl
 | Slices | [MVP.md](MVP.md) |
 | Art bar | [ASSETS.md](ASSETS.md) |
 | AOI | [ADR 0001](adr/0001-aoi-interest.md) |
-| Unity / WebGPU | [ADR 0002](adr/0002-client-host-webgpu.md) |
+| Client host (active) | [ADR 0003](adr/0003-babylon-web-client.md) |
+| Historical Unity / WebGPU | [ADR 0002](adr/0002-client-host-webgpu.md) (superseded for active host) |
+| Babylon plan | [PLAN_BABYLON.md](PLAN_BABYLON.md) |
 
 Revisit locks only with a new ADR (or an explicit superseding decision), not drive-by chat.
 
+## Proof culture (execution)
 
-## Unity deferred (execution)
-
-Keep [ADR 0002](adr/0002-client-host-webgpu.md): Unity remains the **v1 ship client**.
-
-**Until move/cast/GCD smokes are green**, do not block slices on the Unity Editor/UI. Prove authority with:
+Prove authority with headless smokes first; Babylon presentation follows:
 
 - `tools/ConnectSmoke` (slice 0)
 - `tools/MoveSmoke` (slice 1)
@@ -101,7 +101,7 @@ Keep [ADR 0002](adr/0002-client-host-webgpu.md): Unity remains the **v1 ship cli
 - `tools/PersistSmoke` (slice 3)
 - `tools/AoiSmoke` (slice 4)
 
-Unity Connect scene / forest art resume when those gates pass (presentation, not net learning).
+Browser Connect / yard art lives in `web/` (Vite + Babylon). Unity is not required for slice gates.
 
 ## Weekly focus check
 
@@ -113,7 +113,7 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 4 (AOI) proven** via `tools/AoiSmoke` (headless); Unity FPS floor still deferred with Editor
-- **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`)
+- **Phase:** **slice 4 (AOI) proven** via `tools/AoiSmoke` (headless); browser FPS floor tracked with Babylon presentation
+- **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
 - **POC north-star:** not started

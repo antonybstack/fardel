@@ -6,7 +6,7 @@ How Fardel reaches the internet on **sparkify.dev** (Cloudflare).
 
 | Surface | Prod | Dev / preview |
 |---|---|---|
-| Unity web client | **Cloudflare Pages** → `play.sparkify.dev` (or apex when ready) | Local Unity / Pages preview deploy |
+| Browser client (Vite / Babylon) | **Cloudflare Pages** → `play.sparkify.dev` | Local Vite (`web/`) / Pages preview deploy |
 | SpacetimeDB (WS + module) | **MainCloud** or always-on host → `db.sparkify.dev` | **Mac Studio + cloudflared** → `dev-db.sparkify.dev` |
 
 Do **not** make the Mac Studio the permanent shard. Sleep, OS updates, and workstation load will drop players. The tunnel is for friends-and-family playtests and slice demos.
@@ -17,7 +17,7 @@ Do **not** open router port 22 (or SpacetimeDB ports) to the world. Prefer cloud
 
 | Host | Points at |
 |---|---|
-| `play.sparkify.dev` | Cloudflare Pages (Unity WebGPU/WebGL build) |
+| `play.sparkify.dev` | Cloudflare Pages (Vite `web/dist` build) |
 | `db.sparkify.dev` | Prod SpacetimeDB (MainCloud custom domain or always-on) |
 | `dev-db.sparkify.dev` | cloudflared → `http://127.0.0.1:3000` on the Mac Studio |
 
@@ -73,12 +73,19 @@ Clients connect with the SpacetimeDB URI for `https://dev-db.sparkify.dev` (WebS
 
 ## Prod client (Pages)
 
-1. CI (or local) produces the Unity web build.
-2. Deploy the build folder to Cloudflare Pages project `fardel` (or similar).
+1. CI (or local) produces the Vite build from `web/` (`dist/`).
+2. Deploy `web/dist` to Cloudflare Pages project `fardel` (or similar).
 3. Attach custom domain `play.sparkify.dev`.
 4. Configure the client’s SpacetimeDB URI to `db.sparkify.dev` (prod) or `dev-db.sparkify.dev` (preview builds).
 
-Cache HTML/JS carefully: the `.data` / wasm payloads are large; prefer hashed asset names and short cache on `index.html`.
+Prefer hashed asset names and short cache on `index.html`.
+
+Example deploy (adjust when CI lands):
+
+```bash
+# from repo root, after building web/dist:
+# npx wrangler@4 pages deploy web/dist --project-name=fardel --branch main
+```
 
 ## Prod SpacetimeDB
 
@@ -87,7 +94,7 @@ Cache HTML/JS carefully: the `.data` / wasm payloads are large; prefer hashed as
 
 Validate early:
 
-- WebSocket connect + `FrameTick` from a Pages origin
+- WebSocket connect + frame tick from a Pages origin
 - CORS / origin allow behavior for the chosen SpacetimeDB host
 - Reconnect after laptop sleep (dev) and after deploy (prod)
 
@@ -102,8 +109,9 @@ Validate early:
 
 - [x] Deploy policy documented
 - [x] `dev-db.sparkify.dev` on existing Mac `sparkify` tunnel → `127.0.0.1:3000` (HTTP 404 from SpacetimeDB root is healthy)
-- [x] **Cloudflare Pages project `fardel` live** — Unity WebGL Connect build on `play.sparkify.dev` (CNAME → `fardel.pages.dev`, proxied); placeholder retired
+- [x] **Cloudflare Pages project `fardel` live** — custom domain `play.sparkify.dev` (CNAME → `fardel.pages.dev`, proxied)
 - [ ] Prod SpacetimeDB (`db.sparkify.dev` or MainCloud URI)
+- [ ] Replace Pages contents with Vite/`web/dist` Babylon client (Unity WebGL retired from `main`)
 
 ### Tunnel ops note (this machine)
 
@@ -115,26 +123,23 @@ Reuses the existing **`sparkify`** cloudflared LaunchDaemon (`com.cloudflare.spa
 
 `play.sparkify.dev` no longer needs tunnel ingress (DNS points at Pages). **Follow-up:** remove the `play.sparkify.dev` → `:8787` ingress block from the Mac cloudflared configs / LaunchDaemon when convenient (needs sudo on the Studio); interim Mac tunnel can drop play ingress without affecting Pages.
 
-### Unity WebGL client (Pages)
+### Active client (Vite / Babylon)
 
-Live client is a **Unity WebGL** Connect build (gzip + decompressionFallback → `.unityweb` assets):
+Active browser client is **`web/`** (Vite + Babylon.js 9 + TypeScript):
 
-- Local: `python3 tools/scripts/serve-webgl.py` → `http://127.0.0.1:8788/`
-  - Keeps `http://127.0.0.1:3000` (no tunnel rewrite)
-- Pages: `play.sparkify.dev` → Cloudflare Pages project `fardel`
-  - Connects to `https://dev-db.sparkify.dev` (Mac cloudflared → local SpacetimeDB)
-- Build: `Unity -batchmode -executeMethod Fardel.Editor.FardelWebBuild.BuildWebGL`
-- Note: Cloudflare Pages strips `Content-Encoding` from `_headers`; Unity decompressionFallback ungzip's client-side. Keep wasm under the 25 MiB/file Pages limit via gzip.
-- Override: `?db=` / `?database=` on the page URL always wins.
+- Local: package scripts in `web/` → Vite dev server (see `web/README.md`)
+  - Default SpacetimeDB URI `http://127.0.0.1:3000`, database `fardel`
+- Pages: deploy `web/dist` → Cloudflare Pages project `fardel` → `play.sparkify.dev`
+  - Preview builds should connect to `https://dev-db.sparkify.dev`
+- Override: `?db=` / `?database=` on the page URL always wins
 
-### Play placeholder (Pages)
+### Historical Unity WebGL
 
+Unity WebGL Connect was the previous Pages payload. It is preserved only on
+`checkpoint/unity-webgl` @ `ca9b7d5` (not on `main`). Do not resurrect
+`tools/scripts/serve-webgl.py` on `main`.
 
-Production client placeholder is on **Cloudflare Pages**:
+### Play placeholder
 
-- Project: `fardel` → https://fardel.pages.dev
-- Source: repo `web-placeholder/` (`index.html` + `_headers`)
-- Custom domain: `play.sparkify.dev`
-- Deploy: `npx wrangler@4 pages deploy web-placeholder --project-name=fardel --branch main`
-
-Former Mac interim (`python3 -m http.server 8787` + tunnel) is obsolete for play once ingress is cleaned up.
+`web-placeholder/` may still exist as a fallback static page. Prefer deploying
+`web/dist` once the Babylon scaffold builds cleanly.

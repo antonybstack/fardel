@@ -1,6 +1,6 @@
 # ADR 0002: Client host (Unity) and WebGPU
 
-- **Status:** Accepted
+- **Status:** Accepted (historical) — **superseded for active client host by [ADR 0003](0003-babylon-web-client.md)** (Babylon.js + TypeScript). Unity checkpoint retained on `checkpoint/unity-webgl` @ `ca9b7d5`.
 - **Date:** 2026-09-06
 - **Deciders:** Fardel (Antony + Unbound Team Lead)
 
