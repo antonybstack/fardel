@@ -199,7 +199,10 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   if (label) label.textContent = `${target.hp}/${target.maxHp}`;
 }
 
-/** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana dim. */
+/** VE presentation override: force Spark STAFF + Emberbolt OOM + empty slots visible. */
+let veHotbarPresent: null | { sparkDisabled: boolean; emberLowMana: boolean } = null;
+
+/** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana/empty affordances. */
 function updateSpellHotbar(opts: {
   gcdMs: number;
   castingMs: number;
@@ -209,6 +212,9 @@ function updateSpellHotbar(opts: {
   mana?: number;
   /** Selected target beyond Combat.CastRangeMeters — dim spells. */
   outOfRange?: boolean;
+  /** When false, treat filled slot as empty/unknown (client-only). */
+  knowsSpark?: boolean;
+  knowsEmberbolt?: boolean;
 }): void {
   const gcdPct = opts.gcdMs > 0 ? Math.min(100, (opts.gcdMs / 1200) * 100) : 0;
   const castPct =
@@ -226,13 +232,23 @@ function updateSpellHotbar(opts: {
     castId: string,
     isCastingThis: boolean,
     cost: number,
+    known: boolean,
   ) => {
     const slot = document.getElementById(slotId);
     const sweep = document.getElementById(sweepId);
     const cast = document.getElementById(castId);
     if (!slot || !sweep || !cast) return;
+    if (!known) {
+      slot.classList.add('unknown');
+      slot.classList.remove('disabled', 'lowMana', 'outOfRange', 'onGcd', 'casting');
+      sweep.style.height = '0%';
+      cast.style.height = '0%';
+      return;
+    }
+    slot.classList.remove('unknown');
     const lowMana = opts.staffEquipped && mana < cost;
     const dimmed = lowMana || oor;
+    // Disabled (no staff) wins over lowMana — JS only sets lowMana when staff equipped.
     slot.classList.toggle('disabled', !opts.staffEquipped);
     slot.classList.toggle('lowMana', lowMana);
     slot.classList.toggle('outOfRange', oor && opts.staffEquipped && !lowMana);
@@ -243,13 +259,49 @@ function updateSpellHotbar(opts: {
       isCastingThis && opts.staffEquipped && !dimmed ? `${castPct}%` : '0%';
   };
 
-  applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST);
+  const knowsSpark = opts.knowsSpark ?? true;
+  const knowsEmberbolt = opts.knowsEmberbolt ?? true;
+
+  if (veHotbarPresent) {
+    // Proof seed: Spark shows STAFF (disabled), Emberbolt shows OOM; empty 3–6 stay empty.
+    applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST, true);
+    const spark = document.getElementById('slotSpark');
+    if (spark) {
+      spark.classList.remove('unknown', 'lowMana', 'outOfRange', 'onGcd', 'casting');
+      spark.classList.toggle('disabled', veHotbarPresent.sparkDisabled);
+    }
+    applySlot(
+      'slotEmberbolt',
+      'sweepEmberbolt',
+      'castEmberbolt',
+      false,
+      EMBERBOLT_MANA_COST,
+      true,
+    );
+    const ember = document.getElementById('slotEmberbolt');
+    if (ember) {
+      ember.classList.remove('unknown', 'disabled', 'outOfRange', 'onGcd', 'casting');
+      ember.classList.toggle('lowMana', veHotbarPresent.emberLowMana);
+    }
+    const sweepE = document.getElementById('sweepEmberbolt');
+    const castE = document.getElementById('castEmberbolt');
+    const sweepS = document.getElementById('sweepSpark');
+    const castS = document.getElementById('castSpark');
+    if (sweepS) sweepS.style.height = '0%';
+    if (castS) castS.style.height = '0%';
+    if (sweepE) sweepE.style.height = '0%';
+    if (castE) castE.style.height = '0%';
+    return;
+  }
+
+  applySlot('slotSpark', 'sweepSpark', 'castSpark', false, SPARK_MANA_COST, knowsSpark);
   applySlot(
     'slotEmberbolt',
     'sweepEmberbolt',
     'castEmberbolt',
     castingEmber,
     EMBERBOLT_MANA_COST,
+    knowsEmberbolt,
   );
 }
 
@@ -3268,6 +3320,9 @@ async function main(): Promise<void> {
           staffEquipped: equipped,
           mana: st.state === 'connected' ? (st.character?.mana ?? 0) : 999,
           outOfRange: isTargetOutOfCastRange(poseHb, tgtHb),
+          knowsSpark: st.state === 'connected' ? (st.character?.knowsSpark ?? true) : true,
+          knowsEmberbolt:
+            st.state === 'connected' ? (st.character?.knowsEmberbolt ?? true) : true,
         });
       }
       const ch =
@@ -4692,9 +4747,27 @@ async function main(): Promise<void> {
         nameOk &&
         hotbar &&
         castSent &&
-        (gcdLeftNow > 0 || castUntilMs > Date.now())
+        (gcdLeftNow > 0 || castUntilMs > Date.now() || veHotbarPresent)
       ) {
-        if (mark) {
+        // Seed distinct affordances for hotbar proof: empty 3–6 + Spark STAFF + Emberbolt OOM.
+        if (ve === 'hotbar') {
+          veHotbarPresent = { sparkDisabled: true, emberLowMana: true };
+          updateSpellHotbar({
+            gcdMs: 0,
+            castingMs: 0,
+            castingTotal: 0,
+            castingSpell: 0,
+            staffEquipped: true,
+            mana: 0,
+            knowsSpark: true,
+            knowsEmberbolt: true,
+          });
+          const emptyCount = hotbar.querySelectorAll('.spellSlot.empty').length;
+          if (mark) {
+            mark.textContent =
+              `Hotbar OK · empty ${emptyCount} · Spark STAFF (disabled) · Emberbolt OOM · target Dummy #${dummy.npcId}`;
+          }
+        } else if (mark) {
           mark.textContent = `Hotbar OK · target Dummy #${dummy.npcId} HP ${dummy.hp}/${dummy.maxHp} · Spark/Emberbolt slots · GCD ${(gcdLeftNow / 1000).toFixed(1)}s`;
         }
         return;
