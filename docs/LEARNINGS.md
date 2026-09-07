@@ -69,3 +69,6 @@ Fardel follows dek/hordes **bucket culling + dynamic tick** ideas via SpacetimeD
 
 Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible later. WebGL2 stays playable. Decision: [ADR 0002](adr/0002-client-host-webgpu.md).
 
+## Floating damage text (web)
+
+- Prefer **NPC hp deltas** over a new damage-event table for combat floaters — server already mutates `npc.hp` on Spark/Emberbolt apply; client tracks `npcLastHp` and spawns billboard `DynamicTexture` planes. Keeps CombatSmoke / module unchanged.

@@ -142,8 +142,12 @@ See `web/README.md` for exact commands.
   beam+bar, Spark/impact flash, cyan target rings on NPCs selected by others;
   HUD `remote-target` / `remote-cast`; `?ve=remote-cast` + SecondClient cast loop
   (`ve/babylon-remote-cast.png`)
+- **Floating damage / combat text (presentation):** NPC `hp` table deltas spawn
+  rising billboard numbers above the target (Spark yellow / Emberbolt orange);
+  cosmetic only — authority HP remains source of truth; `?ve=damage-text`
+  (`ve/babylon-damage-text.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)
 - Next (north-star): credited art packs when licenses land; party / always-relevant
-  polish; optional damage numbers / floating combat text
+  polish; redeploy Pages with damage-text

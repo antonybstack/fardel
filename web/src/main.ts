@@ -2,6 +2,7 @@ import {
   ArcRotateCamera,
   ArcRotateCameraPointersInput,
   Color3,
+  DynamicTexture,
   Engine,
   InstancedMesh,
   Mesh,
@@ -54,6 +55,15 @@ type RemoteFx = {
   bar: Mesh;
   barMat: StandardMaterial;
   lastCastAtMicros: bigint;
+};
+
+type DamageFloater = {
+  mesh: Mesh;
+  mat: StandardMaterial;
+  bornMs: number;
+  lifeMs: number;
+  startY: number;
+  driftX: number;
 };
 
 function setStatus(text: string): void {
@@ -392,6 +402,63 @@ function flashMesh(mat: StandardMaterial, color: Color3, ms: number): void {
   }, ms);
 }
 
+/** Rising combat text above an NPC — cosmetic only (HP delta from authority). */
+function spawnDamageFloater(
+  scene: Scene,
+  at: Vector3,
+  amount: number,
+  tint: Color3,
+): DamageFloater {
+  const label = `-${amount}`;
+  const tex = new DynamicTexture(
+    `dmgTex_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    { width: 256, height: 128 },
+    scene,
+    false,
+  );
+  tex.hasAlpha = true;
+  const ctx = tex.getContext() as unknown as CanvasRenderingContext2D;
+  ctx.clearRect(0, 0, 256, 128);
+  ctx.font = 'bold 84px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 12;
+  ctx.strokeStyle = 'rgba(0,0,0,0.92)';
+  ctx.strokeText(label, 128, 64);
+  ctx.fillStyle = `rgb(${Math.round(tint.r * 255)},${Math.round(tint.g * 255)},${Math.round(tint.b * 255)})`;
+  ctx.fillText(label, 128, 64);
+  tex.update();
+
+  const mat = new StandardMaterial(`dmgMat_${label}_${Date.now()}`, scene);
+  mat.diffuseTexture = tex;
+  mat.emissiveTexture = tex;
+  mat.opacityTexture = tex;
+  mat.disableLighting = true;
+  mat.useAlphaFromDiffuseTexture = true;
+  mat.backFaceCulling = false;
+  mat.specularColor = new Color3(0, 0, 0);
+
+  const mesh = MeshBuilder.CreatePlane(
+    `dmgPlane_${label}_${Date.now()}`,
+    { width: 1.7, height: 0.85 },
+    scene,
+  );
+  mesh.material = mat;
+  mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
+  mesh.position = at.clone();
+  mesh.position.y += 1.85;
+  mesh.isPickable = false;
+
+  return {
+    mesh,
+    mat,
+    bornMs: Date.now(),
+    lifeMs: 1100,
+    startY: mesh.position.y,
+    driftX: (Math.random() - 0.5) * 0.55,
+  };
+}
+
 async function main(): Promise<void> {
   const canvas = document.getElementById('renderCanvas');
   if (!(canvas instanceof HTMLCanvasElement)) {
@@ -416,6 +483,10 @@ async function main(): Promise<void> {
   let castTotalMs = 0;
   let lastCastSpell = 0;
   const npcMeshes = new Map<string, NpcMesh>();
+  const npcLastHp = new Map<string, number>();
+  const damageFloaters: DamageFloater[] = [];
+  let latestDamageAmount = 0;
+  let latestDamageAtMs = 0;
   const proxyInstances = new Map<string, InstancedMesh>();
   const remoteMeshes = new Map<string, HumanoidParts>();
   const remoteFx = new Map<string, RemoteFx>();
@@ -673,6 +744,27 @@ async function main(): Promise<void> {
       if (!mesh) {
         mesh = makeNpcMesh(scene, npc);
         npcMeshes.set(key, mesh);
+        npcLastHp.set(key, npc.hp);
+      } else {
+        const prev = npcLastHp.get(key);
+        if (prev != null && npc.hp < prev) {
+          const delta = prev - npc.hp;
+          const ember = delta >= 20;
+          const tint = ember
+            ? new Color3(1, 0.55, 0.15)
+            : new Color3(1, 0.95, 0.45);
+          damageFloaters.push(
+            spawnDamageFloater(
+              scene,
+              mesh.root.position,
+              delta,
+              tint,
+            ),
+          );
+          latestDamageAmount = delta;
+          latestDamageAtMs = Date.now();
+        }
+        npcLastHp.set(key, npc.hp);
       }
       mesh.root.position.x = npc.x;
       mesh.root.position.z = npc.z;
@@ -705,6 +797,7 @@ async function main(): Promise<void> {
       if (!seen.has(key)) {
         mesh.root.dispose();
         npcMeshes.delete(key);
+        npcLastHp.delete(key);
       }
     }
   };
@@ -712,6 +805,21 @@ async function main(): Promise<void> {
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() / 1000;
     const now = Date.now();
+
+    for (let i = damageFloaters.length - 1; i >= 0; i--) {
+      const f = damageFloaters[i]!;
+      const age = now - f.bornMs;
+      const t = Math.min(1, age / f.lifeMs);
+      f.mesh.position.y = f.startY + t * 1.35;
+      f.mesh.position.x += f.driftX * dt;
+      const fade = t < 0.55 ? 1 : 1 - (t - 0.55) / 0.45;
+      f.mat.alpha = Math.max(0, fade);
+      if (age >= f.lifeMs) {
+        f.mesh.dispose();
+        f.mat.dispose();
+        damageFloaters.splice(i, 1);
+      }
+    }
 
     if (net && keys.size > 0) {
       const wish = wishFromKeys(keys, camera);
@@ -1103,6 +1211,64 @@ async function main(): Promise<void> {
       window.setTimeout(waitRemoteCast, 250);
     };
     window.setTimeout(waitRemoteCast, 700);
+  }
+
+  // ?ve=damage-text — cast Spark on dummy; wait for floating HP-delta number.
+  if (ve === 'damage-text') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.05;
+  }
+
+  if (net && ve === 'damage-text') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE damage-text: waiting for Connected…';
+    let ticks = 0;
+    let castSent = false;
+    const waitDmg = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        camera.setTarget(
+          new Vector3(dummy.x, 1.4, dummy.z),
+        );
+        camera.radius = 10;
+      }
+      const st = latestStatus;
+      if (st.state === 'connected' && dummy && !castSent) {
+        if (gcdRemainingMs(net.getCombat()) <= 0) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+          lastCastSpell = SPELL_SPARK;
+          net.cast(SPELL_SPARK);
+          castSent = true;
+          if (mark) {
+            mark.textContent = `VE damage-text: Spark cast · waiting HP delta on Dummy #${dummy.npcId}…`;
+          }
+        }
+      }
+      const fresh =
+        latestDamageAtMs > 0 && Date.now() - latestDamageAtMs < 1400;
+      if (st.state === 'connected' && dummy && fresh && damageFloaters.length > 0) {
+        if (mark) {
+          mark.textContent = `Damage-text OK · -${latestDamageAmount} above Dummy #${dummy.npcId} · floaters ${damageFloaters.length} · HP ${dummy.hp}/${dummy.maxHp}`;
+        }
+        return;
+      }
+      if (mark && st.state === 'connected' && castSent && !fresh) {
+        mark.textContent = `VE damage-text: waiting floater… Dummy HP ${dummy?.hp ?? '?'} · floaters ${damageFloaters.length}`;
+      }
+      if (ticks > 100) {
+        if (mark) mark.textContent = 'VE damage-text: timed out waiting for floating damage';
+        return;
+      }
+      window.setTimeout(waitDmg, 120);
+    };
+    window.setTimeout(waitDmg, 600);
   }
 
   void lastCastSpell;
