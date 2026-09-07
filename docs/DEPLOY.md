@@ -102,19 +102,22 @@ Validate early:
 
 - [x] Deploy policy documented
 - [x] `dev-db.sparkify.dev` on existing Mac `sparkify` tunnel → `127.0.0.1:3000` (HTTP 404 from SpacetimeDB root is healthy)
-- [x] `play.sparkify.dev` live (placeholder via Mac tunnel → `:8787`; Pages migration pending wrangler auth)
+- [x] **Cloudflare Pages project `fardel` live** — production deployment of `web-placeholder/`; custom domain `play.sparkify.dev` attached (CNAME → `fardel.pages.dev`, proxied)
 - [ ] Prod SpacetimeDB (`db.sparkify.dev` or MainCloud URI)
 
 ### Tunnel ops note (this machine)
 
 Reuses the existing **`sparkify`** cloudflared LaunchDaemon (`com.cloudflare.sparkify`), config in `/etc/cloudflared/config.yml` (mirror: `~/.cloudflared/config.fardel.yml`). Apex `sparkify.dev` / `sparkify.com` still → `:80`. SpacetimeDB must be **2.10+** if the local data dir was created by 2.10.
 
-### Play placeholder (interim)
+`play.sparkify.dev` no longer needs tunnel ingress (DNS points at Pages). **Follow-up:** remove the `play.sparkify.dev` → `:8787` ingress block from the Mac cloudflared configs / LaunchDaemon when convenient (needs sudo on the Studio); interim Mac tunnel can drop play ingress without affecting Pages.
 
-Until Cloudflare Pages + wrangler auth are set up, `play.sparkify.dev` is served from the Mac Studio:
+### Play placeholder (Pages)
 
-- Static files: `/Users/antbly/dev/fardel-play-placeholder`
-- LaunchAgent: `dev.sparkify.fardel-play-placeholder` → `python3 -m http.server 8787`
-- Tunnel ingress: `play.sparkify.dev` → `http://127.0.0.1:8787`
+Production client placeholder is on **Cloudflare Pages**:
 
-Replace with Pages when an API token / `wrangler login` is available; keep the same hostname.
+- Project: `fardel` → https://fardel.pages.dev
+- Source: repo `web-placeholder/` (`index.html` + `_headers`)
+- Custom domain: `play.sparkify.dev`
+- Deploy: `npx wrangler@4 pages deploy web-placeholder --project-name=fardel --branch main`
+
+Former Mac interim (`python3 -m http.server 8787` + tunnel) is obsolete for play once ingress is cleaned up.
