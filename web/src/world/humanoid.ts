@@ -3,11 +3,9 @@ import {
   AssetContainer,
   Color3,
   Mesh,
-  PBRMaterial,
   Scene,
   SceneLoader,
   StandardMaterial,
-  Texture,
   TransformNode,
   Vector3,
 } from '@babylonjs/core';
