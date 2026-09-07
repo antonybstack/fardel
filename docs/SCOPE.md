@@ -97,5 +97,5 @@ Before starting work, answer:
 
 ## Status
 
-- **Phase:** **slice 0 (Connect) in progress**
+- **Phase:** **slice 0 (Connect) proven** via `tools/ConnectSmoke` (identity OK); Unity Connect scene ready
 - **POC north-star:** not started

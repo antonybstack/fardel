@@ -25,3 +25,16 @@ spacetime generate --lang csharp --out-dir ../client/Assets/Scripts/Spacetime/Ge
 Open `client/` in Unity 6000.6, menu **Fardel → Setup Connect Scene** (or open `Assets/Scenes/Connect.unity`), Play.
 
 **Done when:** Play Mode HUD shows **Connected** and an identity.
+
+
+## Autonomous smoke (preferred)
+
+With local `spacetime start` + published `fardel`:
+
+```bash
+dotnet run --project tools/ConnectSmoke
+```
+
+Expect: `OK: connected identity …`
+
+Unity Play on `Assets/Scenes/Connect` is the visual check; the smoke is the slice gate.
