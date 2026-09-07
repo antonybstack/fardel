@@ -51,6 +51,7 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | Query | Proof |
 |---|---|
 | `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
+| `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
 | `?ve=humanoid` | Frame local procedural humanoid + staff |
 | `?ve=forest` / `?ve=aoi` / `?ve=combat` / `?ve=persist` | Slice presentation shots |
 
