@@ -35,6 +35,19 @@ import {
   type HumanoidParts,
 } from './world/humanoid';
 import {
+  casterMuzzle,
+  createEmberBeam,
+  placeBeam,
+  spawnImpactPop,
+  spawnSparkBolt,
+  targetHitPoint,
+  tickImpactPops,
+  tickSparkBolts,
+  type EmberBeam,
+  type ImpactPop,
+  type SparkBolt,
+} from './world/castVfx';
+import {
   FPS_FLOOR,
   FPS_TARGET,
   updateFpsHud,
@@ -1406,6 +1419,11 @@ async function main(): Promise<void> {
   const remoteNameplates = new Map<string, Nameplate>();
   const remoteFx = new Map<string, RemoteFx>();
   let latestRemoteCombats: RemoteCombat[] = [];
+  const sparkBolts: SparkBolt[] = [];
+  const impactPops: ImpactPop[] = [];
+  const localEmberBeam: EmberBeam = createEmberBeam(scene, 'local');
+  let localBeamActive = false;
+  let castVfxStats = { bolts: 0, impacts: 0, beams: 0 };
   const localNameplate = createNameplate(scene, 'local');
   localNameplate.mesh.parent = player;
   localNameplate.mesh.position.set(0, 2.05, 0);
@@ -1416,19 +1434,7 @@ async function main(): Promise<void> {
   const ensureRemoteFx = (key: string): RemoteFx => {
     let fx = remoteFx.get(key);
     if (fx) return fx;
-    const beamMat = new StandardMaterial(`remoteBeamMat_${key.slice(0, 10)}`, scene);
-    beamMat.diffuseColor = new Color3(1, 0.55, 0.1);
-    beamMat.emissiveColor = new Color3(1.2, 0.45, 0.05);
-    beamMat.disableLighting = true;
-    beamMat.specularColor = new Color3(0.2, 0.1, 0.05);
-    const beam = MeshBuilder.CreateCylinder(
-      `remoteBeam_${key.slice(0, 10)}`,
-      { height: 1, diameter: 0.18, tessellation: 10 },
-      scene,
-    );
-    beam.material = beamMat;
-    beam.setEnabled(false);
-
+    const ember = createEmberBeam(scene, `remote_${key.slice(0, 10)}`);
     const barMat = new StandardMaterial(`remoteBarMat_${key.slice(0, 10)}`, scene);
     barMat.diffuseColor = new Color3(1, 0.7, 0.2);
     barMat.emissiveColor = new Color3(1.1, 0.45, 0.08);
@@ -1441,28 +1447,15 @@ async function main(): Promise<void> {
     bar.material = barMat;
     bar.setEnabled(false);
 
-    fx = { beam, beamMat, bar, barMat, lastCastAtMicros: 0n };
+    fx = {
+      beam: ember.beam,
+      beamMat: ember.beamMat,
+      bar,
+      barMat,
+      lastCastAtMicros: 0n,
+    };
     remoteFx.set(key, fx);
     return fx;
-  };
-
-  const placeBeam = (beam: Mesh, from: Vector3, to: Vector3): void => {
-    const dir = to.subtract(from);
-    const len = dir.length();
-    if (len < 0.05) {
-      beam.setEnabled(false);
-      return;
-    }
-    beam.setEnabled(true);
-    beam.position.copyFrom(from.add(to).scale(0.5));
-    beam.scaling.set(1, len, 1);
-    // Cylinder default axis is +Y — pitch/yaw so +Y aligns with dir.
-    const nx = dir.x / len;
-    const ny = dir.y / len;
-    const nz = dir.z / len;
-    beam.rotation.x = Math.acos(Math.max(-1, Math.min(1, ny)));
-    beam.rotation.y = Math.atan2(nx, nz);
-    beam.rotation.z = 0;
   };
 
   const syncRemoteCastFx = (combats: RemoteCombat[]) => {
@@ -1477,7 +1470,7 @@ async function main(): Promise<void> {
       const wind = castRemainingMs(rc, now);
       const casting = rc.castingSpellId !== 0 && wind > 0;
 
-      // Impact / Spark flash when LastCastAt advances.
+      // Impact / Spark bolt when LastCastAt advances (unify with local cast VFX).
       if (
         rc.lastCastAtMicros > 0n &&
         rc.lastCastAtMicros !== fx.lastCastAtMicros &&
@@ -1489,7 +1482,28 @@ async function main(): Promise<void> {
           : new Color3(1, 0.4, 0.1);
         if (parts) flashMesh(parts.mat, color, spark ? 220 : 380);
         const mesh = npcMeshes.get(rc.targetNpcId.toString());
-        if (mesh) {
+        const from = parts
+          ? casterMuzzle(parts.root.position)
+          : null;
+        const to = mesh ? targetHitPoint(mesh.root.position) : null;
+        if (spark && from && to) {
+          sparkBolts.push(
+            spawnSparkBolt(scene, from, to, {
+              key: `r_${key.slice(0, 8)}_${Number(rc.lastCastAtMicros % 100000n)}`,
+            }),
+          );
+          castVfxStats.bolts += 1;
+        } else if (!spark && to) {
+          impactPops.push(
+            spawnImpactPop(scene, to, new Color3(1.2, 0.45, 0.08), {
+              key: `rimp_${key.slice(0, 8)}`,
+            }),
+          );
+          castVfxStats.impacts += 1;
+          if (mesh) {
+            flashMesh(mesh.mat, new Color3(1, 0.3, 0.05), 450);
+          }
+        } else if (mesh) {
           flashMesh(
             mesh.mat,
             spark ? new Color3(0.55, 0.85, 1) : new Color3(1, 0.3, 0.05),
@@ -1524,8 +1538,8 @@ async function main(): Promise<void> {
 
       const tgt = npcMeshes.get(rc.targetNpcId.toString());
       if (tgt) {
-        const from = parts.root.position.add(new Vector3(0.4, 1.4, 0.1));
-        const to = tgt.root.position.add(new Vector3(0, 0.9, 0));
+        const from = casterMuzzle(parts.root.position);
+        const to = targetHitPoint(tgt.root.position);
         placeBeam(fx.beam, from, to);
       } else {
         fx.beam.setEnabled(false);
@@ -1691,7 +1705,7 @@ async function main(): Promise<void> {
         );
       }
 
-      // Visual telegraph / flash on selected target + player.
+      // Local cast VFX: Spark bolt + trail; Emberbolt thicker beam; impact pop on hit.
       const playerMat = player.material as StandardMaterial;
       flashMesh(
         playerMat,
@@ -1702,7 +1716,29 @@ async function main(): Promise<void> {
       );
       const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
       const mesh = npcMeshes.get(tid.toString());
-      if (mesh) {
+      const from = casterMuzzle(player.position);
+      if (spellId === SPELL_SPARK && mesh) {
+        const to = targetHitPoint(mesh.root.position);
+        sparkBolts.push(
+          spawnSparkBolt(scene, from, to, {
+            key: `local_spark_${Date.now()}`,
+          }),
+        );
+        castVfxStats.bolts += 1;
+        localBeamActive = false;
+        localEmberBeam.beam.setEnabled(false);
+      } else if (spellId === SPELL_EMBERBOLT && mesh) {
+        localBeamActive = true;
+        const to = targetHitPoint(mesh.root.position);
+        placeBeam(localEmberBeam.beam, from, to);
+        castVfxStats.beams += 1;
+        // Soft target glow during windup; impact pop fires when bolt/cast lands.
+        flashMesh(
+          mesh.mat,
+          new Color3(1, 0.35, 0.05),
+          Math.min(500, EMBERBOLT_CAST_MS),
+        );
+      } else if (mesh) {
         flashMesh(
           mesh.mat,
           spellId === SPELL_SPARK
@@ -1916,6 +1952,67 @@ async function main(): Promise<void> {
         f.mesh.dispose();
         f.mat.dispose();
         damageFloaters.splice(i, 1);
+      }
+    }
+
+    // Cast projectile / beam polish: Spark bolts + impact pops + local Emberbolt beam.
+    {
+      const arrived = tickSparkBolts(sparkBolts, now, dt);
+      for (const b of arrived) {
+        impactPops.push(
+          spawnImpactPop(scene, b.to, b.impactColor, {
+            key: `imp_${now}_${impactPops.length}`,
+          }),
+        );
+        castVfxStats.impacts += 1;
+        // Flash nearest NPC at impact point.
+        for (const mesh of npcMeshes.values()) {
+          const hit = targetHitPoint(mesh.root.position);
+          if (Vector3.Distance(hit, b.to) < 0.6) {
+            flashMesh(mesh.mat, new Color3(0.55, 0.9, 1.2), 260);
+            break;
+          }
+        }
+      }
+      tickImpactPops(impactPops, now);
+
+      const castLeftNow = Math.max(0, castUntilMs - now);
+      if (
+        localBeamActive &&
+        lastCastSpell === SPELL_EMBERBOLT &&
+        castLeftNow > 0
+      ) {
+        const tid = net?.getCombat()?.targetNpcId ?? selectedTargetId;
+        const mesh = npcMeshes.get(tid.toString());
+        if (mesh) {
+          placeBeam(
+            localEmberBeam.beam,
+            casterMuzzle(player.position),
+            targetHitPoint(mesh.root.position),
+          );
+          const pulse = 0.85 + 0.2 * Math.sin(now / 80);
+          localEmberBeam.beamMat.emissiveColor = new Color3(
+            1.35 * pulse,
+            0.4 * pulse,
+            0.05,
+          );
+        }
+      } else if (localBeamActive) {
+        // Windup finished — impact pop + hide beam.
+        const tid = net?.getCombat()?.targetNpcId ?? selectedTargetId;
+        const mesh = npcMeshes.get(tid.toString());
+        if (mesh && lastCastSpell === SPELL_EMBERBOLT) {
+          const to = targetHitPoint(mesh.root.position);
+          impactPops.push(
+            spawnImpactPop(scene, to, new Color3(1.25, 0.4, 0.06), {
+              key: `local_ember_imp_${now}`,
+            }),
+          );
+          castVfxStats.impacts += 1;
+          flashMesh(mesh.mat, new Color3(1, 0.35, 0.08), 420);
+        }
+        localEmberBeam.beam.setEnabled(false);
+        localBeamActive = false;
       }
     }
 
@@ -2571,6 +2668,139 @@ async function main(): Promise<void> {
       window.setTimeout(waitRemoteCast, 250);
     };
     window.setTimeout(waitRemoteCast, 700);
+  }
+
+  // ?ve=projectile — local Emberbolt thicker beam (+ Spark bolt VFX path); impact pop.
+  if (ve === 'projectile') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.05;
+  }
+
+  if (net && ve === 'projectile') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE projectile: waiting for Connected…';
+    let ticks = 0;
+    let castSent = false;
+    let sawBolt = false;
+    let sawBeam = false;
+    let sawImpact = false;
+    const waitProj = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE projectile: ${st.state}…`;
+        if (ticks > 160) {
+          if (mark) mark.textContent = 'VE projectile: timed out waiting Connected';
+          return;
+        }
+        window.setTimeout(waitProj, 250);
+        return;
+      }
+      const ch0 = st.character;
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE projectile: re-equipping staff…';
+        window.setTimeout(waitProj, 250);
+        return;
+      }
+      net.ensureTrainingDummy();
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(new Vector3(dummy.x, 1.25, dummy.z));
+        camera.radius = 11;
+        // Frame mid-point player↔dummy so beam/bolt reads clearly.
+        const mid = player.position.add(
+          new Vector3(dummy.x, 1.2, dummy.z).subtract(player.position).scale(0.45),
+        );
+        mid.y = 1.2;
+        camera.setTarget(mid);
+      }
+      if (sparkBolts.length > 0) sawBolt = true;
+      if (localEmberBeam.beam.isEnabled()) sawBeam = true;
+      if (impactPops.length > 0 || castVfxStats.impacts > 0) sawImpact = true;
+
+      if (!castSent && dummy) {
+        castSent = true;
+        lastCastSpell = SPELL_EMBERBOLT;
+        castTotalMs = EMBERBOLT_CAST_MS;
+        castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+        net.cast(SPELL_EMBERBOLT);
+        localBeamActive = true;
+        placeBeam(
+          localEmberBeam.beam,
+          casterMuzzle(player.position),
+          targetHitPoint(
+            npcMeshes.get(dummy.npcId.toString())?.root.position ??
+              new Vector3(dummy.x, 0, dummy.z),
+          ),
+        );
+        castVfxStats.beams += 1;
+        // Also spawn a Spark bolt for VE readability (cosmetic mid-flight proof).
+        sparkBolts.push(
+          spawnSparkBolt(
+            scene,
+            casterMuzzle(player.position),
+            targetHitPoint(
+              npcMeshes.get(dummy.npcId.toString())?.root.position ??
+                new Vector3(dummy.x, 0, dummy.z),
+            ),
+            { key: `ve_spark_${Date.now()}`, lifeMs: 520 },
+          ),
+        );
+        castVfxStats.bolts += 1;
+        sawBolt = true;
+        sawBeam = true;
+        pushCombatLog('cast', `Emberbolt + Spark VFX → Dummy #${dummy.npcId}`);
+        if (mark) {
+          mark.textContent = `VE projectile: Emberbolt beam + Spark bolt · Dummy #${dummy.npcId}…`;
+        }
+        window.setTimeout(waitProj, 120);
+        return;
+      }
+
+      const castLeft = Math.max(0, castUntilMs - Date.now());
+      const beamOn = localEmberBeam.beam.isEnabled();
+      const boltOn = sparkBolts.length > 0;
+      if (
+        castSent &&
+        dummy &&
+        (beamOn || boltOn || sawBeam) &&
+        castLeft > 350
+      ) {
+        if (mark) {
+          mark.textContent = `Projectile OK · Emberbolt beam${beamOn ? ' on' : ''} · Spark bolt${boltOn ? ' mid-flight' : sawBolt ? ' fired' : ''} · impacts ${castVfxStats.impacts} · Dummy #${dummy.npcId} HP ${dummy.hp}/${dummy.maxHp}`;
+        }
+        // Hold while beam/bolt visible for screenshot.
+        if (ticks < 140) window.setTimeout(waitProj, 160);
+        return;
+      }
+      if (
+        castSent &&
+        dummy &&
+        (sawBeam || sawBolt) &&
+        (castLeft <= 0 || sawImpact || impactPops.length > 0)
+      ) {
+        if (mark) {
+          mark.textContent = `Projectile OK · local beam+bolt VFX · impacts ${castVfxStats.impacts} · Dummy #${dummy.npcId} HP ${dummy.hp}/${dummy.maxHp}`;
+        }
+        return;
+      }
+      if (mark && castSent) {
+        mark.textContent = `VE projectile: waiting VFX… beam=${beamOn} bolt=${boltOn} castLeft=${(castLeft / 1000).toFixed(1)}s`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE projectile: timed out waiting for beam/bolt';
+        return;
+      }
+      window.setTimeout(waitProj, 200);
+    };
+    window.setTimeout(waitProj, 700);
   }
 
   // ?ve=damage-text — cast Spark on dummy; wait for floating HP-delta number.

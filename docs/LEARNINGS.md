@@ -72,6 +72,7 @@ Unity is v1 only; keep Shared pure so a custom WebGPU client stays possible late
 ## Floating damage text (web)
 
 - Prefer **NPC hp deltas** over a new damage-event table for combat floaters — server already mutates `npc.hp` on Spark/Emberbolt apply; client tracks `npcLastHp` and spawns billboard `DynamicTexture` planes. Keeps CombatSmoke / module unchanged.
+- Unify local+remote cast presentation in `web/src/world/castVfx.ts` (Spark bolt+trail, Emberbolt thicker beam, impact pop) — cosmetic only; do not change CombatSmoke / Cast reducer timing.
 
 ## Party / always-relevant (invent)
 

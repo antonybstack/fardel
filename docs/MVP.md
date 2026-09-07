@@ -64,6 +64,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - **Shared GCD** after cast start (server-authoritative; client may predict UI)
 - Dummy with HP; server applies damage
 - Cast windup VFX for Emberbolt (client predict ok); Spark can be near-instant
+- Cast projectile / beam polish: Spark bolt+trail + Emberbolt thicker beam (local+remote) + impact pop (`web/src/world/castVfx.ts`; `?ve=projectile`)
 
 **Done when:** both spells can kill the dummy under GCD rules; killing grants XP on the character row.
 

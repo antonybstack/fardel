@@ -162,6 +162,7 @@ See `web/README.md` for exact commands.
 - **System toast banner (presentation):** client-only transient top-center toasts — Connected / identity restore, party invite received / accepted, XP gain, short staff/robes equip feedback; `?ve=toasts` (`ve/babylon-toasts.png`)
 - **Dummy death / respawn (presentation):** NPC HP >0→≤0 plays sink/scale/fade + burst VFX, combat-log **Dummy defeated**, toast kind `death`; HP ≤0→>0 pop-in flash + **Dummy respawned** / toast `respawn`; corpse hidden after VFX (no forever clickable body); `?ve=death` (`ve/babylon-death.png`)
 - **Chat / public Say (presentation + module):** `ChatMessage` table + public `Say` reducer (trim/truncate 120, prune >50); Babylon strip renders server inserts (You vs remote hex), toast kind `say`; `tools/ChatSmoke` (A→B); `?ve=chat` (`ve/babylon-say.png`)
+- **Cast projectile / beam VFX (presentation):** Spark fast sphere+trail bolt to target + impact pop; Emberbolt thicker windup beam (local + remote unified via `web/src/world/castVfx.ts`); clear impact pop on hit; `?ve=projectile` (`ve/babylon-projectile.png`)
 - **Robes mesh visual (presentation):** `EquipRobes`/`UnequipRobes`; hotkeys **J/K**; hood/skirt/shoulders hide + drab tunic tint follow `Character.robesEquipped` (mirrors staff U/I); `tools/RobesEquipSmoke`; `?ve=robes-equip` (`ve/babylon-robes-equip.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
@@ -169,4 +170,4 @@ See `web/README.md` for exact commands.
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- Next (north-star): credited art packs when licenses land (still blocked); optional party/whisper channels or chat rate-limits
+- Next (north-star): credited art packs when licenses land (still blocked); optional party/whisper chat channels or chat rate-limits; optional loot/pickup invent later
