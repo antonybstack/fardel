@@ -151,7 +151,7 @@ See `web/README.md` for exact commands.
   also wholesale-subscribes `party_member` + per-identity `player_pose` for party
   mates outside Moore; green party remote tint; HUD `party: N`; hotkeys P/O;
   `?ve=party` + `tools/PartySmoke` / `tools/PartyMate` (`ve/babylon-party.png`)
-- **Minimap / compass HUD (presentation):** top-right 2D canvas minimap — local (blue), remotes (magenta / party green), training dummy (tan), crowd proxies (amber near / dim far); north-up; `?ve=minimap` (`ve/babylon-minimap.png`)
+- **Minimap / compass HUD (presentation):** top-right 2D canvas minimap — local (blue), remotes (magenta), **party mates (distinct green + halo; rim chevron when far / always-relevant)**, training dummy (tan), crowd proxies (amber near / dim far); north-up; You/Party legend; `?ve=minimap` (`ve/babylon-minimap.png`); party proof `?ve=minimap-party` (`ve/babylon-minimap-party.png`)
 - **World nameplates (presentation):** billboard labels — local **You**, remotes hex prefix (party green tint), training dummy **Dummy** + HP pip; `?ve=nameplates` (`ve/babylon-nameplates.png`)
 - **Selected-target frame HUD (presentation):** compact DOM name + HP bar (+ short npc id) for current Tab target, stacked above combat GCD/cast bars; client-only; `?ve=target-frame` (`ve/babylon-target-frame.png`)
 - **Target frame + spell hotbar HUD (presentation):** bottom-center Spark (1) / Emberbolt (2) slots with keybind + GCD sweep + Emberbolt cast fill; dim when staff unequipped; `?ve=hotbar` / `?ve=target-frame` (`ve/babylon-hotbar.png`)
@@ -160,6 +160,7 @@ See `web/README.md` for exact commands.
 - **Party frames HP (invent/presentation):** wire `Character.Hp`/`MaxHp` into party member frames for You + mates (wholesale Character cache / `getCharacterFor`); PartyMate takes dummy thorns so mate bar is mid; `?ve=party-hp` (`ve/babylon-party-hp.png`)
 - **Party XP share (invent):** kill grants `XpPerKill` to killer + `PartyXpSharePerMate` to always-relevant `PartyMember` mates; `tools/PartyXpSmoke`; mate toast/floater; `?ve=party-xp` (`ve/babylon-party-xp.png`)
 - **Party loot share (invent):** death drop + extra `ember_shard` WorldLoot near each in-range mate (`Loot.PartyShareRangeMeters`); `tools/PartyLootSmoke`; toast; `?ve=party-loot` (`ve/babylon-party-loot.png`)
+- **Minimap party blips (invent/presentation):** client-only — always-relevant party remote poses already green on compass; distinct halo + rim chevron when beyond minimap range; `?ve=minimap-party` + PartyMate far pose (`ve/babylon-minimap-party.png`)
 - **Combat log strip (presentation):** client-only scrolling right-column log — Cast start, HP-delta damage, staff/robes equip, party join; `?ve=combat-log` (`ve/babylon-combat-log.png`)
 - **FPS / performance overlay (presentation):** live `engine.getFps()` HUD (green ≥ 30 floor / 60 target on box reference) + near/far crowd proxies, remotes, NPCs; `?ve=fps` seeds crowd for AOI proof (`ve/babylon-fps.png`)
 - **System toast banner (presentation):** client-only transient top-center toasts — Connected / identity restore, party invite received / accepted, XP gain, short staff/robes equip feedback; `?ve=toasts` (`ve/babylon-toasts.png`)
@@ -185,3 +186,4 @@ See `web/README.md` for exact commands.
 - **Party frames HP (follow-on):** party roster HP bars from same Character rows; `?ve=party-hp` (`ve/babylon-party-hp.png`)
 - **Party XP share (follow-on):** always-relevant mate share on kill; `?ve=party-xp` (`ve/babylon-party-xp.png`)
 - **Party loot share (invent):** dummy-death WorldLoot + extra `ember_shard` near in-range `PartyMember` mates; `tools/PartyLootSmoke`; mate toast; `?ve=party-loot` (`ve/babylon-party-loot.png`)
+- **Minimap party blips (follow-on):** far always-relevant mate green rim blip; `?ve=minimap-party` (`ve/babylon-minimap-party.png`)

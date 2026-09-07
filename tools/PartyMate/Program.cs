@@ -2,7 +2,7 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// Long-lived party mate for browser ?ve=party / ?ve=party-hp / ?ve=party-frames / ?ve=party-xp / ?ve=party-loot:
+// Long-lived party mate for browser ?ve=party / ?ve=party-hp / ?ve=party-frames / ?ve=party-xp / ?ve=party-loot / ?ve=minimap-party:
 // invite online identities (skip stale no-accept), wait for party size>=2,
 // kill dummy once (party XP share + in-range loot share to mates), take a few
 // dummy-thorn Sparks (mate HP mid for party-hp frames), move far, hold.

@@ -891,7 +891,7 @@ function bindChatUi(opts: {
   };
 }
 
-/** Top-right 2D minimap: local, remotes, dummy, crowd proxies. */
+/** Top-right 2D minimap: local, remotes, party (green), dummy, crowd proxies. */
 const MINIMAP_RANGE_M = 48;
 
 function drawMinimap(opts: {
@@ -909,6 +909,7 @@ function drawMinimap(opts: {
   const cx = w / 2;
   const cy = h / 2;
   const scale = (Math.min(w, h) * 0.42) / MINIMAP_RANGE_M;
+  const maxR = Math.min(w, h) * 0.44;
 
   ctx.clearRect(0, 0, w, h);
   // Disc background
@@ -936,25 +937,32 @@ function drawMinimap(opts: {
   const originX = opts.local?.x ?? 0;
   const originZ = opts.local?.z ?? 0;
 
-  const plot = (wx: number, wz: number, color: string, r: number, alpha = 1) => {
+  const project = (wx: number, wz: number) => {
     const dx = (wx - originX) * scale;
     // World +Z forward → screen up (north-up).
     const dy = -(wz - originZ) * scale;
     const dist = Math.hypot(dx, dy);
-    const maxR = Math.min(w, h) * 0.44;
     let px = cx + dx;
     let py = cy + dy;
+    let clamped = false;
     if (dist > maxR && dist > 1e-6) {
       const s = maxR / dist;
       px = cx + dx * s;
       py = cy + dy * s;
+      clamped = true;
     }
+    return { px, py, clamped, dist };
+  };
+
+  const plot = (wx: number, wz: number, color: string, r: number, alpha = 1) => {
+    const { px, py, clamped } = project(wx, wz);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
+    return { px, py, clamped };
   };
 
   for (const p of opts.proxies) {
@@ -965,8 +973,39 @@ function drawMinimap(opts: {
     const dummy = n.kind === NPC_KIND_DUMMY;
     plot(n.x, n.z, dummy ? '#c4a06a' : '#c45a5a', dummy ? 3.4 : 3.0);
   }
+  // Non-party remotes (magenta)
   for (const r of opts.remotes) {
-    plot(r.x, r.z, r.party ? '#5ed68a' : '#d46ad8', 3.6);
+    if (r.party) continue;
+    plot(r.x, r.z, '#d46ad8', 3.6);
+  }
+  // Party mates — distinct green blips; rim chevron when always-relevant / far.
+  let partyCount = 0;
+  for (const r of opts.remotes) {
+    if (!r.party) continue;
+    partyCount += 1;
+    const { px, py, clamped } = plot(r.x, r.z, '#5ed68a', 4.6);
+    ctx.strokeStyle = 'rgba(94, 214, 138, 0.95)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(px, py, 6.4, 0, Math.PI * 2);
+    ctx.stroke();
+    if (clamped) {
+      const ang = Math.atan2(py - cy, px - cx);
+      const tip = 9.5;
+      ctx.fillStyle = '#5ed68a';
+      ctx.beginPath();
+      ctx.moveTo(px + Math.cos(ang) * tip, py + Math.sin(ang) * tip);
+      ctx.lineTo(
+        px + Math.cos(ang + 2.35) * 4.8,
+        py + Math.sin(ang + 2.35) * 4.8,
+      );
+      ctx.lineTo(
+        px + Math.cos(ang - 2.35) * 4.8,
+        py + Math.sin(ang - 2.35) * 4.8,
+      );
+      ctx.closePath();
+      ctx.fill();
+    }
   }
   // Local on top
   plot(originX, originZ, '#6aa2ff', 4.2);
@@ -975,6 +1014,30 @@ function drawMinimap(opts: {
   ctx.beginPath();
   ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
   ctx.stroke();
+
+  // Legend when party mates are on the map (You + Party).
+  if (partyCount > 0) {
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 9px ui-sans-serif, system-ui, sans-serif';
+    ctx.fillStyle = '#6aa2ff';
+    ctx.beginPath();
+    ctx.arc(12, h - 12, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#c8d6f0';
+    ctx.fillText('You', 20, h - 12);
+    ctx.fillStyle = '#5ed68a';
+    ctx.beginPath();
+    ctx.arc(52, h - 12, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(94, 214, 138, 0.9)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(52, h - 12, 5.2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#c8d6f0';
+    ctx.fillText('Party', 60, h - 12);
+  }
 }
 
 function formatLoadout(ch: NonNullable<Extract<ConnectionStatus, { state: 'connected' }>['character']>): string {
@@ -3863,6 +3926,103 @@ async function main(): Promise<void> {
       window.setTimeout(waitMinimap, 250);
     };
     window.setTimeout(waitMinimap, 700);
+  }
+
+  // ?ve=minimap-party — You (blue) + far always-relevant party mate green blip on rim.
+  if (ve === 'minimap-party') {
+    camera.radius = 28;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.25;
+  }
+  if (net && ve === 'minimap-party') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE minimap-party: waiting for party invite / far mate…';
+    try {
+      const p0 = net.getParty();
+      if (p0 && p0.size > 0 && p0.size < 2) net.leaveParty();
+    } catch { /* ignore */ }
+    let ticks = 0;
+    let invited = false;
+    const waitMinimapParty = () => {
+      if (!net) return;
+      ticks += 1;
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const party = net.getParty();
+      const st = latestStatus;
+      const local = net.getLocalPose() ?? {
+        x: player.position.x,
+        z: player.position.z,
+      };
+      drawMinimap({
+        local,
+        remotes,
+        npcs: net.getNpcs(),
+        proxies: net.getProxies(),
+      });
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE minimap-party: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitMinimapParty, 200);
+        return;
+      }
+      if (party?.pendingInviteFrom) {
+        if ((party.size ?? 0) > 0 && (party.size ?? 0) < 2) {
+          net.leaveParty();
+          if (mark) mark.textContent = 'VE minimap-party: left solo party to accept inbound invite…';
+          window.setTimeout(waitMinimapParty, 250);
+          return;
+        }
+        if ((party.size ?? 0) === 0) {
+          net.acceptPartyInvite();
+          if (mark) {
+            mark.textContent = `VE minimap-party: accepting invite from ${party.pendingInviteFrom.slice(0, 12)}…`;
+          }
+          window.setTimeout(waitMinimapParty, 300);
+          return;
+        }
+      }
+      if (
+        !invited &&
+        !party?.pendingInviteFrom &&
+        remotes.length >= 1 &&
+        (party?.size ?? 0) < 2
+      ) {
+        const hex = net.inviteNearestRemote();
+        if (hex) {
+          invited = true;
+          if (mark) {
+            mark.textContent = `VE minimap-party: invited ${hex.slice(0, 12)}… waiting accept + far pose…`;
+          }
+        }
+      }
+      const farParty = remotes.find((r) => {
+        if (!r.party) return false;
+        const dist = Math.hypot(r.x - local.x, r.z - local.z);
+        return dist > MINIMAP_RANGE_M || Math.abs(r.chunkX) > 1 || Math.abs(r.chunkZ) > 1;
+      });
+      if ((party?.size ?? 0) >= 2 && farParty && document.getElementById('minimap')) {
+        camera.setTarget(new Vector3(local.x, 1.1, local.z));
+        camera.radius = 26;
+        if (mark) {
+          const dist = Math.hypot(farParty.x - local.x, farParty.z - local.z);
+          mark.textContent =
+            `Minimap party OK · You + far mate blip ${farParty.identityHex.slice(0, 12)}… ` +
+            `@(${farParty.x.toFixed(0)},${farParty.z.toFixed(0)}) dist ${dist.toFixed(0)}m · green rim`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE minimap-party: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · ` +
+          `invited=${invited} · pending=${party?.pendingInviteFrom?.slice(0, 8) ?? '—'} (waiting far party blip…)`;
+      }
+      if (ticks > 220) {
+        if (mark) mark.textContent = 'VE minimap-party: timed out waiting for far party mate blip';
+        return;
+      }
+      window.setTimeout(waitMinimapParty, 200);
+    };
+    window.setTimeout(waitMinimapParty, 800);
   }
 
   // ?ve=nameplates — You + Dummy (+ remotes) billboard labels; dummy HP pip.
