@@ -154,10 +154,11 @@ See `web/README.md` for exact commands.
 - **Minimap / compass HUD (presentation):** top-right 2D canvas minimap — local (blue), remotes (magenta / party green), training dummy (tan), crowd proxies (amber near / dim far); north-up; `?ve=minimap` (`ve/babylon-minimap.png`)
 - **World nameplates (presentation):** billboard labels — local **You**, remotes hex prefix (party green tint), training dummy **Dummy** + HP pip; `?ve=nameplates` (`ve/babylon-nameplates.png`)
 - **Selected-target frame HUD (presentation):** compact DOM name + HP bar (+ short npc id) for current Tab target, stacked above combat GCD/cast bars; client-only; `?ve=target-frame` (`ve/babylon-target-frame.png`)
+- **Target frame + spell hotbar HUD (presentation):** bottom-center Spark (1) / Emberbolt (2) slots with keybind + GCD sweep + Emberbolt cast fill; dim when staff unequipped; `?ve=hotbar` / `?ve=target-frame` (`ve/babylon-hotbar.png`)
 - **Pages:** Vite `web/dist` → Cloudflare Pages `fardel` → `play.sparkify.dev`
   (default URI `https://dev-db.sparkify.dev` when not localhost; live Connected
   needs Mac tunnel)
 - **Staff unequip / cast gate:** `UnequipStaff` / `EquipStaff`; hotkeys U/I; staff mesh
   follows `Character.staffEquipped`; HUD blocked cast; `tools/StaffEquipSmoke`;
   `?ve=staff-equip` (`ve/babylon-staff-equip.png`)
-- Next (north-star): dual spell hotbar HUD (1/2 GCD sweep) or credited art packs when licenses land; redeploy Pages (target-frame invent done)
+- Next (north-star): credited art packs when licenses land; redeploy Pages (hotbar/target-frame invent done)
