@@ -246,7 +246,7 @@ finally
     try { connC?.Disconnect(); } catch { /* ignore */ }
 }
 
-static async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
+async Task<(DbConnection conn, Identity id)> ConnectAsync(string label)
 {
     var tcs = new TaskCompletionSource<Identity>();
     var conn = DbConnection.Builder()
