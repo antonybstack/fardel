@@ -4416,11 +4416,11 @@ async function main(): Promise<void> {
     window.setTimeout(tryAoi, 700);
   }
 
-  // ?ve=forest — pull camera back so hero trees + mountains + HUD are visible.
+  // ?ve=forest — pull camera back so dense ring + landmark heroes + mountains read.
   if (ve === 'forest' || ve === 'aoi') {
-    camera.radius = ve === 'forest' ? 36 : 22;
-    camera.alpha = Math.PI / 2.5;
-    camera.beta = Math.PI / 3.55;
+    camera.radius = ve === 'forest' ? 34 : 22;
+    camera.alpha = Math.PI / 1.95;
+    camera.beta = Math.PI / 2.35;
   }
 
   if (net && ve === 'forest') {
@@ -4435,8 +4435,8 @@ async function main(): Promise<void> {
         if (mark) {
           const aoi = net.getAoi();
           mark.textContent = aoi
-            ? `Forest OK · trees+mountains · Connected · AOI near ${aoi.nearCount}`
-            : 'Forest OK · trees+mountains · Connected';
+            ? `Forest OK · density+LOD · Connected · AOI near ${aoi.nearCount}`
+            : 'Forest OK · density+LOD · Connected';
         }
         return;
       }
