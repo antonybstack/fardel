@@ -4,8 +4,8 @@ using SpacetimeDB.Types;
 
 // Killer gets Combat.XpPerKill; each other PartyMember mate gets PartyXpSharePerMate
 // (always-relevant — no distance gate). Solo kill must not invent phantom share.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 45000;
 
 DbConnection? connA = null;

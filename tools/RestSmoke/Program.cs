@@ -3,8 +3,8 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Rest reducer: out-of-combat heal + cooldown; reject casting / recently damaged / full / dead.
-const string uri = GameConstants.DefaultLocalUri;
-const string db = GameConstants.DefaultDatabaseName;
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
 
 DbConnection? conn = null;

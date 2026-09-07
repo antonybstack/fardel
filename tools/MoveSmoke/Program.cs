@@ -2,8 +2,8 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-const string uri = "http://127.0.0.1:3000";
-const string db = "fardel";
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 20000;
 
 var connected = new TaskCompletionSource<Identity>();

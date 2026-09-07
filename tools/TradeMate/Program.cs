@@ -4,8 +4,8 @@ using SpacetimeDB.Types;
 
 // Long-lived trade partner for browser ?ve=trade:
 // sit near yard, auto-accept inbound TradeOffers, hold.
-const string uri = "http://127.0.0.1:3000";
-const string db = "fardel";
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const float holdX = 2.0f;
 const float holdZ = 0.5f;
 const int timeoutMs = 30000;

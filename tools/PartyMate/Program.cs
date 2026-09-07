@@ -6,8 +6,8 @@ using SpacetimeDB.Types;
 // invite online identities (skip stale no-accept), wait for party size>=2,
 // kill dummy once (party XP share + in-range loot share to mates), take a few
 // dummy-thorn Sparks (mate HP mid for party-hp frames), move far, hold.
-const string uri = "http://127.0.0.1:3000";
-const string db = "fardel";
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const float farX = 120f;
 const float farZ = 0f;
 const int timeoutMs = 30000;

@@ -4,8 +4,8 @@ using SpacetimeDB.Types;
 
 // One-shot mate for ?ve=party-frames: invite first non-self pose that looks
 // like a browser (or any), wait for party size>=2 with long patience, move far, hold.
-const string uri = "http://127.0.0.1:3000";
-const string db = "fardel";
+var uri = GameConstants.ResolveLocalUri();
+var db = GameConstants.ResolveDatabaseName();
 const float farX = 80f;
 const float farZ = 0f;
 const int timeoutMs = 60000;
