@@ -117,4 +117,4 @@ Before starting work, answer:
 - **Web milestone (Unity):** checkpointed on `checkpoint/unity-webgl` (`ca9b7d5`); Unity tree removed from `main`
 - **Active client:** **Babylon.js + TypeScript** (code-first); SpacetimeDB C# module + headless smokes unchanged (see ADR 0003)
 - **Babylon presentation:** Connect / Move / Combat / Persist / **AOI** green; **forest kitbash** (`ve/babylon-forest.png`); **humanoid+staff**; **second-client shared yard** green (`ve/babylon-two-client.png`); **remote cast/target telegraphs** (`ve/babylon-remote-cast.png`)
-- **POC north-star:** closer — remaining invent: credited art packs for humanoid; optional remote cast/target presentation
+- **POC north-star:** closer — remaining invent: credited art packs for humanoid; party / always-relevant polish
