@@ -581,27 +581,29 @@ body {
   align-items: center;
   gap: 5px;
   padding: 5px 8px;
-  background: rgba(8, 12, 24, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(8, 12, 24, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.24);
   border-radius: 7px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
   min-width: 0;
 }
 
 .loChip.on {
-  border-color: rgba(94, 214, 138, 0.45);
+  border-color: rgba(94, 214, 138, 0.65);
+  background: rgba(12, 20, 16, 0.94);
 }
 
 .loChip.off {
-  opacity: 0.55;
-  filter: grayscale(0.45);
-  border-color: rgba(220, 70, 60, 0.35);
+  opacity: 0.65;
+  filter: grayscale(0.5);
+  border-color: rgba(220, 70, 60, 0.5);
+  background: rgba(18, 8, 8, 0.92);
 }
 
 .loIcon {
   font-size: 12px;
   line-height: 1;
-  color: #c8d6f0;
+  color: #d8e6ff;
 }
 
 .loIcon.staff {
@@ -625,23 +627,23 @@ body {
 }
 
 .loLabel {
-  color: #e8eefc;
+  color: #f0f6ff;
   font-size: 11px;
   font-weight: 650;
 }
 
 .loState {
-  color: #8aa0c8;
+  color: #aec4e8;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
 
 .loChip.on .loState {
-  color: #5ed68a;
+  color: #6ee89a;
 }
 
 .loChip.off .loState {
-  color: #dc463c;
+  color: #ec564c;
 }
 
 /* Bag / loadout panel — toggled with B. */
@@ -653,10 +655,10 @@ body {
   pointer-events: none;
   width: min(240px, 48vw);
   padding: 10px 12px 9px;
-  background: rgba(8, 12, 24, 0.88);
-  border: 1px solid rgba(196, 160, 106, 0.4);
+  background: rgba(8, 12, 24, 0.94);
+  border: 1px solid rgba(196, 160, 106, 0.6);
   border-radius: 10px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -674,7 +676,7 @@ body {
 }
 
 .bagTitle {
-  color: #e8c89a;
+  color: #f4d6aa;
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -693,27 +695,29 @@ body {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  color: #c8d6f0;
+  color: #d4e0f8;
   font-size: 12px;
 }
 
 .bagRow span:last-child {
-  color: #e8eefc;
+  color: #f0f6ff;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
 
 .bagRow span:last-child.ok {
-  color: #5ed68a;
+  color: #6ee89a;
+  font-weight: 700;
 }
 
 .bagRow span:last-child.bad {
-  color: #dc463c;
+  color: #ec564c;
+  font-weight: 700;
 }
 
 .bagFoot {
   margin-top: 4px;
-  color: #8aa0c8;
+  color: #9eb4d8;
   font-size: 10px;
   line-height: 1.35;
 }
