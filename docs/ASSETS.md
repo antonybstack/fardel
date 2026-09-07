@@ -52,6 +52,13 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Still kitbash-OK until free packs land; must read as a *person*
 - VE: `?ve=humanoid-polish`
 
+### Path / ground targets (Issue #44)
+
+- Clearer dirt/stone trail vs lush grass at play cam under locked #39 fog/sun
+- Warm grey-brown path albedo ~`(0.45–0.52, 0.34–0.40, 0.24–0.30)`; soft moss/dirt edge; matte / low specular / no bright emissive
+- Keep lush grass `~(0.26, 0.52, 0.18)`; procedural DIY (trail strip, stone flecks, faint moss patches); no paid packs
+- VE: `?ve=path-ground`
+
 ### Forest targets (Issue #34)
 
 - More mid-tree variety + stronger hero silhouettes; LOD/instancing discipline (see Principles)

@@ -131,7 +131,8 @@ See `web/README.md` for exact commands.
 - **Forest kitbash (presentation):** procedural clearing — landmark hero trunks +
   ThinInstanced mid-tree variety + far LOD ring, distant snow-capped mountain
   silhouette, dusk sky/fog + hemi/sun mood (`web/src/world/forest.ts`);
-  (`ve/babylon-forest.png`, `?ve=forest`)
+  (`ve/babylon-forest.png`, `?ve=forest`); path/ground polish #44
+  (`?ve=path-ground`, `ve/babylon-path-ground.png`)
 - **Humanoid + staff (presentation):** local player procedural body+head+limbs +
   staff (`web/src/world/humanoid.ts`); CrowdProxies stay capsules; dummy unchanged
   (`ve/babylon-humanoid.png`); readability polish #33 (`?ve=humanoid-polish`,

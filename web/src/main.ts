@@ -4522,6 +4522,36 @@ async function main(): Promise<void> {
     window.setTimeout(waitAtmosphere, 600);
   }
 
+  // ?ve=path-ground — play-cam frame of polished dirt/stone trail vs lush grass (#44).
+  if (ve === 'path-ground') {
+    camera.radius = 15;
+    camera.alpha = Math.PI / 3.1;
+    camera.beta = Math.PI / 2.75;
+  }
+
+  if (net && ve === 'path-ground') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE path-ground: waiting for Connected…';
+    const waitPathGround = () => {
+      if (!net) return;
+      const st = latestStatus;
+      if (st.state === 'connected') {
+        // Bias toward SE trail strip + soft path/grass edge under cyan fog.
+        camera.setTarget(player.position.add(new Vector3(4.2, 0.15, 5.2)));
+        camera.radius = 15;
+        camera.alpha = Math.PI / 3.1;
+        camera.beta = Math.PI / 2.75;
+        if (mark) {
+          mark.textContent =
+            'Path-ground OK · dirt/stone trail vs lush grass · Connected';
+        }
+        return;
+      }
+      window.setTimeout(waitPathGround, 300);
+    };
+    window.setTimeout(waitPathGround, 600);
+  }
+
   // ?ve=humanoid — frame local player (humanoid+staff) clearly for VE shot.
   if (ve === 'humanoid') {
     camera.radius = 8;
