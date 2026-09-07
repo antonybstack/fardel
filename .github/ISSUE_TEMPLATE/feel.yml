@@ -1,0 +1,50 @@
+name: Feel / UX observation
+description: Control, camera, feedback, or polish note (not necessarily a hard bug)
+title: "[feel] "
+labels: ["feel"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Capture how it *feels* in play — friction, delight gaps, or polish targets.
+  - type: textarea
+    id: observation
+    attributes:
+      label: Observation
+      description: What you noticed while playing or reviewing.
+    validations:
+      required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: P0 = blocks feel of core loop; P1 = strong friction; P2 = polish.
+      options:
+        - P0
+        - P1
+        - P2
+      default: 1
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Where / when (scene, input mode, host). Optional.
+    validations:
+      required: false
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / clips
+      description: Attach or link visual evidence. Strongly preferred for feel issues.
+      placeholder: Drag images here or paste links.
+    validations:
+      required: false
+  - type: textarea
+    id: suggested
+    attributes:
+      label: Suggested direction
+      description: Optional idea for a fix or experiment — not a full design.
+    validations:
+      required: false
