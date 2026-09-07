@@ -143,3 +143,13 @@ Unity WebGL Connect was the previous Pages payload. It is preserved only on
 
 `web-placeholder/` may still exist as a fallback static page. Prefer deploying
 `web/dist` once the Babylon scaffold builds cleanly.
+
+
+## Visual evidence host (`ve.sparkify.dev`)
+
+PR screenshots are **not** committed to git and **not** pasted via GitHub user-attachments.
+
+- **Bucket:** Cloudflare R2 `fardel-ve` (public custom domain `ve.sparkify.dev`)
+- **Upload (all seats):** `tools/scripts/ve-upload.sh <local.png> <key>` with shared `CLOUDFLARE_API_TOKEN` on the box
+- **Embed:** `https://ve.sparkify.dev/<key>` in the PR body/comment
+- **One-time setup:** enable R2 in the Cloudflare dashboard; create token with R2 edit; set `CLOUDFLARE_API_TOKEN` for the box; attach custom domain `ve.sparkify.dev` to the bucket
