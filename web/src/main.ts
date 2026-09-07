@@ -7415,6 +7415,57 @@ async function main(): Promise<void> {
     window.setTimeout(waitRate, 700);
   }
 
+  // ?ve=loot-sparkle — ground loot sparkle readability at play-cam 8–20m under locked #39 fog (yard bags / #56).
+  if (ve === 'loot-sparkle') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.5;
+  }
+  if (net && ve === 'loot-sparkle') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE loot-sparkle: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitLootSparkle = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE loot-sparkle: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitLootSparkle, 200);
+        return;
+      }
+      camera.setTarget(new Vector3(1.5, 0.9, 1.2));
+      camera.radius = 12;
+      if (!seeded) {
+        seeded = true;
+        if (mark) mark.textContent = 'VE loot-sparkle: seeding ember_shard…';
+        net.seedLoot();
+        window.setTimeout(waitLootSparkle, 350);
+        return;
+      }
+      const items = net.getGroundItems();
+      if (items.length >= 1) {
+        if (mark) {
+          mark.textContent =
+            'Loot sparkle OK · warm amber marker readable at play-cam under #39 cyan fog (8–20m)';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE loot-sparkle: ground ${items.length} · waiting…`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent = `VE loot-sparkle: timed out · ground ${items.length}`;
+        }
+        return;
+      }
+      window.setTimeout(waitLootSparkle, 220);
+    };
+    window.setTimeout(waitLootSparkle, 700);
+  }
+
   // ?ve=loot — seed ground ember_shard sparkle (keep visible for VE), toast/log + bag row; then F-pickup proof.
   if (ve === 'loot') {
     camera.radius = 12;
