@@ -53,6 +53,7 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - VE: `?ve=humanoid-polish`
 - Training dummy scarecrow (#45): `?ve=dummy` (`ve/babylon-dummy.png`)
 - Combat floater readability (#59): thick outline + matte tints under #39 fog; `?ve=floater-read` (`ve/babylon-floater-read.png`)
+- Hotbar affordance polish (#63): empty vs STAFF vs OOM clarity; `?ve=hotbar-afford` (`ve/babylon-hotbar-afford.png`)
 
 ### Path / ground targets (Issue #44)
 
