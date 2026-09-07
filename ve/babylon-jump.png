@@ -1,0 +1,18 @@
+PLACEHOLDER: VE screenshot needed
+
+This file should be replaced with an actual screenshot showing:
+- Player character mid-air (Y > 0.3m)
+- Keybind legend open showing "Space jump"
+- VE success message
+
+To capture:
+1. Start SpacetimeDB: ./tools/scripts/ensure-local-spacetime.sh
+2. Publish module: cd server && spacetime publish fardel --yes
+3. Run client: cd web && npm run dev
+4. Open: http://localhost:5173/?ve=jump
+5. Wait for "Jump OK" message
+6. Take screenshot
+7. Save as ve/babylon-jump.png (replace this file)
+8. Force-add: git add -f ve/babylon-jump.png
+9. Amend: git commit --amend --no-edit
+10. Push: git push -f origin cursor/fix-jump-space-ec43

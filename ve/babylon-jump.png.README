@@ -1,0 +1,29 @@
+# babylon-jump.png
+
+VE screenshot for issue #81 (server-authoritative spacebar jump).
+
+## How to capture
+
+1. Start local SpacetimeDB: `./tools/scripts/ensure-local-spacetime.sh`
+2. Publish module: `cd server && spacetime publish fardel --yes`
+3. Start web client: `cd web && npm run dev`
+4. Open browser: `http://localhost:5173/?ve=jump`
+5. Wait for "Jump OK" message showing Y > 0.3m
+6. Take screenshot (browser devtools or OS screenshot tool)
+7. Save as `ve/babylon-jump.png`
+8. Force-add to git: `git add -f ve/babylon-jump.png`
+9. Amend commit: `git commit --amend --no-edit`
+10. Force push: `git push -f origin cursor/fix-jump-space-ec43`
+
+## Expected screenshot content
+
+- Player character in mid-air (Y > 0.3m from ground)
+- Keybind legend panel open (H key) showing "Space jump"
+- Persist mark showing jump success message
+- Camera angle capturing vertical displacement
+
+The screenshot proves:
+- Server-authoritative Y position working
+- Space key binding functional
+- Gravity + ground clamp physics working
+- Keybind legend updated with Space
