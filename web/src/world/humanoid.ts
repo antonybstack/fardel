@@ -3,9 +3,11 @@ import {
   AssetContainer,
   Color3,
   Mesh,
+  PBRMaterial,
   Scene,
   SceneLoader,
   StandardMaterial,
+  Texture,
   TransformNode,
   Vector3,
 } from '@babylonjs/core';
@@ -195,8 +197,15 @@ export function createPlayerHumanoid(
     n.parent = pivot;
   }
 
+  for (const m of meshes) {
+    m.setEnabled(true);
+    m.isVisible = true;
+    m.visibility = 1;
+  }
+
   // Normalize height ~1.8m and plant feet on y=0 (assimp glTF is Y-up).
-  let bounds = worldBounds(meshes);
+  let bounds = worldBounds(meshes.filter((m) => !!m.skeleton));
+  if (!bounds) bounds = worldBounds(meshes);
   if (bounds) {
     const height = Math.max(0.01, bounds.max.y - bounds.min.y);
     const scale = 1.8 / height;
@@ -248,47 +257,105 @@ export function createPlayerHumanoid(
     syncRobes();
   };
 
-  // Body cloth → StandardMaterial so remote tint + cast flash work.
-  // Skip Quaternius Wizard_Texture as diffuseTexture: navy atlas (~RGB 33,43,74)
-  // reads as a black cutout at 8–15m under #39 cyan fog. Solid mid-sat cloth.
-  robeMat.diffuseColor = new Color3(
-    Math.min(1, robeDiffuse.r * 1.05 + 0.14),
-    Math.min(1, robeDiffuse.g * 1.0 + 0.12),
-    Math.min(1, robeDiffuse.b * 0.95 + 0.1),
+  // Mid-sat cloth under #39 fog. Keep loader PBR on meshes — assigning a shared
+  // StandardMaterial to skinned Wizard.001 yields a full AABB but zero body pixels.
+  // Lift navy Wizard_Texture via albedoColor multiply + texture.level.
+  const clothLift = new Color3(
+    Math.min(2.8, robeDiffuse.r * 3.5 + 0.45),
+    Math.min(2.6, robeDiffuse.g * 3.0 + 0.38),
+    Math.min(3.0, robeDiffuse.b * 2.7 + 0.5),
   );
-  // Keep emissive ≈ ROBE_EMISSIVE_SCALE * diffuse so equip restore in main.ts matches.
-  robeMat.emissiveColor = robeMat.diffuseColor.scale(ROBE_EMISSIVE_SCALE);
+  robeMat.diffuseColor = clothLift.clone();
+  robeMat.emissiveColor = new Color3(
+    Math.min(0.16, clothLift.r * ROBE_EMISSIVE_SCALE),
+    Math.min(0.18, clothLift.g * ROBE_EMISSIVE_SCALE),
+    Math.min(0.24, clothLift.b * ROBE_EMISSIVE_SCALE + 0.02),
+  );
   robeMat.specularColor = new Color3(0.05, 0.06, 0.08);
-  robeMat.ambientColor = new Color3(0.42, 0.45, 0.55);
+  robeMat.ambientColor = new Color3(0.38, 0.42, 0.52);
+  robeMat.backFaceCulling = false;
+
+  const clothPbrs: PBRMaterial[] = [];
+  const liftPbr = (pbr: PBRMaterial) => {
+    pbr.albedoColor.copyFrom(robeMat.diffuseColor);
+    pbr.emissiveColor.copyFrom(robeMat.emissiveColor);
+    pbr.emissiveIntensity = 0.4;
+    pbr.metallic = 0;
+    pbr.roughness = 0.88;
+    pbr.backFaceCulling = false;
+    pbr.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
+    if (pbr.albedoTexture) {
+      const tex = pbr.albedoTexture as Texture;
+      tex.level = 2.2;
+      tex.hasAlpha = false;
+    }
+  };
+
   for (const m of meshes) {
     const bare = bareName(m.name, prefix);
     if (m === staffMesh || /staff/i.test(bare)) continue;
-    m.material = robeMat;
+    const matl = m.material;
+    if (matl instanceof PBRMaterial) {
+      liftPbr(matl);
+      clothPbrs.push(matl);
+    } else {
+      m.material = robeMat;
+    }
   }
+
+  const prevD = robeMat.diffuseColor.clone();
+  const prevE = robeMat.emissiveColor.clone();
+  scene.onBeforeRenderObservable.add(() => {
+    if (
+      robeMat.diffuseColor.equals(prevD) &&
+      robeMat.emissiveColor.equals(prevE)
+    ) {
+      return;
+    }
+    prevD.copyFrom(robeMat.diffuseColor);
+    prevE.copyFrom(robeMat.emissiveColor);
+    for (const pbr of clothPbrs) liftPbr(pbr);
+  });
+
   if (staffMesh) {
     const staffMat = mat(
       scene,
       `${prefix}StaffWoodMat`,
-      new Color3(0.55, 0.36, 0.18),
-      0.05,
+      new Color3(0.62, 0.42, 0.2),
+      0.06,
     );
-    staffMat.specularColor = new Color3(0.15, 0.1, 0.05);
+    staffMat.specularColor = new Color3(0.2, 0.14, 0.06);
+    const sm = staffMesh.material;
+    if (sm instanceof PBRMaterial && sm.albedoTexture) {
+      try {
+        staffMat.diffuseTexture = sm.albedoTexture as Texture;
+        staffMat.diffuseColor = new Color3(1.2, 1.05, 0.9);
+      } catch {
+        /* wood */
+      }
+    }
     staffMesh.material = staffMat;
   }
 
-  // Animations: Idle / Walk / Spell for yard.
-  const idle =
-    findAnim(animGroups, 'Idle_Weapon', 'Idle') ??
-    (animGroups.length > 0 ? animGroups[0]! : null);
-  const walk = findAnim(animGroups, 'Walk', 'Run_Weapon', 'Run');
-  const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Idle_Attacking');
+  // Anim clips drive bone-parented trim; body uses bind-pose (see detach below).
   for (const g of animGroups) {
     g.stop();
+    g.reset();
   }
-  if (idle) {
-    idle.start(true, 1.0, idle.from, idle.to, false);
+  animByRoot.set(root, { idle: null, walk: null, cast: null });
+
+  // Detach skin: post-instantiate skinning draws zero pixels despite valid AABB.
+  // Bind-pose body under Blender *100 node scale is a complete mid-sat wizard.
+  for (const m of meshes) {
+    if (!m.skeleton) continue;
+    m.skeleton = null;
+    m.alwaysSelectAsActiveMesh = true;
+    try {
+      m.refreshBoundingInfo(false, true);
+    } catch {
+      /* optional */
+    }
   }
-  animByRoot.set(root, { idle, walk, cast });
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -298,7 +365,7 @@ export function createPlayerHumanoid(
     mat: robeMat,
     staff,
     robes,
-    // Store the display color (boosted) so equip restore matches mid-sat cloth.
+    // Texture multiply lift (may be >1) for equip restore under #39 fog.
     robeBaseColor: robeMat.diffuseColor.clone(),
   };
 }
