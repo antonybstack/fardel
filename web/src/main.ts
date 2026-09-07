@@ -481,6 +481,12 @@ function setBagPanelOpen(open: boolean): void {
   panel.classList.toggle('hidden', !open);
 }
 
+function setKeysLegendOpen(open: boolean): void {
+  const panel = document.getElementById('keysLegend');
+  if (!panel) return;
+  panel.classList.toggle('hidden', !open);
+}
+
 /** Compact party member frames: hex + leader tag + distance / pose hint. */
 function setVendorPanelOpen(open: boolean): void {
   const panel = document.getElementById('vendorPanel');
@@ -1252,7 +1258,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: WASD move · RMB look · Tab target · 1 Spark · 2 Emberbolt · Esc cancel cast · B bag · U/I staff · J/K robes · P invite/accept · O leave · T trade offer/accept · Y cancel trade · E vendor · F pickup · V use tonic · R rest · Enter say (/p party · /w hex whisper) · combat log right · FPS overlay · system toasts top · mana pool · cast cancel · silence',
+      'keys: H legend · WASD · RMB · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -1485,6 +1491,7 @@ function bindInput(opts: {
   onUnequipRobes: () => void;
   onEquipRobes: () => void;
   onToggleBag: () => void;
+  onToggleKeysLegend: () => void;
   onVendorInteract: () => void;
   onPickupNearest: () => void;
   onUseYardTonic: () => void;
@@ -1565,6 +1572,11 @@ function bindInput(opts: {
     if (k === 'b') {
       e.preventDefault();
       opts.onToggleBag();
+      return;
+    }
+    if (k === 'h') {
+      e.preventDefault();
+      opts.onToggleKeysLegend();
       return;
     }
     if (k === 'e') {
@@ -1976,6 +1988,7 @@ async function main(): Promise<void> {
 
   let net: GameNet | null = null;
   let bagOpen = false;
+  let keysLegendOpen = false;
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
@@ -2516,6 +2529,10 @@ async function main(): Promise<void> {
     onToggleBag: () => {
       bagOpen = !bagOpen;
       setBagPanelOpen(bagOpen);
+    },
+    onToggleKeysLegend: () => {
+      keysLegendOpen = !keysLegendOpen;
+      setKeysLegendOpen(keysLegendOpen);
     },
     onVendorInteract: () => {
       if (!net) return;
@@ -4766,6 +4783,21 @@ async function main(): Promise<void> {
       window.setTimeout(waitReticule, 200);
     };
     window.setTimeout(waitReticule, 700);
+
+  // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.
+  if (ve === 'keys') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    keysLegendOpen = true;
+    setKeysLegendOpen(true);
+    const mark = document.getElementById('persistMark');
+    const panel = document.getElementById('keysLegend');
+    const chips = panel ? panel.querySelectorAll('.klChip').length : 0;
+    if (mark) {
+      mark.textContent =
+        `Keys legend OK · H toggles · ${chips} binds · WASD/RMB/Tab/1-2/Esc · B/U/I/J/K · P/O/T/Y · E/F/V/R · Enter`;
+    }
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
