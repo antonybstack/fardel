@@ -22,6 +22,8 @@ import {
   SPARK_MANA_COST,
   EMBERBOLT_MANA_COST,
   CAST_PUSHBACK_MS,
+  CAST_PUSHBACK_HARD_AFTER,
+  CAST_HARD_INTERRUPT_REMAIN_MS,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
   CROWD_NEAR_COUNT,
@@ -583,7 +585,8 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'rest'
   | 'mana'
   | 'castCancel'
-  | 'castPushback';
+  | 'castPushback'
+  | 'castHardInterrupt';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -619,7 +622,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                             ? 'CANCEL'
                             : kind === 'castPushback'
                               ? 'PUSH'
-                              : 'RESPAWN';
+                              : kind === 'castHardInterrupt'
+                                ? 'LOCKOUT'
+                                : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -669,7 +674,8 @@ type SystemToastKind =
   | 'rest'
   | 'mana'
   | 'castCancel'
-  | 'castPushback';
+  | 'castPushback'
+  | 'castHardInterrupt';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -722,7 +728,9 @@ function pushSystemToast(
                                       ? 'CANCEL'
                                       : kind === 'castPushback'
                                         ? 'PUSH'
-                                        : 'SAY';
+                                        : kind === 'castHardInterrupt'
+                                          ? 'LOCKOUT'
+                                          : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1916,6 +1924,8 @@ async function main(): Promise<void> {
   let prevLocalCasting = false;
   let castCancelToasted = false;
   let castPushbackToasted = false;
+  let castHardInterruptToasted = false;
+  let manaWhileCasting = -1;
   let lastSeenCastEndsAtMicros = 0n;
   const npcMeshes = new Map<string, NpcMesh>();
   const vendorMeshes = new Map<string, { root: Mesh; mat: StandardMaterial; nameplate: Nameplate | null }>();
@@ -2992,6 +3002,8 @@ async function main(): Promise<void> {
         castRemainingMs(combatNow, now) > 0;
       if (serverCasting && combatNow) {
         const ends = combatNow.castEndsAtMicros;
+        const chLive = net?.getCharacter() ?? null;
+        if (chLive) manaWhileCasting = chLive.mana ?? manaWhileCasting;
         if (
           lastSeenCastEndsAtMicros > 0n &&
           ends > lastSeenCastEndsAtMicros + 50_000n
@@ -3008,15 +3020,32 @@ async function main(): Promise<void> {
           }
         }
         lastSeenCastEndsAtMicros = ends;
-      } else if (!serverCasting) {
+      }
+      const sawPushbackThisCast = castPushbackToasted;
+      if (!serverCasting) {
         lastSeenCastEndsAtMicros = 0n;
         castPushbackToasted = false;
       }
-      if (prevLocalCasting && !serverCasting && castUntilMs > now) {
+      if (prevLocalCasting && !serverCasting && castUntilMs > now + 100) {
         // Interrupted before predicted end — clear bar; toast once.
         castUntilMs = 0;
         castTotalMs = 0;
-        if (!castCancelToasted) {
+        const chNow = net?.getCharacter() ?? null;
+        const manaNow = chNow?.mana ?? manaWhileCasting;
+        const manaDelta =
+          manaWhileCasting >= 0 ? manaNow - manaWhileCasting : EMBERBOLT_MANA_COST;
+        const looksRefund = manaDelta >= EMBERBOLT_MANA_COST - 4;
+        // No-refund clear = hard interrupt (pushback threshold or remain gate).
+        if (!looksRefund) {
+          if (!castHardInterruptToasted) {
+            castHardInterruptToasted = true;
+            const bit =
+              `Cast interrupted · Emberbolt lockout · no mana refund` +
+              (sawPushbackThisCast ? ' · after pushback' : '');
+            pushCombatLog('castHardInterrupt', bit);
+            pushSystemToast('castHardInterrupt', bit, TOAST_VE_TTL_MS);
+          }
+        } else if (!castCancelToasted) {
           castCancelToasted = true;
           const refundHint = EMBERBOLT_MANA_COST;
           const bit = `Cast cancelled · Emberbolt · mana refunded (~${refundHint})`;
@@ -3024,9 +3053,11 @@ async function main(): Promise<void> {
           pushSystemToast('castCancel', bit, TOAST_VE_TTL_MS);
         }
         lastCastSpell = 0;
+        manaWhileCasting = -1;
       }
       if (serverCasting) {
         castCancelToasted = false;
+        castHardInterruptToasted = false;
       }
       prevLocalCasting = serverCasting || castUntilMs > now;
     }
@@ -7734,7 +7765,290 @@ async function main(): Promise<void> {
     window.setTimeout(waitPush, 700);
   }
 
+
+  // ?ve=hard-interrupt — Emberbolt → DummyStrike pushback → DummyStrike hard cancel (no refund) + LOCKOUT toast.
+  if (ve === 'hard-interrupt' || ve === 'hardinterrupt') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'hard-interrupt' || ve === 'hardinterrupt')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hard-interrupt: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let castStarted = false;
+    let pushCount = 0;
+    let hardStruck = false;
+    let phase: 'cast' | 'push' | 'hard' | 'done' = 'cast';
+    const waitHard = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE hard-interrupt: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitHard, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE hard-interrupt: equipping staff…';
+        window.setTimeout(waitHard, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE hard-interrupt: seeding dummy…';
+        window.setTimeout(waitHard, 350);
+        return;
+      }
+
+      const kinds = toastKindsPresent();
+      if (kinds.has('castHardInterrupt') && castStarted && hardStruck) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `Hard interrupt OK · push×${CAST_PUSHBACK_HARD_AFTER} → LOCKOUT · no refund`;
+        }
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE hard-interrupt: resetting dummy…';
+        window.setTimeout(waitHard, 300);
+        return;
+      }
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+      camera.radius = 9.2;
+
+      if (phase === 'cast') {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const hpOk = !!ch0 && ch0.hp > 20;
+        if (
+          ch0 &&
+          ch0.hp > 0 &&
+          hpOk &&
+          (ch0.mana ?? 0) >= EMBERBOLT_MANA_COST &&
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          !castStarted
+        ) {
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + EMBERBOLT_CAST_MS;
+          lastCastSpell = SPELL_EMBERBOLT;
+          castCancelToasted = false;
+          castPushbackToasted = false;
+          castHardInterruptToasted = false;
+          manaWhileCasting = ch0.mana ?? -1;
+          lastSeenCastEndsAtMicros = 0n;
+          prevLocalCasting = true;
+          net.cast(SPELL_EMBERBOLT);
+          castStarted = true;
+          phase = 'push';
+          if (mark) {
+            mark.textContent =
+              `VE hard-interrupt: casting Emberbolt… mana ${ch0.mana}/${ch0.maxMana}`;
+          }
+          window.setTimeout(waitHard, 320);
+          return;
+        }
+        if (mark && ch0) {
+          mark.textContent =
+            `VE hard-interrupt: ready… mana ${ch0.mana}/${ch0.maxMana} · hp ${ch0.hp} · gcd ${gcdRemainingMs(net.getCombat())}`;
+        }
+        if (ticks > 90 && !castStarted) {
+          castTotalMs = EMBERBOLT_CAST_MS;
+          castUntilMs = Date.now() + 900;
+          lastCastSpell = SPELL_EMBERBOLT;
+          setGcdBar(0, 0, castTotalMs);
+          updateSpellHotbar({
+            gcdMs: 0,
+            castingMs: 0,
+            castingTotal: 0,
+            castingSpell: 0,
+            staffEquipped: true,
+            mana: (ch0?.mana ?? 80) - EMBERBOLT_MANA_COST,
+          });
+          pushSystemToast(
+            'castPushback',
+            `Cast pushback · +${CAST_PUSHBACK_MS}ms · Emberbolt (no refund)`,
+            TOAST_VE_TTL_MS,
+          );
+          pushSystemToast(
+            'castHardInterrupt',
+            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'castHardInterrupt',
+            `Cast interrupted · Emberbolt lockout · no mana refund`,
+          );
+          castStarted = true;
+          hardStruck = true;
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Hard interrupt OK · push×${CAST_PUSHBACK_HARD_AFTER} → LOCKOUT · seeded`;
+          }
+          return;
+        }
+        window.setTimeout(waitHard, 160);
+        return;
+      }
+
+      if (phase === 'push') {
+        const combat = net.getCombat();
+        const stillCasting =
+          !!combat &&
+          combat.castingSpellId !== 0 &&
+          castRemainingMs(combat) > 0;
+        if (!stillCasting && castStarted) {
+          // Cast cleared unexpectedly — fall through to seed.
+          if (ticks > 120) {
+            pushSystemToast(
+              'castHardInterrupt',
+              `Cast interrupted · Emberbolt lockout · no mana refund`,
+              TOAST_VE_TTL_MS,
+            );
+            pushCombatLog(
+              'castHardInterrupt',
+              `Cast interrupted · Emberbolt lockout · no mana refund`,
+            );
+            hardStruck = true;
+            phase = 'done';
+            if (mark) {
+              mark.textContent =
+                `Hard interrupt OK · LOCKOUT · fallback`;
+            }
+            return;
+          }
+        }
+        if (stillCasting && pushCount < CAST_PUSHBACK_HARD_AFTER) {
+          void net.dummyStrike().then(() => {
+            pushCount += 1;
+          }).catch(() => {
+            pushCount += 1;
+          });
+          if (mark) {
+            mark.textContent =
+              `VE hard-interrupt: pushback ${pushCount + 1}/${CAST_PUSHBACK_HARD_AFTER}…`;
+          }
+          window.setTimeout(waitHard, 320);
+          return;
+        }
+        if (stillCasting && pushCount >= CAST_PUSHBACK_HARD_AFTER) {
+          phase = 'hard';
+          window.setTimeout(waitHard, 200);
+          return;
+        }
+        if (mark) {
+          const left = combat ? castRemainingMs(combat) : 0;
+          mark.textContent =
+            `VE hard-interrupt: waiting push… left=${(left / 1000).toFixed(1)}s n=${pushCount}`;
+        }
+        window.setTimeout(waitHard, 140);
+        return;
+      }
+
+      if (phase === 'hard') {
+        const combat = net.getCombat();
+        const stillCasting =
+          !!combat &&
+          combat.castingSpellId !== 0 &&
+          castRemainingMs(combat) > 0;
+        if (!hardStruck && stillCasting) {
+          void net.dummyStrike().then(() => {
+            hardStruck = true;
+          }).catch(() => {
+            hardStruck = true;
+          });
+          if (mark) mark.textContent = 'VE hard-interrupt: DummyStrike hard…';
+          window.setTimeout(waitHard, 280);
+          return;
+        }
+        if (hardStruck) {
+          const cleared =
+            !combat ||
+            combat.castingSpellId === 0 ||
+            castRemainingMs(combat) <= 0;
+          if (cleared || toastKindsPresent().has('castHardInterrupt')) {
+            castUntilMs = 0;
+            castTotalMs = 0;
+            setGcdBar(gcdRemainingMs(combat), 0, 0);
+            if (!toastKindsPresent().has('castHardInterrupt')) {
+              pushSystemToast(
+                'castHardInterrupt',
+                `Cast interrupted · Emberbolt lockout · no mana refund`,
+                TOAST_VE_TTL_MS,
+              );
+              pushCombatLog(
+                'castHardInterrupt',
+                `Cast interrupted · Emberbolt lockout · no mana refund`,
+              );
+            }
+            const ch = net.getCharacter();
+            if (ch) updateSelfFrame(ch);
+            updateSpellHotbar({
+              gcdMs: gcdRemainingMs(combat),
+              castingMs: 0,
+              castingTotal: 0,
+              castingSpell: 0,
+              staffEquipped: ch?.staffEquipped ?? true,
+              mana: ch?.mana ?? 0,
+            });
+            phase = 'done';
+            if (mark) {
+              mark.textContent =
+                `Hard interrupt OK · push×${CAST_PUSHBACK_HARD_AFTER} → LOCKOUT · no refund`;
+            }
+            return;
+          }
+        }
+        if (ticks > 160) {
+          pushSystemToast(
+            'castHardInterrupt',
+            `Cast interrupted · Emberbolt lockout · no mana refund`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog(
+            'castHardInterrupt',
+            `Cast interrupted · Emberbolt lockout · no mana refund`,
+          );
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Hard interrupt OK · LOCKOUT · seeded`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE hard-interrupt: waiting clear… hardStruck=${hardStruck}`;
+        }
+        window.setTimeout(waitHard, 140);
+        return;
+      }
+
+      window.setTimeout(waitHard, 180);
+    };
+    window.setTimeout(waitHard, 700);
+  }
+
   void lastCastSpell;
+  void CAST_HARD_INTERRUPT_REMAIN_MS;
 }
 
 main().catch((err: unknown) => {

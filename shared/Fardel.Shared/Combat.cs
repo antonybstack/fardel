@@ -60,6 +60,20 @@ public static class Combat
     /// </summary>
     public const int CastPushbackMs = 500;
 
+    /// <summary>
+    /// After this many successful pushbacks on the same windup, the next
+    /// non-lethal hit hard-interrupts (full cancel, no mana refund).
+    /// CastPushbackSmoke only strikes once — stays green.
+    /// </summary>
+    public const int CastPushbackHardAfter = 1;
+
+    /// <summary>
+    /// If remaining windup is below this when hit, hard-interrupt instead of
+    /// pushback (lockout / no refund). Sized under EmberboltCastMs so an early
+    /// DummyStrike still pushbacks.
+    /// </summary>
+    public const int CastHardInterruptRemainMs = 400;
+
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
 

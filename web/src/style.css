@@ -1316,3 +1316,10 @@ body {
 .sysToast.castPushback .toastTag { color: #ff7860; }
 
 .clLine.castPushback .clTag { color: #ff7860; }
+
+.sysToast.castHardInterrupt {
+  border-color: rgba(255, 70, 90, 0.65);
+}
+.sysToast.castHardInterrupt .toastTag { color: #ff465a; }
+
+.clLine.castHardInterrupt .clTag { color: #ff465a; }

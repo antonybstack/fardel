@@ -112,6 +112,7 @@ Prove authority with headless smokes first; Babylon presentation follows:
 - `tools/ManaSmoke` (mana / focus pool invent)
 - `tools/CastCancelSmoke` (Emberbolt cancel / move-interrupt invent)
 - `tools/CastPushbackSmoke` (dummy-thorns windup pushback invent)
+- `tools/HardInterruptSmoke` (hard-interrupt threshold invent)
 
 Browser Connect / yard art lives in `web/` (Vite + Babylon). Unity is not required for slice gates.
 

@@ -108,6 +108,7 @@ export const PlayerCombat = __t.object("PlayerCombat", {
   castEndsAt: __t.timestamp(),
   lastSpellId: __t.i32(),
   lastCastAt: __t.timestamp(),
+  castPushbackCount: __t.i32(),
 });
 export type PlayerCombat = __Infer<typeof PlayerCombat>;
 

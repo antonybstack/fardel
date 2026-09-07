@@ -46,6 +46,7 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp> CastEndsAt { get; }
         public global::SpacetimeDB.Col<PlayerCombat, int> LastSpellId { get; }
         public global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp> LastCastAt { get; }
+        public global::SpacetimeDB.Col<PlayerCombat, int> CastPushbackCount { get; }
 
         public PlayerCombatCols(string tableName)
         {
@@ -56,6 +57,7 @@ namespace SpacetimeDB.Types
             CastEndsAt = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp>(tableName, "cast_ends_at");
             LastSpellId = new global::SpacetimeDB.Col<PlayerCombat, int>(tableName, "last_spell_id");
             LastCastAt = new global::SpacetimeDB.Col<PlayerCombat, SpacetimeDB.Timestamp>(tableName, "last_cast_at");
+            CastPushbackCount = new global::SpacetimeDB.Col<PlayerCombat, int>(tableName, "cast_pushback_count");
         }
     }
 

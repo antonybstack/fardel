@@ -17,6 +17,10 @@ export const GCD_MS = 1200;
 export const EMBERBOLT_CAST_MS = 1500;
 /** Match shared Combat.CastPushbackMs — windup delay on hit. */
 export const CAST_PUSHBACK_MS = 500;
+/** Match Combat.CastPushbackHardAfter — pushbacks before hard interrupt. */
+export const CAST_PUSHBACK_HARD_AFTER = 1;
+/** Match Combat.CastHardInterruptRemainMs. */
+export const CAST_HARD_INTERRUPT_REMAIN_MS = 400;
 export const NPC_KIND_DUMMY = 1;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
@@ -88,6 +92,8 @@ export type CombatView = {
   /** Non-zero while a windup cast is in progress (e.g. Emberbolt). */
   castingSpellId: number;
   castEndsAtMicros: bigint;
+  /** Pushbacks on current windup (server CastPushbackCount). */
+  castPushbackCount: number;
   /** Last spell that actually fired (instant or resolve) — remotes flash on change. */
   lastSpellId: number;
   lastCastAtMicros: bigint;
@@ -387,6 +393,7 @@ type CombatRow = {
   castEndsAt: Timestamp;
   lastSpellId: number;
   lastCastAt: Timestamp;
+  castPushbackCount?: number;
 };
 
 type NpcRow = {
@@ -515,6 +522,7 @@ function combatView(row: CombatRow): CombatView {
     gcdReadyAtMicros: row.gcdReadyAt.microsSinceUnixEpoch,
     castingSpellId: row.castingSpellId,
     castEndsAtMicros: row.castEndsAt.microsSinceUnixEpoch,
+    castPushbackCount: row.castPushbackCount ?? 0,
     lastSpellId: row.lastSpellId,
     lastCastAtMicros: row.lastCastAt.microsSinceUnixEpoch,
   };

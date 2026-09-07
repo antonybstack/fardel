@@ -27,6 +27,8 @@ namespace SpacetimeDB.Types
         public int LastSpellId;
         [DataMember(Name = "last_cast_at")]
         public SpacetimeDB.Timestamp LastCastAt;
+        [DataMember(Name = "cast_pushback_count")]
+        public int CastPushbackCount;
 
         public PlayerCombat(
             SpacetimeDB.Identity Identity,
@@ -35,7 +37,8 @@ namespace SpacetimeDB.Types
             int CastingSpellId,
             SpacetimeDB.Timestamp CastEndsAt,
             int LastSpellId,
-            SpacetimeDB.Timestamp LastCastAt
+            SpacetimeDB.Timestamp LastCastAt,
+            int CastPushbackCount
         )
         {
             this.Identity = Identity;
@@ -45,6 +48,7 @@ namespace SpacetimeDB.Types
             this.CastEndsAt = CastEndsAt;
             this.LastSpellId = LastSpellId;
             this.LastCastAt = LastCastAt;
+            this.CastPushbackCount = CastPushbackCount;
         }
 
         public PlayerCombat()

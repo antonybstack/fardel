@@ -113,6 +113,9 @@ public static partial class Module
         /// <summary>Last spell that actually fired (instant Cast or ResolveCast) for remote flash.</summary>
         public int LastSpellId;
         public Timestamp LastCastAt;
+        /// <summary>Pushbacks applied to the current windup; resets on cast start / clear.</summary>
+        [SpacetimeDB.Default(0)]
+        public int CastPushbackCount;
     }
 
     [SpacetimeDB.Table(Accessor = "Npc", Public = true)]
@@ -466,6 +469,7 @@ public static partial class Module
 
         combat.CastingSpellId = spellId;
         combat.CastEndsAt = ctx.Timestamp + Ms(castMs);
+        combat.CastPushbackCount = 0;
         ctx.Db.PlayerCombat.Identity.Update(combat);
 
         ctx.Db.PendingCast.Insert(new PendingCast
@@ -493,6 +497,7 @@ public static partial class Module
         }
 
         combat.CastingSpellId = 0;
+        combat.CastPushbackCount = 0;
         combat.LastSpellId = cast.SpellId;
         combat.LastCastAt = ctx.Timestamp;
         ctx.Db.PlayerCombat.Identity.Update(combat);
@@ -512,8 +517,9 @@ public static partial class Module
 
     /// <summary>
     /// Training-dummy thorns poke (opt-in). Applies DummyThornsDamage to the
-    /// caller. If they are mid-windup, ApplyPlayerDamage delays CastEndsAt
-    /// without cancel/refund. CombatSmoke / ManaSmoke do not call this.
+    /// caller. Mid-windup: pushback CastEndsAt, or hard-interrupt (no refund)
+    /// after CastPushbackHardAfter / when remaining &lt; CastHardInterruptRemainMs.
+    /// CombatSmoke / ManaSmoke do not call this.
     /// </summary>
     [SpacetimeDB.Reducer]
     public static void DummyStrike(ReducerContext ctx)
@@ -877,6 +883,7 @@ public static partial class Module
                 CastEndsAt = ctx.Timestamp,
                 LastSpellId = 0,
                 LastCastAt = ctx.Timestamp,
+                CastPushbackCount = 0,
             });
         }
     }
@@ -944,8 +951,8 @@ public static partial class Module
         ctx.Db.Character.Identity.Update(ch);
         if (ch.Hp > 0)
         {
-            // Partial interrupt: delay remaining windup, keep mana spent.
-            PushbackWindupCast(ctx, target);
+            // Partial interrupt → hard interrupt once threshold crossed.
+            MaybePushbackOrHardInterrupt(ctx, target);
             return;
         }
 
@@ -953,6 +960,7 @@ public static partial class Module
         {
             combat.TargetNpcId = 0;
             combat.CastingSpellId = 0;
+            combat.CastPushbackCount = 0;
             ctx.Db.PlayerCombat.Identity.Update(combat);
         }
         ClearPendingCastsFor(ctx, target);
@@ -1009,6 +1017,7 @@ public static partial class Module
         {
             combat.TargetNpcId = 0;
             combat.CastingSpellId = 0;
+            combat.CastPushbackCount = 0;
             ctx.Db.PlayerCombat.Identity.Update(combat);
         }
 
@@ -1787,11 +1796,12 @@ public static partial class Module
         var spellId = combat.CastingSpellId;
         ClearPendingCastsFor(ctx, caster);
         combat.CastingSpellId = 0;
+        combat.CastPushbackCount = 0;
         ctx.Db.PlayerCombat.Identity.Update(combat);
 
         if (!refundMana)
         {
-            Log.Info($"InterruptWindupCast {caster} spell={spellId} (no refund)");
+            Log.Info($"InterruptWindupCast {caster} spell={spellId} (no refund / hard)");
             return;
         }
 
@@ -1811,6 +1821,39 @@ public static partial class Module
         {
             Log.Info($"InterruptWindupCast {caster} spell={spellId}");
         }
+    }
+
+    /// <summary>
+    /// Non-lethal hit during windup: pushback, or hard-interrupt (no refund)
+    /// when CastPushbackCount &gt;= CastPushbackHardAfter or remaining &lt; threshold.
+    /// </summary>
+    static void MaybePushbackOrHardInterrupt(ReducerContext ctx, Identity caster)
+    {
+        if (ctx.Db.PlayerCombat.Identity.Find(caster) is not { } combat
+            || combat.CastingSpellId == 0)
+        {
+            return;
+        }
+
+        var remainUs = combat.CastEndsAt.MicrosecondsSinceUnixEpoch
+            - ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        var remainMs = remainUs / 1000L;
+        if (remainMs < 0)
+        {
+            remainMs = 0;
+        }
+
+        if (combat.CastPushbackCount >= Combat.CastPushbackHardAfter
+            || remainMs < Combat.CastHardInterruptRemainMs)
+        {
+            Log.Info(
+                $"HardInterruptWindup {caster} spell={combat.CastingSpellId} " +
+                $"pushbacks={combat.CastPushbackCount} remainMs={remainMs} (no refund)");
+            InterruptWindupCast(ctx, caster, refundMana: false);
+            return;
+        }
+
+        PushbackWindupCast(ctx, caster);
     }
 
     /// <summary>
@@ -1840,6 +1883,7 @@ public static partial class Module
             ? combat.CastEndsAt
             : ctx.Timestamp;
         combat.CastEndsAt = baseEnd + Ms(Combat.CastPushbackMs);
+        combat.CastPushbackCount = combat.CastPushbackCount + 1;
         ctx.Db.PlayerCombat.Identity.Update(combat);
 
         ClearPendingCastsFor(ctx, caster);
@@ -1850,7 +1894,9 @@ public static partial class Module
             SpellId = spellId,
             TargetNpcId = targetNpcId,
         });
-        Log.Info($"PushbackWindupCast {caster} spell={spellId} +{Combat.CastPushbackMs}ms");
+        Log.Info(
+            $"PushbackWindupCast {caster} spell={spellId} +{Combat.CastPushbackMs}ms " +
+            $"count={combat.CastPushbackCount}");
     }
 
     /// <summary>Lazy mana regen between Cast/Rest using LastManaTickAt wall time.</summary>
