@@ -143,12 +143,18 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
   hero TwistedTree + mid CommonTree variants + understory (grass/fern/rock/bush);
   distant mountains stay **procedural**; sky dome + locked #32/#39 cyan fog / warm sun / cool hemi.
   Procedural fallback keeps post-#40 ThinInstance density + LOD if the pack fails to load.
-- `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
-  silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy is procedural scarecrow (wood post + crossbeam + canvas/sack; `web/src/world/dummy.ts`, #45).
+- `web/src/world/humanoid.ts` — local/remote players use **Quaternius LowPoly RPG Wizard**
+  (CC0 skinned `Wizard.glb`) under the `HumanoidParts` API from #43 (staff/robes equip
+  hide/show; mid-sat cloth tint under cyan fog). CrowdProxies remain amber capsules;
+  training dummy is procedural scarecrow (wood post + crossbeam + canvas/sack; `web/src/world/dummy.ts`, #45).
 - `web/src/world/vendorStall.ts` — procedural yard **shop stall** (posts + counter + cloth awning +
   crate/goods hints); warm wood / desaturated canvas under locked #39 fog (#58).
 
-Vendored under `web/public/third-party/quaternius-stylized-nature/` (see ledger). Visual north star remains Issue #31 / mood brief above.
+Env pack: `web/public/third-party/quaternius-stylized-nature/` (see ledger).
+Character pack: `web/public/third-party/quaternius-lowpoly-rpg-characters/` + `LICENSE`
+(see ledger). Modular Fantasy Standard was evaluated for Male Wizard but free tier only
+ships Peasant/Ranger — Wizard is Source-tier; OGA LowPoly RPG Wizard used instead (CC0).
+Visual north star remains Issue #31 / mood brief above.
 
 ## How we source (v1)
 
@@ -191,5 +197,5 @@ Vendored under `web/public/third-party/quaternius-stylized-nature/` (see ledger)
 |---|---|---|---|
 | Quaternius Stylized Nature MegaKit **Standard** (free) | CC0 1.0 | Hero TwistedTree + mid CommonTree + understory grass/fern/rock/bush (`web/public/third-party/quaternius-stylized-nature/`) | https://quaternius.itch.io/stylized-nature-megakit · import mirror https://opengameart.org/sites/default/files/stylized_nature_megakitstandard.zip · https://opengameart.org/content/stylized-nature-megakit |
 | Procedural mountains/sky (`web/src/world/forest.ts`) | original (Fardel) | Distant mountain silhouettes + sky dome (hybrid; pack mountains skipped for web budget) | — |
-| Procedural humanoid (`web/src/world/humanoid.ts`) | original (Fardel) | local player body+head+limbs + staff + robes group | — |
-| Character pack (shortlisted — free CC0) | CC0 (rec: Quaternius LowPoly RPG Characters) | replace procedural humanoid | https://opengameart.org/content/lowpoly-rpg-characters — **not vendored yet** |
+| Quaternius LowPoly RPG Characters — Wizard (`web/public/third-party/quaternius-lowpoly-rpg-characters/`) | CC0 1.0 | Local/remote skinned wizard + staff; idle/walk/cast | https://opengameart.org/content/lowpoly-rpg-characters |
+| HumanoidParts staff/robes containers (`web/src/world/humanoid.ts`) | original (Fardel) | Equip hide/show API preserved from #43 | — |
