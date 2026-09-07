@@ -20,10 +20,10 @@ Related docs: [TEAM_SEATS.md](TEAM_SEATS.md) · [BACKLOG.md](BACKLOG.md) · [DEV
 - Assigns work **only from GitHub Issues** (not ad-hoc chat wishlists)
 - **Never leaves seats idle** while the project has open gaps — if the board is thin, file Issues (or have Art file visual ones) and assign immediately
 - Merges to `develop` only after Reviewer feedback is addressed
-- Greenlights Release cuts (`develop` → `main` → Mac smoke → Pages)
+- Does **not** gate routine Release cuts (Release decides + deploys on its own criteria)
 - Does **not** solo-invent features on `main` while the team is live
 
-Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge when clear). Surface Antony only for merges, blockers, release candidates, or genuine human gates (deploy wipe, elevated approvals).
+Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge when clear). Release owns cut/deploy without Lead greenlight. Surface Antony only for blockers or genuine human gates (non-local DB wipe, elevated approvals).
 
 ---
 
@@ -31,12 +31,12 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 
 | Role | Job | Must NOT |
 |------|-----|----------|
-| **Team Lead** | Pick Issues; assign seats; broadcast `develop` tip SHAs; merge after Reviewer; greenlight Release; run continuous-iterate | Solo invent on `main`; wipe non-local DBs; fan-out spam |
+| **Team Lead** | Pick Issues; assign seats; broadcast `develop` tip SHAs; merge after Reviewer; run continuous-iterate; unstick Release only on P0 / wipe | Solo invent on `main`; wipe non-local DBs; fan-out spam; micromanage routine cuts |
 | **Dev1–Dev5** | Implement one assigned Issue in their seat worktree; open PR → `develop` with VE | Invent without an Issue; PR to `main`; use another seat’s ports/DB |
 | **QA Bugs** | Smoke matrix, flake repros, regression Issues; optional fix PRs as `qa/<slug>` | Feature invent |
 | **QA Feel** | Feel / UX playtests; `feel`-labeled Issues; Mac/Pages FPS truth (not box SwiftShader) | Feature invent |
 | **Reviewer** | Review PRs targeting `develop`: correctness, smoke coverage, schema-collision risk, lane conflicts; concrete feedback | Own features; push merges |
-| **Release** | On Lead greenlight: promote pinned `develop` SHA → `main`, Mac smoke, Cloudflare Pages deploy, VE + release beat | Cut without greenlight; expand tip silently; invent features; run two cuts at once |
+| **Release** | **Self-sufficient:** decide cut timing; pin `develop` SHA → `main`; Mac smoke; Pages deploy; VE + release beat | Expand tip silently mid-cut; invent features; run two cuts at once; wipe non-local DBs without Lead |
 | **Art** | Visual north star vs [ASSETS.md](ASSETS.md); art-direction briefs; **free OSS/CC0 or original-only** shortlists; break visual work into Issues for Devs; look-language coherence | Invent gameplay; propose **paid** packs; **flip Issue open/close or Fix numbers** after Lead locked an assign; leave Devs idle |
 
 ### Seat map (shared computer)
@@ -170,11 +170,13 @@ Team Lead merges (not Reviewer, not Dev self-merge by default).
 
 ### Release cut
 
-1. Lead greenlights a **pinned** `develop` SHA (example language: “cut at `d6c21dc`”).
-2. Release opens / merges **develop → main** for that tip (do not silently include later develops).
+Release decides cuts **without** Lead greenlight.
+
+1. **Cut when** (all true): (a) `develop` tip has Reviewer-cleared merges with meaningful delta since `main`, (b) QA Bugs smokes green on that tip (or Release documents a waive), (c) no open P0 blockers on the tip.
+2. Release **pins** a concrete `develop` SHA and opens / merges **develop → main** for that tip only (never silently include later develops mid-cut).
 3. Mac Studio smoke on `/Users/antbly/dev/fardel` (local Spacetime and/or tunnel `dev-db.sparkify.dev`).
 4. If green: Vite production build + Cloudflare Pages → `https://play.sparkify.dev`.
-5. Post VE + short release beat to Lead / Fardel QA.
+5. Post VE + short release beat to Lead / Fardel QA (FYI, not a gate).
 6. Later commits on `develop` wait for the next cut.
 
 Deploy topology: [DEPLOY.md](DEPLOY.md).
@@ -223,8 +225,8 @@ flowchart LR
   Rev --> LeadMerge[Lead merge]
   LeadMerge --> Tip[Broadcast develop tip]
   Tip --> Issues
-  LeadMerge --> Rel{Release greenlight?}
-  Rel -->|yes| Cut[Release: main + Mac smoke + Pages]
+  LeadMerge --> Rel{Release criteria met?}
+  Rel -->|yes| Cut[Release self-cuts: main + Mac smoke + Pages]
 ```
 
 ### Step-by-step
@@ -254,18 +256,18 @@ Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as
 
 ## 9. Release loop (detail)
 
-**Trigger:** Team Lead message naming the greenlit tip SHA and “cut now.”
+**Trigger:** Release itself when cut criteria in §6 are met (Lead ping is optional FYI, not required).
 
 **Release agent checklist:**
 
-1. Confirm Reviewer + smokes on that tip (or Lead attestation).
-2. Open PR `develop` → `main` (or fast-forward if policy allows) for the **pinned** SHA only.
+1. Diff `main`…`develop`; confirm Reviewer-cleared meaningful delta + green smokes + no P0s.
+2. Pin tip SHA; open PR `develop` → `main` (or fast-forward if policy allows) for that SHA only.
 3. On Mac: pull that tip at `/Users/antbly/dev/fardel`, publish local if needed, run critical smokes + quick Vite playpass.
 4. Build `web/` → deploy Pages project for `play.sparkify.dev`.
 5. Capture VE of live play (or Mac local if Pages lag).
-6. Report: main SHA, Pages URL, smoke result, VE path, anything deferred to next cut.
+6. Report: main SHA, Pages URL, smoke result, VE path, anything deferred to next cut (FYI to Lead / Fardel QA).
 
-If `develop` moved after greenlight, **do not** expand the cut unless Lead re-greenlights.
+If `develop` moves after the pin, **do not** expand the cut — finish this pin, then evaluate a new cut.
 
 ---
 
@@ -285,7 +287,7 @@ Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specif
 | VE missing from PR (gitignore) | `git add -f ve/...` + embed in body as Done-when |
 | Stale GitHub `CONFLICTING` / mergeable noise | Re-fetch base; rebase; reopen PR if GitHub lies |
 | Parallel schema PRs | Serialize `lane:server` module edits |
-| Release cut expands past greenlit tip | Pin SHA in the greenlight message; Release refuses silent expansion |
+| Release cut expands past pinned tip | Release pins SHA at cut start; refuses silent expansion |
 | Box FPS used as feel truth | QA Feel verifies on Mac / Pages |
 | Spacetime dies with agent shell abort | `ensure-*-spacetime.sh` + detached/`setsid` |
 | Fish can’t find `spacetime` on Mac | `fish_add_path ~/.local/bin` |
@@ -333,14 +335,14 @@ done
 
 - Parent assigns from Issues; subagents work only in their worktree.
 - Source `wt-env.sh` / ensure-seat scripts after path rewrite.
-- Human still confirms: Pages deploy, any DB wipe, force-push, payment/secrets.
+- Human / Lead still confirms: any non-local DB wipe, force-push, payment/secrets. Routine Pages deploys are Release-owned.
 - Prefer Issues + PR links over long chat dumps when waking Antony.
 - When Cloud Agents / remote coders are unavailable, seats edit locally on the Mac — same Done-when (smokes + VE).
 
 ### What “done” looks like after a port
 
 - Idle Dev can receive `#N`, land a PR to `develop` with VE, get Reviewer + Lead merge, without touching the Bot box.
-- Release can cut `main` and update `play.sparkify.dev` from the Mac after Lead greenlight.
+- Release self-decides cuts and updates `play.sparkify.dev` from the Mac when criteria are met.
 - Continuous tick stays quiet when the board is idle.
 
 ---
@@ -366,7 +368,7 @@ done
 - Open feature PRs to `main`
 - Wipe non-local DBs
 - Re-ping merged PRs
-- Expand a release past the greenlit tip
+- Expand a release past the pinned tip
 - Treat box SwiftShader FPS as ship feel
 - Purchase third-party art packs (forbidden — free/OSS or original only)
 
