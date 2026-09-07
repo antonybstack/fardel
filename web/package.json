@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "@babylonjs/core": "9.0.0",
-    "spacetimedb": "2.10.0"
+    "spacetimedb": "2.10.0",
+    "@babylonjs/loaders": "9.0.0",
+    "babylonjs-gltf2interface": "9.0.0"
   },
   "devDependencies": {
     "typescript": "5.9.2",

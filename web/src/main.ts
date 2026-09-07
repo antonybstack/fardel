@@ -1531,14 +1531,14 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
   return `Disconnected\nuri: ${s.uri}\ndb: ${s.database}`;
 }
 
-function createScene(engine: Engine): {
+async function createScene(engine: Engine): Promise<{
   scene: Scene;
   camera: ArcRotateCamera;
   player: Mesh;
   humanoid: HumanoidParts;
   proxySource: Mesh;
   setLocalGhost: (on: boolean) => void;
-} {
+}> {
   const scene = new Scene(engine);
 
   const camera = new ArcRotateCamera(
@@ -1568,8 +1568,8 @@ function createScene(engine: Engine): {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
-  // North-star yard: forest clearing + huge trees + distant mountains.
-  buildForestClearing(scene);
+  // North-star yard: Quaternius Standard forest + procedural mountains (#41).
+  await buildForestClearing(scene);
 
   // Local player: procedural humanoid + staff (crowd proxies stay capsules).
   const humanoid = createPlayerHumanoid(scene);
@@ -2381,7 +2381,7 @@ async function main(): Promise<void> {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  const { scene, camera, player, humanoid, proxySource, setLocalGhost } = createScene(engine);
+  const { scene, camera, player, humanoid, proxySource, setLocalGhost } = await createScene(engine);
   const castRangeRing = createCastRangeRing(scene);
 
   let net: GameNet | null = null;
@@ -4466,16 +4466,17 @@ async function main(): Promise<void> {
     window.setTimeout(tryAoi, 700);
   }
 
-  // ?ve=forest — pull camera back so dense ring + landmark heroes + mountains read.
-  if (ve === 'forest' || ve === 'aoi') {
-    camera.radius = ve === 'forest' ? 34 : 22;
-    camera.alpha = Math.PI / 1.95;
-    camera.beta = Math.PI / 2.35;
+  // ?ve=forest / ?ve=quaternius-env — pull camera back so hero trees + mountains + HUD are visible.
+  if (ve === 'forest' || ve === 'quaternius-env' || ve === 'aoi') {
+    camera.radius = ve === 'aoi' ? 22 : ve === 'quaternius-env' ? 52 : 38;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.35;
   }
 
-  if (net && ve === 'forest') {
+  if (net && (ve === 'forest' || ve === 'quaternius-env')) {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE forest: waiting for Connected…';
+    const label = ve === 'quaternius-env' ? 'Quaternius env' : 'forest';
+    if (mark) mark.textContent = `VE ${label}: waiting for Connected…`;
     const waitForest = () => {
       if (!net) return;
       const st = latestStatus;
@@ -4484,9 +4485,11 @@ async function main(): Promise<void> {
         syncProxyMeshes(net.getProxies());
         if (mark) {
           const aoi = net.getAoi();
-          mark.textContent = aoi
-            ? `Forest OK · density+LOD · Connected · AOI near ${aoi.nearCount}`
-            : 'Forest OK · density+LOD · Connected';
+          const ok =
+            ve === 'quaternius-env'
+              ? 'Quaternius env OK · Standard CC0 heroes+mid+understory · mountains procedural'
+              : 'Forest OK · density+LOD · Connected';
+          mark.textContent = aoi ? `${ok} · AOI near ${aoi.nearCount}` : ok;
         }
         return;
       }

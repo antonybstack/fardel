@@ -1,16 +1,25 @@
 import {
+  AbstractMesh,
   Color3,
   Color4,
   DirectionalLight,
   HemisphericLight,
+  ImportMeshAsync,
+  Material,
   Matrix,
   Mesh,
   MeshBuilder,
+  PBRMaterial,
   Quaternion,
   Scene,
   StandardMaterial,
+  TransformNode,
   Vector3,
 } from '@babylonjs/core';
+import '@babylonjs/loaders/glTF';
+
+/** Vendored free Quaternius Stylized Nature MegaKit Standard (CC0) glTF root. */
+const PACK_ROOT = '/third-party/quaternius-stylized-nature/glTF/';
 
 /** Deterministic pseudo-random in [0,1) from integer seed. */
 function hash01(n: number): number {
@@ -21,16 +30,17 @@ function hash01(n: number): number {
 function makeTrunkMat(scene: Scene, name: string, tint: Color3): StandardMaterial {
   const m = new StandardMaterial(name, scene);
   m.diffuseColor = tint;
-  m.specularColor = new Color3(0.015, 0.012, 0.01);
-  m.emissiveColor = tint.scale(0.04);
+  m.specularColor = new Color3(0.04, 0.03, 0.02);
+  m.emissiveColor = tint.scale(0.05);
   return m;
 }
 
 function makeFoliageMat(scene: Scene, name: string, tint: Color3): StandardMaterial {
   const m = new StandardMaterial(name, scene);
   m.diffuseColor = tint;
-  m.specularColor = new Color3(0.008, 0.012, 0.008);
-  m.emissiveColor = tint.scale(0.06);
+  m.specularColor = new Color3(0.02, 0.04, 0.02);
+  // Matte — do not fight cyan fog with emissive leaves.
+  m.emissiveColor = tint.scale(0.04);
   return m;
 }
 
@@ -59,6 +69,7 @@ type TreeBuildOpts = {
 
 /**
  * Unique hero tree — thick gnarled bole + asymmetric canopy (not ThinInstanced).
+ * Used by procedural fallback if Quaternius glTF fails to load.
  */
 function buildTreeMesh(scene: Scene, name: string, opts: TreeBuildOpts): Mesh {
   const root = new Mesh(name, scene);
@@ -425,13 +436,387 @@ function buildSkyDome(scene: Scene): void {
   const skyMat = new StandardMaterial('skyMat', scene);
   skyMat.backFaceCulling = false;
   skyMat.disableLighting = true;
-  // Soft blue-cyan haze dome — matches atmospheric fog depth.
-  skyMat.emissiveColor = new Color3(0.36, 0.54, 0.68);
+  skyMat.emissiveColor = new Color3(0.35, 0.48, 0.68);
   skyMat.diffuseColor = new Color3(0, 0, 0);
   sky.material = skyMat;
 }
 
-/**
+/** Matte foliage/bark — keep specular low; kill emissive so cyan fog wins. */
+function mattePackMaterials(meshes: AbstractMesh[]): void {
+  const seen = new Set<Material>();
+  for (const mesh of meshes) {
+    const mat = mesh.material;
+    if (!mat || seen.has(mat)) continue;
+    seen.add(mat);
+    const leafish = /leaf|leaves|grass|fern|bush|plant/i.test(mat.name || mesh.name || '');
+    if (mat instanceof PBRMaterial) {
+      mat.metallic = 0;
+      mat.roughness = 0.92;
+      mat.emissiveColor = new Color3(0, 0, 0);
+      mat.environmentIntensity = 0.3;
+      mat.specularIntensity = 0.12;
+      if (leafish) {
+        // Bias toward lush green under cyan fog (pack _C leaf cards can read warm/red).
+        mat.albedoColor = new Color3(0.55, 0.85, 0.42);
+      }
+    } else if (mat instanceof StandardMaterial) {
+      mat.specularColor = new Color3(0.03, 0.03, 0.02);
+      mat.emissiveColor = new Color3(0, 0, 0);
+      if (leafish) {
+        mat.diffuseColor = new Color3(0.45, 0.7, 0.32);
+      }
+    }
+  }
+}
+
+function hideTemplate(root: TransformNode): void {
+  root.setEnabled(false);
+  root.getChildMeshes(true).forEach((m) => {
+    m.isVisible = false;
+    m.isPickable = false;
+    m.checkCollisions = false;
+  });
+}
+
+async function loadPackRoot(
+  scene: Scene,
+  fileName: string,
+  templateName: string,
+): Promise<TransformNode | null> {
+  try {
+    const result = await ImportMeshAsync(fileName, scene, { rootUrl: PACK_ROOT });
+    const meshes = result.meshes.filter((m): m is Mesh => m instanceof Mesh);
+    if (meshes.length === 0) return null;
+
+    // Prefer an empty root / first mesh as hierarchy parent.
+    let root: TransformNode = meshes[0]!;
+    const named = meshes.find((m) => m.name === '__root__' || m.name === fileName.replace(/\.gltf$/i, ''));
+    if (named) root = named;
+
+    // If multiple top-level meshes, parent them under a transform for cloning.
+    const topLevel = meshes.filter((m) => !m.parent);
+    if (topLevel.length > 1) {
+      const holder = new TransformNode(templateName, scene);
+      for (const m of topLevel) {
+        m.parent = holder;
+      }
+      root = holder;
+    } else {
+      root.name = templateName;
+    }
+
+    mattePackMaterials(result.meshes);
+    // Freeze world matrix after we place clones; templates stay hidden at origin.
+    root.position.set(0, -500, 0);
+    hideTemplate(root);
+    return root;
+  } catch (err) {
+    console.warn(`[forest] failed to load ${fileName}`, err);
+    return null;
+  }
+}
+
+function placeClone(
+  template: TransformNode,
+  name: string,
+  x: number,
+  z: number,
+  scale: number,
+  yaw: number,
+): TransformNode {
+  const clone = template.clone(name, null);
+  if (!clone) {
+    throw new Error(`Failed to clone ${name}`);
+  }
+  clone.setEnabled(true);
+  clone.getChildMeshes(true).forEach((m) => {
+    m.isVisible = true;
+    m.isPickable = false;
+  });
+  clone.position.set(x, 0, z);
+  clone.rotation.y = yaw;
+  clone.scaling.setAll(scale);
+  // Cull far understory / mid trees — Babylon frustum cull handles most; harden with distance.
+  clone.getChildMeshes(true).forEach((m) => {
+    if (m instanceof Mesh) {
+      m.doNotSyncBoundingInfo = false;
+      m.alwaysSelectAsActiveMesh = false;
+    }
+  });
+  return clone;
+}
+
+async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
+  // Heroes: few unique large TwistedTree trunks/canopies.
+  const heroFiles = ['TwistedTree_1.gltf', 'TwistedTree_2.gltf', 'TwistedTree_3.gltf'] as const;
+  const heroTemplates: TransformNode[] = [];
+  for (let i = 0; i < heroFiles.length; i++) {
+    const t = await loadPackRoot(scene, heroFiles[i]!, `heroTemplate_${i}`);
+    if (t) heroTemplates.push(t);
+  }
+  if (heroTemplates.length === 0) return false;
+
+  // Mid: 2–4 variants for ring (classic / tall / stubby).
+  const midFiles = ['CommonTree_1.gltf', 'CommonTree_3.gltf', 'CommonTree_5.gltf'] as const;
+  const midTemplates: TransformNode[] = [];
+  for (let i = 0; i < midFiles.length; i++) {
+    const t = await loadPackRoot(scene, midFiles[i]!, `midTemplate_${i}`);
+    if (t) midTemplates.push(t);
+  }
+  if (midTemplates.length === 0) return false;
+
+  // Quaternius trees are ~author-scale metres; scale up for "huge" clearing grandeur.
+  const heroSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
+    { name: 'heroTreeNE', x: 22, z: -18, scale: 2.0, yaw: 0.4, ti: 0 },
+    { name: 'heroTreeNW', x: -24, z: -16, scale: 2.25, yaw: -0.6, ti: 1 },
+    { name: 'heroTreeSE', x: 18, z: 26, scale: 1.9, yaw: 1.1, ti: 2 % heroTemplates.length },
+    { name: 'heroTreeSW', x: -20, z: 22, scale: 2.1, yaw: 2.2, ti: 0 },
+    { name: 'heroTreeN', x: 4, z: -32, scale: 2.4, yaw: 0.2, ti: 1 % heroTemplates.length },
+  ];
+  for (const h of heroSpots) {
+    const tmpl = heroTemplates[h.ti % heroTemplates.length]!;
+    placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
+  }
+
+  const ringCount = 28;
+  const innerR = 28;
+  const outerR = 52;
+  for (let i = 0; i < ringCount; i++) {
+    const a = (i / ringCount) * Math.PI * 2 + hash01(i * 3) * 0.35;
+    const r = innerR + hash01(i * 7) * (outerR - innerR);
+    // Keep south-east approach / path readable.
+    if (a > 0.15 && a < 0.55 && r < 34) continue;
+    const tmpl = midTemplates[i % midTemplates.length]!;
+    const s = 1.15 + hash01(i * 11) * 0.95;
+    // Variant personality: classic / taller / stubbier via Y scale.
+    const yMul = i % 3 === 1 ? 1.25 : i % 3 === 2 ? 0.82 : 1.0;
+    const clone = placeClone(
+      tmpl,
+      `midTree_${i}`,
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      s,
+      hash01(i * 17) * Math.PI * 2,
+    );
+    clone.scaling.y *= yMul;
+  }
+
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2 + 0.4;
+    const r = 55 + hash01(i * 19) * 18;
+    const tmpl = midTemplates[i % midTemplates.length]!;
+    const s = 0.85 + hash01(i * 23) * 0.55;
+    placeClone(
+      tmpl,
+      `farTree_${i}`,
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      s,
+      hash01(i * 29) * Math.PI * 2,
+    );
+  }
+
+  // Understory: grass / fern / rock / bush clusters (budget-friendly counts).
+  const underFiles = [
+    'Grass_Common_Tall.gltf',
+    'Grass_Wispy_Short.gltf',
+    'Fern_1.gltf',
+    'Bush_Common.gltf',
+    'Rock_Medium_1.gltf',
+    'Rock_Medium_2.gltf',
+  ] as const;
+  const underTemplates: TransformNode[] = [];
+  for (let i = 0; i < underFiles.length; i++) {
+    const t = await loadPackRoot(scene, underFiles[i]!, `underTemplate_${i}`);
+    if (t) underTemplates.push(t);
+  }
+
+  let underPlaced = 0;
+  for (let i = 0; i < 28 && underTemplates.length > 0; i++) {
+    const a = hash01(i * 41) * Math.PI * 2;
+    const r = 11 + hash01(i * 43) * 38;
+    if (r < 10) continue;
+    if (a > 0.15 && a < 0.55 && r < 22) continue; // path/clearing readable
+    const tmpl = underTemplates[i % underTemplates.length]!;
+    const isRock = tmpl.name.includes('Rock') || (i % underTemplates.length) >= 4;
+    const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.4 + hash01(i * 47) * 2.2;
+    placeClone(
+      tmpl,
+      `under_${i}`,
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      s,
+      hash01(i * 53) * Math.PI * 2,
+    );
+    underPlaced++;
+  }
+  void underPlaced;
+
+  return true;
+}
+
+function placeProceduralForest(scene: Scene): void {
+  // Post-#40 density fallback: landmark/sentinel heroes + ThinInstance mid variety + far LOD + understory.
+  const limeMat = new StandardMaterial('limeMossMat', scene);
+  limeMat.diffuseColor = new Color3(0.42, 0.62, 0.22);
+  limeMat.specularColor = new Color3(0.02, 0.03, 0.01);
+  limeMat.emissiveColor = new Color3(0.04, 0.07, 0.02);
+  const limeSpots: Array<{ x: number; z: number; r: number }> = [
+    { x: -6, z: 4, r: 3.2 },
+    { x: 8, z: -3, r: 2.6 },
+    { x: 2, z: 10, r: 2.2 },
+    { x: -11, z: -6, r: 2.8 },
+    { x: 12, z: 8, r: 2.0 },
+    { x: -3, z: -12, r: 2.4 },
+  ];
+  for (let i = 0; i < limeSpots.length; i++) {
+    const s = limeSpots[i]!;
+    const patch = MeshBuilder.CreateDisc(`limeMoss_${i}`, { radius: s.r, tessellation: 16 }, scene);
+    patch.rotation.x = Math.PI / 2;
+    patch.position.set(s.x, 0.025, s.z);
+    patch.material = limeMat;
+  }
+
+  const trunkMatA = makeTrunkMat(scene, 'trunkMatA', new Color3(0.32, 0.28, 0.24));
+  const trunkMatB = makeTrunkMat(scene, 'trunkMatB', new Color3(0.26, 0.22, 0.18));
+  const foliageA = makeFoliageMat(scene, 'foliageA', new Color3(0.12, 0.3, 0.14));
+  const foliageB = makeFoliageMat(scene, 'foliageB', new Color3(0.09, 0.24, 0.12));
+  const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.16, 0.34, 0.16));
+  const underMat = makeUnderstoryMat(scene, 'understoryMat', new Color3(0.2, 0.42, 0.16));
+
+  placeHeroTree(scene, 'heroElderN', 3, -34, 1.9, 0.18, trunkMatA, foliageB, 'landmark');
+  placeHeroTree(scene, 'heroElderSW', -22, 24, 1.7, 2.15, trunkMatB, foliageA, 'landmark');
+  placeHeroTree(scene, 'heroSentNE', 24, -17, 1.4, 0.45, trunkMatA, foliageA, 'sentinel');
+  placeHeroTree(scene, 'heroSentNW', -26, -15, 1.5, -0.55, trunkMatB, foliageB, 'sentinel');
+  placeHeroTree(scene, 'heroSentSE', 19, 27, 1.25, 1.05, trunkMatA, foliageC, 'standard');
+  placeHeroTree(scene, 'heroSentE', 30, 6, 1.35, -1.2, trunkMatB, foliageC, 'sentinel');
+
+  const midClassic = buildMergedMidTree(scene, 'midClassic', trunkMatB, foliageB, {
+    trunkHeight: 7.5,
+    trunkTop: 0.55,
+    trunkBot: 1.1,
+    levels: 3,
+    canopyBase: 5.2,
+    canopyH0: 3.2,
+    tess: 7,
+  });
+  const midTall = buildMergedMidTree(scene, 'midTall', trunkMatA, foliageA, {
+    trunkHeight: 9.2,
+    trunkTop: 0.42,
+    trunkBot: 0.95,
+    levels: 4,
+    canopyBase: 4.4,
+    canopyH0: 2.85,
+    tess: 6,
+  });
+  const midStubby = buildMergedMidTree(scene, 'midStubby', trunkMatB, foliageC, {
+    trunkHeight: 5.8,
+    trunkTop: 0.7,
+    trunkBot: 1.35,
+    levels: 2,
+    canopyBase: 6.4,
+    canopyH0: 3.6,
+    tess: 6,
+  });
+
+  const farLod = buildFarLodTree(scene, 'farLodTree', trunkMatB, foliageB);
+  const understory = buildUnderstoryCluster(scene, 'understoryCluster', underMat);
+
+  const matsClassic: Matrix[] = [];
+  const matsTall: Matrix[] = [];
+  const matsStubby: Matrix[] = [];
+  const matsFar: Matrix[] = [];
+  const matsUnder: Matrix[] = [];
+
+  const innerCount = 68;
+  const innerR0 = 22;
+  const innerR1 = 38;
+  for (let i = 0; i < innerCount; i++) {
+    const a = (i / innerCount) * Math.PI * 2 + hash01(i * 3) * 0.28;
+    const r = innerR0 + hash01(i * 7) * (innerR1 - innerR0);
+    if (a > 0.12 && a < 0.52 && r < 32) continue;
+    const s = 0.72 + hash01(i * 11) * 0.9;
+    const sy = s * (0.88 + hash01(i * 13) * 0.38);
+    const m = composeInstanceMatrix(
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      s,
+      sy,
+      s,
+      hash01(i * 17) * Math.PI * 2,
+    );
+    const pick = hash01(i * 41);
+    if (pick < 0.38) matsClassic.push(m);
+    else if (pick < 0.72) matsTall.push(m);
+    else matsStubby.push(m);
+  }
+
+  const midCount = 40;
+  for (let i = 0; i < midCount; i++) {
+    const a = (i / midCount) * Math.PI * 2 + 0.22 + hash01(i * 5) * 0.2;
+    const r = 42 + hash01(i * 9) * 14;
+    const s = 0.65 + hash01(i * 15) * 0.7;
+    const m = composeInstanceMatrix(
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      s,
+      s * (0.95 + hash01(i * 21) * 0.25),
+      s,
+      hash01(i * 27) * Math.PI * 2,
+    );
+    const pick = hash01(i * 33);
+    if (pick < 0.45) matsClassic.push(m);
+    else if (pick < 0.78) matsTall.push(m);
+    else matsStubby.push(m);
+  }
+
+  const farCount = 48;
+  for (let i = 0; i < farCount; i++) {
+    const a = (i / farCount) * Math.PI * 2 + hash01(i * 19) * 0.15;
+    const r = 58 + hash01(i * 23) * 22;
+    const s = 0.7 + hash01(i * 29) * 0.85;
+    matsFar.push(
+      composeInstanceMatrix(
+        Math.cos(a) * r,
+        Math.sin(a) * r,
+        s,
+        s * (1.05 + hash01(i * 31) * 0.35),
+        s,
+        hash01(i * 37) * Math.PI * 2,
+      ),
+    );
+  }
+
+  const underCount = 64;
+  for (let i = 0; i < underCount; i++) {
+    const a = (i / underCount) * Math.PI * 2 + hash01(i * 43) * 0.4;
+    const band = hash01(i * 47);
+    const r =
+      band < 0.35
+        ? 10 + hash01(i * 53) * 8
+        : 18 + hash01(i * 53) * 12;
+    if (r < 11 && a > 0.15 && a < 0.55) continue;
+    const s = 0.7 + hash01(i * 59) * 1.1;
+    matsUnder.push(
+      composeInstanceMatrix(
+        Math.cos(a) * r,
+        Math.sin(a) * r,
+        s * (0.8 + hash01(i * 61) * 0.5),
+        s,
+        s * (0.8 + hash01(i * 67) * 0.5),
+        hash01(i * 71) * Math.PI * 2,
+      ),
+    );
+  }
+
+  thinInstanceFromMatrices(midClassic, matsClassic);
+  thinInstanceFromMatrices(midTall, matsTall);
+  thinInstanceFromMatrices(midStubby, matsStubby);
+  thinInstanceFromMatrices(farLod, matsFar);
+  thinInstanceFromMatrices(understory, matsUnder);
+}
+
+
 /**
  * Procedural clearing path (#44): warm grey-brown dirt/stone + soft moss/dirt
  * edge + trail strip + cheap stone flecks. Readable vs lush grass under cyan
@@ -551,17 +936,16 @@ function buildClearingPath(scene: Scene): void {
 }
 
 /**
- * Procedural / kitbash forest clearing: gnarled landmark heroes, ThinInstanced
- * mid-tree variety + far LOD, understory clusters. Fog/hemi/sun from #39 lock.
- * Web-cheap (shared StandardMaterials + ThinInstances). Art #34 mood.
- * Path/ground polish #44 via buildClearingPath.
+ * Forest clearing: Quaternius Standard heroes + mid + understory (CC0),
+ * procedural mountain silhouettes, locked #32/#39 atmosphere (warm sun / cool hemi / cyan fog).
+ * Path/ground polish #44 via buildClearingPath. Procedural fallback uses post-#40 ThinInstance density + LOD.
  */
-export function buildForestClearing(scene: Scene): {
+export async function buildForestClearing(scene: Scene): Promise<{
   ground: Mesh;
   hemi: HemisphericLight;
   sun: DirectionalLight;
-} {
-  // Atmosphere lock from #39/develop: blue/cyan fog, warm sun + cool hemi, lush ground.
+}> {
+  // Atmosphere lock from #32/#39: blue/cyan fog mid→far, warm sun + cool hemi, lush ground.
   // Mood > volumetric soup — StandardMaterial + EXP2 fog only (web-cheap).
   // Hemi/sun locked for Dev4 (#33) robe mats — do not flip casually.
   scene.clearColor = new Color4(0.24, 0.36, 0.46, 1);
@@ -609,170 +993,13 @@ export function buildForestClearing(scene: Scene): {
   // Art warm grey-brown multi-tone dirt (not chalky) + cheap procedural detail.
   buildClearingPath(scene);
 
-  // Lime moss patches — place highlights like mood ref (not neon).
-  const limeMat = new StandardMaterial('limeMossMat', scene);
-  limeMat.diffuseColor = new Color3(0.42, 0.62, 0.22);
-  limeMat.specularColor = new Color3(0.02, 0.03, 0.01);
-  limeMat.emissiveColor = new Color3(0.04, 0.07, 0.02);
-  const limeSpots: Array<{ x: number; z: number; r: number }> = [
-    { x: -6, z: 4, r: 3.2 },
-    { x: 8, z: -3, r: 2.6 },
-    { x: 2, z: 10, r: 2.2 },
-    { x: -11, z: -6, r: 2.8 },
-    { x: 12, z: 8, r: 2.0 },
-    { x: -3, z: -12, r: 2.4 },
-  ];
-  for (let i = 0; i < limeSpots.length; i++) {
-    const s = limeSpots[i]!;
-    const patch = MeshBuilder.CreateDisc(`limeMoss_${i}`, { radius: s.r, tessellation: 16 }, scene);
-    patch.rotation.x = Math.PI / 2;
-    patch.position.set(s.x, 0.025, s.z);
-    patch.material = limeMat;
+  const packed = await placeQuaterniusForest(scene);
+  if (!packed) {
+    console.warn('[forest] Quaternius pack unavailable — procedural fallback (post-#40 density)');
+    placeProceduralForest(scene);
   }
 
-  // Shared mats: grey-brown bark + muted deep greens (Art — no neon).
-  const trunkMatA = makeTrunkMat(scene, 'trunkMatA', new Color3(0.32, 0.28, 0.24));
-  const trunkMatB = makeTrunkMat(scene, 'trunkMatB', new Color3(0.26, 0.22, 0.18));
-  const foliageA = makeFoliageMat(scene, 'foliageA', new Color3(0.12, 0.3, 0.14));
-  const foliageB = makeFoliageMat(scene, 'foliageB', new Color3(0.09, 0.24, 0.12));
-  const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.16, 0.34, 0.16));
-  const underMat = makeUnderstoryMat(scene, 'understoryMat', new Color3(0.2, 0.42, 0.16));
-
-  // Landmark gnarled heroes — thick bole silhouettes at rim.
-  placeHeroTree(scene, 'heroElderN', 3, -34, 1.9, 0.18, trunkMatA, foliageB, 'landmark');
-  placeHeroTree(scene, 'heroElderSW', -22, 24, 1.7, 2.15, trunkMatB, foliageA, 'landmark');
-  placeHeroTree(scene, 'heroSentNE', 24, -17, 1.4, 0.45, trunkMatA, foliageA, 'sentinel');
-  placeHeroTree(scene, 'heroSentNW', -26, -15, 1.5, -0.55, trunkMatB, foliageB, 'sentinel');
-  placeHeroTree(scene, 'heroSentSE', 19, 27, 1.25, 1.05, trunkMatA, foliageC, 'standard');
-  placeHeroTree(scene, 'heroSentE', 30, 6, 1.35, -1.2, trunkMatB, foliageC, 'sentinel');
-
-  const midClassic = buildMergedMidTree(scene, 'midClassic', trunkMatB, foliageB, {
-    trunkHeight: 7.5,
-    trunkTop: 0.55,
-    trunkBot: 1.1,
-    levels: 3,
-    canopyBase: 5.2,
-    canopyH0: 3.2,
-    tess: 7,
-  });
-  const midTall = buildMergedMidTree(scene, 'midTall', trunkMatA, foliageA, {
-    trunkHeight: 9.2,
-    trunkTop: 0.42,
-    trunkBot: 0.95,
-    levels: 4,
-    canopyBase: 4.4,
-    canopyH0: 2.85,
-    tess: 6,
-  });
-  const midStubby = buildMergedMidTree(scene, 'midStubby', trunkMatB, foliageC, {
-    trunkHeight: 5.8,
-    trunkTop: 0.7,
-    trunkBot: 1.35,
-    levels: 2,
-    canopyBase: 6.4,
-    canopyH0: 3.6,
-    tess: 6,
-  });
-
-  const farLod = buildFarLodTree(scene, 'farLodTree', trunkMatB, foliageB);
-  const understory = buildUnderstoryCluster(scene, 'understoryCluster', underMat);
-
-  const matsClassic: Matrix[] = [];
-  const matsTall: Matrix[] = [];
-  const matsStubby: Matrix[] = [];
-  const matsFar: Matrix[] = [];
-  const matsUnder: Matrix[] = [];
-
-  // Dense inner ring (approach gap kept so clearing reads as a place).
-  const innerCount = 68;
-  const innerR0 = 22;
-  const innerR1 = 38;
-  for (let i = 0; i < innerCount; i++) {
-    const a = (i / innerCount) * Math.PI * 2 + hash01(i * 3) * 0.28;
-    const r = innerR0 + hash01(i * 7) * (innerR1 - innerR0);
-    if (a > 0.12 && a < 0.52 && r < 32) continue;
-    const s = 0.72 + hash01(i * 11) * 0.9;
-    const sy = s * (0.88 + hash01(i * 13) * 0.38);
-    const m = composeInstanceMatrix(
-      Math.cos(a) * r,
-      Math.sin(a) * r,
-      s,
-      sy,
-      s,
-      hash01(i * 17) * Math.PI * 2,
-    );
-    const pick = hash01(i * 41);
-    if (pick < 0.38) matsClassic.push(m);
-    else if (pick < 0.72) matsTall.push(m);
-    else matsStubby.push(m);
-  }
-
-  const midCount = 40;
-  for (let i = 0; i < midCount; i++) {
-    const a = (i / midCount) * Math.PI * 2 + 0.22 + hash01(i * 5) * 0.2;
-    const r = 42 + hash01(i * 9) * 14;
-    const s = 0.65 + hash01(i * 15) * 0.7;
-    const m = composeInstanceMatrix(
-      Math.cos(a) * r,
-      Math.sin(a) * r,
-      s,
-      s * (0.95 + hash01(i * 21) * 0.25),
-      s,
-      hash01(i * 27) * Math.PI * 2,
-    );
-    const pick = hash01(i * 33);
-    if (pick < 0.45) matsClassic.push(m);
-    else if (pick < 0.78) matsTall.push(m);
-    else matsStubby.push(m);
-  }
-
-  // Far LOD — fog eats these into silhouette mass.
-  const farCount = 48;
-  for (let i = 0; i < farCount; i++) {
-    const a = (i / farCount) * Math.PI * 2 + hash01(i * 19) * 0.15;
-    const r = 58 + hash01(i * 23) * 22;
-    const s = 0.7 + hash01(i * 29) * 0.85;
-    matsFar.push(
-      composeInstanceMatrix(
-        Math.cos(a) * r,
-        Math.sin(a) * r,
-        s,
-        s * (1.05 + hash01(i * 31) * 0.35),
-        s,
-        hash01(i * 37) * Math.PI * 2,
-      ),
-    );
-  }
-
-  // Understory grass/fern clusters around clearing rim + near dirt (budget ThinInstances).
-  const underCount = 64;
-  for (let i = 0; i < underCount; i++) {
-    const a = (i / underCount) * Math.PI * 2 + hash01(i * 43) * 0.4;
-    const band = hash01(i * 47);
-    const r =
-      band < 0.35
-        ? 10 + hash01(i * 53) * 8
-        : 18 + hash01(i * 53) * 12;
-    if (r < 11 && a > 0.15 && a < 0.55) continue;
-    const s = 0.7 + hash01(i * 59) * 1.1;
-    matsUnder.push(
-      composeInstanceMatrix(
-        Math.cos(a) * r,
-        Math.sin(a) * r,
-        s * (0.8 + hash01(i * 61) * 0.5),
-        s,
-        s * (0.8 + hash01(i * 67) * 0.5),
-        hash01(i * 71) * Math.PI * 2,
-      ),
-    );
-  }
-
-  thinInstanceFromMatrices(midClassic, matsClassic);
-  thinInstanceFromMatrices(midTall, matsTall);
-  thinInstanceFromMatrices(midStubby, matsStubby);
-  thinInstanceFromMatrices(farLod, matsFar);
-  thinInstanceFromMatrices(understory, matsUnder);
-
+  // Hybrid: mountains stay procedural (pack mountains optional / heavy).
   buildMountainBackdrop(scene);
   buildSkyDome(scene);
 

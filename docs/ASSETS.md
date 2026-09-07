@@ -111,16 +111,14 @@ Dropped from shortlist: any paid-minimum itch/store packs (e.g. AssetQuest Styli
 
 ## Current POC (Babylon)
 
-Until a credited **free** pack lands, the Babylon client uses **procedural kitbash**:
-
-- `web/src/world/forest.ts` — gnarled landmark/sentinel heroes, ThinInstanced mid-tree
-  variants (classic/tall/stubby) + far LOD + understory clusters, cyan fog that eats
-  edges, muted foliage (no neon emissive), lime moss patches, cool lighting. Shared
-  materials; procedural until packs land.
+- `web/src/world/forest.ts` — **Quaternius Stylized Nature MegaKit Standard (CC0)** glTF
+  hero TwistedTree + mid CommonTree variants + understory (grass/fern/rock/bush);
+  distant mountains stay **procedural**; sky dome + locked #32/#39 cyan fog / warm sun / cool hemi.
+  Procedural fallback keeps post-#40 ThinInstance density + LOD if the pack fails to load.
 - `web/src/world/humanoid.ts` — local player **body+head+limbs + staff + robes group** (robes
   silhouette; #33 polish: limb/neck separation, richer robe+trim, thicker staff/orb); CrowdProxies remain amber capsules; training dummy stays cylinder.
 
-Visual north star is locked above / in Issue #31. Devs execute presentation Issues **#32–#34** while free packs (or further DIY) are chosen. No third-party mesh packs are vendored yet — replace with licensed **free** kits when credits are chosen (see ledger below).
+Vendored under `web/public/third-party/quaternius-stylized-nature/` (see ledger). Visual north star remains Issue #31 / mood brief above.
 
 ## How we source (v1)
 
@@ -161,7 +159,7 @@ Visual north star is locked above / in Issue #31. Devs execute presentation Issu
 
 | Pack / asset | License | Used for | URL |
 |---|---|---|---|
-| Procedural kitbash (`web/src/world/forest.ts`) | original (Fardel) | POC forest clearing, mountains, sky | — |
+| Quaternius Stylized Nature MegaKit **Standard** (free) | CC0 1.0 | Hero TwistedTree + mid CommonTree + understory grass/fern/rock/bush (`web/public/third-party/quaternius-stylized-nature/`) | https://quaternius.itch.io/stylized-nature-megakit · import mirror https://opengameart.org/sites/default/files/stylized_nature_megakitstandard.zip · https://opengameart.org/content/stylized-nature-megakit |
+| Procedural mountains/sky (`web/src/world/forest.ts`) | original (Fardel) | Distant mountain silhouettes + sky dome (hybrid; pack mountains skipped for web budget) | — |
 | Procedural humanoid (`web/src/world/humanoid.ts`) | original (Fardel) | local player body+head+limbs + staff + robes group | — |
-| Env pack (shortlisted — free CC0) | CC0 (rec: Quaternius Stylized Nature MegaKit Standard) | replace procedural trees/mountains/undergrowth | https://quaternius.itch.io/stylized-nature-megakit — **not vendored yet** |
 | Character pack (shortlisted — free CC0) | CC0 (rec: Quaternius LowPoly RPG Characters) | replace procedural humanoid | https://opengameart.org/content/lowpoly-rpg-characters — **not vendored yet** |
