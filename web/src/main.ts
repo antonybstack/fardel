@@ -59,6 +59,7 @@ import {
   createPlayerHumanoid,
   partyRobeColor,
   playHumanoidCast,
+  playHumanoidFlinch,
   preloadPlayerHumanoid,
   readHumanoidPlayback,
   remoteRobeColor,
@@ -3322,6 +3323,7 @@ async function main(): Promise<void> {
   let fpsHudAccum = 0;
 
   const remoteMeshes = new Map<string, HumanoidParts>();
+  const remoteLastHp = new Map<string, number>();
   const remoteNameplates = new Map<string, Nameplate>();
   const remoteFx = new Map<string, RemoteFx>();
   let latestRemoteCombats: RemoteCombat[] = [];
@@ -3718,12 +3720,21 @@ async function main(): Promise<void> {
       parts.root.position.y = samp.y;
       parts.root.position.z = samp.z;
       parts.root.setEnabled(true);
+      const rHp = net?.getCharacterFor(key)?.hp;
+      if (typeof rHp === 'number') {
+        const prev = remoteLastHp.get(key);
+        if (prev != null && rHp < prev && rHp > 0) {
+          playHumanoidFlinch(parts);
+        }
+        remoteLastHp.set(key, rHp);
+      }
     }
     for (const [key, parts] of remoteMeshes) {
       if (!seen.has(key)) {
         parts.root.dispose();
         remoteMeshes.delete(key);
         remotePartyTint.delete(key);
+        remoteLastHp.delete(key);
         remoteInterps.delete(key);
         remoteWalkHold.delete(key);
         disposeNameplate(remoteNameplates.get(key));
@@ -5205,6 +5216,7 @@ async function main(): Promise<void> {
                 ),
               );
               flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
+              playHumanoidFlinch(humanoid);
             } else if (ch.hp > prevPlayerHp && prevPlayerHp > 0) {
               const healed = ch.hp - prevPlayerHp;
               // Authority-backed heal (Rest). Hotkey also toasts; avoid duplicate log spam.
@@ -5602,6 +5614,7 @@ async function main(): Promise<void> {
       } else if (
         veFollow === 'walk' ||
         veFollow === 'run' ||
+        veFollow === 'flinch' ||
         veFollow === 'yaw' ||
         veFollow === 'jump-pose' ||
         veFollow === 'look-at'
@@ -6619,6 +6632,85 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitRun, 200);
     };
     window.setTimeout(waitRun, 600);
+  }
+
+  // ?ve=flinch — E8.5 RecieveHit on dummy thorns; Move intents still flow.
+  if (ve === 'flinch') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.5;
+  }
+  if (net && ve === 'flinch') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE flinch: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let lastCastAt = 0;
+    let startHp: number | null = null;
+    const waitFlinch = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE flinch: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitFlinch, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitFlinch, 250);
+        return;
+      }
+      if (startHp == null && ch) startHp = ch.hp;
+      const pb = readHumanoidPlayback(humanoid);
+      const flinchOk =
+        pb.skinned > 0 && !!pb.playing && /recievehit|flinch/i.test(pb.playing);
+      if (flinchOk) {
+        if (mark) {
+          mark.textContent = `Flinch OK · ${pb.playing} · skinned ${pb.skinned}`;
+        }
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        window.setTimeout(waitFlinch, 300);
+        return;
+      }
+      const cycle = net.getTargetCycle();
+      const dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        window.setTimeout(waitFlinch, 280);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      const gcd = gcdRemainingMs(net.getCombat());
+      const now = Date.now();
+      if (ch && ch.hp > 0 && gcd <= 0 && now - lastCastAt > 1250) {
+        lastCastSpell = SPELL_SPARK;
+        net.cast(SPELL_SPARK);
+        lastCastAt = now;
+      }
+      if (mark) {
+        mark.textContent = flinchOk
+          ? `Flinch OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `VE flinch: You ${ch?.hp ?? '?'}/${ch?.maxHp ?? '?'} · clip=${pb.playing ?? 'none'}`;
+      }
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        }
+        return;
+      }
+      window.setTimeout(waitFlinch, 140);
+    };
+    window.setTimeout(waitFlinch, 600);
   }
 
   // ?ve=yaw — E2.4 face camera-relative wish (slerp, no client positions).

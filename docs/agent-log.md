@@ -133,3 +133,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `setHumanoidDead` plays `Death` once and holds the last frame (`speedRatio` 0). Respawn starts Idle_Weapon. Loco/cast no-op while `dead`.
 - **Seen in:** #329
 
+### 2026-09-08 — humanoid,flinch — pack clip is RecieveHit (sic)
+- **Cause:** Quaternius names the hit react `RecieveHit`, not ReceiveHit. `includes('RecieveHit')` can also match RecieveHit_Attacking.
+- **Do this:** Prefer `/recievehit$/i`. One-shot then resume Idle/Walk. Do not cancel Move intents.
+- **Seen in:** #330
+
