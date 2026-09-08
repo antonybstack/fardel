@@ -116,6 +116,55 @@ try
     }
     Console.WriteLine("dead Move reject OK");
 
+    // Dead jump:true (Space on corpse) also rejects; Y/VelY unchanged.
+    var poseBeforeJump = conn.Db.PlayerPose.Identity.Find(id)!;
+    string? jumpFail = null;
+    var jumpFailed = new TaskCompletionSource();
+    void OnDeadJump(ReducerEventContext ctx, float dx, float dz, bool jump)
+    {
+        if (!jump || dx != 0f || dz != 0f)
+        {
+            return;
+        }
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                jumpFail = reason;
+                jumpFailed.TrySetResult();
+                break;
+            case Status.Committed:
+                jumpFailed.TrySetException(new Exception("Move jump:true committed while dead"));
+                break;
+            case Status.OutOfEnergy(_):
+                jumpFailed.TrySetException(new Exception("Move jump:true out of energy"));
+                break;
+        }
+    }
+    conn.Reducers.OnMove += OnDeadJump;
+    try
+    {
+        conn.Reducers.Move(0f, 0f, true);
+        await Pump(jumpFailed.Task, timeoutMs, conn, "jump while dead");
+    }
+    finally
+    {
+        conn.Reducers.OnMove -= OnDeadJump;
+    }
+    if (string.IsNullOrEmpty(jumpFail) ||
+        jumpFail.IndexOf("Dead", StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected Dead on Move jump:true, got: {jumpFail ?? "(null)"}");
+        return;
+    }
+    var poseAfterJump = conn.Db.PlayerPose.Identity.Find(id)!;
+    if (MathF.Abs(poseAfterJump.Y - poseBeforeJump.Y) > 0.01f ||
+        MathF.Abs(poseAfterJump.VelY - poseBeforeJump.VelY) > 0.01f)
+    {
+        Fail($"dead jump changed pose Y/VelY ({poseBeforeJump.Y},{poseBeforeJump.VelY})->({poseAfterJump.Y},{poseAfterJump.VelY})");
+        return;
+    }
+    Console.WriteLine($"dead jump reject OK (Y={poseAfterJump.Y} VelY={poseAfterJump.VelY} unchanged)");
+
     // Wait for scheduled respawn: full HP + yard origin pose.
     await PumpUntil(() =>
     {
