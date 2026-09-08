@@ -11959,16 +11959,16 @@ async function main(): Promise<void> {
     window.setTimeout(waitE, 500);
   }
 
-  // ?ve=hunt-loop — Tab, Spark hit, kill, corpse loot. Dummy trainer. Play cam (#422).
-  // Stay at origin (outside AggroRadius). Do not walk to the shard.
+  // ?ve=hunt-loop — Tab, Spark hit, kill, corpse loot on Kind=3 Brigand (#485 / #422).
+  // Stay at origin (outside AggroRadius). Do not walk to the shard. Dummy trainer.
   if (ve === 'hunt-loop') {
-    camera.radius = 10;
-    camera.alpha = Math.PI / 2.15;
+    camera.radius = 12;
+    camera.alpha = Math.atan2(-3, 7);
     camera.beta = Math.PI / 2.55;
   }
   if (net && ve === 'hunt-loop') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE hunt-loop: waiting for hostiles…';
+    if (mark) mark.textContent = 'VE hunt-loop: waiting for Brigand…';
     let ticks = 0;
     let phase: 'tab' | 'hit' | 'loot' | 'done' = 'tab';
     let lastCast = 0;
@@ -11977,33 +11977,40 @@ async function main(): Promise<void> {
     let hitSeen = false;
     let deathSeen = false;
     let okTicks = 0;
+    const padCx = 7;
+    const padCz = -3;
     const waitL = () => {
       if (!net) return;
       ticks += 1;
       const npcs = net.getNpcs();
       syncNpcMeshes(npcs);
-      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyOk = !!dummy;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = dummyOk && !!dMesh && !dMesh.humanoid;
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND);
       const hostiles = npcs.filter((n) => isHostileKind(n.kind));
       const selfHp = net.getCharacter()?.hp ?? 0;
       const items = net.getGroundItems();
       const tgt = camera.target;
       tgt.y = 1.05;
       if (phase === 'loot') {
-        tgt.x = 3.1;
-        tgt.z = 5.4;
+        tgt.x = 6.2;
+        tgt.z = -2.2;
       } else {
-        tgt.x = 2.2;
-        tgt.z = 3.4;
+        tgt.x = 4.2;
+        tgt.z = -1.4;
       }
-      if (latestStatus.state !== 'connected' || hostiles.length < 2 || !dummyOk) {
+      if (latestStatus.state !== 'connected' || hostiles.length < 2 || brigands.length < 1 || !dummyOk) {
         if (mark) {
-          mark.textContent = `VE hunt-loop: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+          mark.textContent =
+            `VE hunt-loop: ${latestStatus.state} · H ${hostiles.length} · B ${brigands.length}…`;
         }
         if (ticks < 360) window.setTimeout(waitL, 200);
         return;
       }
       if (selfHp <= 0) {
-        if (mark) mark.textContent = 'Hunt-loop FAIL · player died · #422';
+        if (mark) mark.textContent = 'Hunt-loop FAIL · player died · #485';
         return;
       }
       if (phase === 'tab') {
@@ -12011,14 +12018,14 @@ async function main(): Promise<void> {
         if (id != null) selectedTargetId = id;
         const picked = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
         updateTargetFrame(picked);
-        if (picked && isHostileKind(picked.kind) && picked.hp > 0) {
+        if (picked && picked.kind === NPC_KIND_BRIGAND && picked.hp > 0) {
           tabbedId = picked.npcId;
           hpAtTab = picked.hp;
           net.setTarget(picked.npcId);
           phase = 'hit';
-          if (mark) mark.textContent = `VE hunt-loop: Tab Hostile #${picked.npcId} · spark…`;
+          if (mark) mark.textContent = `VE hunt-loop: Tab Brigand #${picked.npcId} · spark…`;
         } else if (mark) {
-          mark.textContent = `VE hunt-loop: Tab… tgt ${picked?.kind ?? 'none'}`;
+          mark.textContent = `VE hunt-loop: Tab… tgt ${picked?.kind ?? 'none'} (want Brigand)`;
         }
       } else if (phase === 'hit') {
         const prey = npcs.find((n) => n.npcId === tabbedId);
@@ -12031,23 +12038,37 @@ async function main(): Promise<void> {
           }
           if (prey.hp < hpAtTab) hitSeen = true;
           if (mark) {
-            mark.textContent = `VE hunt-loop: hit ${hitSeen ? 'y' : 'n'} · hp ${prey.hp}/${prey.maxHp}`;
+            mark.textContent = `VE hunt-loop: Brigand hit ${hitSeen ? 'y' : 'n'} · hp ${prey.hp}/${prey.maxHp}`;
           }
         } else {
           deathSeen = true;
           phase = 'loot';
-          if (mark) mark.textContent = 'VE hunt-loop: dead — waiting shard…';
+          if (mark) mark.textContent = 'VE hunt-loop: Brigand dead — waiting shard…';
         }
       } else if (phase === 'loot') {
         const prey = npcs.find((n) => n.npcId === tabbedId);
-        const px = prey?.x ?? 3;
-        const pz = prey?.z ?? 7;
+        const px = prey?.x ?? padCx;
+        const pz = prey?.z ?? padCz;
         const shard = items.find((it) => Math.hypot(it.x - px, it.z - pz) < 2.5);
+        const bMesh = npcMeshes.get(tabbedId.toString());
+        const capsule = !!bMesh && !bMesh.humanoid;
+        if (capsule) {
+          if (mark) mark.textContent = 'Hunt-loop FAIL · capsule · #485';
+          return;
+        }
         const tabOk = tabbedId !== 0n;
-        if (tabOk && hitSeen && deathSeen && shard && dummyOk && selfHp > 0) {
+        if (
+          tabOk &&
+          hitSeen &&
+          deathSeen &&
+          shard &&
+          dummyTrainer &&
+          selfHp > 0
+        ) {
           okTicks += 1;
           if (mark) {
-            mark.textContent = 'Hunt-loop OK · Tab · hit · death · loot · dummy trainer · #422';
+            mark.textContent =
+              'Hunt-loop OK · Tab · hit · death · loot · Brigand · dummy trainer · #485';
           }
           if (okTicks >= 8) {
             phase = 'done';
@@ -12055,11 +12076,11 @@ async function main(): Promise<void> {
           }
         } else if (mark) {
           mark.textContent =
-            `VE hunt-loop: loot ${shard ? 'y' : 'n'} · death ${deathSeen ? 'y' : 'n'} · dummy ${dummyOk ? 'y' : 'n'}`;
+            `VE hunt-loop: loot ${shard ? 'y' : 'n'} · death ${deathSeen ? 'y' : 'n'} · dummy ${dummyTrainer ? 'y' : 'n'}`;
         }
       }
       if (ticks > 360) {
-        if (mark) mark.textContent = `Hunt-loop FAIL · phase ${phase} · #422`;
+        if (mark) mark.textContent = `Hunt-loop FAIL · phase ${phase} · #485`;
         return;
       }
       window.setTimeout(waitL, 200);
