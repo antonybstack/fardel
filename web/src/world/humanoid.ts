@@ -427,13 +427,14 @@ export function createPlayerHumanoid(
     (animGroups.length > 0 ? animGroups[0]! : null);
   // E2.3: locomotion clip. Prefer Walk; weapon-run is the GLB fallback (no Walk_Weapon).
   const walk = findAnim(animGroups, 'Walk', 'Run_Weapon', 'Run');
+  const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Staff_Attack');
   for (const g of animGroups) {
     g.stop();
   }
   if (idle) {
     idle.start(true, 1.0, idle.from, idle.to, false);
   }
-  animByRoot.set(root, { idle, walk, cast: null });
+  animByRoot.set(root, { idle, walk, cast });
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -452,6 +453,7 @@ export function createPlayerHumanoid(
 export function setHumanoidMoving(parts: HumanoidParts, moving: boolean): void {
   const a = animByRoot.get(parts.root);
   if (!a) return;
+  if (a.cast?.isPlaying) return;
   if (moving && a.walk) {
     if (a.idle && a.idle.isPlaying) a.idle.stop();
     if (!a.walk.isPlaying) {

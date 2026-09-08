@@ -5273,6 +5273,14 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'cast-anim') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
+        camera.alpha = Math.PI / 2.2;
+        camera.beta = Math.PI / 2.6;
+        camera.radius = 8;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -6119,6 +6127,58 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitYaw, 200);
     };
     window.setTimeout(waitYaw, 600);
+  }
+
+  // ?ve=cast-anim — E2.5/E2.7 Spell1 one-shot on Spark/Emberbolt path.
+  if (ve === 'cast-anim') {
+    camera.radius = 8;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'cast-anim') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-anim: waiting for Connected…';
+    let ticks = 0;
+    const playingNames = (): string =>
+      scene.animationGroups
+        .filter((g) => g.isPlaying)
+        .map((g) => g.name.replace(/^player__/, ''))
+        .join(' · ');
+    const waitCast = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-anim: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitCast, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitCast, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitCast, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      const casting = scene.animationGroups.some(
+        (g) => /spell|staff_attack/i.test(g.name) && g.isPlaying,
+      );
+      if (!casting) playHumanoidCast(humanoid);
+      const playing = playingNames();
+      if (mark) {
+        mark.textContent = /spell/i.test(playing)
+          ? `Cast OK · ${playing} · Connected`
+          : `VE cast-anim · ${playing || 'no clip'} · Connected`;
+      }
+      if (ticks < 240) window.setTimeout(waitCast, 250);
+    };
+    window.setTimeout(waitCast, 600);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
