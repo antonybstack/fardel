@@ -338,3 +338,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** User zoom still stops at 4.5. Collision may pull to `CAM_COLLIDE_FLOOR` (~1.55). Live Dummy/Hostile/Brigand cylinders (corpses skipped). persistMark `Dummy` at `?ve=cam-collision-dummy`. Do not aggro.
 - **Seen in:** #466
 
+### 2026-09-08 — camera,hop — bole Y-extent misses the airborne cam ray
+- **Cause:** `clampRadiusVsTrunks` dropped hits when `target.y + tHit*dy` was above collider `y1`. Short `*_trunk` AABBs miss the hop-cam ray; land re-hits and punches radius. E1 Y-spring is not the punch.
+- **Do this:** Treat hero/mid boles as infinite vertical cylinders (skip Y clip). Keep Y-spring; do not zero inertial on the play follow. persistMark `?ve=cam-collision-hop` must name a trunk while `y` is above ground. Grounded-only pass = fail.
+- **Seen in:** #483
+
