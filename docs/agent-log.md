@@ -348,3 +348,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Sort in-range hostiles aggroed-first, then id. Dummy stays after hostiles (trainer, still in the cycle). persistMark `?ve=tab-aggro` names the pulled kind. Do not `net.cycleTarget()`.
 - **Seen in:** #484 / #358 / #361
 
+### 2026-09-08 — ve,remote,hop — persistMark hop OK while the PNG is You on dirt
+- **Cause:** `?ve=remote-hop` only aimed at a remote while `root.y>0.12` that frame and fell back to `player.position`. persistMark could still read apex (`y=1.68`) from waitHop; Playwright then screenshotted the grounded local. Remote was a nameplate over empty grass at (0,−6).
+- **Do this:** Always mutate `camera.target` to the living hop remote (root at feet + 0.85, never local). Hide the local wizard. Hide leftover remotes while `y>1.2`. persistMark requires `y>1.2` Idle_Weapon + skinned. Slight look-up (`beta=π/1.95`) so the feet-to-ground gap reads. Do not freeze presentation Y (body and root desync). New VE key — CDN HITs old `464/remote-hop.png` / `464/remote-hop-2.png`.
+- **Seen in:** #449 / #464
+
