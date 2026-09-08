@@ -80,8 +80,8 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=rmb-look` | Prove RMB-look armed clarity (#154): canvas `grabbing` + legend `LOOKING` chip + status `camera: looking`; HUD `RMB-look OK · armed · grabbing · legend LOOKING · status looking · #154` |
 | `?ve=rmb-orbit` | Prove RMB orbit moves `camera.alpha` on the **play follow** path after a **real pointer RMB-drag** (#366 / #389). Do not inject `inertialAlphaOffset`. Chrome-only `?ve=rmb-look` is not enough. HUD `RMB orbit OK · dAlpha …` / `RMB orbit FAIL` |
 | `?ve=hostile-spawn` | Two yard hostiles as red capsules; dummy stays trainer (#354); HUD `Hostile spawn OK · n=2 · capsule · dummy trainer · #354` |
-| `?ve=leash` | Walk into aggro, hostile leaves pad, run out, it returns (#355); HUD `Leash OK · pulled · returned · #355`. |
-| `?ve=aggro` | Same pull-then-leash session shot (#360); HUD `Aggro OK · pulled · leashed · #360`. |
+| `?ve=leash` | Walk into pad C aggro, Brigand leaves pad, run out, it returns (#455); HUD `Leash OK · Brigand #… · pulled · returned · dummy trainer · #455`. Dummy never aggro. |
+| `?ve=aggro` | Same pad C pull-then-leash session shot (#455); HUD `Aggro OK · Brigand #… · pulled · leashed · dummy trainer · #455`. |
 | `?ve=auto-attack` | Pull pad A, HP drops on cadence, run out, HP stops (#356); HUD `Auto-attack OK · hp … · stopped · #356`. |
 | `?ve=hunt-loot` | Kill pad A from outside aggro, corpse ember_shard, F pickup (#357); HUD `Hunt-loot OK · corpse shard · F pickup · #357`. |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |

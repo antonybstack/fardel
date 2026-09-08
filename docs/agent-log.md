@@ -288,3 +288,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Cycle until Kind=2, Kind=3, and Dummy have been selected. Hold on Brigand. persistMark names `Brigand` + dummy selectable. Dummy stays in the cycle.
 - **Seen in:** #453
 
+### 2026-09-08 — ve,leash — ?ve=leash / ?ve=aggro pin pad A Kind=2
+- **Cause:** Harness `npcs.filter(kind === NPC_KIND_HOSTILE)` + pad A (3,7). TickHostile already `IsHostileKind`, so pad C Brigand pulls/leashes, but VE never named it.
+- **Do this:** Pull pad C (`HostileSpawnC*` 7,-3) Kind=3. persistMark `Leash OK` + `Brigand`. Dummy never aggro. Drop run stays past `HostileLeashRadius`.
+- **Seen in:** #455
+
