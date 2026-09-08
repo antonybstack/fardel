@@ -3951,11 +3951,8 @@ async function main(): Promise<void> {
         st.dz = stepZ * MOVE_SEND_HZ;
       }
       parts.root.setEnabled(true);
-      {
-        const rChNow = net?.getCharacterFor(key);
-        if (rChNow) setHumanoidStaffEquipped(parts, rChNow.staffEquipped);
-      }
-      const rHp = net?.getCharacterFor(key)?.hp;
+      const rChNow = net?.getCharacterFor(key);
+      const rHp = rChNow?.hp;
       if (typeof rHp === 'number') {
         const prev = remoteLastHp.get(key);
         if (prev != null && rHp < prev && rHp > 0) {
@@ -3966,6 +3963,10 @@ async function main(): Promise<void> {
           setHumanoidMoving(parts, false);
         }
         remoteLastHp.set(key, rHp);
+      }
+      // Dead remotes keep Death. Do not unequip-swap Idle over a corpse.
+      if (rChNow && (rHp == null || rHp > 0)) {
+        setHumanoidStaffEquipped(parts, rChNow.staffEquipped);
       }
     }
     for (const [key, parts] of remoteMeshes) {
@@ -6272,16 +6273,20 @@ async function main(): Promise<void> {
         let fy = player.position.y + 1.0;
         let fz = player.position.z;
         let best = -1;
-        for (const [, parts] of remoteMeshes) {
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) continue;
           const pb = readHumanoidPlayback(parts);
           const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          if (/death/i.test(clip)) continue;
           const sheathed =
             pb.skinned > 0 &&
             /^idle$/i.test(clip) &&
             !/weapon/i.test(clip) &&
             !parts.staff.isEnabled();
+          if (!sheathed) continue;
           const d = Vector3.Distance(parts.root.position, player.position);
-          const rank = (sheathed ? 1000 : 0) + d;
+          const rank = 1000 + d;
           if (rank > best) {
             best = rank;
             fx = parts.root.position.x;
@@ -8078,7 +8083,8 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
+        // West of origin so local + remote do not stack. Stay outside AggroRadius 3.
+        for (let i = 0; i < 4; i++) net.sendMove(-0.55, 0, false);
       }
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes);
@@ -8089,20 +8095,21 @@ async function main(): Promise<void> {
           ? { pb: readHumanoidPlayback(p), staffOn: p.staff.isEnabled() }
           : { pb: { skinned: 0, playing: null, idle: null, height: 0 }, staffOn: true };
       };
-      const preferred =
-        remotes.find((r) => {
-          const ch = net.getCharacterFor(r.identityHex);
-          const { pb, staffOn } = playbackOf(r.identityHex);
-          const clip = clipBare(pb.playing);
-          return (
-            ch != null &&
-            !ch.staffEquipped &&
-            pb.skinned > 0 &&
-            /^idle$/i.test(clip) &&
-            !/weapon/i.test(clip) &&
-            !staffOn
-          );
-        }) ?? remotes[0];
+      const preferred = remotes.find((r) => {
+        const ch = net.getCharacterFor(r.identityHex);
+        const { pb, staffOn } = playbackOf(r.identityHex);
+        const clip = clipBare(pb.playing);
+        return (
+          ch != null &&
+          ch.hp > 0 &&
+          !ch.staffEquipped &&
+          pb.skinned > 0 &&
+          /^idle$/i.test(clip) &&
+          !/weapon/i.test(clip) &&
+          !/death/i.test(clip) &&
+          !staffOn
+        );
+      });
       const got = preferred ? playbackOf(preferred.identityHex) : null;
       const clip = clipBare(got?.pb.playing ?? null);
       const ch = preferred ? net.getCharacterFor(preferred.identityHex) : null;
@@ -8110,20 +8117,33 @@ async function main(): Promise<void> {
         !!preferred &&
         !!got &&
         !!ch &&
+        ch.hp > 0 &&
         !ch.staffEquipped &&
         got.pb.skinned > 0 &&
         /^idle$/i.test(clip) &&
         !/weapon/i.test(clip) &&
+        !/death/i.test(clip) &&
         !got.staffOn;
       if (mark) {
         if (sheathOk && got) {
           mark.textContent =
             `Remote sheathed OK · ${clip} · skinned ${got.pb.skinned} · remotes ${n}`;
-        } else if (n > 0 && got && got.pb.skinned <= 0) {
-          mark.textContent = `T-POSE · clip=${got.pb.playing ?? 'none'} · skeleton=${got.pb.skinned}`;
-        } else if (n > 0 && got) {
-          mark.textContent =
-            `VE remote-sheathed: remotes ${n} · ${clip} · staff ${got.staffOn ? 'on' : 'off'} · skinned ${got.pb.skinned} (FARDEL_SECOND_SHEATH=1)`;
+        } else if (n > 0) {
+          const any = remotes[0];
+          const anyGot = any ? playbackOf(any.identityHex) : null;
+          const anyCh = any ? net.getCharacterFor(any.identityHex) : null;
+          const anyClip = clipBare(anyGot?.pb.playing ?? null);
+          if (anyGot && anyGot.pb.skinned <= 0) {
+            mark.textContent = `T-POSE · clip=${anyGot.pb.playing ?? 'none'} · skeleton=${anyGot.pb.skinned}`;
+          } else if (anyCh && anyCh.hp <= 0) {
+            mark.textContent = `VE remote-sheathed: remotes ${n} · dead (need living Idle)`;
+          } else if (anyGot) {
+            mark.textContent =
+              `VE remote-sheathed: remotes ${n} · ${anyClip} · staff ${anyGot.staffOn ? 'on' : 'off'} · skinned ${anyGot.pb.skinned} (FARDEL_SECOND_SHEATH=1)`;
+          } else {
+            mark.textContent =
+              `VE remote-sheathed: remotes ${n} · waiting living Idle…`;
+          }
         } else {
           mark.textContent =
             'VE remote-sheathed: remotes 0 (start tools/SecondClient FARDEL_SECOND_SHEATH=1)…';

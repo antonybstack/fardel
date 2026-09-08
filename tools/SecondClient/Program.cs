@@ -58,15 +58,6 @@ try
 
     Console.WriteLine($"spawn ({pose.X}, {pose.Z})");
 
-    if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
-    {
-        conn.Reducers.EquipStaff();
-        await Frame(conn, 200);
-    }
-
-    conn.Reducers.EnsureTrainingDummy();
-    await Frame(conn, 200);
-
     var sheath = string.Equals(
         Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH"),
         "1",
@@ -75,25 +66,51 @@ try
         Environment.GetEnvironmentVariable("FARDEL_SECOND_DIE"),
         "1",
         StringComparison.OrdinalIgnoreCase);
+
+    if (!sheath && conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+    {
+        conn.Reducers.EquipStaff();
+        await Frame(conn, 200);
+    }
+
+    conn.Reducers.EnsureTrainingDummy();
+    await Frame(conn, 200);
+
     if (sheath)
     {
-        // ?ve=remote-sheathed: stand in-yard with staff off so the browser
-        // sees unarmed Idle (not Idle_Weapon + hidden stick).
+        // ?ve=remote-sheathed: stand at origin (outside HostileAggroRadius 3;
+        // pads A/B/C are ~7.6m). Do not walk to (4, 2.5) — leftover DIE
+        // identity / pad-C path reads as a Death pose. Wait for respawn.
+        var aliveGuard = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuard)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("sheath: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
         if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: true })
         {
             conn.Reducers.UnequipStaff();
             await Frame(conn, 200);
         }
+        const float sheathX = 0f;
+        const float sheathZ = 0f;
         var walkGuard = DateTime.UtcNow.AddSeconds(8);
         while (DateTime.UtcNow < walkGuard)
         {
+            if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+            {
+                await Frame(conn, 200);
+                continue;
+            }
             if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
             {
                 await Frame(conn, 50);
                 continue;
             }
-            var dx = targetX - cur.X;
-            var dz = targetZ - cur.Z;
+            var dx = sheathX - cur.X;
+            var dz = sheathZ - cur.Z;
             var dist = MathF.Sqrt(dx * dx + dz * dz);
             if (dist < 0.4f)
             {
@@ -110,7 +127,13 @@ try
         }
         while (true)
         {
-            if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: true })
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: <= 0 })
+            {
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch is { StaffEquipped: true })
             {
                 conn.Reducers.UnequipStaff();
             }
