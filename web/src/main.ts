@@ -13160,7 +13160,7 @@ async function main(): Promise<void> {
   }
 
 
-  // ?ve=no-target-cast — empty target cycle cast failure: CANCEL-class toast + combat log (#190).
+  // ?ve=no-target-cast — empty cycle, then key 1 so bindInput runs onCast.
   if (ve === 'no-target-cast' || ve === 'notargetcast' || ve === 'no-target') {
     camera.radius = 10;
     camera.alpha = Math.PI / 2.3;
@@ -13170,9 +13170,9 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE no-target-cast: waiting for Connected…';
     let ticks = 0;
-    let cleared = false;
-    let attempted = false;
-    let phase: 'clear' | 'attempt' | 'done' = 'clear';
+    let lastCastAt = 0;
+    let pressed = false;
+    let phase: 'kill' | 'clear' | 'press' | 'done' = 'kill';
     const waitNoTarget = () => {
       if (!net) return;
       ticks += 1;
@@ -13190,91 +13190,149 @@ async function main(): Promise<void> {
         return;
       }
       if (ch0) updateSelfFrame(ch0);
+      if ((ch0?.hp ?? 0) <= 0) {
+        if (mark) mark.textContent = 'VE no-target-cast: waiting respawn…';
+        if (ticks < 200) window.setTimeout(waitNoTarget, 250);
+        return;
+      }
 
       if (phase === 'done') return;
 
-      if (phase === 'clear' && !cleared) {
-        // Clear selected target so cast hits empty/no-target gate (no soft-target invent).
-        net.setTarget(0n);
-        selectedTargetId = 0n;
-        cleared = true;
-        if (mark) mark.textContent = 'VE no-target-cast: cleared target…';
-        window.setTimeout(waitNoTarget, 350);
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const cycle = net.getTargetCycle();
+      const living = npcs.filter((n) => n.hp > 0);
+      const dummy =
+        living.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      const combat = net.getCombat();
+      const gcdLeft = gcdRemainingMs(combat);
+
+      if (phase === 'kill') {
+        if (cycle.length === 0 && living.length === 0) {
+          phase = 'clear';
+          window.setTimeout(waitNoTarget, 120);
+          return;
+        }
+        // Living Dummy stays in getTargetCycle (hp>0); onCast would auto-pick.
+        if (
+          dummy &&
+          dummy.hp > 0 &&
+          lastCastAt === 0 &&
+          (ch0?.hp ?? 0) < 60
+        ) {
+          void net.rest();
+          if (mark) {
+            mark.textContent = `VE no-target-cast: Rest · HP ${ch0?.hp ?? 0}`;
+          }
+          window.setTimeout(waitNoTarget, 500);
+          return;
+        }
+        if (dummy && dummy.hp > 0) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+          const now = Date.now();
+          if (gcdLeft <= 0 && now - lastCastAt > 1100) {
+            lastCastSpell = SPELL_SPARK;
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            if (mark) {
+              mark.textContent =
+                `VE no-target-cast: Spark · Dummy HP ${dummy.hp}/${dummy.maxHp}`;
+            }
+          } else if (mark) {
+            mark.textContent =
+              `VE no-target-cast: Dummy HP ${dummy.hp}/${dummy.maxHp} · GCD ${Math.max(0, gcdLeft)}ms`;
+          }
+        }
+        if (ticks > 160) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · Dummy still has HP (cycle ${cycle.length})`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitNoTarget, 140);
         return;
       }
 
       if (phase === 'clear') {
-        phase = 'attempt';
+        if (cycle.length > 0 || living.length > 0) {
+          phase = 'kill';
+          window.setTimeout(waitNoTarget, 140);
+          return;
+        }
+        net.setTarget(0n);
+        selectedTargetId = 0n;
+        if (gcdLeft > 0 || (combat && combat.targetNpcId !== 0n)) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: clearing · gcd ${Math.max(0, gcdLeft)}ms`;
+          }
+          if (ticks > 180) {
+            if (mark) {
+              mark.textContent =
+                'VE no-target-cast: fail · Dummy still has HP (cycle not empty)';
+            }
+            phase = 'done';
+            return;
+          }
+          window.setTimeout(waitNoTarget, 140);
+          return;
+        }
+        phase = 'press';
       }
 
-      const cycle = net.getTargetCycle();
-      const combat = net.getCombat();
-      const noTargetArmed =
-        (!combat || combat.targetNpcId === 0n) && cycle.length === 0;
-
-      if (phase === 'attempt' && !attempted) {
-        attempted = true;
-        if (noTargetArmed) {
-          // Exercise the same empty-cycle feedback path as onCast (status + toast + log).
-          latestStatus =
-            latestStatus.state === 'connected'
-              ? { ...latestStatus, castFeedback: 'No target' }
-              : latestStatus;
-          pushSystemToast(
-            'noTarget',
-            'No target · Tab to select',
-            TOAST_VE_TTL_MS,
-          );
-          pushCombatLog('noTarget', 'No target · Tab to select');
+      if (phase === 'press' && !pressed) {
+        if (cycle.length !== 0 || living.length > 0) {
           if (mark) {
             mark.textContent =
-              'VE no-target-cast: empty cycle · firing CANCEL toast…';
+              `VE no-target-cast: fail · Dummy still has HP (cycle ${cycle.length})`;
           }
-        } else {
-          // Yard still has alive NPCs (cycle non-empty → onCast would auto-pick).
-          // Seed CANCEL-class feedback for VE proof without inventing soft-target rules.
-          latestStatus =
-            latestStatus.state === 'connected'
-              ? { ...latestStatus, castFeedback: 'No target' }
-              : latestStatus;
-          pushSystemToast(
-            'noTarget',
-            'No target · Tab to select',
-            TOAST_VE_TTL_MS,
-          );
-          pushCombatLog('noTarget', 'No target · Tab to select');
-          if (mark) {
-            mark.textContent =
-              'VE no-target-cast: seeded CANCEL toast (cycle non-empty)…';
-          }
+          phase = 'done';
+          return;
         }
-        window.setTimeout(waitNoTarget, 400);
+        setChatComposing(false);
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '1',
+            code: 'Digit1',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        pressed = true;
+        if (mark) {
+          mark.textContent = 'VE no-target-cast: pressed 1 · waiting onCast…';
+        }
+        window.setTimeout(waitNoTarget, 200);
         return;
       }
 
-      if (toastKindsPresent().has('noTarget') || combatLogKindsPresent().has('noTarget')) {
-        phase = 'done';
-        if (mark) {
-          mark.textContent =
-            'No-target-cast OK · CANCEL toast · Tab to select · #190';
+      if (pressed) {
+        const cycleNow = net.getTargetCycle();
+        const hasNoTarget =
+          toastKindsPresent().has('noTarget') ||
+          combatLogKindsPresent().has('noTarget');
+        if (hasNoTarget && cycleNow.length === 0) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'No-target-cast OK · CANCEL toast · Tab to select · #190';
+          }
+          return;
         }
-        return;
-      }
-
-      if (ticks > 120) {
-        if (!toastKindsPresent().has('noTarget')) {
-          pushSystemToast(
-            'noTarget',
-            'No target · Tab to select',
-            TOAST_VE_TTL_MS,
-          );
-          pushCombatLog('noTarget', 'No target · Tab to select');
+        if (ticks > 200) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · noTarget after 1 · cycle=${cycleNow.length}`;
+          }
+          phase = 'done';
+          return;
         }
-        phase = 'done';
-        if (mark) {
-          mark.textContent =
-            'No-target-cast OK · CANCEL toast · Tab to select · #190 · seeded';
-        }
+        window.setTimeout(waitNoTarget, 160);
         return;
       }
 
