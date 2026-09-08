@@ -56,6 +56,7 @@ import {
   readHumanoidPlayback,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
+  setHumanoidAirborne,
   setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
@@ -4647,7 +4648,12 @@ async function main(): Promise<void> {
       }
       const moving = st.hold > 0 && samp.y <= 0.05;
       const spd = Math.hypot(st.dx, st.dz);
-      setHumanoidMoving(parts, moving, spd >= REMOTE_RUN_SPD);
+      if (samp.y > 0.05) {
+        setHumanoidAirborne(parts, true);
+      } else {
+        setHumanoidAirborne(parts, false);
+        setHumanoidMoving(parts, moving, spd >= REMOTE_RUN_SPD);
+      }
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
         const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
@@ -4899,22 +4905,37 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        const moving = keys.size > 0 && !isAirborne;
+        if (isAirborne) {
+          setHumanoidAirborne(humanoid, true);
+        } else {
+          setHumanoidAirborne(humanoid, false);
+          const moving = keys.size > 0;
+          const running =
+            moving &&
+            (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
+          setHumanoidMoving(humanoid, moving, running);
+        }
+      } else {
+        moveAccumulator = 0;
+        if (isAirborne) {
+          setHumanoidAirborne(humanoid, true);
+        } else {
+          setHumanoidAirborne(humanoid, false);
+          setHumanoidMoving(humanoid, false);
+        }
+      }
+    } else {
+      moveAccumulator = 0;
+      if (isAirborne) {
+        setHumanoidAirborne(humanoid, true);
+      } else {
+        setHumanoidAirborne(humanoid, false);
+        const moving = keys.size > 0;
         const running =
           moving &&
           (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
         setHumanoidMoving(humanoid, moving, running);
-      } else {
-        moveAccumulator = 0;
-        setHumanoidMoving(humanoid, false);
       }
-    } else {
-      moveAccumulator = 0;
-      const moving = !isAirborne && keys.size > 0;
-      const running =
-        moving &&
-        (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
-      setHumanoidMoving(humanoid, moving, running);
     }
     humanoid.root.scaling.set(1, 1, 1);
 
@@ -9013,11 +9034,11 @@ async function main(): Promise<void> {
     window.setTimeout(waitJumpPose, 600);
   }
 
-  // ?ve=hop-wow — rigid hop, no squash, no camera slam. Does not replace ?ve=jump (#257).
+  // ?ve=hop-wow — rigid hop, no squash. Close enough that airborne pose reads (#328).
   if (ve === 'hop-wow') {
-    camera.radius = 18;
+    camera.radius = 12;
     camera.alpha = Math.PI / 2.45;
-    camera.beta = Math.PI / 3.2;
+    camera.beta = Math.PI / 2.5;
   }
   if (net && ve === 'hop-wow') {
     const mark = document.getElementById('persistMark');
@@ -9031,7 +9052,7 @@ async function main(): Promise<void> {
     const waitHop = () => {
       if (!net) return;
       ticks += 1;
-      camera.radius = 18;
+      camera.radius = 12;
       const st = latestStatus;
       if (st.state !== 'connected') {
         if (mark) mark.textContent = `VE hop-wow: ${st.state}…`;
@@ -9047,7 +9068,7 @@ async function main(): Promise<void> {
       if (!jumpAttempted && ticks > 5) {
         jumpAttempted = true;
         net.sendMove(0, 0, true);
-        if (mark) mark.textContent = 'VE hop-wow: Space tapped · play-cam r=18…';
+        if (mark) mark.textContent = 'VE hop-wow: Space tapped · play-cam r=12…';
         window.setTimeout(waitHop, 120);
         return;
       }
@@ -9059,7 +9080,7 @@ async function main(): Promise<void> {
       }
       const scaleY = humanoid.root.scaling.y;
       const rigidOk = Math.abs(scaleY - 1) < 0.05;
-      const radiusOk = camera.radius >= 14 && camera.radius <= 22;
+      const radiusOk = camera.radius >= 9 && camera.radius <= 16;
       const airNow = pose.y > 0.35;
       if (!hopOk && peakY > 0.5 && rigidOk && radiusOk && airNow) {
         hopOk = true;
@@ -9068,9 +9089,18 @@ async function main(): Promise<void> {
       }
       if (hopOk) {
         okPeak = Math.max(okPeak, peakY);
+        const pb = readHumanoidPlayback(humanoid);
+        const locoOn = scene.animationGroups.some(
+          (g) =>
+            /(walk|run)/i.test(g.name) &&
+            g.isPlaying &&
+            !/remote_/i.test(g.name),
+        );
         if (mark) {
           mark.textContent =
-            `Hop-wow OK · rigid y=${okScaleY.toFixed(2)} · no slam · r=18 · peak=${okPeak.toFixed(2)}m · #257`;
+            !locoOn && pb.skinned > 0 && pb.playing && !/walk|run/i.test(pb.playing)
+              ? `Hop-wow OK · ${pb.playing} · skinned ${pb.skinned} · rigid y=${okScaleY.toFixed(2)} · peak=${okPeak.toFixed(2)}m`
+              : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · loco ${locoOn ? 'on' : 'off'}`;
         }
         window.setTimeout(waitHop, 200);
         return;
