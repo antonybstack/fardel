@@ -201,6 +201,11 @@ function tabTargetCycle(net: GameNet): NpcView[] {
   return [...hostilesNear, ...dummy, ...hostilesFar, ...rest];
 }
 
+function npcStunnedNow(n: NpcView, nowMs = Date.now()): boolean {
+  const untilMs = Number(n.stunnedUntilMicros / 1000n);
+  return Number.isFinite(untilMs) && untilMs > nowMs;
+}
+
 function cyclePreferHostiles(net: GameNet): bigint | null {
   const cycle = tabTargetCycle(net);
   if (cycle.length === 0) return null;
@@ -3743,6 +3748,8 @@ async function main(): Promise<void> {
   const NPC_TICK_HZ = 10;
   const npcWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
   const npcLastXz = new Map<string, { x: number; z: number }>();
+  const npcStunnedNow = (n: NpcView): boolean =>
+    Number(n.stunnedUntilMicros / 1000n) > Date.now();
   const proxyInterps = new Map<string, PoseInterp>();
 
   const ensureRemoteFx = (key: string): RemoteFx => {
@@ -4881,7 +4888,10 @@ async function main(): Promise<void> {
       }
 
       const prevXz = npcLastXz.get(key);
-      if (prevXz) {
+      const stunned = isAlive && npcStunnedNow(npc);
+      if (stunned) {
+        npcWalkHold.delete(key);
+      } else if (prevXz) {
         const stepX = npc.x - prevXz.x;
         const stepZ = npc.z - prevXz.z;
         const step = Math.hypot(stepX, stepZ);
@@ -4889,6 +4899,7 @@ async function main(): Promise<void> {
           mesh.humanoid &&
           isHostileKind(npc.kind) &&
           isAlive &&
+          !npcStunnedNow(npc) &&
           step > NPC_WALK_STEP &&
           step < NPC_WALK_SNAP
         ) {
@@ -4900,6 +4911,8 @@ async function main(): Promise<void> {
           st.hold = NPC_WALK_HOLD_S;
           st.dx = stepX * NPC_TICK_HZ;
           st.dz = stepZ * NPC_TICK_HZ;
+        } else if (isAlive && npcStunnedNow(npc)) {
+          npcWalkHold.delete(key);
         }
       }
       npcLastXz.set(key, { x: npc.x, z: npc.z });
@@ -4908,7 +4921,7 @@ async function main(): Promise<void> {
       mesh.root.position.z = npc.z;
       if (mesh.humanoid && isHostileKind(npc.kind)) {
         setHumanoidDead(mesh.humanoid, !isAlive);
-        if (!isAlive) npcWalkHold.delete(key);
+        if (!isAlive || stunned) npcWalkHold.delete(key);
       }
 
       const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
@@ -5121,6 +5134,11 @@ async function main(): Promise<void> {
         (n) => n.npcId.toString() === npcKey,
       );
       if (!npcRow || !isHostileKind(npcRow.kind) || npcRow.hp <= 0) continue;
+      if (npcStunnedNow(npcRow)) {
+        npcWalkHold.delete(npcKey);
+        setHumanoidGroundWalk(parts, false, 0);
+        continue;
+      }
       let st = npcWalkHold.get(npcKey);
       if (!st) {
         st = { hold: 0, dx: 0, dz: 0 };
@@ -5462,6 +5480,11 @@ async function main(): Promise<void> {
         if (!parts) continue;
         const npcRow = net.getNpcs().find((n) => n.npcId.toString() === npcKey);
         if (!npcRow || !isHostileKind(npcRow.kind) || npcRow.hp <= 0) continue;
+        if (npcStunnedNow(npcRow)) {
+          npcWalkHold.delete(npcKey);
+          setHumanoidGroundWalk(parts, false, 0);
+          continue;
+        }
         let st = npcWalkHold.get(npcKey);
         if (!st) {
           st = { hold: 0, dx: 0, dz: 0 };
@@ -6167,6 +6190,7 @@ async function main(): Promise<void> {
       } else if (
         veFollow === 'kick' ||
         veFollow === 'stun' ||
+        veFollow === 'stun-hold' ||
         veFollow === 'leash' ||
         veFollow === 'aggro'
       ) {
@@ -20291,6 +20315,170 @@ async function main(): Promise<void> {
       window.setTimeout(waitStunNpc, 200);
     };
     window.setTimeout(waitStunNpc, 600);
+  }
+
+  // ?ve=stun-hold — StunNpc Kind=3 mid-chase; stand for the lock, no Walk moonwalk (#487).
+  if (ve === 'stun-hold') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'stun-hold') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE stun-hold: waiting for brigand…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let phase: 'pull' | 'stun' | 'hold' | 'done' = 'pull';
+    let holdX = 0;
+    let holdZ = 0;
+    let holdAt = 0;
+    let stunBusy = false;
+    const waitHold = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (ticks < 260) window.setTimeout(waitHold, 80);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && dummy.hp > 0 && !!dummyMesh && !dummyMesh.humanoid;
+      const dummyAggro = dummy?.aggroed === true;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      if (!dummyTrainer || dummyAggro) {
+        if (mark) {
+          mark.textContent = dummyAggro
+            ? 'Stun-hold FAIL · dummy aggroed · #487'
+            : `VE stun-hold: dummy trainer ${dummyTrainer ? 'ok' : 'no'}…`;
+        }
+        if (dummyAggro) return;
+        if (ticks < 260) window.setTimeout(waitHold, 80);
+        return;
+      }
+      if (!brigand) {
+        if (mark) mark.textContent = 'VE stun-hold: waiting Kind=3…';
+        if (ticks < 260) window.setTimeout(waitHold, 80);
+        return;
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      const home = Math.hypot(
+        brigand.x - (brigand.spawnX || padCx),
+        brigand.z - (brigand.spawnZ || padCz),
+      );
+      const dx = brigand.x - player.position.x;
+      const dz = brigand.z - player.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (capsule) {
+        if (mark) mark.textContent = 'Stun-hold FAIL · capsule · #487';
+        return;
+      }
+      if (phase === 'pull') {
+        if (dist > HOSTILE_AGGRO_RADIUS - 0.35 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (brigand.aggroed && home > 0.35) {
+          selectedTargetId = brigand.npcId;
+          net.setTarget(brigand.npcId);
+          phase = 'stun';
+        } else if (mark) {
+          mark.textContent =
+            `VE stun-hold: pull · d=${dist.toFixed(1)} · home=${home.toFixed(2)} · aggro=${brigand.aggroed ? 'y' : 'n'}`;
+        }
+      } else if (phase === 'stun') {
+        if (dist > STUN_RANGE_METERS - 0.5 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        } else if (!stunBusy && gcdRemainingMs(net.getCombat()) <= 0) {
+          stunBusy = true;
+          holdX = brigand.x;
+          holdZ = brigand.z;
+          const stunId = brigand.npcId;
+          void net.stunNpc(stunId).then(() => {
+            stunBusy = false;
+            phase = 'hold';
+            holdAt = Date.now();
+            const live = net.getNpcs().find((n) => n.npcId === stunId);
+            holdX = live?.x ?? brigand.x;
+            holdZ = live?.z ?? brigand.z;
+            const bit = `Stun · Brigand #${stunId} · hold`;
+            pushCombatLog('stun', bit);
+            pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+          }).catch(() => {
+            stunBusy = false;
+          });
+        }
+        if (mark) {
+          mark.textContent =
+            `VE stun-hold: stun · d=${dist.toFixed(1)} · home=${home.toFixed(2)} · ${bLabel || 'no'}`;
+        }
+      } else if (phase === 'hold') {
+        const drift = Math.hypot(brigand.x - holdX, brigand.z - holdZ);
+        const pb = bMesh?.humanoid ? readHumanoidPlayback(bMesh.humanoid) : null;
+        const clip = clipBare(pb?.playing ?? null);
+        const walking = /walk/i.test(clip);
+        const held = Date.now() - holdAt;
+        if (drift > 0.4) {
+          if (mark) {
+            mark.textContent =
+              `Stun-hold FAIL · drift ${drift.toFixed(2)}m · ${clip} · #487`;
+          }
+          return;
+        }
+        if (held >= 200 && walking) {
+          if (mark) {
+            mark.textContent =
+              `Stun-hold FAIL · Walk moonwalk · ${clip} · #487`;
+          }
+          return;
+        }
+        if (
+          held >= 700 &&
+          npcStunnedNow(brigand) &&
+          bLabel === 'Brigand' &&
+          dummyTrainer &&
+          pb != null &&
+          pb.skinned > 0 &&
+          !walking
+        ) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Stun-hold OK · Brigand · stun hold · dummy trainer · #487`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE stun-hold: hold ${held}ms · drift=${drift.toFixed(2)} · ${clip} · ${bLabel || 'no'}`;
+        }
+      }
+      if (ticks > 280) {
+        if (mark) {
+          mark.textContent = `Stun-hold FAIL · phase ${phase} · #487`;
+        }
+        return;
+      }
+      window.setTimeout(waitHold, 80);
+    };
+    window.setTimeout(waitHold, 500);
   }
 
   // ?ve=bash — PvP Stun(Identity) vs a nearby remote (SecondClient).
