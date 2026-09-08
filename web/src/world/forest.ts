@@ -1079,7 +1079,8 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     thinInstancePackRoot(midTemplates[i]!, midMats[i]!);
   }
 
-  // Understory: grass / fern / rock / bush clusters (budget-friendly counts).
+  // Understory: pack grass/fern/rock/bush as ThinInstances only (#345).
+  // Unique GLTF clones (even 24) still cost MASK/draw. Opaque merge + instances.
   const underFiles = [
     'Grass_Common_Tall.gltf',
     'Grass_Wispy_Short.gltf',
@@ -1090,14 +1091,12 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   ] as const;
   const underTemplates: TransformNode[] = [];
   for (let i = 0; i < underFiles.length; i++) {
-    const t = await loadPackRoot(scene, underFiles[i]!, `underTemplate_${i}`);
+    const t = await loadPackRoot(scene, underFiles[i]!, `underTemplate_${i}`, false, true);
     if (t) underTemplates.push(t);
   }
-
-  // #315: 80 unique GLTF clones with alpha cards melted play-cam FPS.
-  // ThinInstance ferns below still add density. Cap unique pack clones.
-  let underPlaced = 0;
-  for (let i = 0; i < 24 && underTemplates.length > 0; i++) {
+  const underMats: Matrix[][] = underTemplates.map(() => []);
+  const underCount = 36;
+  for (let i = 0; i < underCount && underTemplates.length > 0; i++) {
     const a = hash01(i * 41) * Math.PI * 2;
     const r = 12 + hash01(i * 43) * 95;
     if (r < 11) continue;
@@ -1106,20 +1105,24 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     if (pathBlocksUnderstory(ux, uz)) continue;
     const plantish = i % 8 < 6;
     const ti = plantish ? i % 3 : 3 + (i % 3);
-    const tmpl = underTemplates[ti % underTemplates.length]!;
-    const isRock = tmpl.name.includes('Rock') || ti >= 4;
+    const tmplI = ti % underTemplates.length;
+    const tmpl = underTemplates[tmplI]!;
+    const isRock = tmpl.name.includes('Rock') || tmplI >= 4;
     const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.5 + hash01(i * 47) * 2.4;
-    placeClone(
-      tmpl,
-      `under_${i}`,
-      ux,
-      uz,
-      s,
-      hash01(i * 53) * Math.PI * 2,
+    underMats[tmplI]!.push(
+      composeInstanceMatrix(
+        ux,
+        uz,
+        s,
+        s,
+        s,
+        hash01(i * 53) * Math.PI * 2,
+      ),
     );
-    underPlaced++;
   }
-  void underPlaced;
+  for (let i = 0; i < underTemplates.length; i++) {
+    thinInstancePackRoot(underTemplates[i]!, underMats[i]!);
+  }
 
   return true;
 }
