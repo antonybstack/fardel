@@ -274,6 +274,9 @@ let veFrameHpLock = false;
 /** VE lock: hold seeded loadout strip + tonic buff chrome for ?ve=loadout-buff. */
 let veLoadoutBuffLock = false;
 
+/** VE lock: hold bandage vs tonic toast/log/buff chrome for ?ve=bandage-tonic (#163). */
+let veBandageTonicLock = false;
+
 /** VE lock: hold seeded bottom-left HUD layout chrome for ?ve=hud-layout (#104). */
 let veHudLayoutLock = false;
 
@@ -470,7 +473,7 @@ function updateSelfFrame(character: {
   maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
-  if (veFrameHpLock || veLoadoutBuffLock || veHudLayoutLock) return;
+  if (veFrameHpLock || veLoadoutBuffLock || veHudLayoutLock || veBandageTonicLock) return;
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
@@ -689,7 +692,7 @@ function updateLoadoutStrip(character: {
   hasYardTonic?: boolean;
   hasYardBandage?: boolean;
 } | null | undefined): void {
-  if (veLoadoutBuffLock || veHudLayoutLock) return;
+  if (veLoadoutBuffLock || veHudLayoutLock || veBandageTonicLock) return;
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
   if (!character) {
@@ -1043,7 +1046,7 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                       : kind === 'outOfRange'
                                         ? 'RANGE'
                                         : kind === 'bandage'
-                                          ? 'HEAL'
+                                          ? 'BANDAGE'
                                           : kind === 'gcd'
                                             ? 'GCD'
                                             : kind === 'noTarget'
@@ -1186,7 +1189,7 @@ function pushSystemToast(
                                                     : kind === 'outOfRange'
                                                       ? 'RANGE'
                                                       : kind === 'bandage'
-                                                        ? 'HEAL'
+                                                        ? 'BANDAGE'
                                                         : kind === 'noTarget'
                                                           ? 'CANCEL ↩'
                                                           : kind === 'canvasFocus'
@@ -2453,6 +2456,8 @@ const FLOATER_TINT_SPARK = new Color3(1.0, 0.9, 0.48);
 const FLOATER_TINT_EMBER = new Color3(1.0, 0.58, 0.22);
 const FLOATER_TINT_THORNS = new Color3(0.96, 0.4, 0.36);
 const FLOATER_TINT_HEAL = new Color3(0.7, 0.96, 0.86);
+/** Tonic use flash — warm amber, not heal green (#163). */
+const TONIC_FLASH = new Color3(0.88, 0.62, 0.28);
 const FLOATER_TINT_XP = new Color3(1.0, 0.86, 0.4);
 const FLOATER_TINT_LEVEL = new Color3(0.72, 0.9, 1.0);
 
@@ -3563,7 +3568,7 @@ async function main(): Promise<void> {
       const g = net;
       const ch0 = g.getCharacter();
       if (!ch0?.hasYardTonic) {
-        pushSystemToast('rate', 'No yard tonic in bag');
+        pushSystemToast('tonic', 'No yard tonic in bag');
         return;
       }
       void g.useYardTonic().then(() => {
@@ -3577,14 +3582,13 @@ async function main(): Promise<void> {
         setBagPanelOpen(true);
         pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
         pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
-        // Brief green flash VFX on local player
-        flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
+        flashMesh(humanoid.mat, TONIC_FLASH, 700);
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/no yard tonic/i.test(msg)) {
-          pushSystemToast('rate', 'No yard tonic in bag');
+          pushSystemToast('tonic', 'No yard tonic in bag');
         } else {
-          pushSystemToast('rate', msg.slice(0, 96) || 'Use tonic failed');
+          pushSystemToast('tonic', msg.slice(0, 96) || 'Use tonic failed');
         }
       });
     },
@@ -3593,7 +3597,7 @@ async function main(): Promise<void> {
       const g = net;
       const ch0 = g.getCharacter();
       if (!ch0?.hasYardBandage) {
-        pushSystemToast('rate', 'No yard bandage in bag');
+        pushSystemToast('bandage', 'No yard bandage in bag');
         return;
       }
       const hpAt = ch0.hp;
@@ -3622,15 +3626,15 @@ async function main(): Promise<void> {
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/no yard bandage/i.test(msg)) {
-          pushSystemToast('rate', 'No yard bandage in bag');
+          pushSystemToast('bandage', 'No yard bandage in bag');
         } else if (/recently damaged/i.test(msg)) {
-          pushSystemToast('rate', 'Too soon after damage');
+          pushSystemToast('bandage', 'Too soon after damage');
         } else if (/bandage on cooldown/i.test(msg)) {
-          pushSystemToast('rate', 'Bandage on cooldown');
+          pushSystemToast('bandage', 'Bandage on cooldown');
         } else if (/already full/i.test(msg)) {
-          pushSystemToast('rate', 'Already full HP');
+          pushSystemToast('bandage', 'Already full HP');
         } else {
-          pushSystemToast('rate', msg.slice(0, 96) || 'Use bandage failed');
+          pushSystemToast('bandage', msg.slice(0, 96) || 'Use bandage failed');
         }
       });
     },
@@ -7754,6 +7758,137 @@ async function main(): Promise<void> {
     window.setTimeout(waitLoadoutBuff, 700);
   }
 
+  // ?ve=bandage-tonic — bandage heal-green vs tonic speed-amber (#163). HUD only.
+  if (ve === 'bandage-tonic') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'bandage-tonic') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE bandage-tonic: seeding N vs V chrome…';
+    let ticks = 0;
+    const setChipState = (
+      chipId: string,
+      stateId: string,
+      on: boolean,
+      onLabel: string,
+      offLabel: string,
+    ) => {
+      const chip = document.getElementById(chipId);
+      const state = document.getElementById(stateId);
+      if (chip) {
+        chip.classList.toggle('on', on);
+        chip.classList.toggle('off', !on);
+      }
+      if (state) state.textContent = on ? onLabel : offLabel;
+    };
+    const seedBandageTonicChrome = () => {
+      veBandageTonicLock = false;
+      const ch = net?.getCharacter() ?? null;
+      const xp = ch?.xp ?? 12;
+      const level = ch?.level ?? 1;
+      const maxHp = ch?.maxHp && ch.maxHp > 0 ? ch.maxHp : 100;
+      const hp = Math.max(1, Math.round(maxHp * 0.62));
+      const mana = ch?.mana ?? 70;
+      const maxMana = ch?.maxMana ?? 100;
+
+      updateSelfFrame({
+        xp,
+        level,
+        hp,
+        maxHp,
+        mana,
+        maxMana,
+        tonicExpiresAtMicros: BigInt(Date.now() + 12_000) * 1000n,
+      });
+
+      const frame = document.getElementById('selfFrame');
+      if (frame) frame.classList.remove('hidden');
+
+      const buffEl = document.getElementById('sfBuff');
+      if (buffEl) {
+        buffEl.classList.remove('hidden');
+        buffEl.classList.add('active');
+        buffEl.textContent = `Tonic 12.0s · ×${TONIC_MOVE_MULT} move`;
+      }
+
+      const strip = document.getElementById('loadoutStrip');
+      if (strip) strip.classList.remove('hidden');
+      setChipState('loStaff', 'loStaffState', true, 'equipped', 'unequipped');
+      setChipState('loRobes', 'loRobesState', true, 'equipped', 'unequipped');
+      setChipState('loSpark', 'loSparkState', true, 'known', 'unknown');
+      setChipState('loEmber', 'loEmberState', true, 'known', 'unknown');
+      setChipState('loShard', 'loShardState', false, 'held', 'empty');
+      setChipState('loTonic', 'loTonicState', true, 'held', 'empty');
+      setChipState('loBandage', 'loBandageState', true, 'held', 'empty');
+
+      const bag = document.getElementById('bagPanel');
+      if (bag) bag.classList.add('hidden');
+      bagOpen = false;
+
+      const logRoot = document.getElementById('combatLogLines');
+      if (logRoot) logRoot.innerHTML = '';
+      pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
+      pushCombatLog('bandage', 'Bandage +40 · You 62/100');
+
+      const toastRoot = document.getElementById('toastStack');
+      if (toastRoot) toastRoot.innerHTML = '';
+      pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
+      pushSystemToast('bandage', 'Bandage · +40 HP', TOAST_VE_TTL_MS);
+
+      veBandageTonicLock = true;
+    };
+    const waitBandageTonic = () => {
+      ticks += 1;
+      const st = latestStatus;
+      const connected = st.state === 'connected' || ticks > 40;
+      if (connected) {
+        seedBandageTonicChrome();
+        const kindsToast = toastKindsPresent();
+        const kindsLog = combatLogKindsPresent();
+        const buffEl = document.getElementById('sfBuff');
+        const buffActive =
+          !!buffEl &&
+          buffEl.classList.contains('active') &&
+          !buffEl.classList.contains('hidden');
+        const tonicChip = document.getElementById('loTonic');
+        const bandageChip = document.getElementById('loBandage');
+        const chipsOn =
+          !!tonicChip?.classList.contains('on') &&
+          !!bandageChip?.classList.contains('on');
+        if (
+          kindsToast.has('tonic') &&
+          kindsToast.has('bandage') &&
+          kindsLog.has('tonic') &&
+          kindsLog.has('bandage') &&
+          buffActive &&
+          chipsOn
+        ) {
+          if (mark) {
+            mark.textContent =
+              'Bandage-tonic OK · TONIC amber · BANDAGE heal-green · V vs N';
+          }
+          const hold = () => {
+            seedBandageTonicChrome();
+            window.setTimeout(hold, 280);
+          };
+          window.setTimeout(hold, 280);
+          return;
+        }
+      }
+      if (mark && ticks % 5 === 0) {
+        mark.textContent = `VE bandage-tonic: waiting… tick ${ticks}`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE bandage-tonic: timed out seeding N vs V chrome';
+        return;
+      }
+      window.setTimeout(waitBandageTonic, 200);
+    };
+    window.setTimeout(waitBandageTonic, 700);
+  }
+
   // ?ve=hud-layout — non-overlapping chat / loadout / self+keybind / hotbar (#104).
   if (ve === 'hud-layout') {
     camera.radius = 16;
@@ -10390,7 +10525,7 @@ async function main(): Promise<void> {
           setBagPanelOpen(true);
           pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
           pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
-          flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 900);
+          flashMesh(humanoid.mat, TONIC_FLASH, 900);
         }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           if (mark) mark.textContent = `VE tonic: use fail ${msg.slice(0, 48)}`;
