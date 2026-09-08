@@ -73,6 +73,7 @@ require_discovered() {
 require_discovered JumpSmoke
 require_discovered IdleSmoke
 require_discovered RmbOrbitSmoke
+require_discovered HostileSmoke
 
 is_compile_fail() {
   local logf="$1" ec="$2"
