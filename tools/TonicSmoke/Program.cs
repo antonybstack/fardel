@@ -203,7 +203,11 @@ try
     var poseA = conn.Db.PlayerPose.Identity.Find(id)!;
     var wish = Movement.MaxStepMeters * 1.5f;
     conn.Reducers.Move(wish, 0f, false);
-    await DelayPump(conn, 80);
+    await PumpUntil(() =>
+    {
+        var p = conn.Db.PlayerPose.Identity.Find(id);
+        return p is not null && MathF.Abs(p.X - poseA.X) > 0.01f;
+    }, timeoutMs, conn, "baseline move");
     var poseB = conn.Db.PlayerPose.Identity.Find(id)!;
     var baseDelta = poseB.X - poseA.X;
     Console.WriteLine($"baseline move deltaX={baseDelta:F3} (expect ~{Movement.MaxStepMeters})");
@@ -214,18 +218,23 @@ try
         Console.WriteLine("note: baseline already boosted (prior buff); will compare after Use");
     }
 
-    // Optional baseline vertical asserts (#170)
+    // Baseline grounded Move (#170, optional): Y ≈ GroundY, VelY ≈ 0, LastGroundedMicros advanced.
     if (MathF.Abs(poseB.Y - Movement.GroundY) > 0.05f)
     {
         Fail($"baseline Y={poseB.Y} not ≈ GroundY={Movement.GroundY}");
         return;
     }
-    if (MathF.Abs(poseB.VelY) > 0.5f)
+    if (MathF.Abs(poseB.VelY) > 0.1f)
     {
         Fail($"baseline VelY={poseB.VelY} not ≈ 0");
         return;
     }
-    Console.WriteLine($"baseline pose Y={poseB.Y} VelY={poseB.VelY} OK");
+    if (poseB.LastGroundedMicros == 0 || poseB.LastGroundedMicros <= poseA.LastGroundedMicros)
+    {
+        Fail($"baseline LastGroundedMicros={poseB.LastGroundedMicros} not updated (was {poseA.LastGroundedMicros})");
+        return;
+    }
+    Console.WriteLine($"baseline pose Y={poseB.Y} VelY={poseB.VelY} LastGroundedMicros={poseB.LastGroundedMicros} OK");
 
     conn.Reducers.UseYardTonic();
     await PumpUntil(() =>
@@ -243,7 +252,11 @@ try
 
     var poseC = conn.Db.PlayerPose.Identity.Find(id)!;
     conn.Reducers.Move(wish, 0f, false);
-    await DelayPump(conn, 80);
+    await PumpUntil(() =>
+    {
+        var p = conn.Db.PlayerPose.Identity.Find(id);
+        return p is not null && MathF.Abs(p.X - poseC.X) > 0.01f;
+    }, timeoutMs, conn, "buffed move");
     var poseD = conn.Db.PlayerPose.Identity.Find(id)!;
     var buffDelta = poseD.X - poseC.X;
     Console.WriteLine($"buffed move deltaX={buffDelta:F3} (expect ~{wish})");
@@ -258,18 +271,18 @@ try
         return;
     }
 
-    // Assert vertical after buffed grounded Move (#170)
+    // Buffed grounded Move (#170): Y ≈ GroundY, VelY ≈ 0, LastGroundedMicros must advance.
     if (MathF.Abs(poseD.Y - Movement.GroundY) > 0.05f)
     {
         Fail($"buffed Y={poseD.Y} not ≈ GroundY={Movement.GroundY}");
         return;
     }
-    if (MathF.Abs(poseD.VelY) > 0.5f)
+    if (MathF.Abs(poseD.VelY) > 0.1f)
     {
         Fail($"buffed VelY={poseD.VelY} not ≈ 0");
         return;
     }
-    if (poseD.LastGroundedMicros == 0 || poseD.LastGroundedMicros < poseC.LastGroundedMicros)
+    if (poseD.LastGroundedMicros == 0 || poseD.LastGroundedMicros <= poseC.LastGroundedMicros)
     {
         Fail($"buffed LastGroundedMicros={poseD.LastGroundedMicros} not updated (was {poseC.LastGroundedMicros})");
         return;
