@@ -2,7 +2,7 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// BuyYardTonic + UseYardTonic — range, consume, move-speed buff.
+// BuyYardTonic + UseYardTonic — range, Dead gate, consume, move-speed buff.
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 45000;
@@ -151,6 +151,55 @@ try
     }, timeoutMs, conn, "buy tonic");
     Console.WriteLine($"BuyYardTonic OK XP {xpBefore}→{conn.Db.Character.Identity.Find(id)!.Xp}");
 
+    // Dead reject — hold tonic → die → ExpectUseFail Dead (mandatory).
+    if (conn.Db.Character.Identity.Find(id) is { StaffEquipped: false })
+    {
+        conn.Reducers.EquipStaff();
+        await PumpUntil(() => conn.Db.Character.Identity.Find(id) is { StaffEquipped: true },
+            timeoutMs, conn, "staff for death");
+    }
+    var casts = 0;
+    while (conn.Db.Character.Identity.Find(id) is { Hp: > 0 } && casts < 40)
+    {
+        conn.Reducers.EnsureTrainingDummy();
+        await PumpUntil(() => FindDummy(conn) is { Hp: > 0 }, timeoutMs, conn, "dummy die");
+        var d = FindDummy(conn)!;
+        conn.Reducers.SetTarget(d.NpcId);
+        await DelayPump(conn, Combat.GcdMs + 30);
+        var beforeSpark = conn.Db.Character.Identity.Find(id)!.Hp;
+        conn.Reducers.Cast(Combat.SpellSpark);
+        casts++;
+        await PumpUntil(() =>
+        {
+            var ch = conn.Db.Character.Identity.Find(id);
+            return ch is null || ch.Hp < beforeSpark || ch.Hp == 0;
+        }, timeoutMs, conn, "thorn toward death");
+        await DelayPump(conn, Combat.GcdMs + 40);
+        if (conn.Db.Character.Identity.Find(id) is { Hp: <= 0 }) break;
+    }
+    if (conn.Db.Character.Identity.Find(id) is not { Hp: <= 0 })
+    {
+        Fail("expected death for Dead UseYardTonic reject");
+        return;
+    }
+    if (conn.Db.Character.Identity.Find(id) is not { HasYardTonic: true })
+    {
+        Fail("expected HasYardTonic held at death for Dead UseYardTonic reject");
+        return;
+    }
+    await ExpectUseFail(conn, "Dead", "dead");
+    Console.WriteLine("dead UseYardTonic reject OK");
+
+    await PumpUntil(() =>
+        conn.Db.Character.Identity.Find(id) is { Hp: var h, MaxHp: var m } && m > 0 && h == m,
+        timeoutMs, conn, "respawn after tonic dead gate");
+    // Tonic must still be held after Dead reject + respawn (bag flag survives).
+    if (conn.Db.Character.Identity.Find(id) is not { HasYardTonic: true })
+    {
+        Fail("HasYardTonic cleared across Dead reject/respawn; cannot cover use+buff");
+        return;
+    }
+
     var poseA = conn.Db.PlayerPose.Identity.Find(id)!;
     var wish = Movement.MaxStepMeters * 1.5f;
     conn.Reducers.Move(wish, 0f, false);
@@ -252,6 +301,46 @@ static Npc? FindDummy(DbConnection c)
         if (n.Kind == 1) return n;
     }
     return null;
+}
+
+
+static async Task ExpectUseFail(DbConnection conn, string needle, string label)
+{
+    string? fail = null;
+    var tcs = new TaskCompletionSource();
+    void OnUse(ReducerEventContext ctx)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                fail = reason;
+                tcs.TrySetResult();
+                break;
+            case Status.Committed:
+                tcs.TrySetException(new Exception($"UseYardTonic committed when expecting fail ({label})"));
+                break;
+            case Status.OutOfEnergy(_):
+                tcs.TrySetException(new Exception($"UseYardTonic out of energy ({label})"));
+                break;
+        }
+    }
+    conn.Reducers.OnUseYardTonic += OnUse;
+    try
+    {
+        conn.Reducers.UseYardTonic();
+        await Pump(tcs.Task, timeoutMs, conn, "use fail " + label);
+    }
+    finally
+    {
+        conn.Reducers.OnUseYardTonic -= OnUse;
+    }
+    if (string.IsNullOrEmpty(fail) ||
+        fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected '{needle}' on UseYardTonic ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("use fail mismatch");
+    }
+    Console.WriteLine($"UseYardTonic reject OK ({label}): {fail}");
 }
 
 static void Fail(string msg)
