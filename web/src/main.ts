@@ -6648,7 +6648,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ?ve=jump — prove spacebar jump (server-authoritative Y with gravity).
+  // ?ve=jump — prove tap-Space lands via airborne auto-send (#167).
   if (net && ve === 'jump') {
     camera.radius = 9;
     camera.alpha = Math.PI / 2.2;
@@ -6658,6 +6658,11 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     let ticks = 0;
     let jumpAttempted = false;
+    let peakY = 0;
+    let lastY = 0;
+    let stableYTicks = 0;
+    const GROUND_THRESHOLD = 0.08;
+    const FREEZE_TIMEOUT = 80;
     const waitJump = () => {
       if (!net) return;
       ticks += 1;
@@ -6675,30 +6680,58 @@ async function main(): Promise<void> {
       }
       if (!jumpAttempted && ticks > 5) {
         jumpAttempted = true;
-        // Trigger jump by simulating Space key press
+        // Tap Space once; keys remain empty (no WASD, no held Space).
         net.sendMove(0, 0, true);
-        if (mark) mark.textContent = 'VE jump: Space sent · Y rising…';
+        if (mark) mark.textContent = 'VE jump: Space tapped · keys empty · Y rising…';
         window.setTimeout(waitJump, 150);
         return;
       }
-      if (jumpAttempted && pose.y > 0.3) {
-        if (mark) {
-          mark.textContent =
-            `Jump OK · Y=${pose.y.toFixed(2)}m · Space key · server-authoritative · gravity + ground clamp · keybind legend shows Space`;
+      if (jumpAttempted) {
+        peakY = Math.max(peakY, pose.y);
+        const yDelta = Math.abs(pose.y - lastY);
+        if (yDelta < 0.01) {
+          stableYTicks += 1;
+        } else {
+          stableYTicks = 0;
         }
-        return;
-      }
-      if (jumpAttempted && ticks > 50) {
-        if (mark) {
-          mark.textContent =
-            `Jump attempted · Y=${pose.y.toFixed(2)}m · Space sent · may need server rebuild for schema`;
+        lastY = pose.y;
+        // Hard-FAIL: Y rose but stalled mid-air (freeze).
+        if (peakY > 0.3 && pose.y > GROUND_THRESHOLD && stableYTicks > 8 && ticks > 30) {
+          if (mark) {
+            mark.textContent =
+              `FAIL #167 · airborne freeze · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · stalled ${stableYTicks} ticks · keys empty · auto-send broken`;
+          }
+          return;
         }
-        return;
+        // Success: jumped, then landed via airborne auto-send.
+        if (peakY > 0.3 && pose.y < GROUND_THRESHOLD && stableYTicks > 3) {
+          if (mark) {
+            mark.textContent =
+              `Jump+land OK · peak=${peakY.toFixed(2)}m · Y=${pose.y.toFixed(2)}m · keys empty · airborne auto-send → land · #167 · #149 contract`;
+          }
+          return;
+        }
+        // Timeout: jump never started.
+        if (ticks > FREEZE_TIMEOUT && peakY < 0.25) {
+          if (mark) {
+            mark.textContent =
+              `Timeout · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · Space sent but no jump · check server schema`;
+          }
+          return;
+        }
+        // Timeout: landed but too slow (shouldn't happen).
+        if (ticks > FREEZE_TIMEOUT) {
+          if (mark) {
+            mark.textContent =
+              `Slow land · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · landed but >80 ticks`;
+          }
+          return;
+        }
       }
       if (mark && !jumpAttempted) {
         mark.textContent = `VE jump: connected · warming up… (tick ${ticks})`;
       }
-      if (ticks < 100) window.setTimeout(waitJump, 100);
+      if (ticks < FREEZE_TIMEOUT + 20) window.setTimeout(waitJump, 100);
     };
     window.setTimeout(waitJump, 600);
   }
