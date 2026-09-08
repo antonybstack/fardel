@@ -25,8 +25,9 @@ Score the farm on this session, not PR count:
 
 | Wave | Status | Session Done-when on play.sparkify.dev |
 |------|--------|----------------------------------------|
-| **0. Ship the yard** | **in flight** | Frozen-pin cut of `develop` @ `00cfbcfe` → `main` → Pages. Live site has the post-#199 feel/smoke work (interpolation, jump presence, loot F, rest exit, fog chrome, …). |
-| **1. The yard hunts back** | next | 2–3 hostile types, aggro/leash, corpse loot as the reason to stay. Dummy is a trainer, not the game. |
+| **0. Ship the yard** | **done** | Frozen pin `00cfbcfe` on `main` (#246). Pages 200. VE `https://ve.sparkify.dev/release/00cfbcfe/play.png`. |
+| **24h hop / body / place** | **active** | See [PARITY.md](PARITY.md). Rigid hop, skinned walk, WoW-scale clearing — not hunt, not HUD chrome. |
+| **1. The yard hunts back** | parked | 2–3 hostile types, aggro/leash, corpse loot. Dummy is a trainer. **Do not file until PARITY 24h session Done-whens are on Pages.** |
 | **2. Other players matter** | later | You can fight or contest another client in the yard. Death/loot rules readable. |
 | **3. A second place** | later | A path to a second clearing (not an open world). Minimap N means somewhere. |
 | **4. A deeper book** | later | 4 hotbar skills with roles (filler / windup / interrupt / self). Shared GCD stays. |
