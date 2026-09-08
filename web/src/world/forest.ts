@@ -1069,18 +1069,35 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     registerTrunk(mx, mz, boleRadiusWorld(s, 'mid'), 'mid');
   }
 
+  // Far ring: cheap LOD impostors, not pack GLTF ThinInstances (#349).
+  const farTrunk = makeTrunkMat(scene, 'farImpostorTrunk', new Color3(0.22, 0.18, 0.16));
+  const farFoliage = makeFoliageMat(scene, 'farImpostorFoliage', new Color3(0.14, 0.28, 0.18));
+  const farImpostor = buildFarLodTree(scene, 'farImpostor', farTrunk, farFoliage);
+  farImpostor.applyFog = true;
+  const farMats: Matrix[] = [];
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2 + 0.4;
     const r = 135 + hash01(i * 19) * 40;
     const mx = Math.cos(a) * r;
     const mz = Math.sin(a) * r;
     if (pathBlocksTree(mx, mz)) continue;
-    const ti = i % midTemplates.length;
     const s = 2.0 + hash01(i * 23) * 1.4;
-    midMats[ti]!.push(
-      composeInstanceMatrix(mx, mz, s, s, s, hash01(i * 29) * Math.PI * 2),
+    farMats.push(
+      composeInstanceMatrix(mx, mz, s, s * (1.05 + hash01(i * 31) * 0.3), s, hash01(i * 29) * Math.PI * 2),
     );
   }
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2 + hash01(i * 37) * 0.2;
+    const r = 175 + hash01(i * 41) * 50;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
+    if (pathBlocksTree(mx, mz)) continue;
+    const s = 1.8 + hash01(i * 43) * 1.3;
+    farMats.push(
+      composeInstanceMatrix(mx, mz, s, s * (1.1 + hash01(i * 47) * 0.35), s, hash01(i * 53) * Math.PI * 2),
+    );
+  }
+  thinInstanceFromMatrices(farImpostor, farMats);
   // Second clearing ring — fogged tree silhouette, path mouth left open (#342).
   for (let i = 0; i < 9; i++) {
     const a = (i / 9) * Math.PI * 2 + 0.35;

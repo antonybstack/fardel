@@ -11234,7 +11234,7 @@ async function main(): Promise<void> {
       if (hudVisible && fpsOk && ticks > 10) {
         if (mark) {
           mark.textContent =
-            `FPS OK · ${fpsNum} fps (floor ${FPS_FLOOR} / target ${FPS_TARGET}) · dense play-cam`;
+            `FPS OK · ${fpsNum} fps (floor ${FPS_FLOOR} / target ${FPS_TARGET}) · far impostors`;
         }
         return;
       }
