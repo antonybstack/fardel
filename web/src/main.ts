@@ -12517,14 +12517,14 @@ async function main(): Promise<void> {
         const now = Date.now();
         const canCast = gcdLeft <= 0 && (ch0?.mana ?? 0) >= SPARK_MANA_COST;
         if (canCast && now - firstCastAt > 2500) {
-          net.cast(SPELL_SPARK, dummy.npcId);
+          net.cast(SPELL_SPARK);
           firstCastAt = now;
           if (mark) mark.textContent = 'VE gcd-block: casting Spark to start GCD…';
           window.setTimeout(waitGcdBlock, 150);
           return;
         }
         if (gcdLeft > 800) {
-          net.cast(SPELL_SPARK, dummy.npcId);
+          net.cast(SPELL_SPARK);
           if (mark) mark.textContent = `VE gcd-block: GCD active ${(gcdLeft / 1000).toFixed(1)}s · pressed · forcing toast…`;
           phase = 'block';
           window.setTimeout(waitGcdBlock, 180);
