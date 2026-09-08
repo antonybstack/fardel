@@ -104,6 +104,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=cast-range` | Move beyond CastRangeMeters; outOfRange toast + dim hotbar (`ve/babylon-cast-range.png`) |
 | `?ve=cast-range-ring` | Selected Dummy beyond cast range; Babylon ground reach ring (`ve/babylon-cast-range-ring.png`); HUD `Cast-range ring OK · …` |
 | `?ve=cast-cancel` | Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast (`ve/babylon-cast-cancel.png`) |
+| `?ve=cast-cancel-pose` | Esc/CancelCast recovers Idle_Weapon, no bind-T (#431); HUD `Cast cancel OK · Idle_Weapon · skinned 1` |
 | `?ve=cast-feedback` | Prominent Emberbolt cast bar + CANCEL ≠ LOCKOUT toasts + Rest enter chrome (`ve/babylon-cast-feedback.png`) |
 | `?ve=castbar-read` | Cast / CANCEL / LOCKOUT chrome readable over #39 cyan fog (`ve/babylon-castbar-read.png`); HUD `Castbar-read OK · … · fog chrome` |
 | `?ve=gcd-block` | GCD-blocked cast press shows cool blue/silver toast + combat-log (#188); HUD `GCD-block OK · toast GCD blue/silver · combat-log · #188` |

@@ -984,9 +984,12 @@ export function setHumanoidCasting(
     if (!a.casting) return;
     a.casting = false;
     a.turning = false;
+    // setHumanoidMoving returns while a.cast isPlaying — start Idle first.
+    applyStaffClips(a);
+    if (a.idle) a.idle.speedRatio = 1;
+    if (!a.dead && !a.airborne) startLoop(a.idle);
     stopIfPlaying(a.cast);
     if (a.cast) a.cast.speedRatio = 1;
-    if (!a.dead && !a.airborne) setHumanoidMoving(parts, false);
     return;
   }
   if (a.dead || !a.cast) return;
