@@ -303,3 +303,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Require living Kind=2 + Kind=3 skinned + dummy trainer (no humanoid). persistMark names both. `capsule` = fail. Wide frame so pad C is in the shot.
 - **Seen in:** #456
 
+### 2026-09-08 — camera,trunk — origin cam-collision cannot hit midTree_*
+- **Cause:** E10.2 zoom max is 42 m. Mid ring starts ~48 m. Hero `+0.16` graze also misses thin mid cylinders (bole ~2.5 m).
+- **Do this:** Walk to ~13 m of a `midTree_*` whose ray is not a hero, then overshoot radius. Scale mid graze by `(r+pad)/dist`. persistMark must name `midTree_*` — hero-only hit = fail. Keep E1 Y-spring.
+- **Seen in:** #465 / #351
+
