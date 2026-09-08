@@ -52,3 +52,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `ArcRotateCamera.setTarget(player)` each frame rebuilds alpha/beta/radius from the current camera position.
 - **Do this:** Lock `?ve=sky-horizon` / `?ve=place-wow` (and similar establishing shots) inside the follow branch every frame. A one-shot set after connect is not enough.
 - **Seen in:** #295 / #273, #276
+
+### 2026-09-08 — place,disc — CreateDisc scaling.z after rotation.x=π/2 is a no-op
+- **Cause:** `MeshBuilder.CreateDisc` is XY. `rotation.x = π/2` lays it on XZ; local Z becomes the disc normal (world Y). `scaling.z` does not squash world Z, so DummySpawn (5,0) sat on grass (ellipse 1.008).
+- **Do this:** After that rotation, world-Z ellipse squash is `scaling.y`. Or use `CreateGround` (already XZ). Helper: `placeGroundDisc` in `forest.ts`.
+- **Seen in:** #296 / #299

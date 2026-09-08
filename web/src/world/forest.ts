@@ -55,6 +55,31 @@ function makeUnderstoryMat(scene: Scene, name: string, tint: Color3): StandardMa
   return m;
 }
 
+/**
+ * Ground-plane disc. CreateDisc is XY; after rotation.x = π/2, world-Z squash
+ * is scaling.y (local Z is the disc normal). scaling.z is a no-op (#299).
+ */
+function placeGroundDisc(
+  scene: Scene,
+  name: string,
+  x: number,
+  z: number,
+  y: number,
+  radius: number,
+  tessellation: number,
+  sx: number,
+  sz: number,
+  material: StandardMaterial,
+): Mesh {
+  const d = MeshBuilder.CreateDisc(name, { radius, tessellation }, scene);
+  d.rotation.x = Math.PI / 2;
+  d.position.set(x, y, z);
+  d.scaling.x = sx;
+  d.scaling.y = sz;
+  d.material = material;
+  return d;
+}
+
 type TreeBuildOpts = {
   trunkHeight: number;
   trunkRadius: number;
@@ -829,10 +854,7 @@ function placeProceduralForest(scene: Scene): void {
   ];
   for (let i = 0; i < limeSpots.length; i++) {
     const s = limeSpots[i]!;
-    const patch = MeshBuilder.CreateDisc(`limeMoss_${i}`, { radius: s.r, tessellation: 16 }, scene);
-    patch.rotation.x = Math.PI / 2;
-    patch.position.set(s.x, 0.025, s.z);
-    patch.material = limeMat;
+    placeGroundDisc(scene, `limeMoss_${i}`, s.x, s.z, 0.025, s.r, 16, 1, 1, limeMat);
   }
 
   const trunkMatA = makeTrunkMat(scene, 'trunkMatA', new Color3(0.32, 0.28, 0.24));
@@ -1022,21 +1044,18 @@ function buildClearingPath(scene: Scene): void {
   };
 
   // Small irregular worn hollows at spawn — not a concentric disc pad.
+  // DummySpawn (5, 0) and vendor (-2.5, 2) must sit on dirt (ellipse < 1).
   const hollowMat = matteDirt('dirtMat', new Color3(0.46, 0.34, 0.24), new Color3(0.012, 0.009, 0.006));
   const hollows: Array<{ x: number; z: number; r: number; sx: number; sz: number }> = [
-    { x: 0.4, z: 0.2, r: 3.4, sx: 1.35, sz: 0.72 },
+    { x: 0.4, z: 0.2, r: 3.4, sx: 1.52, sz: 0.82 },
     { x: 2.6, z: 2.8, r: 2.2, sx: 1.4, sz: 0.65 },
     { x: -2.2, z: -1.4, r: 1.8, sx: 0.9, sz: 1.2 },
     { x: 1.2, z: -2.6, r: 1.5, sx: 1.5, sz: 0.7 },
+    { x: 5.0, z: 0.0, r: 1.7, sx: 1.2, sz: 0.85 },
   ];
   for (let i = 0; i < hollows.length; i++) {
     const h = hollows[i]!;
-    const d = MeshBuilder.CreateDisc(`dirtHollow_${i}`, { radius: h.r, tessellation: 16 }, scene);
-    d.rotation.x = Math.PI / 2;
-    d.position.set(h.x, 0.028, h.z);
-    d.scaling.x = h.sx;
-    d.scaling.z = h.sz;
-    d.material = hollowMat;
+    placeGroundDisc(scene, `dirtHollow_${i}`, h.x, h.z, 0.028, h.r, 16, h.sx, h.sz, hollowMat);
   }
 
   const trailMat = matteDirt('pathTrailMat', new Color3(0.45, 0.33, 0.23), new Color3(0.011, 0.008, 0.005));
@@ -1064,10 +1083,7 @@ function buildClearingPath(scene: Scene): void {
   ];
   for (let i = 0; i < mossPatches.length; i++) {
     const p = mossPatches[i]!;
-    const m = MeshBuilder.CreateDisc(`pathMossPatch_${i}`, { radius: p.r, tessellation: 12 }, scene);
-    m.rotation.x = Math.PI / 2;
-    m.position.set(p.x, 0.018, p.z);
-    m.material = mossPatchMat;
+    placeGroundDisc(scene, `pathMossPatch_${i}`, p.x, p.z, 0.018, p.r, 12, 1, 1, mossPatchMat);
   }
 
   // Cobble-ish worn patches along trail (cheap discs, shared mat) — warm stone.
@@ -1087,10 +1103,7 @@ function buildClearingPath(scene: Scene): void {
   ];
   for (let i = 0; i < cobbleSpots.length; i++) {
     const s = cobbleSpots[i]!;
-    const c = MeshBuilder.CreateDisc(`pathCobble_${i}`, { radius: s.r, tessellation: 10 }, scene);
-    c.rotation.x = Math.PI / 2;
-    c.position.set(s.x, 0.04, s.z);
-    c.material = cobbleMat;
+    placeGroundDisc(scene, `pathCobble_${i}`, s.x, s.z, 0.04, s.r, 10, 1, 1, cobbleMat);
   }
 
   // Tiny stone flecks — shared mat, few instances, web-cheap, warm grey.
@@ -1177,12 +1190,18 @@ export async function buildForestClearing(scene: Scene): Promise<{
   ];
   for (let i = 0; i < mossClumps.length; i++) {
     const c = mossClumps[i]!;
-    const moss = MeshBuilder.CreateDisc(`mossClump_${i}`, { radius: c.r, tessellation: 14 }, scene);
-    moss.rotation.x = Math.PI / 2;
-    moss.position.set(c.x, 0.014, c.z);
-    moss.scaling.x = 1.2 + hash01(i * 3) * 0.4;
-    moss.scaling.z = 0.75 + hash01(i * 7) * 0.35;
-    moss.material = mossMat;
+    placeGroundDisc(
+      scene,
+      `mossClump_${i}`,
+      c.x,
+      c.z,
+      0.014,
+      c.r,
+      14,
+      1.2 + hash01(i * 3) * 0.4,
+      0.75 + hash01(i * 7) * 0.35,
+      mossMat,
+    );
   }
 
   // #44 path/ground polish — readable trail vs lush grass under locked #39 fog/sun.
