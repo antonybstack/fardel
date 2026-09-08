@@ -10326,6 +10326,114 @@ async function main(): Promise<void> {
     window.setTimeout(waitE, 500);
   }
 
+  // ?ve=hunt-loop — Tab, Spark hit, kill, corpse loot. Dummy trainer. Play cam (#422).
+  // Stay at origin (outside AggroRadius). Do not walk to the shard.
+  if (ve === 'hunt-loop') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'hunt-loop') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hunt-loop: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'tab' | 'hit' | 'loot' | 'done' = 'tab';
+    let lastCast = 0;
+    let tabbedId = 0n;
+    let hpAtTab = 0;
+    let hitSeen = false;
+    let deathSeen = false;
+    let okTicks = 0;
+    const waitL = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const hostiles = npcs.filter((n) => isHostileKind(n.kind));
+      const selfHp = net.getCharacter()?.hp ?? 0;
+      const items = net.getGroundItems();
+      const tgt = camera.target;
+      tgt.y = 1.05;
+      if (phase === 'loot') {
+        tgt.x = 3.1;
+        tgt.z = 5.4;
+      } else {
+        tgt.x = 2.2;
+        tgt.z = 3.4;
+      }
+      if (latestStatus.state !== 'connected' || hostiles.length < 2 || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE hunt-loop: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 360) window.setTimeout(waitL, 200);
+        return;
+      }
+      if (selfHp <= 0) {
+        if (mark) mark.textContent = 'Hunt-loop FAIL · player died · #422';
+        return;
+      }
+      if (phase === 'tab') {
+        const id = cyclePreferHostiles(net);
+        if (id != null) selectedTargetId = id;
+        const picked = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
+        updateTargetFrame(picked);
+        if (picked && isHostileKind(picked.kind) && picked.hp > 0) {
+          tabbedId = picked.npcId;
+          hpAtTab = picked.hp;
+          net.setTarget(picked.npcId);
+          phase = 'hit';
+          if (mark) mark.textContent = `VE hunt-loop: Tab Hostile #${picked.npcId} · spark…`;
+        } else if (mark) {
+          mark.textContent = `VE hunt-loop: Tab… tgt ${picked?.kind ?? 'none'}`;
+        }
+      } else if (phase === 'hit') {
+        const prey = npcs.find((n) => n.npcId === tabbedId);
+        if (prey && prey.hp > 0) {
+          net.setTarget(prey.npcId);
+          const now = Date.now();
+          if (now - lastCast >= GCD_MS + 80) {
+            net.cast(SPELL_SPARK);
+            lastCast = now;
+          }
+          if (prey.hp < hpAtTab) hitSeen = true;
+          if (mark) {
+            mark.textContent = `VE hunt-loop: hit ${hitSeen ? 'y' : 'n'} · hp ${prey.hp}/${prey.maxHp}`;
+          }
+        } else {
+          deathSeen = true;
+          phase = 'loot';
+          if (mark) mark.textContent = 'VE hunt-loop: dead — waiting shard…';
+        }
+      } else if (phase === 'loot') {
+        const prey = npcs.find((n) => n.npcId === tabbedId);
+        const px = prey?.x ?? 3;
+        const pz = prey?.z ?? 7;
+        const shard = items.find((it) => Math.hypot(it.x - px, it.z - pz) < 2.5);
+        const tabOk = tabbedId !== 0n;
+        if (tabOk && hitSeen && deathSeen && shard && dummyOk && selfHp > 0) {
+          okTicks += 1;
+          if (mark) {
+            mark.textContent = 'Hunt-loop OK · Tab · hit · death · loot · dummy trainer · #422';
+          }
+          if (okTicks >= 8) {
+            phase = 'done';
+            return;
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE hunt-loop: loot ${shard ? 'y' : 'n'} · death ${deathSeen ? 'y' : 'n'} · dummy ${dummyOk ? 'y' : 'n'}`;
+        }
+      }
+      if (ticks > 360) {
+        if (mark) mark.textContent = `Hunt-loop FAIL · phase ${phase} · #422`;
+        return;
+      }
+      window.setTimeout(waitL, 200);
+    };
+    window.setTimeout(waitL, 500);
+  }
+
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
   if (ve === 'rmb-look') {
     camera.radius = 14;

@@ -94,6 +94,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=kick` | KickNpc Kind=2 interrupt + dummy still kickable (#419); HUD `Kick OK · Hostile #… · interrupt · dummy kickable · #419`. |
 | `?ve=stun` | StunNpc Kind=2 lock + dummy still stunnable (#420); HUD `Stun OK · Hostile #… · lock · dummy stunnable · #420`. Walk to ~4m (StunRange 5, AggroRadius 3). |
 | `?ve=encounter` | Pull pad A, Tab, take a swing among trees with nameplate on and cam out of trunks (#361); HUD `Encounter OK · fighting · plate · cam clear · #361`. |
+| `?ve=hunt-loop` | Tab a hostile, Spark hit, kill, corpse loot at play cam (#422); HUD `Hunt-loop OK · Tab · hit · death · loot · dummy trainer · #422`. Stay outside AggroRadius. Dummy stays trainer. |
 | `?ve=keys` | Open keybind legend overlay (H); HUD `Keys legend OK · …` (`ve/babylon-keys.png`) |
 | `?ve=keys-read` | Keybind legend chrome readability under #39 cyan fog (#115); HUD `Keys-read OK · …` |
 | `?ve=first-session` | First-connect H legend flash + canvas-focus toast (#134); HUD `First-session OK · H legend · canvas focus · #134` |
