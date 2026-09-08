@@ -167,3 +167,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Pad B is (−7, 3). CastRangeSmoke walks to x=DummySpawnX−(range+2) ≈ −5, z=0. Dist to B is ~3.6m.
 - **Do this:** Keep `Combat.HostileAggroRadius` under 3.6 so dummy-range smokes do not pull B. Origin is ~7.6m from both pads.
 - **Seen in:** #355
+
+### 2026-09-08 — humanoid,remote — remotes T while Walk isPlaying
+- **Cause:** Per-clone Assimp IBM compensate multiplies `A` again on later `instantiateModelsToScene` copies (clone bind already has `A`). Local Idle reads; remotes collapse into a seated bind-T while clips `isPlaying`. `animationGroup.clone` can also keep container targets. After #327, full-step remotes select `Run_Weapon` so persistMark `/walk/` never matches.
+- **Do this:** Compensate IBM once on the container in preload; relink + retarget cloned groups onto the instance pivot/bones. Drive remotes with Walk (not Run) from PoseInterp `vx,vz` hold. persistMark via `readHumanoidPlayback`: `Remote walk OK` + Walk named + `skinned` ≥ 1. `T-POSE` if skeleton=0. `?ve=remote-walk` needs `tools/SecondClient` (local `sendMove` is not a remote XZ delta). Mutate `camera.target` in place for the remote close-up — do not `setTarget`.
+- **Seen in:** #333 / #313

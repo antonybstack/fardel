@@ -89,6 +89,19 @@ export function preloadPlayerHumanoid(scene: Scene): Promise<AssetContainer> {
       scene,
     ).then((c) => {
       sharedContainer = c;
+      // Compensate Assimp IBM once on the container. Per-clone compensate
+      // multiplies A*A on later instantiates → remotes collapse while local Idle
+      // still reads (clone copies an already-fixed bind, then A again).
+      let armature: TransformNode | null = null;
+      for (const n of c.transformNodes) {
+        if (n.name.includes('CharacterArmature')) armature = n;
+      }
+      for (const n of c.meshes) {
+        if (n.name.includes('CharacterArmature')) armature = n;
+      }
+      if (armature) {
+        for (const s of c.skeletons) compensateAssimpIbm(s, armature);
+      }
       // Container originals share geometry with clones. Hide them so a GPU
       // sail on the source cannot overwrite instance vertex buffers.
       for (const m of c.meshes) {
@@ -144,18 +157,23 @@ function compensateAssimpIbm(skel: Skeleton, armature: TransformNode): void {
   }
 }
 
-/** Skeleton.clone / IBM updateMatrix can leave bones on the container source. */
-function relinkSkeletonToClones(
-  skel: Skeleton,
-  pivot: TransformNode,
-  prefix: string,
-): void {
+function collectTransformNodes(pivot: TransformNode): TransformNode[] {
   const nodes: TransformNode[] = [];
   const visit = (n: Node): void => {
     if (n instanceof TransformNode) nodes.push(n);
     for (const c of n.getChildren()) visit(c);
   };
   visit(pivot);
+  return nodes;
+}
+
+/** Skeleton.clone / IBM updateMatrix can leave bones on the container source. */
+function relinkSkeletonToClones(
+  skel: Skeleton,
+  pivot: TransformNode,
+  prefix: string,
+): void {
+  const nodes = collectTransformNodes(pivot);
   for (const bone of skel.bones) {
     const bn = bone.name;
     const tn =
@@ -163,6 +181,48 @@ function relinkSkeletonToClones(
       nodes.find((n) => n.name.endsWith(bn)) ??
       nodes.find((n) => bareName(n.name, prefix) === bn);
     if (tn) bone.linkTransformNode(tn);
+  }
+}
+
+/**
+ * instantiateModelsToScene clone() falls back to container targets when the
+ * conversion map misses a bone. Remotes then isPlaying Walk on the hidden
+ * source while the CPU-skin clone stays bind-T.
+ */
+function retargetAnimGroupsToClones(
+  groups: AnimationGroup[],
+  pivot: TransformNode,
+  skel: Skeleton | null,
+  prefix: string,
+): void {
+  const nodes = collectTransformNodes(pivot);
+  const nodeByBare = new Map<string, TransformNode>();
+  for (const n of nodes) {
+    nodeByBare.set(n.name, n);
+    nodeByBare.set(bareName(n.name, prefix), n);
+  }
+  const boneByName = new Map<string, Skeleton['bones'][number]>();
+  if (skel) {
+    for (const b of skel.bones) {
+      boneByName.set(b.name, b);
+      boneByName.set(bareName(b.name, prefix), b);
+    }
+  }
+  for (const g of groups) {
+    for (const ta of g.targetedAnimations) {
+      const t = ta.target as { name?: string; getClassName?: () => string } | null;
+      if (!t?.name) continue;
+      const cn = t.getClassName?.() ?? '';
+      if (cn === 'Bone') {
+        const b = boneByName.get(t.name) ?? boneByName.get(bareName(t.name, prefix));
+        if (b && b !== t) ta.target = b;
+        continue;
+      }
+      const hit =
+        nodeByBare.get(t.name) ??
+        nodeByBare.get(bareName(t.name, prefix));
+      if (hit && hit !== t) ta.target = hit;
+    }
   }
 }
 
@@ -281,14 +341,6 @@ export function createPlayerHumanoid(
     n.parent = pivot;
   }
 
-  let armature: TransformNode | null = null;
-  for (const n of roots) {
-    if (n.name.includes('CharacterArmature')) armature = n as TransformNode;
-    for (const d of n.getDescendants(false)) {
-      if (d.name.includes('CharacterArmature')) armature = d as TransformNode;
-    }
-  }
-
   let staffMesh: AbstractMesh | null = null;
   const robeMeshes: AbstractMesh[] = [];
   for (const m of meshes) {
@@ -315,7 +367,6 @@ export function createPlayerHumanoid(
     m.alwaysSelectAsActiveMesh = true;
     m.numBoneInfluencers = 4;
     skel.useTextureToStoreBoneMatrices = false;
-    if (armature) compensateAssimpIbm(skel, armature);
     relinkSkeletonToClones(skel, pivot, prefix);
     if (m.getClassName() === 'Mesh') {
       const mesh = m as Mesh;
@@ -379,6 +430,12 @@ export function createPlayerHumanoid(
   if (staffMesh) {
     attachStaffToWeaponBone(staffMesh, skinnedBody?.skeleton ?? null, skinnedBody);
   }
+  retargetAnimGroupsToClones(
+    animGroups,
+    pivot,
+    skinnedBody?.skeleton ?? null,
+    prefix,
+  );
 
   // Wire equip hide: when staff/robes containers toggle, mirror onto real meshes.
   const syncStaff = () => {
