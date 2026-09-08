@@ -4246,20 +4246,17 @@ async function main(): Promise<void> {
       const nearV = net?.nearestVendor(4.5) ?? null;
       if (nearV) {
         updateVendorPanel(nearV);
+        const ch = net?.getCharacter();
+        const msg = ch?.hasEmberShard
+          ? 'Vendor nearby · E sell ember_shard (+5 XP)'
+          : 'Vendor nearby · E buy ember_shard (−5 XP)';
         // transient nearby chip via vendor panel peek without forcing open
         const foot = document.querySelector('#vendorPanel .bagFoot');
         if (foot) {
-          const ch = net?.getCharacter();
-          foot.textContent = ch?.hasEmberShard
-            ? 'Vendor nearby · E sell ember_shard (+5 XP)'
-            : 'Vendor nearby · E buy ember_shard (−5 XP)';
+          foot.textContent = msg;
         }
         if (!vendorInRangeToasted) {
           vendorInRangeToasted = true;
-          const ch = net?.getCharacter();
-          const msg = ch?.hasEmberShard
-            ? 'Vendor nearby · E sell ember_shard (+5 XP)'
-            : 'Vendor nearby · E buy ember_shard (−5 XP)';
           pushSystemToast('vendor', msg, TOAST_VE_TTL_MS);
         }
       } else {
