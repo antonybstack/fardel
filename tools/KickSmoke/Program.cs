@@ -213,6 +213,46 @@ try
     }
     Console.WriteLine($"KickNpc Kind=2 OK id={kicked.NpcId} shove={shoved:0.##} swingAt={kicked.NextSwingAtMicros}");
 
+    await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
+    await TopUpMana(connA, idA, connB);
+    await MoveTo(connA, idA, 0f, 0f, connB);
+    await PumpUntilBoth(() =>
+        FindKindNear(connA, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz) is { Hp: > 0 },
+        timeoutMs, connA, connB, "brigand pad C");
+    var padC = FindKindNear(connA, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz)!;
+    if (padC.Kind != Combat.NpcKindBrigand)
+    {
+        Fail($"pad C kind={padC.Kind} want Kind=3");
+        return;
+    }
+    var c0x = padC.X;
+    var c0z = padC.Z;
+    var dummyHpBeforeBrigand = FindDummy(connA)!.Hp;
+    await ExpectKickNpcOk(connA, padC.NpcId, "Kind=3 KickNpc");
+    await PumpUntilBoth(() =>
+    {
+        var n = FindNpc(connA, padC.NpcId);
+        return n is { Hp: > 0, NextSwingAtMicros: > 0 };
+    }, timeoutMs, connA, connB, "pad C swing interrupted");
+    var kickedC = FindNpc(connA, padC.NpcId)!;
+    if (kickedC.Kind != Combat.NpcKindBrigand)
+    {
+        Fail($"KickNpc changed pad C kind={kickedC.Kind}");
+        return;
+    }
+    var shovedC = Dist(kickedC.X, kickedC.Z, c0x, c0z);
+    if (shovedC < Combat.KickNpcShoveMeters * 0.5f)
+    {
+        Fail($"KickNpc did not shove Kind=3 ({shovedC:0.##}m)");
+        return;
+    }
+    if (FindDummy(connA) is not { Hp: var dHpC } || dHpC != dummyHpBeforeBrigand)
+    {
+        Fail("dummy trainer HP changed during KickNpc brigand");
+        return;
+    }
+    Console.WriteLine($"KickNpc Kind=3 OK id={kickedC.NpcId} shove={shovedC:0.##} swingAt={kickedC.NextSwingAtMicros}");
+
     await MoveTo(connA, idA, Combat.KickRangeMeters * 3f, 0f, connB);
     await ExpectKickNpcFail(connA, padA.NpcId, "Out of range", "far KickNpc");
     Console.WriteLine("out-of-range KickNpc reject OK");
@@ -337,6 +377,18 @@ static Npc? FindHostileNear(DbConnection conn, float x, float z)
         if (d < bestD) { bestD = d; best = n; }
     }
     return best;
+}
+
+static Npc? FindKindNear(DbConnection conn, int kind, float x, float z)
+{
+    foreach (var n in conn.Db.Npc.Iter())
+    {
+        if (n.Kind != kind) continue;
+        var hx = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnX : n.X;
+        var hz = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnZ : n.Z;
+        if (Dist(hx, hz, x, z) < 0.5f) return n;
+    }
+    return null;
 }
 
 static float Dist(float ax, float az, float bx, float bz)
