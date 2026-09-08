@@ -785,15 +785,19 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     if (t) underTemplates.push(t);
   }
 
+  // #278: 80 clones of 6 pack templates (shared meshes, no uniques).
+  // Mac play-cam floor 30 FPS (`fpsHud.FPS_FLOOR`). SwiftShader VE is not FPS truth.
   let underPlaced = 0;
-  for (let i = 0; i < 28 && underTemplates.length > 0; i++) {
+  for (let i = 0; i < 80 && underTemplates.length > 0; i++) {
     const a = hash01(i * 41) * Math.PI * 2;
-    const r = 14 + hash01(i * 43) * 90;
-    if (r < 12) continue;
-    if (a > 0.15 && a < 0.55 && r < 28) continue; // path/clearing readable
-    const tmpl = underTemplates[i % underTemplates.length]!;
-    const isRock = tmpl.name.includes('Rock') || (i % underTemplates.length) >= 4;
-    const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.4 + hash01(i * 47) * 2.2;
+    const r = 12 + hash01(i * 43) * 95;
+    if (r < 11) continue;
+    if (a > 0.15 && a < 0.55 && r < 32) continue; // path/clearing readable
+    const plantish = i % 8 < 6;
+    const ti = plantish ? i % 3 : 3 + (i % 3);
+    const tmpl = underTemplates[ti % underTemplates.length]!;
+    const isRock = tmpl.name.includes('Rock') || ti >= 4;
+    const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.5 + hash01(i * 47) * 2.4;
     placeClone(
       tmpl,
       `under_${i}`,
@@ -941,7 +945,8 @@ function placeProceduralForest(scene: Scene): void {
     );
   }
 
-  const underCount = 64;
+  // #278 fallback: ThinInstance understory (shared mesh). Same 30 FPS floor.
+  const underCount = 110;
   for (let i = 0; i < underCount; i++) {
     const a = (i / underCount) * Math.PI * 2 + hash01(i * 43) * 0.4;
     const band = hash01(i * 47);
@@ -970,6 +975,38 @@ function placeProceduralForest(scene: Scene): void {
   thinInstanceFromMatrices(understory, matsUnder);
 }
 
+/**
+ * #278: GPU-instanced fern/grass beside the path. Two merged clusters,
+ * ThinInstances (not unique meshes). Floor: 30 fps (`fpsHud.FPS_FLOOR`).
+ */
+function placeThinUnderstory(scene: Scene): void {
+  const matA = makeUnderstoryMat(scene, 'thinUnderA', new Color3(0.18, 0.4, 0.14));
+  const matB = makeUnderstoryMat(scene, 'thinUnderB', new Color3(0.23, 0.46, 0.16));
+  const clusterA = buildUnderstoryCluster(scene, 'thinUnderClusterA', matA);
+  const clusterB = buildUnderstoryCluster(scene, 'thinUnderClusterB', matB);
+  const matsA: Matrix[] = [];
+  const matsB: Matrix[] = [];
+  const count = 128;
+  for (let i = 0; i < count; i++) {
+    const a = hash01(i * 73) * Math.PI * 2;
+    const r = 16 + hash01(i * 79) * 72;
+    if (r < 12) continue;
+    if (a > 0.12 && a < 0.58 && r < 40) continue;
+    const s = 1.15 + hash01(i * 83) * 1.55;
+    const m = composeInstanceMatrix(
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      s * (0.75 + hash01(i * 89) * 0.5),
+      s,
+      s * (0.75 + hash01(i * 97) * 0.5),
+      hash01(i * 101) * Math.PI * 2,
+    );
+    if (i % 2 === 0) matsA.push(m);
+    else matsB.push(m);
+  }
+  thinInstanceFromMatrices(clusterA, matsA);
+  thinInstanceFromMatrices(clusterB, matsB);
+}
 
 /**
  * Clearing path (#274): dirt vs grass, not a shiny disc. Small worn hollow
@@ -1157,6 +1194,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
     console.warn('[forest] Quaternius pack unavailable — procedural fallback (post-#40 density)');
     placeProceduralForest(scene);
   }
+  placeThinUnderstory(scene);
 
   // Hybrid: mountains stay procedural (pack mountains optional / heavy).
   buildMountainBackdrop(scene);
