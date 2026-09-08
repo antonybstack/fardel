@@ -753,21 +753,23 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
   const height = Number.isFinite(minY) ? Math.max(0, maxY - minY) : 0;
   const playing = a?.dead && a.death
     ? a.death.name
-    : a?.casting && a.cast
-      ? a.cast.name
-      : a?.cast?.isPlaying
+    : a?.death?.isPlaying
+      ? a.death.name
+      : a?.casting && a.cast
         ? a.cast.name
-        : a?.flinch?.isPlaying
-          ? a.flinch.name
-          : a?.air?.isPlaying
-            ? a.air.name
-            : a?.run?.isPlaying
-              ? a.run.name
-              : a?.walk?.isPlaying
-                ? a.walk.name
-                : a?.idle?.isPlaying
-                  ? a.idle.name
-                  : null;
+        : a?.cast?.isPlaying
+          ? a.cast.name
+          : a?.flinch?.isPlaying
+            ? a.flinch.name
+            : a?.air?.isPlaying
+              ? a.air.name
+              : a?.run?.isPlaying
+                ? a.run.name
+                : a?.walk?.isPlaying
+                  ? a.walk.name
+                  : a?.idle?.isPlaying
+                    ? a.idle.name
+                    : null;
   return { skinned, playing, idle: a?.idle?.name ?? null, height };
 }
 
@@ -830,6 +832,7 @@ export function setHumanoidMoving(
   if (a.dead || a.airborne || a.casting) return;
   if (a.cast?.isPlaying) return;
   if (a.flinch?.isPlaying) return;
+  stopIfPlaying(a.death);
   applyStaffClips(a);
   if (a.idle) a.idle.speedRatio = 1;
   if (!moving) {
@@ -913,6 +916,7 @@ export function setHumanoidStaffEquipped(
   applyStaffClips(a);
   if (a.dead || a.airborne || a.casting) return;
   if (a.flinch?.isPlaying || a.cast?.isPlaying) return;
+  stopIfPlaying(a.death);
   if (a.walk?.isPlaying) return;
   if (prevRun?.isPlaying && a.run && a.run !== prevRun) {
     stopIfPlaying(prevRun);

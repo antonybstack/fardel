@@ -310,6 +310,6 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 
 ### 2026-09-08 — ve,remote,sheath — persistMark Idle while VE camera is a Death pose
 - **Cause:** `?ve=remote-sheathed` latched unarmed Idle without `hp > 0` / not-Death. `FARDEL_SECOND_SHEATH` walked to (4, 2.5); leftover `FARDEL_SECOND_DIE` identity or pad-C path is a corpse. Camera still looked at the only remote.
-- **Do this:** Latch only living remotes (`hp > 0`, clip `Idle` not `Idle_Weapon` / Death). Stand SecondClient at origin (outside `HostileAggroRadius` 3). Do not walk to (4, 2.5). Apply `setHumanoidDead` before staff unequip so Idle does not stomp a corpse. Mutate `camera.target` (do not `setTarget`).
+- **Do this:** Latch only living remotes (`hp > 0`, clip `Idle` not `Idle_Weapon` / Death, AABB height ≥ 1.2 m). Stop Death when swapping to live Idle. Stand SecondClient west of origin `(-2.5, 0)` (outside `HostileAggroRadius` 3), not (4, 2.5) and not stacked on yard-origin corpses. Apply `setHumanoidDead` before staff unequip. Mutate `camera.target` (do not `setTarget`).
 - **Seen in:** #448 / #463
 

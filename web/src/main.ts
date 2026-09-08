@@ -6281,8 +6281,10 @@ async function main(): Promise<void> {
           if (/death/i.test(clip)) continue;
           const sheathed =
             pb.skinned > 0 &&
+            pb.height >= 1.2 &&
             /^idle$/i.test(clip) &&
             !/weapon/i.test(clip) &&
+            !/death/i.test(clip) &&
             !parts.staff.isEnabled();
           if (!sheathed) continue;
           const d = Vector3.Distance(parts.root.position, player.position);
@@ -8083,8 +8085,8 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        // West of origin so local + remote do not stack. Stay outside AggroRadius 3.
-        for (let i = 0; i < 4; i++) net.sendMove(-0.55, 0, false);
+        // East of origin (dummy side). Remote stands west at (-2.5, 0).
+        for (let i = 0; i < 4; i++) net.sendMove(0.55, 0, false);
       }
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes);
@@ -8104,6 +8106,7 @@ async function main(): Promise<void> {
           ch.hp > 0 &&
           !ch.staffEquipped &&
           pb.skinned > 0 &&
+          pb.height >= 1.2 &&
           /^idle$/i.test(clip) &&
           !/weapon/i.test(clip) &&
           !/death/i.test(clip) &&
@@ -8120,6 +8123,7 @@ async function main(): Promise<void> {
         ch.hp > 0 &&
         !ch.staffEquipped &&
         got.pb.skinned > 0 &&
+        got.pb.height >= 1.2 &&
         /^idle$/i.test(clip) &&
         !/weapon/i.test(clip) &&
         !/death/i.test(clip) &&

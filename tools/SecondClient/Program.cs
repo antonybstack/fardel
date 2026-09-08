@@ -94,7 +94,9 @@ try
             conn.Reducers.UnequipStaff();
             await Frame(conn, 200);
         }
-        const float sheathX = 0f;
+        // West of origin: outside AggroRadius 3 vs A/B/C, not stacked on
+        // yard-origin corpses from other VE identities.
+        const float sheathX = -2.5f;
         const float sheathZ = 0f;
         var walkGuard = DateTime.UtcNow.AddSeconds(8);
         while (DateTime.UtcNow < walkGuard)
