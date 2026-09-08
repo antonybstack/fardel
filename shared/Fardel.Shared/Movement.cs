@@ -11,8 +11,11 @@ public static class Movement
 
     /// <summary>Gravity acceleration (meters per second squared, downward).</summary>
     public const float Gravity = -20f;
-    /// <summary>Initial upward velocity when jump intent is true (meters per second).</summary>
-    public const float JumpVelocity = 6f;
+    /// <summary>
+    /// Initial upward velocity when jump intent is true (meters per second).
+    /// Discrete peak at 20Hz is ~1.8m — readable at play-cam r≈14–22 without mesh scale.
+    /// </summary>
+    public const float JumpVelocity = 8f;
     /// <summary>Ground Y level (clamped when grounded).</summary>
     public const float GroundY = 0f;
     /// <summary>Coyote time: grace period for jump after leaving ground (microseconds).</summary>
