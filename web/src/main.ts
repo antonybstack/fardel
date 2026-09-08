@@ -2776,6 +2776,99 @@ async function main(): Promise<void> {
   paintNameplate(localNameplate, 'You', '#b8d4ff', -1);
   let moveAccumulator = 0;
   const MOVE_SEND_HZ = 20;
+  /** Presentation lerp only; snap teleports. */
+  const POSE_SNAP_METERS = 2.5;
+  type PoseInterp = {
+    seeded: boolean;
+    fx: number;
+    fy: number;
+    fz: number;
+    fyaw: number;
+    tx: number;
+    ty: number;
+    tz: number;
+    tyaw: number;
+    u: number;
+  };
+  const makePoseInterp = (): PoseInterp => ({
+    seeded: false,
+    fx: 0,
+    fy: 0,
+    fz: 0,
+    fyaw: 0,
+    tx: 0,
+    ty: 0,
+    tz: 0,
+    tyaw: 0,
+    u: 1,
+  });
+  const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
+  const lerpYaw = (a: number, b: number, t: number) => {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+  };
+  const clampU = (u: number) => (u < 0 ? 0 : u > 1 ? 1 : u);
+  const retargetPoseInterp = (
+    i: PoseInterp,
+    x: number,
+    y: number,
+    z: number,
+    yaw: number,
+  ) => {
+    if (!i.seeded) {
+      i.fx = i.tx = x;
+      i.fy = i.ty = y;
+      i.fz = i.tz = z;
+      i.fyaw = i.tyaw = yaw;
+      i.u = 1;
+      i.seeded = true;
+      return;
+    }
+    if (x === i.tx && y === i.ty && z === i.tz && yaw === i.tyaw) {
+      return;
+    }
+    const s = clampU(i.u);
+    const cx = lerpN(i.fx, i.tx, s);
+    const cy = lerpN(i.fy, i.ty, s);
+    const cz = lerpN(i.fz, i.tz, s);
+    const dx = x - cx;
+    const dz = z - cz;
+    if (dx * dx + dz * dz > POSE_SNAP_METERS * POSE_SNAP_METERS) {
+      i.fx = i.tx = x;
+      i.fy = i.ty = y;
+      i.fz = i.tz = z;
+      i.fyaw = i.tyaw = yaw;
+      i.u = 1;
+      return;
+    }
+    i.fx = cx;
+    i.fy = cy;
+    i.fz = cz;
+    i.fyaw = lerpYaw(i.fyaw, i.tyaw, s);
+    i.tx = x;
+    i.ty = y;
+    i.tz = z;
+    i.tyaw = yaw;
+    i.u = 0;
+  };
+  const samplePoseInterp = (i: PoseInterp) => {
+    const s = clampU(i.u);
+    return {
+      x: lerpN(i.fx, i.tx, s),
+      y: lerpN(i.fy, i.ty, s),
+      z: lerpN(i.fz, i.tz, s),
+      yaw: lerpYaw(i.fyaw, i.tyaw, s),
+    };
+  };
+  const advancePoseInterp = (i: PoseInterp, dt: number) => {
+    if (!i.seeded) return;
+    i.u = Math.min(1, i.u + dt * MOVE_SEND_HZ);
+  };
+  const localInterp = makePoseInterp();
+  const remoteInterps = new Map<string, PoseInterp>();
+  const proxyInterps = new Map<string, PoseInterp>();
 
   const ensureRemoteFx = (key: string): RemoteFx => {
     let fx = remoteFx.get(key);
@@ -2924,15 +3017,23 @@ async function main(): Promise<void> {
         inst = proxySource.createInstance(`proxy_${key}`);
         proxyInstances.set(key, inst);
       }
-      inst.position.x = p.x;
-      inst.position.y = p.y + 0.75;
-      inst.position.z = p.z;
+      let pi = proxyInterps.get(key);
+      if (!pi) {
+        pi = makePoseInterp();
+        proxyInterps.set(key, pi);
+      }
+      retargetPoseInterp(pi, p.x, p.y + 0.75, p.z, 0);
+      const samp = samplePoseInterp(pi);
+      inst.position.x = samp.x;
+      inst.position.y = samp.y;
+      inst.position.z = samp.z;
       inst.setEnabled(true);
     }
     for (const [key, inst] of proxyInstances) {
       if (!seen.has(key)) {
         inst.dispose();
         proxyInstances.delete(key);
+        proxyInterps.delete(key);
       }
     }
   };
@@ -2990,10 +3091,17 @@ async function main(): Promise<void> {
           );
         }
       }
-      parts.root.position.x = r.x;
-      parts.root.position.y = r.y;
-      parts.root.position.z = r.z;
-      parts.root.rotation.y = r.yaw;
+      let ri = remoteInterps.get(key);
+      if (!ri) {
+        ri = makePoseInterp();
+        remoteInterps.set(key, ri);
+      }
+      retargetPoseInterp(ri, r.x, r.y, r.z, r.yaw);
+      const samp = samplePoseInterp(ri);
+      parts.root.position.x = samp.x;
+      parts.root.position.y = samp.y;
+      parts.root.position.z = samp.z;
+      parts.root.rotation.y = samp.yaw;
       parts.root.setEnabled(true);
     }
     for (const [key, parts] of remoteMeshes) {
@@ -3001,6 +3109,7 @@ async function main(): Promise<void> {
         parts.root.dispose();
         remoteMeshes.delete(key);
         remotePartyTint.delete(key);
+        remoteInterps.delete(key);
         disposeNameplate(remoteNameplates.get(key));
         remoteNameplates.delete(key);
       }
@@ -3812,6 +3921,35 @@ async function main(): Promise<void> {
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() / 1000;
     const now = Date.now();
+
+    // Presentation only; snap teleports.
+    advancePoseInterp(localInterp, dt);
+    if (localInterp.seeded) {
+      const samp = samplePoseInterp(localInterp);
+      player.position.x = samp.x;
+      player.position.y = samp.y;
+      player.position.z = samp.z;
+      player.rotation.y = samp.yaw;
+    }
+    for (const [key, parts] of remoteMeshes) {
+      const ri = remoteInterps.get(key);
+      if (!ri) continue;
+      advancePoseInterp(ri, dt);
+      const samp = samplePoseInterp(ri);
+      parts.root.position.x = samp.x;
+      parts.root.position.y = samp.y;
+      parts.root.position.z = samp.z;
+      parts.root.rotation.y = samp.yaw;
+    }
+    for (const [key, inst] of proxyInstances) {
+      const pi = proxyInterps.get(key);
+      if (!pi) continue;
+      advancePoseInterp(pi, dt);
+      const samp = samplePoseInterp(pi);
+      inst.position.x = samp.x;
+      inst.position.y = samp.y;
+      inst.position.z = samp.z;
+    }
 
     const tickFloaters = (list: DamageFloater[]) => {
       for (let i = list.length - 1; i >= 0; i--) {
@@ -4767,10 +4905,12 @@ async function main(): Promise<void> {
   net = await connectToSpacetime(
     onStatus,
     (pose) => {
-      player.position.x = pose.x;
-      player.position.y = pose.y;
-      player.position.z = pose.z;
-      player.rotation.y = pose.yaw;
+      retargetPoseInterp(localInterp, pose.x, pose.y, pose.z, pose.yaw);
+      const samp = samplePoseInterp(localInterp);
+      player.position.x = samp.x;
+      player.position.y = samp.y;
+      player.position.z = samp.z;
+      player.rotation.y = samp.yaw;
     },
     (npcs) => {
       syncNpcMeshes(npcs);
