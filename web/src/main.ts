@@ -53,6 +53,7 @@ import {
   partyRobeColor,
   playHumanoidCast,
   preloadPlayerHumanoid,
+  readHumanoidPlayback,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
   setHumanoidMoving,
@@ -5277,6 +5278,17 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2 + 0.45;
         camera.beta = Math.PI / 2.38;
         camera.radius = 34;
+      } else if (veFollow === 'idle') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.05;
+        tgt.z = player.position.z;
+        camera.alpha = Math.PI / 2.15;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 8;
       } else if (veFollow === 'walk' || veFollow === 'yaw' || veFollow === 'jump-pose') {
         // Side play-cam so Walk stride / wish facing / hop pose reads; lock each frame.
         camera.inertialAlphaOffset = 0;
@@ -9862,6 +9874,34 @@ async function main(): Promise<void> {
   }
 
 
+
+  // ?ve=idle — play-cam Idle_Weapon on a skinned mesh. T-pose is a failed VE.
+  if (ve === 'idle' && net) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE idle: waiting for Connected…';
+    let ticks = 0;
+    const waitIdle = () => {
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE idle: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitIdle, 200);
+        return;
+      }
+      setHumanoidMoving(humanoid, false);
+      const pb = readHumanoidPlayback(humanoid);
+      const idleOk =
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /idle/i.test(pb.playing);
+      if (mark) {
+        mark.textContent = idleOk
+          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+      }
+    };
+    window.setTimeout(waitIdle, 800);
+  }
 
   // ?ve=fps — seed crowd proxies; prove FPS HUD visible + near proxies > 0.
   if (ve === 'fps') {
