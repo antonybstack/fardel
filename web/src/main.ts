@@ -10415,6 +10415,68 @@ async function main(): Promise<void> {
     window.setTimeout(waitRest, 700);
   }
 
+  // ?ve=rest-chrome — HUD-only demo: resting self-frame + badge (fog-safe cyan-mint chrome).
+  if (ve === 'rest-chrome') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && ve === 'rest-chrome') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rest-chrome: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitRestChrome = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE rest-chrome: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRestChrome, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE rest-chrome: equipping staff…';
+        window.setTimeout(waitRestChrome, 280);
+        return;
+      }
+      if (ch0) {
+        updateSelfFrame(ch0);
+        // Seed mid-HP for visible bars + resting chrome.
+        const fakeHp = Math.floor(ch0.maxHp * 0.68);
+        const fillEl = document.getElementById('sfHpFill');
+        const labEl = document.getElementById('sfHpLabel');
+        if (fillEl && labEl) {
+          fillEl.style.width = `${(fakeHp / ch0.maxHp * 100).toFixed(1)}%`;
+          labEl.textContent = `${fakeHp}/${ch0.maxHp}`;
+        }
+        const fakeMana = Math.floor((ch0.maxMana ?? 100) * 0.75);
+        const manaFillEl = document.getElementById('sfManaFill');
+        const manaLabEl = document.getElementById('sfManaLabel');
+        if (manaFillEl && manaLabEl) {
+          manaFillEl.style.width = `${(fakeMana / Math.max(1, ch0.maxMana ?? 100) * 100).toFixed(1)}%`;
+          manaLabEl.textContent = `${fakeMana}/${ch0.maxMana ?? 100}`;
+        }
+      }
+
+      if (!seeded) {
+        // Seed resting state for screenshot.
+        setRestingState('enter');
+        seeded = true;
+        if (mark) {
+          mark.textContent = 'Rest-chrome OK · resting badge + border visible · HUD only';
+        }
+        return;
+      }
+
+      if (ticks > 100) return;
+      window.setTimeout(waitRestChrome, 180);
+    };
+    window.setTimeout(waitRestChrome, 700);
+  }
+
 
 
   // ?ve=floaters / floater-read post-connect: early pre-connect seed owns the mark/stack.
