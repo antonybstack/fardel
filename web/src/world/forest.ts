@@ -418,7 +418,6 @@ function thinInstancePackRoot(root: TransformNode, matrices: Matrix[]): void {
     merged.setEnabled(true);
     merged.isVisible = true;
     thinInstanceFromMatrices(merged, matrices);
-    merged.alwaysSelectAsActiveMesh = true;
     return;
   }
   for (const m of sources) {
