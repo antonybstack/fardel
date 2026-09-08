@@ -56,6 +56,19 @@ body:
     id: evidence
     attributes:
       label: Evidence
-      description: Paste links, logs, or attach screenshots if available.
+      description: |
+        Paste links, logs, or VE links.
+        
+        For screenshots/recordings: use https://ve.sparkify.dev (upload via tools/scripts/ve-upload.sh).
+        Do NOT rely solely on GitHub drag-drop for long-term VE.
+        
+        Example: ![bug](https://ve.sparkify.dev/issue-123/bug-screenshot.png)
+      placeholder: |
+        https://ve.sparkify.dev/...
+        
+        Error log:
+        ```
+        ...
+        ```
     validations:
       required: false

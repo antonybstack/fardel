@@ -1,6 +1,8 @@
 # Team seats (agent worktrees)
 
-Parallel agent seats on the shared Linux box. Each seat has its own **git worktree**, **SpacetimeDB port + data dir**, **Vite port**, and **database name** so agents do not stomp each other.
+Parallel agent seats on the shared computer (Grok Bot box or Mac Studio). Each seat has its own **git worktree**, **SpacetimeDB port + data dir**, **Vite port**, and **database name** so agents do not stomp each other.
+
+For Mac Studio + Grok CLI setup, see [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md).
 
 ## Git workflow
 
@@ -9,24 +11,26 @@ Parallel agent seats on the shared Linux box. Each seat has its own **git worktr
 | `main` | **Release** / production tip. Do not open feature PRs against `main`. |
 | `develop` | **PR target** for day-to-day work. Land features here first. |
 
-Seat worktrees live under `/workspace/wt/<slug>` on branches `seats/<slug>` (except **lead**, which is `/workspace/fardel` on `develop` / `main`).
+Seat worktrees live under:
+- **Grok Bot box:** `/workspace/wt/<slug>` on branches `seats/<slug>` (except **lead**: `/workspace/fardel`)
+- **Mac Studio:** `/Users/antbly/dev/fardel-wt/<slug>` on branches `seats/<slug>` (except **lead**: `/Users/antbly/dev/fardel`)
 
-Do **not** delete existing worktrees under `/workspace/wt/`.
+Do **not** delete existing worktrees.
 
 ## Roster
 
-| Seat | Spacetime port | Vite port | DB name | Worktree |
-|------|----------------|-----------|---------|----------|
-| `dev1` | 3001 | 5174 | `fardel-dev1` | `/workspace/wt/dev1` |
-| `dev2` | 3002 | 5175 | `fardel-dev2` | `/workspace/wt/dev2` |
-| `dev3` | 3003 | 5176 | `fardel-dev3` | `/workspace/wt/dev3` |
-| `dev4` | 3004 | 5177 | `fardel-dev4` | `/workspace/wt/dev4` |
-| `dev5` | 3005 | 5178 | `fardel-dev5` | `/workspace/wt/dev5` |
-| `qa-bugs` | 3011 | 5184 | `fardel-qa-bugs` | `/workspace/wt/qa-bugs` |
-| `qa-feel` | 3012 | 5185 | `fardel-qa-feel` | `/workspace/wt/qa-feel` |
-| `lead` | 3000 | 5173 | `fardel` | `/workspace/fardel` |
+| Seat | Spacetime port | Vite port | DB name | Worktree (Box) | Worktree (Mac) |
+|------|----------------|-----------|---------|----------------|----------------|
+| `dev1` | 3001 | 5174 | `fardel-dev1` | `/workspace/wt/dev1` | `/Users/antbly/dev/fardel-wt/dev1` |
+| `dev2` | 3002 | 5175 | `fardel-dev2` | `/workspace/wt/dev2` | `/Users/antbly/dev/fardel-wt/dev2` |
+| `dev3` | 3003 | 5176 | `fardel-dev3` | `/workspace/wt/dev3` | `/Users/antbly/dev/fardel-wt/dev3` |
+| `dev4` | 3004 | 5177 | `fardel-dev4` | `/workspace/wt/dev4` | `/Users/antbly/dev/fardel-wt/dev4` |
+| `dev5` | 3005 | 5178 | `fardel-dev5` | `/workspace/wt/dev5` | `/Users/antbly/dev/fardel-wt/dev5` |
+| `qa-bugs` | 3011 | 5184 | `fardel-qa-bugs` | `/workspace/wt/qa-bugs` | `/Users/antbly/dev/fardel-wt/qa-bugs` |
+| `qa-feel` | 3012 | 5185 | `fardel-qa-feel` | `/workspace/wt/qa-feel` | `/Users/antbly/dev/fardel-wt/qa-feel` |
+| `lead` | 3000 | 5173 | `fardel` | `/workspace/fardel` | `/Users/antbly/dev/fardel` |
 
-Canonical map file: [`tools/scripts/fardel-seats.env`](../tools/scripts/fardel-seats.env) (`slug|spacetime_port|vite_port|db_name|worktree_path`).
+Canonical map file: [`tools/scripts/fardel-seats.env`](../tools/scripts/fardel-seats.env) (`slug|spacetime_port|vite_port|db_name|worktree_path`). Paths differ by host; ports and DB names stay constant.
 
 Per-seat Spacetime data: `$HOME/.local/share/fardel-wt/<slug>`.
 

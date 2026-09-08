@@ -37,8 +37,17 @@ body:
     id: screenshots
     attributes:
       label: Screenshots / clips
-      description: Attach or link visual evidence. Strongly preferred for feel issues.
-      placeholder: Drag images here or paste links.
+      description: |
+        Link visual evidence (strongly preferred for feel issues).
+        
+        Use https://ve.sparkify.dev for screenshots (upload via tools/scripts/ve-upload.sh).
+        Lead or QA Feel will host VE when filing or verifying.
+        
+        Do NOT rely solely on GitHub drag-drop paste for long-term VE.
+      placeholder: |
+        ![feel-issue](https://ve.sparkify.dev/feel-123/observation.png)
+        
+        or drag images here as interim (but prefer ve.sparkify.dev links)
     validations:
       required: false
   - type: textarea
