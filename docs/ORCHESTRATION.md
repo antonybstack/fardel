@@ -321,45 +321,53 @@ That document covers:
 
 ---
 
-## 12. Token / chat hygiene (mandatory)
+## 12. Token budget / chat hygiene (hard)
 
-These rules prevent waste loops, stale pings, and notification spam. **All seats must follow.**
+Antony is under **severe token spend pressure**. Every message burns budget. All seats follow these rules or stop.
 
-### Before merge/VE/status pings
+### Banned responses
 
-1. **Check PR state first:** Run `gh pr view <n>` before reporting "MERGE-READY" / "ready to merge" / "please review" to Lead or Reviewer. Never ping about already-merged PRs.
-2. **Check VE URL first:** `curl -I <ve-url>` before reporting "please upload" or "VE missing." If URL returns HTTP 200, VE is live — don't ask again.
+- **"Ack"** / "Copy" / "On it" / "Standing by" / "Understood" / "Will do"
+- Roster restates ("Dev1 on #20, Dev2 idle, …")
+- Any reply to Lead corrections — seats fix silently
 
-### VE upload discipline
+### Before any PR status ping
 
-3. **One canonical key per Issue:** Use `N/name.png` naming (e.g. `123/chat-read.png` for Issue #123). On first publish, embed `https://ve.sparkify.dev/N/name.png?v=1` in PR (edge may 404 plain URL briefly; `?v=1` forces cache bypass).
-4. **Lead uploads once, acks once:** Seats capture + request upload; Lead uploads + acks. Seats do **not** re-ask after ack. If genuinely missing after ack, re-check URL first (rule 2).
+Run `gh pr view <n>`. If state = **MERGED** or **CLOSED**: **silence forever** on that PR. Never ping "ready to merge" / "please review" / "VE missing" on dead PRs.
 
-### Feel / QA coordination
+### Max one outbound status per open PR tip SHA
 
-5. **Freeze one SHA for Feel/QA:** Comment the target SHA in the PR when sending to Feel or QA. Do **not** move the freeze until Feel/QA reports PASS/FAIL on that SHA. If tip moves mid-test, finish the frozen SHA first, then re-test new SHA if needed.
-6. **Feel: one box automation attempt:** If Feel harness on box is inconclusive (e.g. flaky setup), Feel verifies on Mac or play.sparkify.dev directly — no inconclusive retry loops. Report PASS/FAIL or INCONCLUSIVE + manual result.
+Once you report "PR #N up @ SHA" or "MERGE-READY @ SHA", do **not** send another status on that same SHA unless the PR is blocked or Lead asks. Silence = no change.
 
-### Lead / parent economy
+### Lead corrections
 
-7. **Stay silent on pure FYI acks:** Lead does not reply "ok" / "ack" / "noted" to FYI status reports. Silence = received. Speak only when action is needed (assign, nudge, merge, block).
-8. **Continuous-iterate: speak on deltas only:** Status messages only when tip moves, queue changes, or seat state changes (assign/merge/block). Do **not** restate roster, repeat idle facts, or echo unchanged state.
+When Lead says "rebase" / "fix X" / "wrong lane": seat fixes silently. **No** "got it" / "fixing now" reply. Next speak = "PR #N rebased @ new-SHA" when done (if material).
 
-### Broadcast economy
+### Spend self-estimate (required)
 
-9. **Prefer one status bus message per seat:** Post seat state changes (assign, PR up, merge, block) to the relevant channel once. Do **not** repeat the same fact in 1:1 DMs unless truly seat-specific context is needed.
+End every status or PR comment with:
 
-### Summary
+```
+spend: light   # short update, no churn
+spend: med     # multi-step or moderate detail
+spend: heavy   # long explanation or multi-turn needed
+```
 
-- Check before ping (`gh pr view`, `curl -I`)
-- One VE key per Issue; Lead uploads once
-- Freeze SHA for Feel/QA
-- Feel: one box attempt, then Mac/self-verify
-- Lead silent on FYI
-- Continuous-iterate: deltas only
-- One bus message per fact
+Agents lack exact token meters; this is the monitor signal for Antony.
 
-**Violating these rules burns Antony's notification budget.** Stay disciplined.
+### Continuous-iterate cadence
+
+- **~30 minutes** between ticks (not 15m unless crisis)
+- Speak only on tip moves, new assigns, merges, or blockers
+- Quiet tick = no message at all
+
+### Prefer Cloud Agents over chat
+
+For heavy edits or multi-turn work on the same tip, **launch a Cloud Agent** instead of burning parent context with long back-and-forth. Cloud Agents are cheaper for deep work.
+
+---
+
+**Summary:** Check `gh pr view` first. Silence on MERGED/CLOSED. One status per SHA. No acks. Self-estimate spend. ~30m iterate. Use Cloud Agents for heavy work. **Violating these rules exhausts Antony's budget.**
 
 ---
 
