@@ -207,3 +207,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Face and Wizard.001 share one PBR. `albedoColor` indigo multiply + `texture.level` 2.2 crushes atlas peach skin / blue cloth / brown hair into one robe.
 - **Do this:** Clone a Face skin PBR (warm albedo, no robe multiply). Mild cloth multiply so the atlas still reads. Staff keeps wood PBR + a small tip orb. Do not `StandardMaterial` on Wizard.001.
 - **Seen in:** #337
+
+### 2026-09-08 — npc,tab — connection.cycleTarget still sorts Dummy first
+- **Cause:** Pre-hostiles Tab sorted Kind=1 ahead of Kind=2. Hunt Tab lives in `cyclePreferHostiles` in `main.ts`.
+- **Do this:** Play Tab uses the main.ts helper (in-range hostiles, then dummy). Do not call `net.cycleTarget()` for hunt. `?ve=tab-target` still `setTarget(dummy)`.
+- **Seen in:** #358
