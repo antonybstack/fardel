@@ -62,6 +62,10 @@ try
         Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH"),
         "1",
         StringComparison.OrdinalIgnoreCase);
+    var hop = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_HOP"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
     var suicide = string.Equals(
         Environment.GetEnvironmentVariable("FARDEL_SECOND_DIE"),
         "1",
@@ -78,7 +82,7 @@ try
 
     if (sheath)
     {
-        // ?ve=remote-sheathed: stand at origin (outside HostileAggroRadius 3;
+        // ?ve=remote-sheathed: stand west of origin (outside HostileAggroRadius 3;
         // pads A/B/C are ~7.6m). Do not walk to (4, 2.5) — leftover DIE
         // identity / pad-C path reads as a Death pose. Wait for respawn.
         var aliveGuard = DateTime.UtcNow.AddSeconds(20);
@@ -140,6 +144,78 @@ try
                 conn.Reducers.UnequipStaff();
             }
             await Frame(conn, 400);
+        }
+    }
+    if (hop)
+    {
+        // ?ve=remote-hop: stand west of origin (outside AggroRadius 3) and
+        // pump jump. Do not walk to (4, 2.5) — leftover DIE identities / pad
+        // corpses made the VE a graveyard. Wait for respawn. Keep staff on.
+        var aliveGuard = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuard)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("hop: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+        {
+            conn.Reducers.EquipStaff();
+            await Frame(conn, 200);
+        }
+        const float hopX = -2.5f;
+        const float hopZ = 0f;
+        var walkGuard = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < walkGuard)
+        {
+            if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+            {
+                await Frame(conn, 200);
+                continue;
+            }
+            if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+            {
+                await Frame(conn, 50);
+                continue;
+            }
+            var dx = hopX - cur.X;
+            var dz = hopZ - cur.Z;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist < 0.4f)
+            {
+                Console.WriteLine($"hop-pad ({cur.X:F1}, {cur.Z:F1})");
+                break;
+            }
+            var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+            conn.Reducers.Move(dx * scale, dz * scale, false);
+            await Frame(conn, 50);
+        }
+        if (conn.Db.PlayerPose.Identity.Find(identity) is { } hopPose)
+        {
+            Console.WriteLine($"READY hop-pad ({hopPose.X:F2}, {hopPose.Z:F2}) identity={identity}");
+        }
+        while (true)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: <= 0 })
+            {
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch is { StaffEquipped: false })
+            {
+                conn.Reducers.EquipStaff();
+            }
+            var hopCur = conn.Db.PlayerPose.Identity.Find(identity);
+            if (hopCur is null)
+            {
+                await Frame(conn, 50);
+                continue;
+            }
+            var air = hopCur.Y > 0.08f;
+            conn.Reducers.Move(0f, 0f, jump: !air);
+            await Frame(conn, 50);
         }
     }
     if (suicide)

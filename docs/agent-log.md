@@ -318,3 +318,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Put a **new key** (`463/remote-sheathed-2.png`) or `?v=` on the PR URL. Confirm Content-Length / etag / last-modified moved before asking Reviewer. `fish -c ve-upload.sh`.
 - **Seen in:** #448 / #463
 
+### 2026-09-08 — ve,remote,hop — persistMark Idle_Weapon while VE is a graveyard
+- **Cause:** `?ve=remote-hop` latched `/idle/i` + `y>0.12` and fell back to `remotes[0]`. Leftover `FARDEL_SECOND_DIE` identities / pad corpses filled the frame. SecondClient walked to (4, 2.5).
+- **Do this:** Latch only living remotes (`hp > 0`, clip `Idle_Weapon`, not Walk/Death, AABB height ≥ 1.0, `y > 0.12`). Stand SecondClient at (−2.5, 0) outside `HostileAggroRadius`. Do not fall back to a dead remote. Mutate `camera.target`. New VE key if CDN HITs the old PNG.
+- **Seen in:** #449 / #464
+

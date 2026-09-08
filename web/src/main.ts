@@ -5040,9 +5040,12 @@ async function main(): Promise<void> {
       const moving = st.hold > 0 && samp.y <= 0.05;
       const spd = Math.hypot(st.dx, st.dz);
       if (samp.y > 0.05) {
+        st.hold = 0;
         setHumanoidAirborne(parts, true);
+        parts.root.scaling.set(1, 1, 1);
       } else {
         setHumanoidAirborne(parts, false);
+        parts.root.scaling.set(1, 1, 1);
         // Walk named (not Run); speedRatio from snap/hold m/s.
         setHumanoidMoving(parts, moving, false, spd);
       }
@@ -6360,6 +6363,44 @@ async function main(): Promise<void> {
         camera.alpha = 0.55;
         camera.beta = Math.PI / 2.7;
         camera.radius = 7;
+      } else if (veFollow === 'remote-hop') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = player.position.x;
+        let fy = player.position.y + 1.2;
+        let fz = player.position.z;
+        let best = -1;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) continue;
+          const y = parts.root.position.y;
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          if (/death/i.test(clip)) continue;
+          const air =
+            y > 0.12 &&
+            pb.skinned > 0 &&
+            pb.height >= 1.0 &&
+            /idle_weapon/i.test(clip) &&
+            !/walk/i.test(clip);
+          if (!air) continue;
+          const d = Vector3.Distance(parts.root.position, player.position);
+          const rank = 1000 + y * 10 + d;
+          if (rank > best) {
+            best = rank;
+            fx = parts.root.position.x;
+            fy = parts.root.position.y + 1.1;
+            fz = parts.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0;
+        camera.beta = Math.PI / 2.35;
+        camera.radius = 11;
       } else if (veFollow === 'cam-collision' || veFollow === 'cam-collision-mid') {
         // Orbit into a bole; collision keeps the camera in the open (hero E10.1, mid E10.24).
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
@@ -6445,7 +6486,8 @@ async function main(): Promise<void> {
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
-        veFollow !== 'zoom-stop'
+        veFollow !== 'zoom-stop' &&
+        veFollow !== 'remote-hop'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -8301,6 +8343,84 @@ async function main(): Promise<void> {
       if (ticks < 360) window.setTimeout(waitRemoteDeath, 160);
     };
     window.setTimeout(waitRemoteDeath, 700);
+  }
+
+  // ?ve=remote-hop — E8.27 airborne Idle_Weapon, no Walk, no squash.
+  if (ve === 'remote-hop') {
+    camera.radius = 11;
+    camera.alpha = 0;
+    camera.beta = Math.PI / 2.35;
+  }
+  if (net && ve === 'remote-hop') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-hop: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let nudged = false;
+    const waitHop = () => {
+      if (!net) return;
+      ticks += 1;
+      if (!nudged && latestStatus.state === 'connected') {
+        nudged = true;
+        for (let i = 0; i < 4; i++) net.sendMove(0.55, 0, false);
+      }
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const n = remoteMeshes.size;
+      const preferred = remotes.find((r) => {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) return false;
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        return (
+          p.root.position.y > 0.12 &&
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          /idle_weapon/i.test(clip) &&
+          !/walk/i.test(clip) &&
+          !/death/i.test(clip)
+        );
+      });
+      const parts = preferred ? remoteMeshes.get(preferred.identityHex) : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const y = parts?.root.position.y ?? preferred?.y ?? 0;
+      const scaleY = parts?.root.scaling.y ?? 1;
+      const walkOn = /walk/i.test(clip);
+      const hopOk =
+        !!parts &&
+        !!preferred &&
+        y > 0.12 &&
+        pb.skinned > 0 &&
+        pb.height >= 1.0 &&
+        /idle_weapon/i.test(clip) &&
+        !walkOn &&
+        !/death/i.test(clip) &&
+        Math.abs(scaleY - 1) < 0.04;
+      if (mark) {
+        if (hopOk) {
+          mark.textContent =
+            `Remote hop OK · ${clip} · skinned ${pb.skinned} · y=${y.toFixed(2)} · remotes ${n}`;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (n > 0) {
+          mark.textContent =
+            `VE remote-hop: remotes ${n} · ${clip} · y=${y.toFixed(2)} · walk ${walkOn ? 'on' : 'off'} · skinned ${pb.skinned} (FARDEL_SECOND_HOP=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-hop: remotes 0 (start tools/SecondClient FARDEL_SECOND_HOP=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitHop, 80);
+    };
+    window.setTimeout(waitHop, 700);
   }
 
   // ?ve=projectile — local Emberbolt thicker beam (+ Spark bolt VFX path); impact pop.
