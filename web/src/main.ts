@@ -55,6 +55,7 @@ import {
   preloadPlayerHumanoid,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
+  setHumanoidJumpSquash,
   setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
@@ -1164,6 +1165,7 @@ type SystemToastKind =
   | 'noTarget'
   | 'deadTarget'
   | 'canvasFocus'
+  | 'jump'
   | 'bag'
   | 'zoomLimit';
 
@@ -1247,6 +1249,8 @@ function pushSystemToast(
                                                         ? 'BANDAGE'
                                                         : kind === 'noTarget' || kind === 'deadTarget'
                                                           ? 'CANCEL ↩'
+                                                          : kind === 'jump'
+                                                            ? 'JUMP'
                                                           : kind === 'canvasFocus'
                                                             ? 'FOCUS'
                                                             : kind === 'bag'
@@ -2888,6 +2892,13 @@ async function main(): Promise<void> {
   let net: GameNet | null = null;
   let bagOpen = false;
   let keysLegendOpen = false;
+  /** #139 — client-only hop presence (squash/stretch + camera dip + JUMP toast). */
+  let jumpWasAirborne = false;
+  let jumpTakeoffMs = 0;
+  let jumpApexToasted = false;
+  let jumpPeakY = 0;
+  let jumpLandSquashUntil = 0;
+  let jumpCamDipY = 0;
   const bootParams = new URLSearchParams(window.location.search);
   const debugParam = (bootParams.get('debug') || '').toLowerCase();
   let debugHudVisible = debugParam === '1' || debugParam === 'true';
@@ -4403,6 +4414,44 @@ async function main(): Promise<void> {
     const pose = net?.getLocalPose();
     const isAirborne = pose && pose.y > GROUND_Y + AIRBORNE_THRESHOLD;
 
+    // #139 — hop presence at play-cam: stretch while airborne, squat on land, brief JUMP toast.
+    {
+      const y = pose?.y ?? player.position.y;
+      const air = y > GROUND_Y + AIRBORNE_THRESHOLD;
+      if (air) {
+        if (!jumpWasAirborne) {
+          jumpTakeoffMs = now;
+          jumpApexToasted = false;
+          jumpPeakY = y;
+        }
+        jumpWasAirborne = true;
+        jumpPeakY = Math.max(jumpPeakY, y);
+        const t = Math.min(1, (now - jumpTakeoffMs) / 280);
+        setHumanoidJumpSquash(humanoid, 1.1 + 0.32 * t);
+        jumpCamDipY = -0.55 * (1 - t) + 0.18 * t;
+        const nearApex = now - jumpTakeoffMs > 160 && y + 0.02 >= jumpPeakY;
+        if (!jumpApexToasted && (nearApex || y > 0.18)) {
+          jumpApexToasted = true;
+          const veNow = new URLSearchParams(window.location.search).get('ve');
+          const ttl = veNow === 'jump-apex' ? TOAST_VE_TTL_MS : 1200;
+          dismissSystemToasts('jump');
+          pushSystemToast('jump', 'Jump', ttl);
+        }
+      } else {
+        if (jumpWasAirborne) jumpLandSquashUntil = now + 180;
+        jumpWasAirborne = false;
+        if (now < jumpLandSquashUntil) {
+          const u = (jumpLandSquashUntil - now) / 180;
+          setHumanoidJumpSquash(humanoid, 1 - 0.28 * u, 1 + 0.2 * u);
+          jumpCamDipY = -0.22 * u;
+        } else {
+          setHumanoidJumpSquash(humanoid, 1, 1);
+          jumpCamDipY *= Math.max(0, 1 - dt * 8);
+          if (Math.abs(jumpCamDipY) < 0.01) jumpCamDipY = 0;
+        }
+      }
+    }
+
     if (net && (keys.size > 0 || isAirborne)) {
       const wish = wishFromKeys(keys, camera);
       if (wish.dx !== 0 || wish.dz !== 0 || wish.jump || isAirborne) {
@@ -5038,7 +5087,7 @@ async function main(): Promise<void> {
         veFollow !== 'tab-target' &&
         veFollow !== 'loot-f'
       ) {
-        const follow = player.position.add(new Vector3(0, 1.35, 0));
+        const follow = player.position.add(new Vector3(0, 1.35 + jumpCamDipY, 0));
         const radius = camera.radius;
         camera.setTarget(follow);
         camera.radius = radius;
@@ -7835,6 +7884,84 @@ async function main(): Promise<void> {
       if (ticks < FREEZE_TIMEOUT + 20) window.setTimeout(waitJump, 100);
     };
     window.setTimeout(waitJump, 600);
+  }
+
+  // ?ve=jump-apex — play-cam hop presence (JUMP toast + stretch). Do not replace ?ve=jump (#139).
+  if (ve === 'jump-apex') {
+    camera.radius = 22;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.25;
+  }
+  if (net && ve === 'jump-apex') {
+    const mark = document.getElementById('persistMark');
+    let ticks = 0;
+    let jumpAttempted = false;
+    let peakY = 0;
+    let apexOk = false;
+    let okStretch = 0;
+    let okPeak = 0;
+    const GROUND_THRESHOLD = 0.08;
+    const waitApex = () => {
+      if (!net) return;
+      ticks += 1;
+      camera.radius = 22;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE jump-apex: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitApex, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE jump-apex: waiting for pose…';
+        if (ticks < 100) window.setTimeout(waitApex, 100);
+        return;
+      }
+      if (!jumpAttempted && ticks > 5) {
+        jumpAttempted = true;
+        net.sendMove(0, 0, true);
+        if (mark) mark.textContent = 'VE jump-apex: Space tapped · play-cam r=22…';
+        window.setTimeout(waitApex, 120);
+        return;
+      }
+      peakY = Math.max(peakY, pose.y);
+      if (pose.y > GROUND_THRESHOLD) {
+        net.sendMove(0, 0, false);
+      } else if (jumpAttempted && peakY > 0.15) {
+        net.sendMove(0, 0, true);
+      }
+      const toastEl = document.querySelector('.sysToast.jump');
+      const toastOk = !!toastEl && /Jump/i.test(toastEl.textContent || '');
+      const stretchY = humanoid.root.scaling.y;
+      const stretchOk = stretchY > 1.08;
+      const radiusOk = camera.radius >= 20;
+      if (!apexOk && peakY > 0.3 && toastOk && stretchOk && radiusOk) {
+        apexOk = true;
+        okStretch = stretchY;
+        okPeak = peakY;
+      }
+      if (apexOk) {
+        if (mark) {
+          mark.textContent =
+            `Jump-apex OK · JUMP toast · stretch y=${okStretch.toFixed(2)} · r=22 · peak=${okPeak.toFixed(2)}m · #139`;
+        }
+        window.setTimeout(waitApex, 400);
+        return;
+      }
+      if (ticks > 90) {
+        if (mark) {
+          mark.textContent =
+            `Jump-apex FAIL · peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
+        }
+        return;
+      }
+      if (mark && jumpAttempted) {
+        mark.textContent =
+          `VE jump-apex: peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchY.toFixed(2)}`;
+      }
+      window.setTimeout(waitApex, 100);
+    };
+    window.setTimeout(waitApex, 600);
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
