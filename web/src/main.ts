@@ -3265,6 +3265,7 @@ async function main(): Promise<void> {
   };
   const localInterp = makePoseInterp();
   const remoteInterps = new Map<string, PoseInterp>();
+  const remoteLastXz = new Map<string, { x: number; z: number }>();
   const proxyInterps = new Map<string, PoseInterp>();
 
   const ensureRemoteFx = (key: string): RemoteFx => {
@@ -3506,7 +3507,6 @@ async function main(): Promise<void> {
       parts.root.position.x = samp.x;
       parts.root.position.y = samp.y;
       parts.root.position.z = samp.z;
-      parts.root.rotation.y = samp.yaw;
       parts.root.setEnabled(true);
     }
     for (const [key, parts] of remoteMeshes) {
@@ -3515,6 +3515,7 @@ async function main(): Promise<void> {
         remoteMeshes.delete(key);
         remotePartyTint.delete(key);
         remoteInterps.delete(key);
+        remoteLastXz.delete(key);
         disposeNameplate(remoteNameplates.get(key));
         remoteNameplates.delete(key);
       }
@@ -4411,7 +4412,22 @@ async function main(): Promise<void> {
       parts.root.position.x = samp.x;
       parts.root.position.y = samp.y;
       parts.root.position.z = samp.z;
-      parts.root.rotation.y = samp.yaw;
+      const prev = remoteLastXz.get(key);
+      if (prev && dt > 1e-4) {
+        const dx = samp.x - prev.x;
+        const dz = samp.z - prev.z;
+        const spd = Math.hypot(dx, dz) / dt;
+        const moving = spd > 0.55;
+        setHumanoidMoving(parts, moving);
+        if (moving) {
+          const targetYaw = Math.atan2(dx, dz);
+          const a = 1 - Math.exp(-dt * YAW_FACE_HZ);
+          parts.root.rotation.y = lerpYaw(parts.root.rotation.y, targetYaw, a);
+        }
+      } else {
+        setHumanoidMoving(parts, false);
+      }
+      remoteLastXz.set(key, { x: samp.x, z: samp.z });
     }
     for (const [key, inst] of proxyInstances) {
       const pi = proxyInterps.get(key);
@@ -5305,6 +5321,18 @@ async function main(): Promise<void> {
         camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
         camera.alpha = Math.PI / 2.2;
         camera.beta = Math.PI / 2.6;
+        camera.radius = 8;
+      } else if (veFollow === 'remote-walk') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const rp = [...remoteMeshes.values()][0];
+        const tgt = rp
+          ? rp.root.position.add(new Vector3(0, 1.0, 0))
+          : player.position.add(new Vector3(0, 1.0, 0));
+        camera.setTarget(tgt);
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
         camera.radius = 8;
       } else if (
         veFollow !== 'vendor-stall' &&
@@ -6265,6 +6293,40 @@ async function main(): Promise<void> {
       window.setTimeout(waitTwo, 250);
     };
     window.setTimeout(waitTwo, 700);
+  }
+
+  // ?ve=remote-walk — E2.8 other wizards Walk from pose XZ delta (no client positions).
+  if (ve === 'remote-walk') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'remote-walk') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-walk: waiting for remotes…';
+    let ticks = 0;
+    const waitRemoteWalk = () => {
+      if (!net) return;
+      ticks += 1;
+      syncRemoteMeshes(net.getRemotes());
+      const playing = scene.animationGroups
+        .filter((g) => /remote_/i.test(g.name) && g.isPlaying)
+        .map((g) => g.name.replace(/^remote_[^_]+__/, ''))
+        .join(' · ');
+      const walkOn = /walk/i.test(playing);
+      const n = remoteMeshes.size;
+      if (mark) {
+        if (walkOn) {
+          mark.textContent = `Remote walk OK · remotes ${n} · ${playing}`;
+        } else if (n > 0) {
+          mark.textContent = `VE remote-walk: remotes ${n} · ${playing || 'idle'} (waiting pose delta)`;
+        } else {
+          mark.textContent = 'VE remote-walk: remotes 0…';
+        }
+      }
+      if (ticks < 240) window.setTimeout(waitRemoteWalk, 200);
+    };
+    window.setTimeout(waitRemoteWalk, 700);
   }
 
   // ?ve=remote-cast — wait for remote PlayerCombat target + Emberbolt windup telegraph.
