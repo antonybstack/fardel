@@ -5,6 +5,7 @@ using SpacetimeDB.Types;
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 15000;
+var startedMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
 
 var tcs = new TaskCompletionSource<(bool ok, Identity identity, string detail)>();
 
@@ -99,7 +100,7 @@ try
         return;
     }
 
-    // Assert vertical spawn defaults (#168)
+    // Assert EnsureSession spawn verticals (#168): Y≈SpawnY, VelY≈0, LastGroundedMicros set/recent.
     if (MathF.Abs(pose.Y - Movement.SpawnY) > 0.05f)
     {
         Console.Error.WriteLine($"FAIL: Y={pose.Y} not ≈ SpawnY={Movement.SpawnY}");
@@ -112,9 +113,15 @@ try
         Environment.ExitCode = 1;
         return;
     }
-    if (pose.LastGroundedMicros == 0)
+    var nowMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+    var ageMicros = nowMicros - pose.LastGroundedMicros;
+    // Nonzero and within the connect window (5s clock skew). Stale coyote fuel still PASSed #183.
+    if (pose.LastGroundedMicros == 0
+        || pose.LastGroundedMicros < startedMicros - 5_000_000
+        || ageMicros > timeoutMs * 1000L)
     {
-        Console.Error.WriteLine("FAIL: LastGroundedMicros not set (zero)");
+        Console.Error.WriteLine(
+            $"FAIL: LastGroundedMicros={pose.LastGroundedMicros} not set/recent (start={startedMicros} now={nowMicros})");
         Environment.ExitCode = 1;
         return;
     }
