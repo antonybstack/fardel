@@ -835,6 +835,7 @@ function setBagPanelOpen(open: boolean): void {
   const panel = document.getElementById('bagPanel');
   if (!panel) return;
   panel.classList.toggle('hidden', !open);
+  pushSystemToast('bag', open ? 'Bag' : 'Bag closed', 1800);
 }
 
 function setKeysLegendOpen(open: boolean): void {
@@ -1102,7 +1103,8 @@ type SystemToastKind =
   | 'stun'
   | 'outOfRange'
   | 'bandage'
-  | 'canvasFocus';
+  | 'canvasFocus'
+  | 'bag';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1167,7 +1169,9 @@ function pushSystemToast(
                                               ? 'RANGE'
                                               : kind === 'canvasFocus'
                                                 ? 'FOCUS'
-                                                : 'SAY';
+                                                : kind === 'bag'
+                                                  ? 'BAG'
+                                                  : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
