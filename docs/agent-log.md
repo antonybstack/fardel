@@ -313,3 +313,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Latch only living remotes (`hp > 0`, clip `Idle` not `Idle_Weapon` / Death, AABB height ≥ 1.2 m). Stop Death when swapping to live Idle. Stand SecondClient west of origin `(-2.5, 0)` (outside `HostileAggroRadius` 3), not (4, 2.5) and not stacked on yard-origin corpses. Apply `setHumanoidDead` before staff unequip. Mutate `camera.target` (do not `setTarget`).
 - **Seen in:** #448 / #463
 
+### 2026-09-08 — ve,r2 — wrangler put does not bust ve.sparkify.dev cache
+- **Cause:** Public VE is `Cache-Control: max-age=14400`. Overwriting `463/remote-sheathed.png` left Reviewer on the Death-pose etag (`cf-cache-status: HIT`, last-modified 21:29:41).
+- **Do this:** Put a **new key** (`463/remote-sheathed-2.png`) or `?v=` on the PR URL. Confirm Content-Length / etag / last-modified moved before asking Reviewer. `fish -c ve-upload.sh`.
+- **Seen in:** #448 / #463
+
