@@ -320,6 +320,6 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 
 ### 2026-09-08 — ve,remote,hop — persistMark Idle_Weapon while VE is a graveyard
 - **Cause:** `?ve=remote-hop` latched `/idle/i` + `y>0.12` and fell back to `remotes[0]`. Leftover `FARDEL_SECOND_DIE` identities / pad corpses filled the frame. SecondClient walked to (4, 2.5).
-- **Do this:** Latch only living remotes (`hp > 0`, clip `Idle_Weapon`, not Walk/Death, AABB height ≥ 1.0, `y > 0.12`). Stand SecondClient at (−2.5, 0) outside `HostileAggroRadius`. Do not fall back to a dead remote. Mutate `camera.target`. New VE key if CDN HITs the old PNG.
+- **Do this:** Latch only living remotes (`hp > 0`, clip `Idle_Weapon`, not Walk/Death, AABB height ≥ 1.0, `y > 0.12`). Stand SecondClient at (0, −6) (south of origin; pads A/B/C + dummy all >7 m). Do not stand at (−2.5, 0) (vendor / pad-B). Do not fall back to a dead remote. Mutate `camera.target`. New VE key if CDN HITs the old PNG.
 - **Seen in:** #449 / #464
 

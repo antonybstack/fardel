@@ -164,8 +164,10 @@ try
             conn.Reducers.EquipStaff();
             await Frame(conn, 200);
         }
-        const float hopX = -2.5f;
-        const float hopZ = 0f;
+        // South of origin: pads A(3,7) B(-7,3) C(7,-3) dummy(5,0) are all
+        // >7 m away. (-2.5, 0) sat next to the vendor stall and pad-B path.
+        const float hopX = 0f;
+        const float hopZ = -6f;
         var walkGuard = DateTime.UtcNow.AddSeconds(8);
         while (DateTime.UtcNow < walkGuard)
         {

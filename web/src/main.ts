@@ -6400,7 +6400,7 @@ async function main(): Promise<void> {
         tgt.z = fz;
         camera.alpha = 0;
         camera.beta = Math.PI / 2.35;
-        camera.radius = 11;
+        camera.radius = 8;
       } else if (veFollow === 'cam-collision' || veFollow === 'cam-collision-mid') {
         // Orbit into a bole; collision keeps the camera in the open (hero E10.1, mid E10.24).
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
@@ -8347,7 +8347,7 @@ async function main(): Promise<void> {
 
   // ?ve=remote-hop — E8.27 airborne Idle_Weapon, no Walk, no squash.
   if (ve === 'remote-hop') {
-    camera.radius = 11;
+    camera.radius = 8;
     camera.alpha = 0;
     camera.beta = Math.PI / 2.35;
   }
@@ -8366,7 +8366,9 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(0.55, 0, false);
+        // Side-on hop cam is alpha=0 (east of the jumper at (0,-6)). Park
+        // local north so You is not between camera and remote.
+        for (let i = 0; i < 6; i++) net.sendMove(0, 0.7, false);
       }
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes);
