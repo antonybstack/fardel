@@ -428,6 +428,8 @@ try
         return;
     }
     Console.WriteLine("hold-Space Move(0,0,true) air pump land OK (no VelY re-boost)");
+    // E1.8 (#259): this land-with-jump:true still Y/VelY≈0 is why we do not store a
+    // 100ms pre-land jump buffer — it would re-boost here. Coyote is the v1 queue.
 
     // Same-tick jump+XZ (#158): live client sendMove(dx, dz, wish.jump) in one reducer.
     // Oversized wish proves clamp + VelY together (gap (c) on the issue).

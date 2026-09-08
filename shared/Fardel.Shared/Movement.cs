@@ -18,7 +18,13 @@ public static class Movement
     public const float JumpVelocity = 8f;
     /// <summary>Ground Y level (clamped when grounded).</summary>
     public const float GroundY = 0f;
-    /// <summary>Coyote time: grace period for jump after leaving ground (microseconds).</summary>
+    /// <summary>
+    /// Coyote time: grace period for jump after leaving ground (microseconds).
+    /// E1.8 (#259) v1 jump-queue: live client is ~20Hz, so a Space tap on the first
+    /// grounded Move after land is ≤50ms late — same order as a 100ms pre-land buffer.
+    /// A stored pre-land intent needs a pose field and would re-boost if <c>jump:true</c>
+    /// is held through land (JumpSmoke hold-Space #157). No extra field; no multi-jump.
+    /// </summary>
     public const long CoyoteTimeMicros = 50_000L;
     /// <summary>
     /// Scale applied to XZ wish while <c>Y &gt; GroundY</c> (WoW-like air control).
