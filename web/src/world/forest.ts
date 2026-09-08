@@ -834,16 +834,22 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     const ti = i % midTemplates.length;
     const s = 2.4 + hash01(i * 11) * 1.6;
     const yMul = i % 3 === 1 ? 1.28 : i % 3 === 2 ? 0.82 : 1.0;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
     midMats[ti]!.push(
       composeInstanceMatrix(
-        Math.cos(a) * r,
-        Math.sin(a) * r,
+        mx,
+        mz,
         s,
         s * yMul,
         s,
         hash01(i * 17) * Math.PI * 2,
       ),
     );
+    // Named empty root so #351 camera collision still finds mid boles (no unique mesh).
+    const mark = new TransformNode(`midTree_${i}`, scene);
+    mark.position.set(mx, 0, mz);
+    mark.scaling.setAll(s);
   }
 
   for (let i = 0; i < 12; i++) {
