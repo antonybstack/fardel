@@ -293,3 +293,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Pull pad C (`HostileSpawnC*` 7,-3) Kind=3. persistMark `Leash OK` + `Brigand`. Dummy never aggro. Drop run stays past `HostileLeashRadius`.
 - **Seen in:** #455
 
+### 2026-09-08 — ve,nameplate — Brigand HP pip used the generic Dummy-green branch
+- **Cause:** `paintNameplate` treated `label === 'Dummy' || label === 'Hostile'` as first-class pips. Kind=3 already paints `Brigand` via `npcPlateName`, so the pip fell through to the generic green fill.
+- **Do this:** First-class pip for `Brigand` (violet). Kind=2 stays coral Hostile. Dummy stays parchment/green. Combat log already uses `npcPlateName`.
+- **Seen in:** #454
+

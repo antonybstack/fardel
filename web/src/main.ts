@@ -2893,7 +2893,8 @@ function paintNameplate(
     const fill = Math.max(0, Math.min(1, hpFrac));
     const isDummy = label === 'Dummy';
     const isHostile = label === 'Hostile';
-    if (isDummy || isHostile) {
+    const isBrigand = label === 'Brigand';
+    if (isDummy || isHostile || isBrigand) {
       ctx.fillStyle = 'rgba(8,10,12,0.92)';
       ctx.fillRect(bx, by, bw, bh);
       ctx.strokeStyle = selected
@@ -2901,17 +2902,23 @@ function paintNameplate(
         : 'rgba(0,0,0,0.95)';
       ctx.lineWidth = selected ? 4 : 3;
       ctx.strokeRect(bx, by, bw, bh);
-      ctx.fillStyle = isHostile
+      ctx.fillStyle = isDummy
         ? fill > 0.35
-          ? 'rgb(255,110,80)'
-          : fill > 0.15
-            ? 'rgb(245,150,50)'
-            : 'rgb(210,40,40)'
-        : fill > 0.35
           ? 'rgb(55,230,95)'
           : fill > 0.15
             ? 'rgb(245,180,40)'
-            : 'rgb(235,55,50)';
+            : 'rgb(235,55,50)'
+        : isBrigand
+          ? fill > 0.35
+            ? 'rgb(196,130,255)'
+            : fill > 0.15
+              ? 'rgb(220,150,90)'
+              : 'rgb(210,40,40)'
+          : fill > 0.35
+            ? 'rgb(255,110,80)'
+            : fill > 0.15
+              ? 'rgb(245,150,50)'
+              : 'rgb(210,40,40)';
       ctx.fillRect(bx + 3, by + 3, (bw - 6) * fill, bh - 6);
     } else {
       ctx.fillStyle = 'rgba(12,12,14,0.85)';
@@ -5940,6 +5947,7 @@ async function main(): Promise<void> {
         veFollow === 'hostile-body' ||
         veFollow === 'hostile-read' ||
         veFollow === 'hostile-types' ||
+        veFollow === 'brigand-plate' ||
         veFollow === 'brigand-body'
       ) {
         // Dummy (5,0) + Kind=2 (3,7)/(-7,3) + Kind=3 (7,-3) in one shot.
@@ -6202,6 +6210,7 @@ async function main(): Promise<void> {
         veFollow !== 'tab-hostile' &&
         veFollow !== 'hostile-read' &&
         veFollow !== 'hostile-types' &&
+        veFollow !== 'brigand-plate' &&
         veFollow !== 'brigand-body' &&
         veFollow !== 'kick' &&
         veFollow !== 'stun' &&
@@ -10602,6 +10611,100 @@ async function main(): Promise<void> {
       window.setTimeout(waitTypes, 200);
     };
     window.setTimeout(waitTypes, 500);
+  }
+
+  // ?ve=brigand-plate — Kind=2 Hostile + Kind=3 Brigand plates + combat log (#454).
+  if (ve === 'brigand-plate') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'brigand-plate') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE brigand-plate: waiting for both kinds…';
+    let ticks = 0;
+    let sparkedB = false;
+    let sparkedH = false;
+    let lastCast = 0;
+    const waitP = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      syncNpcMeshes(npcs);
+      const h = hostiles[0];
+      const b = brigands[0];
+      const hMesh = h ? npcMeshes.get(h.npcId.toString()) : undefined;
+      const bMesh = b ? npcMeshes.get(b.npcId.toString()) : undefined;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const hLabel = hMesh?.nameplate?.label ?? '';
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const platesOn =
+        !!(hMesh?.nameplate && hMesh.nameplate.mesh.isEnabled()) &&
+        !!(bMesh?.nameplate && bMesh.nameplate.mesh.isEnabled()) &&
+        !!(dMesh?.nameplate && dMesh.nameplate.mesh.isEnabled());
+      const logText = document.getElementById('combatLogLines')?.textContent ?? '';
+      const logBoth = /Brigand/.test(logText) && /Hostile/.test(logText);
+      if (
+        latestStatus.state === 'connected' &&
+        platesOn &&
+        hLabel === 'Hostile' &&
+        bLabel === 'Brigand' &&
+        dLabel === 'Dummy' &&
+        logBoth
+      ) {
+        if (b) {
+          selectedTargetId = b.npcId;
+          net.setTarget(b.npcId);
+          updateTargetFrame(b);
+        }
+        if (mark) {
+          mark.textContent =
+            'Brigand-plate OK · Hostile coral · Brigand violet · Dummy parchment · log both · #454';
+        }
+        return;
+      }
+      const gcd = gcdRemainingMs(net.getCombat());
+      const now = Date.now();
+      if (
+        latestStatus.state === 'connected' &&
+        b &&
+        h &&
+        dummy &&
+        gcd <= 0 &&
+        now - lastCast >= GCD_MS + 80
+      ) {
+        if (!sparkedB) {
+          selectedTargetId = b.npcId;
+          net.setTarget(b.npcId);
+          net.cast(SPELL_SPARK);
+          lastCast = now;
+          sparkedB = true;
+        } else if (!sparkedH) {
+          selectedTargetId = h.npcId;
+          net.setTarget(h.npcId);
+          net.cast(SPELL_SPARK);
+          lastCast = now;
+          sparkedH = true;
+        }
+      }
+      if (mark) {
+        mark.textContent =
+          `VE brigand-plate: H ${hLabel || 'no'} · B ${bLabel || 'no'} · D ${dLabel || 'no'} · log ${logBoth ? 'y' : 'n'}`;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          mark.textContent =
+            `Brigand-plate FAIL · H ${hLabel || 'no'} · B ${bLabel || 'no'} · D ${dLabel || 'no'} · log ${logBoth ? 'y' : 'n'} · #454`;
+        }
+        return;
+      }
+      window.setTimeout(waitP, 200);
+    };
+    window.setTimeout(waitP, 500);
   }
 
   // ?ve=brigand-body — Kind=2 crimson staff Idle_Weapon vs Kind=3 unarmed Idle (#428).
