@@ -77,3 +77,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Local avatar presentation-lerped 20 Hz XZ (up to 50 ms plus a slow frame). `ArcRotateCamera.setTarget` every follow frame rebuilds alpha/beta. Unique GLTF heroes at 5–7× with ALPHATEST on every pack leaf + 80 understory clones melted fillrate.
 - **Do this:** Snap local grounded XZ. Mutate `camera.target` in place (do not `setTarget` on the play follow). ALPHATEST on hero canopies only; cap unique pack understory clones (~24). Do not lerp the local walker.
 - **Seen in:** #315
+
+### 2026-09-08 — humanoid,interp — remote Walk restarts every 20 Hz snapshot
+- **Cause:** Grounded `advancePoseInterp` parks at `u=1` between snapshots. Frame-to-frame `hypot(dx,dz)/dt` on `samplePoseInterp` is 0 most frames, so `setHumanoidMoving(false)` stops Walk and restarts it from frame 0 on the next snap.
+- **Do this:** Drive remote Walk from `PoseInterp` `vx,vz` while `u<1`, with ~150ms hold. Do not use parked sample deltas. `?ve=remote-walk` needs a moving other identity (`tools/SecondClient`); local `sendMove` does not create a remote XZ delta.
+- **Seen in:** #313 / #267
