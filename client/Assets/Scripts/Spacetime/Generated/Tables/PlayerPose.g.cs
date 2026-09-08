@@ -48,6 +48,8 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<PlayerPose, int> ChunkZ { get; }
         public global::SpacetimeDB.Col<PlayerPose, int> InterestChunkX { get; }
         public global::SpacetimeDB.Col<PlayerPose, int> InterestChunkZ { get; }
+        public global::SpacetimeDB.Col<PlayerPose, float> VelY { get; }
+        public global::SpacetimeDB.Col<PlayerPose, long> LastGroundedMicros { get; }
 
         public PlayerPoseCols(string tableName)
         {
@@ -60,6 +62,8 @@ namespace SpacetimeDB.Types
             ChunkZ = new global::SpacetimeDB.Col<PlayerPose, int>(tableName, "chunk_z");
             InterestChunkX = new global::SpacetimeDB.Col<PlayerPose, int>(tableName, "interest_chunk_x");
             InterestChunkZ = new global::SpacetimeDB.Col<PlayerPose, int>(tableName, "interest_chunk_z");
+            VelY = new global::SpacetimeDB.Col<PlayerPose, float>(tableName, "vel_y");
+            LastGroundedMicros = new global::SpacetimeDB.Col<PlayerPose, long>(tableName, "last_grounded_micros");
         }
     }
 

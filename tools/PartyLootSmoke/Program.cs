@@ -271,7 +271,7 @@ static async Task WalkNear(DbConnection conn, Identity id, float tx, float tz)
         {
             return;
         }
-        conn.Reducers.Move(dx, dz);
+        conn.Reducers.Move(dx, dz, false);
         await DelayPumpOne(conn, 40);
     }
 }
@@ -291,7 +291,7 @@ static async Task WalkTo(DbConnection conn, Identity id, float tx, float tz)
         var dist = MathF.Sqrt(dx * dx + dz * dz);
         if (dist < 0.5f) return;
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        conn.Reducers.Move(dx * scale, dz * scale);
+        conn.Reducers.Move(dx * scale, dz * scale, false);
         await DelayPumpOne(conn, 16);
     }
 }

@@ -153,7 +153,7 @@ try
 
     var poseA = conn.Db.PlayerPose.Identity.Find(id)!;
     var wish = Movement.MaxStepMeters * 1.5f;
-    conn.Reducers.Move(wish, 0f);
+    conn.Reducers.Move(wish, 0f, false);
     await DelayPump(conn, 80);
     var poseB = conn.Db.PlayerPose.Identity.Find(id)!;
     var baseDelta = poseB.X - poseA.X;
@@ -180,7 +180,7 @@ try
     Console.WriteLine($"UseYardTonic OK expires micros={afterUse.TonicExpiresAt.MicrosecondsSinceUnixEpoch}");
 
     var poseC = conn.Db.PlayerPose.Identity.Find(id)!;
-    conn.Reducers.Move(wish, 0f);
+    conn.Reducers.Move(wish, 0f, false);
     await DelayPump(conn, 80);
     var poseD = conn.Db.PlayerPose.Identity.Find(id)!;
     var buffDelta = poseD.X - poseC.X;
@@ -264,7 +264,7 @@ static async Task MoveTo(DbConnection conn, Identity id, float x, float z)
         var dx = x - p.X;
         var dz = z - p.Z;
         if (dx * dx + dz * dz < 0.05f) break;
-        conn.Reducers.Move(dx, dz);
+        conn.Reducers.Move(dx, dz, false);
         await DelayPump(conn, 40);
     }
     await PumpUntil(() =>

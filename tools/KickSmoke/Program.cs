@@ -231,7 +231,7 @@ static async Task MoveTo(DbConnection conn, Identity id, float x, float z, DbCon
         var dist = MathF.Sqrt(dx * dx + dz * dz);
         if (dist < 0.25f) return;
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        conn.Reducers.Move(dx * scale, dz * scale);
+        conn.Reducers.Move(dx * scale, dz * scale, false);
         await DelayPumpBoth(conn, other, 50);
     }
     Fail($"MoveTo timeout ({x},{z})");

@@ -216,7 +216,7 @@ static async Task MoveTo(DbConnection mover, Identity id, float tx, float tz, Db
         if (dist < 0.5f) return;
 
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        mover.Reducers.Move(dx * scale, dz * scale);
+        mover.Reducers.Move(dx * scale, dz * scale, false);
         await DelayPumpBoth(mover, other, 16);
     }
 

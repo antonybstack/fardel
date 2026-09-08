@@ -76,7 +76,7 @@ try
     {
         var p = conn.Db.PlayerPose.Identity.Find(identity)!;
         if (p.X >= 32.1f) break;
-        conn.Reducers.Move(Movement.MaxStepMeters, 0f);
+        conn.Reducers.Move(Movement.MaxStepMeters, 0f, false);
         await DelayPump(conn, 20);
     }
 
@@ -92,7 +92,7 @@ try
     {
         var p = conn.Db.PlayerPose.Identity.Find(identity)!;
         if (p.X >= 34.5f) break;
-        conn.Reducers.Move(Movement.MaxStepMeters, 0f);
+        conn.Reducers.Move(Movement.MaxStepMeters, 0f, false);
         await DelayPump(conn, 20);
     }
 

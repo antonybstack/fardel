@@ -209,7 +209,7 @@ static async Task ExpectMoveFail(DbConnection conn, float dx, float dz, string n
 {
     string? fail = null;
     var tcs = new TaskCompletionSource();
-    void OnMove(ReducerEventContext ctx, float _dx, float _dz)
+    void OnMove(ReducerEventContext ctx, float _dx, float _dz, bool _jump)
     {
         switch (ctx.Event.Status)
         {
@@ -219,7 +219,7 @@ static async Task ExpectMoveFail(DbConnection conn, float dx, float dz, string n
         }
     }
     conn.Reducers.OnMove += OnMove;
-    try { conn.Reducers.Move(dx, dz); await Pump(tcs.Task, timeoutMs, conn, "move fail " + label); }
+    try { conn.Reducers.Move(dx, dz, false); await Pump(tcs.Task, timeoutMs, conn, "move fail " + label); }
     finally { conn.Reducers.OnMove -= OnMove; }
     if (string.IsNullOrEmpty(fail) || fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
     {
@@ -289,7 +289,7 @@ static async Task MoveTo(DbConnection conn, Identity id, float x, float z, DbCon
         var dist = MathF.Sqrt(dx * dx + dz * dz);
         if (dist < 0.25f) return;
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        conn.Reducers.Move(dx * scale, dz * scale);
+        conn.Reducers.Move(dx * scale, dz * scale, false);
         await DelayPumpBoth(conn, other, 50);
     }
     Fail($"MoveTo timeout ({x},{z})");

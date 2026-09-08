@@ -57,12 +57,21 @@ dotnet run --project tools/ConnectSmoke
 
 Expect: `OK: connected identity …`. Smokes compile generated C# under `client/Assets/Scripts/Spacetime/Generated/` (bindings only; full Unity client is on `checkpoint/unity-webgl`).
 
-Regenerate C# bindings if the module schema changes:
+Regenerate C# bindings if the module schema changes (**commit the Generated/ diff** — do not leave seats on stale 2-arg `Move.g.cs`; see #118):
 
 ```bash
 spacetime generate --lang csharp \
   --out-dir client/Assets/Scripts/Spacetime/Generated \
   --module-path server/spacetimedb
+```
+
+**Order / Move.compat footgun (#130):** run `spacetime generate --lang csharp` **first**. Only after `Move.g.cs` is 3-arg (`Move(dx, dz, jump)`) may you keep an optional seat-local `Move.compat.cs` 2-arg → `jump: false` overload. If tip still has 2-arg `Move.g.cs`, a compat file causes **CS0111** and wipes the whole smoke matrix. Once 3-arg bindings are committed, **delete** any local `Move.compat.cs` (call sites should pass `jump:` / `false` explicitly).
+
+Arity / cut preflight (#119 / #130):
+
+```bash
+./tools/scripts/check-move-bindings-arity.sh
+./tools/scripts/run-smoke-matrix.sh   # fail-fast on compile errors; refuses Move.compat + 2-arg Move.g.cs
 ```
 
 ## Web client (Babylon 9)

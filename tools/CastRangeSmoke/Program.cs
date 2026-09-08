@@ -143,7 +143,7 @@ static async Task MoveToward(DbConnection conn, Identity id, float tx, float tz)
         var dist = MathF.Sqrt(dx * dx + dz * dz);
         if (dist <= 0.35f) break;
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        conn.Reducers.Move(dx * scale, dz * scale);
+        conn.Reducers.Move(dx * scale, dz * scale, false);
         await DelayPump(conn, 25);
     }
     await DelayPump(conn, 80);

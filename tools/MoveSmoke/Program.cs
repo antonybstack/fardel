@@ -75,7 +75,7 @@ try
     Console.WriteLine($"spawn pose ({startX}, {startZ}) chunk=({pose.ChunkX},{pose.ChunkZ})");
 
     // Oversized wish step — server must clamp
-    conn.Reducers.Move(10f, 0f);
+    conn.Reducers.Move(10f, 0f, false);
 
     if (!await WaitTick(moved.Task, timeoutMs, conn, "move"))
     {
