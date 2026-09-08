@@ -310,6 +310,14 @@ let veHudLayoutLock = false;
 /** VE lock: hold resting chrome for ?ve=rest-chrome (freeze enter state, no auto-exit). */
 let veRestChromeLock = false;
 
+/** VE lock: hold left-rest chrome for ?ve=rest-exit (freeze exit badge + toast). */
+let veRestExitLock = false;
+
+/** Client rest chrome mode — enter persists until WASD/cast (#133). */
+let restChromeMode: 'off' | 'enter' | 'exit' = 'off';
+/** Why the last rest exit happened (status / badge). */
+let restLeaveReason: 'move' | 'cast' | null = null;
+
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
   gcdMs: number;
@@ -338,7 +346,7 @@ let veRmbLookLock = false;
 /** Client-only Rest enter/exit chrome on #selfFrame (not a server channel). */
 let restExitTimer: number | null = null;
 
-function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
+function setRestingState(mode: 'off' | 'enter' | 'exit', reason?: 'move' | 'cast'): void {
   const frame = document.getElementById('selfFrame');
   const badge = document.getElementById('sfRest');
   if (!frame || !badge) return;
@@ -346,8 +354,10 @@ function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
     window.clearTimeout(restExitTimer);
     restExitTimer = null;
   }
+  restChromeMode = mode;
+  restLeaveReason = mode === 'exit' ? (reason ?? null) : null;
   if (mode === 'off') {
-    frame.classList.remove('resting');
+    frame.classList.remove('resting', 'rest-exit');
     badge.classList.add('hidden');
     badge.classList.remove('exiting');
     badge.textContent = 'Resting…';
@@ -355,21 +365,40 @@ function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
   }
   if (mode === 'enter') {
     frame.classList.add('resting');
+    frame.classList.remove('rest-exit');
     badge.classList.remove('hidden', 'exiting');
     badge.textContent = 'Resting…';
-    // Auto-exit chrome after a short settle so enter vs exit is readable.
-    // Skip auto-exit if VE rest-chrome lock is active (freeze for screenshot).
-    if (!veRestChromeLock) {
-      restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
-    }
+    // Stay in enter until WASD/cast actually leaves rest (#133). No timer auto-exit.
     return;
   }
-  // exit
+  // exit — move/cast interrupt vs already-full complete.
   frame.classList.remove('resting');
+  frame.classList.add('rest-exit');
   badge.classList.remove('hidden');
   badge.classList.add('exiting');
-  badge.textContent = 'Rest complete';
-  restExitTimer = window.setTimeout(() => setRestingState('off'), 1600);
+  badge.textContent =
+    reason === 'move'
+      ? 'Left rest · move'
+      : reason === 'cast'
+        ? 'Left rest · cast'
+        : 'Rest complete';
+  // Existing exit-badge fade only (not a new rest timer). Freeze for VE locks.
+  if (!veRestChromeLock && !veRestExitLock) {
+    restExitTimer = window.setTimeout(() => setRestingState('off'), 1600);
+  }
+}
+
+/** Drop rest chrome when locomotion or a real cast starts. Idempotent. */
+function leaveRestIfActive(reason: 'move' | 'cast'): void {
+  if (veRestChromeLock) return;
+  if (restChromeMode !== 'enter') return;
+  const bit = reason === 'move' ? 'Left rest · moved' : 'Left rest · cast';
+  const veNow = new URLSearchParams(window.location.search).get('ve');
+  const ttl = veNow === 'rest-exit' ? TOAST_VE_TTL_MS : TOAST_TTL_MS;
+  dismissSystemToasts('rest');
+  pushSystemToast('rest', bit, ttl);
+  pushCombatLog('rest', bit);
+  setRestingState('exit', reason);
 }
 
 /** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana/empty affordances. */
@@ -1765,6 +1794,16 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
     const poseLine = s.pose
       ? `pos: (${s.pose.x.toFixed(2)}, ${s.pose.y.toFixed(2)}, ${s.pose.z.toFixed(2)})`
       : 'pos: —';
+    const restLine =
+      restChromeMode === 'enter'
+        ? 'rest: resting · WASD/cast leaves'
+        : restChromeMode === 'exit' && restLeaveReason === 'move'
+          ? 'rest: left rest · moved'
+          : restChromeMode === 'exit' && restLeaveReason === 'cast'
+            ? 'rest: left rest · cast'
+            : restChromeMode === 'exit'
+              ? 'rest: rest complete'
+              : 'rest: —';
     const tgt = s.targetNpc;
     const targetLine = tgt
       ? `target: ${tgt.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC'} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
@@ -1840,6 +1879,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       xpLine,
       persistLine,
       poseLine,
+      restLine,
       remotesLine,
       partyLine,
       aoiLine,
@@ -2216,11 +2256,13 @@ function bindInput(opts: {
     if (e.repeat) return;
     if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
       keys.add(k);
+      leaveRestIfActive('move');
       e.preventDefault();
       return;
     }
     if (k === ' ') {
       keys.add(' ');
+      leaveRestIfActive('move');
       e.preventDefault();
       return;
     }
@@ -3482,6 +3524,7 @@ async function main(): Promise<void> {
         castUntilMs = 0;
       }
       lastCastSpell = spellId;
+      leaveRestIfActive('cast');
       net.cast(spellId);
       {
         const spellName =
@@ -4471,6 +4514,9 @@ async function main(): Promise<void> {
             dz *= s;
           }
           if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump || isAirborne) {
+            if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump) {
+              leaveRestIfActive('move');
+            }
             net.sendMove(dx, dz, wish.jump);
           }
         }
@@ -5085,7 +5131,8 @@ async function main(): Promise<void> {
         veFollow !== 'vendor-interact' &&
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
-        veFollow !== 'loot-f'
+        veFollow !== 'loot-f' &&
+        veFollow !== 'rest-exit'
       ) {
         const follow = player.position.add(new Vector3(0, 1.35 + jumpCamDipY, 0));
         const radius = camera.radius;
@@ -12328,7 +12375,128 @@ async function main(): Promise<void> {
     window.setTimeout(waitRestChrome, 700);
   }
 
+  // ?ve=rest-exit — enter rest chrome, WASD/sendMove leaves; toast + badge persist (#133).
+  if (ve === 'rest-exit') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+    veRestExitLock = true;
+  }
+  if (net && ve === 'rest-exit') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rest-exit: waiting for Connected…';
+    let ticks = 0;
+    let phase: 'enter' | 'move' | 'done' = 'enter';
+    let holding = false;
+    const pinSelfFrame = (): void => {
+      const chatPanel = document.getElementById('chatPanel');
+      if (chatPanel) chatPanel.style.display = 'none';
+      const selfFrame = document.getElementById('selfFrame');
+      if (selfFrame) {
+        selfFrame.classList.remove('hidden');
+        selfFrame.style.cssText =
+          'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
+      }
+    };
+    const waitRestExit = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE rest-exit: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRestExit, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE rest-exit: equipping staff…';
+        window.setTimeout(waitRestExit, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+      pinSelfFrame();
 
+      if (phase === 'enter') {
+        setRestingState('enter');
+        pinSelfFrame();
+        const badge = document.getElementById('sfRest');
+        if (badge) {
+          badge.classList.remove('hidden', 'exiting');
+          badge.textContent = 'Resting…';
+        }
+        phase = 'move';
+        if (mark) mark.textContent = 'VE rest-exit: resting · sending move…';
+        window.setTimeout(waitRestExit, 280);
+        return;
+      }
+
+      if (phase === 'move') {
+        keys.add('w');
+        net.sendMove(0.45, 0, false);
+        leaveRestIfActive('move');
+        keys.delete('w');
+        dismissSystemToasts('jump', 'connected', 'loot', 'vendor');
+        pinSelfFrame();
+        const badge = document.getElementById('sfRest');
+        if (badge) {
+          badge.classList.remove('hidden');
+          badge.classList.add('exiting');
+          badge.textContent = 'Left rest · move';
+        }
+        const sf = document.getElementById('selfFrame');
+        if (sf) {
+          sf.classList.remove('resting');
+          sf.classList.add('rest-exit');
+        }
+        const kinds = toastKindsPresent();
+        const toastText = document.getElementById('toastStack')?.textContent ?? '';
+        const toastOk = kinds.has('rest') && /left rest/i.test(toastText);
+        const badgeOk =
+          !!badge &&
+          !badge.classList.contains('hidden') &&
+          /left rest/i.test(badge.textContent ?? '');
+        if (toastOk && badgeOk) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = 'Rest-exit OK · left rest on move · #133';
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE rest-exit: toast ${toastOk ? 'y' : 'n'} · badge ${badgeOk ? 'y' : 'n'}`;
+        }
+        if (!holding) {
+          holding = true;
+          let reapply = 0;
+          const hold = window.setInterval(() => {
+            pinSelfFrame();
+            const b = document.getElementById('sfRest');
+            if (b) {
+              b.classList.remove('hidden');
+              b.classList.add('exiting');
+              b.textContent = 'Left rest · move';
+            }
+            const frame = document.getElementById('selfFrame');
+            if (frame) {
+              frame.classList.remove('resting');
+              frame.classList.add('rest-exit');
+            }
+            dismissSystemToasts('jump', 'connected', 'loot', 'vendor');
+            if (!toastKindsPresent().has('rest')) {
+              pushSystemToast('rest', 'Left rest · moved', TOAST_VE_TTL_MS);
+            }
+            reapply += 1;
+            if (reapply >= 40) window.clearInterval(hold);
+          }, 250);
+        }
+        if (phase !== 'done' && ticks < 80) {
+          window.setTimeout(waitRestExit, 200);
+        }
+        return;
+      }
+    };
+    window.setTimeout(waitRestExit, 600);
+  }
 
   // ?ve=floaters / floater-read post-connect: early pre-connect seed owns the mark/stack.
   if (ve === 'floaters') {
