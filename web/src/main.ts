@@ -9708,7 +9708,7 @@ async function main(): Promise<void> {
       if (ready && lineCount >= 6) {
         if (mark) {
           mark.textContent =
-            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog';
+            'Combat-log-read OK · hit+heal+kill+system · dark plate · #102 fog';
         }
         const hold = () => {
           // Keep strip populated for screenshot without changing filter behavior.
@@ -9728,7 +9728,7 @@ async function main(): Promise<void> {
         seedCombatLogRead();
         if (mark) {
           mark.textContent =
-            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog · seeded';
+            'Combat-log-read OK · hit+heal+kill+system · dark plate · #102 fog · seeded';
         }
         return;
       }
