@@ -1473,21 +1473,29 @@ function drawMinimap(opts: {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = 160;
+  const h = 160;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const bw = Math.round(w * dpr);
+  const bh = Math.round(h * dpr);
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const cx = w / 2;
   const cy = h / 2;
   const scale = (Math.min(w, h) * 0.42) / MINIMAP_RANGE_M;
   const maxR = Math.min(w, h) * 0.44;
 
   ctx.clearRect(0, 0, w, h);
-  // Disc background
-  ctx.fillStyle = 'rgba(8, 12, 24, 0.55)';
+  // Opaque disc so the moving 3D yard cannot flash through pip / N.
+  ctx.fillStyle = 'rgba(8, 12, 24, 0.88)';
   ctx.beginPath();
   ctx.arc(cx, cy, Math.min(w, h) * 0.46, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 1.2;
   ctx.stroke();
 
   // Range ring
@@ -1495,18 +1503,6 @@ function drawMinimap(opts: {
   ctx.beginPath();
   ctx.arc(cx, cy, MINIMAP_RANGE_M * scale, 0, Math.PI * 2);
   ctx.stroke();
-
-  // Compass N with shadow for readability
-  ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  // Dark outline
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-  ctx.lineWidth = 3.0;
-  ctx.strokeText('N', cx, 12);
-  // Bright fill
-  ctx.fillStyle = '#f0f4fc';
-  ctx.fillText('N', cx, 12);
 
   const originX = opts.local?.x ?? 0;
   const originZ = opts.local?.z ?? 0;
@@ -1610,19 +1606,34 @@ function drawMinimap(opts: {
       ctx.fill();
     }
   }
-  // Local on top
-  plot(originX, originZ, '#6aa2ff', 4.2);
-  // Dark outline ring for contrast
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
-  ctx.lineWidth = 2.4;
+  // Local pip on top — larger + halo + pulse so WASD crowd blips cannot swallow it (#164).
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220);
+  const pipR = 5.8;
+  const ringR = pipR + 3.4 + pulse * 2.8;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
   ctx.beginPath();
-  ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+  ctx.arc(cx, cy, pipR + 3.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.38 + 0.5 * pulse;
+  ctx.strokeStyle = '#f4f8ff';
+  ctx.lineWidth = 2.1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
   ctx.stroke();
-  // Bright white ring
-  ctx.strokeStyle = 'rgba(232,238,252,0.85)';
-  ctx.lineWidth = 1.2;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#8ec0ff';
   ctx.beginPath();
-  ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+  ctx.arc(cx, cy, pipR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f4f8ff';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.96)';
+  ctx.lineWidth = 1.7;
+  ctx.beginPath();
+  ctx.arc(cx, cy, pipR + 0.35, 0, Math.PI * 2);
   ctx.stroke();
 
   // Legend when party mates are on the map (You + Party).
@@ -1648,6 +1659,28 @@ function drawMinimap(opts: {
     ctx.fillStyle = '#c8d6f0';
     ctx.fillText('Party', 60, h - 12);
   }
+
+  // Compass N last so moving rim blips cannot cover it (#164).
+  const nPulse = 0.78 + 0.22 * pulse;
+  ctx.globalAlpha = nPulse;
+  ctx.fillStyle = 'rgba(4, 8, 16, 0.94)';
+  ctx.fillRect(cx - 12, 1, 24, 26);
+  ctx.fillStyle = '#ffe28a';
+  ctx.beginPath();
+  ctx.moveTo(cx, 3.5);
+  ctx.lineTo(cx + 5.4, 12);
+  ctx.lineTo(cx - 5.4, 12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 13px ui-sans-serif, system-ui, sans-serif';
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.95)';
+  ctx.lineWidth = 4.2;
+  ctx.strokeText('N', cx, 19);
+  ctx.fillStyle = '#ffe28a';
+  ctx.fillText('N', cx, 19);
+  ctx.globalAlpha = 1;
 }
 
 function formatLoadout(ch: NonNullable<Extract<ConnectionStatus, { state: 'connected' }>['character']>): string {
@@ -4852,7 +4885,12 @@ async function main(): Promise<void> {
     // Skip follow for framed VE shots so the subject stays on-camera.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
-      if (
+      if (veFollow === 'minimap-pip') {
+        camera.alpha = Math.PI / 2.45;
+        camera.beta = Math.PI / 3.3;
+        camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
+        camera.radius = 22;
+      } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
         veFollow !== 'vendor-interact' &&
@@ -6602,6 +6640,70 @@ async function main(): Promise<void> {
       window.setTimeout(waitMinimapRead, 200);
     };
     window.setTimeout(waitMinimapRead, 800);
+  }
+
+  // ?ve=minimap-pip — WASD slide so self pip + N stay readable over moving blips (#164).
+  if (ve === 'minimap-pip') {
+    camera.detachControl();
+    camera.radius = 22;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.3;
+  }
+  if (net && ve === 'minimap-pip') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE minimap-pip: waiting for Connected + dummy…';
+    let ticks = 0;
+    let ok = false;
+    const waitPip = () => {
+      if (!net) return;
+      ticks += 1;
+      net.seedCrowdProxies();
+      net.ensureTrainingDummy();
+      if (ticks <= 22) keys.add('w');
+      else keys.delete('w');
+      const st = latestStatus;
+      const local = net.getLocalPose();
+      const proxies = net.getProxies();
+      const near = proxies.filter((p) => !p.far);
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      syncProxyMeshes(proxies);
+      syncNpcMeshes(npcs);
+      camera.radius = 22;
+      camera.alpha = Math.PI / 2.45;
+      camera.beta = Math.PI / 3.3;
+      if (local) {
+        camera.setTarget(new Vector3(local.x, 1.15, local.z));
+      }
+      drawMinimap({
+        local: local ?? { x: player.position.x, z: player.position.z },
+        remotes: net.getRemotes(),
+        npcs,
+        proxies,
+      });
+      const canvasEl = document.getElementById('minimap');
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        canvasEl &&
+        ticks >= 12
+      ) {
+        ok = true;
+        if (mark) {
+          mark.textContent =
+            `Minimap pip OK · N + self pip readable in motion · #164`;
+        }
+      } else if (!ok && mark && st.state === 'connected') {
+        mark.textContent =
+          `VE minimap-pip: Connected · proxies ${proxies.length} near ${near.length} · dummy ${dummy ? 'yes' : 'no'} · tick ${ticks}`;
+      }
+      if (ticks > 200 && !ok) {
+        if (mark) mark.textContent = 'VE minimap-pip: timed out waiting for dummy + motion';
+        return;
+      }
+      if (ticks < 240) window.setTimeout(waitPip, 180);
+    };
+    window.setTimeout(waitPip, 700);
   }
 
   // ?ve=nameplates — You + Dummy (+ remotes) billboard labels; dummy HP pip.
