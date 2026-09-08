@@ -2,7 +2,7 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// Mana pool: Spark/Emberbolt spend; Insufficient mana reject; Rest restores; lazy regen.
+// Mana pool: Spark/Emberbolt spend; lazy TickManaRegen without Rest; Insufficient mana reject; Rest restores.
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
@@ -105,8 +105,56 @@ try
         return;
     }
     Console.WriteLine($"Emberbolt spend OK {beforeEmber}->{afterEmber.Mana} (drop {emberDrop})");
-    // Let windup finish so casting gate is clean.
-    await DelayPump(conn, Combat.EmberboltCastMs + Combat.GcdMs + 80);
+
+    // --- Lazy TickManaRegen without Rest ---
+    // Wall time does not mutate Character until a committed Cast/Rest. A thrown Cast
+    // (OOM) rolls back TickManaRegen, so flush with a committed Spark and add back
+    // SparkManaCost. Wait also covers Emberbolt windup + GCD. No Rest / ManaRestore.
+    var manaBeforeRegen = afterEmber.Mana;
+    if (manaBeforeRegen >= afterEmber.MaxMana)
+    {
+        Fail("expected missing mana after spend so lazy regen is observable");
+        return;
+    }
+    await DelayPump(conn, Combat.ManaRegenIntervalMs * 2 + 250);
+    await PumpUntil(() =>
+        conn.Db.PlayerCombat.Identity.Find(id) is { CastingSpellId: 0 },
+        timeoutMs, conn, "ember land before regen");
+    var waitedMana = conn.Db.Character.Identity.Find(id)!.Mana;
+    if (waitedMana != manaBeforeRegen)
+    {
+        Fail($"mana changed during wait without Cast/Rest ({manaBeforeRegen}->{waitedMana}); expected lazy");
+        return;
+    }
+    conn.Reducers.EnsureTrainingDummy();
+    await PumpUntil(() => FindDummy(conn) is { Hp: > 0 }, timeoutMs, conn, "dummy lazy regen");
+    dummy = FindDummy(conn)!;
+    conn.Reducers.SetTarget(dummy.NpcId);
+    await PumpUntil(() =>
+        conn.Db.PlayerCombat.Identity.Find(id) is { } cc && cc.TargetNpcId == dummy.NpcId,
+        timeoutMs, conn, "target lazy regen");
+    if (conn.Db.Character.Identity.Find(id) is { Hp: <= 0 })
+    {
+        Fail("unexpected death before lazy regen Spark");
+        return;
+    }
+    conn.Reducers.Cast(Combat.SpellSpark);
+    await PumpUntil(() =>
+    {
+        var ch = conn.Db.Character.Identity.Find(id);
+        return ch is not null && ch.Mana != manaBeforeRegen;
+    }, timeoutMs, conn, "lazy regen spark");
+    var afterRegen = conn.Db.Character.Identity.Find(id)!;
+    var regenGain = afterRegen.Mana + Combat.SparkManaCost - manaBeforeRegen;
+    var room = afterRegen.MaxMana - manaBeforeRegen;
+    var minGain = Math.Min(Combat.ManaRegenPerTick, Math.Max(0, room));
+    var maxGain = Math.Min(Combat.ManaRegenPerTick * 3, Math.Max(0, room));
+    if (regenGain < minGain || regenGain > maxGain)
+    {
+        Fail($"expected lazy TickManaRegen ~{Combat.ManaRegenPerTick}/tick without Rest, got +{regenGain} ({manaBeforeRegen}->{afterRegen.Mana} after Spark cost {Combat.SparkManaCost})");
+        return;
+    }
+    Console.WriteLine($"lazy TickManaRegen OK +{regenGain} ({manaBeforeRegen}->{afterRegen.Mana} after Spark -{Combat.SparkManaCost}, no Rest)");
 
     // --- Drain with Emberbolt until mana < cost, then OOM reject (check OOM before Rest). ---
     // Sparks alone hit respawn (full mana) before OOM because thorns outpace Spark cost.
@@ -130,15 +178,8 @@ try
         var manaNow = chNow.Mana;
         Console.WriteLine($"drain loop mana={manaNow} hp={chNow.Hp} casts={drainCasts}");
 
-        // Prefer OOM proof over Rest top-up (Rest restores ManaRestore).
-        if (manaNow < Combat.EmberboltManaCost)
-        {
-            await ExpectCastFail(conn, Combat.SpellEmberbolt, "Insufficient mana", "oom ember");
-            rejectSeen = true;
-            break;
-        }
-
-        // Soft HP floor so the next Emberbolt thorns won't kill before OOM.
+        // Soft HP floor before a committed Emberbolt (thorns). Do this before the
+        // OOM probe: TickManaRegen may still afford Emberbolt when visible mana < cost.
         if (chNow.Hp <= Combat.DummyThornsDamage)
         {
             await DelayPump(conn, Rest.CombatLockMs + Rest.CooldownMs + 200);
@@ -148,7 +189,18 @@ try
             continue;
         }
 
-        conn.Reducers.Cast(Combat.SpellEmberbolt);
+        var drainFail = await CastOutcome(conn, Combat.SpellEmberbolt, "drain ember");
+        if (drainFail != null)
+        {
+            if (drainFail.IndexOf("Insufficient mana", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Console.WriteLine($"Cast reject OK (oom ember): {drainFail}");
+                rejectSeen = true;
+                break;
+            }
+            Fail($"unexpected Cast fail during drain: {drainFail}");
+            return;
+        }
         drainCasts++;
         await DelayPump(conn, Combat.EmberboltCastMs + 80);
     }
@@ -247,7 +299,7 @@ static async Task EnsureNearFullMana(DbConnection conn, Identity id)
     }
 }
 
-static async Task ExpectCastFail(DbConnection conn, int spellId, string needle, string label)
+static async Task<string?> CastOutcome(DbConnection conn, int spellId, string label)
 {
     string? fail = null;
     var tcs = new TaskCompletionSource();
@@ -260,7 +312,7 @@ static async Task ExpectCastFail(DbConnection conn, int spellId, string needle, 
                 tcs.TrySetResult();
                 break;
             case Status.Committed:
-                tcs.TrySetException(new Exception($"Cast committed when expecting fail ({label})"));
+                tcs.TrySetResult();
                 break;
             case Status.OutOfEnergy(_):
                 tcs.TrySetException(new Exception($"Cast out of energy ({label})"));
@@ -271,19 +323,13 @@ static async Task ExpectCastFail(DbConnection conn, int spellId, string needle, 
     try
     {
         conn.Reducers.Cast(spellId);
-        await Pump(tcs.Task, timeoutMs, conn, "cast fail " + label);
+        await Pump(tcs.Task, timeoutMs, conn, "cast " + label);
     }
     finally
     {
         conn.Reducers.OnCast -= OnCast;
     }
-    if (string.IsNullOrEmpty(fail) ||
-        fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
-    {
-        Fail($"expected '{needle}' on Cast ({label}), got: {fail ?? "(null)"}");
-        throw new Exception("cast fail mismatch");
-    }
-    Console.WriteLine($"Cast reject OK ({label}): {fail}");
+    return fail;
 }
 
 static Npc? FindDummy(DbConnection conn)
