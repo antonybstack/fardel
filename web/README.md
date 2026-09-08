@@ -82,6 +82,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=hostile-spawn` | Two yard hostiles as red capsules; dummy stays trainer (#354); HUD `Hostile spawn OK · n=2 · capsule · dummy trainer · #354` |
 | `?ve=leash` | Walk into aggro, hostile leaves pad, run out, it returns (#355); HUD `Leash OK · pulled · returned · #355`. `?ve=aggro` is #360. |
 | `?ve=auto-attack` | Pull pad A, HP drops on cadence, run out, HP stops (#356); HUD `Auto-attack OK · hp … · stopped · #356`. |
+| `?ve=hunt-loot` | Kill pad A from outside aggro, corpse ember_shard, F pickup (#357); HUD `Hunt-loot OK · corpse shard · F pickup · #357`. |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
 | `?ve=reticule` | Select Dummy; prove gold ring + overhead marker (`ve/babylon-reticule.png`); HUD `Reticule OK · … · gold ring+marker` |
 | `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |

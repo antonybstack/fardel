@@ -1469,6 +1469,7 @@ public static partial class Module
             ctx.Db.Character.Identity.Update(character);
             Log.Info($"Npc {row.NpcId} kind={row.Kind} killed by {caster}, xp={character.Xp} level={character.Level}");
             SharePartyKillXp(ctx, caster);
+            // Dummy + hostiles both drop ember_shard WorldLoot. Pickup is F. (#357)
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
             SharePartyLootDrop(ctx, caster, row.X, row.Y, row.Z);
         }
