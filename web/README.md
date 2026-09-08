@@ -69,6 +69,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 |---|---|
 | `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
 | `?ve=remote-sheathed` | Remote without staff: unarmed Idle (not Idle_Weapon + hidden stick) (#448); HUD `Remote sheathed OK · Idle · skinned 1`. `FARDEL_SECOND_SHEATH=1` on `tools/SecondClient`. |
+| `?ve=remote-sheathed-walk` | Unequipped remote Walk, not Idle_Weapon / hidden staff (#479); HUD `Walk OK · Walk · sheathed · skinned 1`. `FARDEL_SECOND_SHEATH_WALK=1` on `tools/SecondClient`. |
 | `?ve=remote-hop` | Remote airborne Idle_Weapon hold, no Walk, no squash (#449); HUD `Remote hop OK · Idle_Weapon · skinned 1`. `FARDEL_SECOND_HOP=1` on `tools/SecondClient`. |
 | `?ve=walk-stop` | Walk then release WASD: Idle, no leftover Walk stride (#450); HUD `Idle OK · Idle_Weapon · skinned 1 · walk-stop`. |
 | `?ve=remote-walk-stop` | Remote Walk then stand: Idle, no leftover stride (#478); HUD `Idle OK · Idle_Weapon · skinned 1 · remote-walk-stop`. `FARDEL_SECOND_WALK_STOP=1` on `tools/SecondClient`. |

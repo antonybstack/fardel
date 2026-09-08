@@ -74,8 +74,12 @@ try
         Environment.GetEnvironmentVariable("FARDEL_SECOND_WALK_STOP"),
         "1",
         StringComparison.OrdinalIgnoreCase);
+    var sheathWalk = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH_WALK"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
 
-    if (!sheath && conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+    if (!sheath && !sheathWalk && conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
     {
         conn.Reducers.EquipStaff();
         await Frame(conn, 200);
@@ -148,6 +152,72 @@ try
                 conn.Reducers.UnequipStaff();
             }
             await Frame(conn, 400);
+        }
+    }
+    if (sheathWalk)
+    {
+        // ?ve=remote-sheathed-walk: unequip and keep walking so the browser
+        // sees unarmed Walk (not Idle_Weapon + hidden stick). South-west of
+        // origin, outside AggroRadius 3.
+        var aliveGuardSw = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuardSw)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("sheath-walk: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: true })
+        {
+            conn.Reducers.UnequipStaff();
+            await Frame(conn, 200);
+        }
+        var sheathWalkPlus = true;
+        while (true)
+        {
+            var ch0 = conn.Db.Character.Identity.Find(identity);
+            if (ch0 is { Hp: <= 0 })
+            {
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch0 is { StaffEquipped: true })
+            {
+                conn.Reducers.UnequipStaff();
+                await Frame(conn, 150);
+            }
+            var destX = sheathWalkPlus ? -1.5f : -6.5f;
+            var destZ = -5f;
+            var walkGuardSw = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < walkGuardSw)
+            {
+                if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+                {
+                    await Frame(conn, 200);
+                    continue;
+                }
+                if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+                {
+                    await Frame(conn, 50);
+                    continue;
+                }
+                var dx = destX - cur.X;
+                var dz = destZ - cur.Z;
+                var dist = MathF.Sqrt(dx * dx + dz * dz);
+                if (dist < 0.4f)
+                {
+                    Console.WriteLine($"sheath-walk pad ({cur.X:F1}, {cur.Z:F1})");
+                    break;
+                }
+                var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+                conn.Reducers.Move(dx * scale, dz * scale, false);
+                await Frame(conn, 50);
+            }
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } swPose)
+            {
+                Console.WriteLine($"READY sheath-walk ({swPose.X:F2}, {swPose.Z:F2}) identity={identity}");
+            }
+            sheathWalkPlus = !sheathWalkPlus;
         }
     }
     if (walkStop)

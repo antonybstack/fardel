@@ -373,3 +373,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Arm Walk only on `hypot(step)>0.04`. Leave `step==0` re-syncs alone. Expire hold ~80 ms after the last walking snapshot. `setHumanoidMoving(false)` is Idle-first (#450). `?ve=remote-walk-stop` persistMark `/^Idle OK/` + skinned, not Walk. Hide You; do not fall back to a dead remote.
 - **Seen in:** #478
 
+### 2026-09-08 — humanoid,remote,staff — sheathed remotes Walk as Idle_Weapon with a hidden stick
+- **Cause:** Wizard.glb has `Walk` but no `Walk_Weapon`. `applyStaffClips` swapped Idle/Run only, so unequipped remotes could keep Idle_Weapon while XZ moved. `setHumanoidStaffEquipped` returned while Walk was playing without stopping Idle_Weapon.
+- **Do this:** Select unarmed Walk when `staffEquipped` is false. Stop Idle_Weapon on unequip even if Walk is playing. Staff mesh off. `?ve=remote-sheathed-walk` persistMark `/^Walk OK/` + `Walk` (no Weapon) + `sheathed` + skinned. Idle_Weapon / T-POSE on an empty-handed mover = fail.
+- **Seen in:** #479
+
