@@ -362,7 +362,7 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
  * Fog / sky lock (#270 E3.1). Sun/hemi stay on the #39 values (E3.8 may lift).
  *
  * | Param        | #39                         | #270                                      |
- * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 95                  |
+ * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 200 (#272 scale)    |
  * | fog color    | (0.34, 0.55, 0.7)           | unchanged                                 |
  * | clearColor   | (0.24, 0.36, 0.46)          | matches fogColor (was a horizon halo)     |
  * | sky          | 420-dome, fog on, 64px tex  | fog off, horizon = fogColor, 256px clamp  |
@@ -373,7 +373,10 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
  */
 const FOG_COLOR = new Color3(0.34, 0.55, 0.7);
 const FOG_START = 16;
-const FOG_END = 95;
+/** #272: 120 m pad is gone — fog must reach the larger forest, not clip at 95. */
+const FOG_END = 200;
+/** Grass plane extent (m). 120 was the toy disc. */
+const GROUND_EXTENT = 480;
 
 function fogCss(c: Color3): string {
   return `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
@@ -681,31 +684,33 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   }
   if (midTemplates.length === 0) return false;
 
-  // Quaternius trees are ~author-scale metres; scale up for "huge" clearing grandeur.
+  // #272: Quaternius author-scale is toy-yard; WoW/hordes read is player-tiny vs trunks.
+  // Heroes sit on the clearing rim so play-cam is not inside a canopy.
   const heroSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
-    { name: 'heroTreeNE', x: 22, z: -18, scale: 2.0, yaw: 0.4, ti: 0 },
-    { name: 'heroTreeNW', x: -24, z: -16, scale: 2.25, yaw: -0.6, ti: 1 },
-    { name: 'heroTreeSE', x: 18, z: 26, scale: 1.9, yaw: 1.1, ti: 2 % heroTemplates.length },
-    { name: 'heroTreeSW', x: -20, z: 22, scale: 2.1, yaw: 2.2, ti: 0 },
-    { name: 'heroTreeN', x: 4, z: -32, scale: 2.4, yaw: 0.2, ti: 1 % heroTemplates.length },
+    { name: 'heroTreeN', x: 6, z: -40, scale: 6.8, yaw: 0.18, ti: 1 },
+    { name: 'heroTreeNE', x: 34, z: -28, scale: 5.8, yaw: 0.45, ti: 0 },
+    { name: 'heroTreeNW', x: -36, z: -24, scale: 6.2, yaw: -0.55, ti: 1 },
+    { name: 'heroTreeSW', x: -32, z: 34, scale: 5.4, yaw: 2.15, ti: 0 },
+    { name: 'heroTreeSE', x: 30, z: 38, scale: 5.0, yaw: 1.05, ti: 2 },
+    { name: 'heroTreeW', x: -28, z: 6, scale: 4.8, yaw: -1.2, ti: 0 },
   ];
   for (const h of heroSpots) {
     const tmpl = heroTemplates[h.ti % heroTemplates.length]!;
     placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
   }
 
-  const ringCount = 28;
-  const innerR = 28;
-  const outerR = 52;
+  const ringCount = 36;
+  const innerR = 48;
+  const outerR = 110;
   for (let i = 0; i < ringCount; i++) {
     const a = (i / ringCount) * Math.PI * 2 + hash01(i * 3) * 0.35;
     const r = innerR + hash01(i * 7) * (outerR - innerR);
     // Keep south-east approach / path readable.
-    if (a > 0.15 && a < 0.55 && r < 34) continue;
+    if (a > 0.15 && a < 0.55 && r < 62) continue;
     const tmpl = midTemplates[i % midTemplates.length]!;
-    const s = 1.15 + hash01(i * 11) * 0.95;
+    const s = 2.4 + hash01(i * 11) * 1.6;
     // Variant personality: classic / taller / stubbier via Y scale.
-    const yMul = i % 3 === 1 ? 1.25 : i % 3 === 2 ? 0.82 : 1.0;
+    const yMul = i % 3 === 1 ? 1.28 : i % 3 === 2 ? 0.82 : 1.0;
     const clone = placeClone(
       tmpl,
       `midTree_${i}`,
@@ -717,11 +722,11 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     clone.scaling.y *= yMul;
   }
 
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 + 0.4;
-    const r = 55 + hash01(i * 19) * 18;
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2 + 0.4;
+    const r = 135 + hash01(i * 19) * 40;
     const tmpl = midTemplates[i % midTemplates.length]!;
-    const s = 0.85 + hash01(i * 23) * 0.55;
+    const s = 2.0 + hash01(i * 23) * 1.4;
     placeClone(
       tmpl,
       `farTree_${i}`,
@@ -750,9 +755,9 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   let underPlaced = 0;
   for (let i = 0; i < 28 && underTemplates.length > 0; i++) {
     const a = hash01(i * 41) * Math.PI * 2;
-    const r = 11 + hash01(i * 43) * 38;
-    if (r < 10) continue;
-    if (a > 0.15 && a < 0.55 && r < 22) continue; // path/clearing readable
+    const r = 14 + hash01(i * 43) * 90;
+    if (r < 12) continue;
+    if (a > 0.15 && a < 0.55 && r < 28) continue; // path/clearing readable
     const tmpl = underTemplates[i % underTemplates.length]!;
     const isRock = tmpl.name.includes('Rock') || (i % underTemplates.length) >= 4;
     const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.4 + hash01(i * 47) * 2.2;
@@ -800,12 +805,12 @@ function placeProceduralForest(scene: Scene): void {
   const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.16, 0.34, 0.16));
   const underMat = makeUnderstoryMat(scene, 'understoryMat', new Color3(0.2, 0.42, 0.16));
 
-  placeHeroTree(scene, 'heroElderN', 3, -34, 1.9, 0.18, trunkMatA, foliageB, 'landmark');
-  placeHeroTree(scene, 'heroElderSW', -22, 24, 1.7, 2.15, trunkMatB, foliageA, 'landmark');
-  placeHeroTree(scene, 'heroSentNE', 24, -17, 1.4, 0.45, trunkMatA, foliageA, 'sentinel');
-  placeHeroTree(scene, 'heroSentNW', -26, -15, 1.5, -0.55, trunkMatB, foliageB, 'sentinel');
-  placeHeroTree(scene, 'heroSentSE', 19, 27, 1.25, 1.05, trunkMatA, foliageC, 'standard');
-  placeHeroTree(scene, 'heroSentE', 30, 6, 1.35, -1.2, trunkMatB, foliageC, 'sentinel');
+  placeHeroTree(scene, 'heroElderN', 6, -40, 3.4, 0.18, trunkMatA, foliageB, 'landmark');
+  placeHeroTree(scene, 'heroElderSW', -32, 34, 3.0, 2.15, trunkMatB, foliageA, 'landmark');
+  placeHeroTree(scene, 'heroSentNE', 34, -28, 2.7, 0.45, trunkMatA, foliageA, 'sentinel');
+  placeHeroTree(scene, 'heroSentNW', -36, -24, 2.8, -0.55, trunkMatB, foliageB, 'sentinel');
+  placeHeroTree(scene, 'heroSentSE', 30, 38, 2.4, 1.05, trunkMatA, foliageC, 'standard');
+  placeHeroTree(scene, 'heroSentW', -28, 6, 2.5, -1.2, trunkMatB, foliageC, 'sentinel');
 
   const midClassic = buildMergedMidTree(scene, 'midClassic', trunkMatB, foliageB, {
     trunkHeight: 7.5,
@@ -845,13 +850,13 @@ function placeProceduralForest(scene: Scene): void {
   const matsUnder: Matrix[] = [];
 
   const innerCount = 68;
-  const innerR0 = 22;
-  const innerR1 = 38;
+  const innerR0 = 58;
+  const innerR1 = 95;
   for (let i = 0; i < innerCount; i++) {
     const a = (i / innerCount) * Math.PI * 2 + hash01(i * 3) * 0.28;
     const r = innerR0 + hash01(i * 7) * (innerR1 - innerR0);
-    if (a > 0.12 && a < 0.52 && r < 32) continue;
-    const s = 0.72 + hash01(i * 11) * 0.9;
+    if (a > 0.12 && a < 0.52 && r < 72) continue;
+    const s = 1.6 + hash01(i * 11) * 1.4;
     const sy = s * (0.88 + hash01(i * 13) * 0.38);
     const m = composeInstanceMatrix(
       Math.cos(a) * r,
@@ -870,8 +875,8 @@ function placeProceduralForest(scene: Scene): void {
   const midCount = 40;
   for (let i = 0; i < midCount; i++) {
     const a = (i / midCount) * Math.PI * 2 + 0.22 + hash01(i * 5) * 0.2;
-    const r = 42 + hash01(i * 9) * 14;
-    const s = 0.65 + hash01(i * 15) * 0.7;
+    const r = 100 + hash01(i * 9) * 28;
+    const s = 1.5 + hash01(i * 15) * 1.1;
     const m = composeInstanceMatrix(
       Math.cos(a) * r,
       Math.sin(a) * r,
@@ -889,8 +894,8 @@ function placeProceduralForest(scene: Scene): void {
   const farCount = 48;
   for (let i = 0; i < farCount; i++) {
     const a = (i / farCount) * Math.PI * 2 + hash01(i * 19) * 0.15;
-    const r = 58 + hash01(i * 23) * 22;
-    const s = 0.7 + hash01(i * 29) * 0.85;
+    const r = 135 + hash01(i * 23) * 40;
+    const s = 1.6 + hash01(i * 29) * 1.2;
     matsFar.push(
       composeInstanceMatrix(
         Math.cos(a) * r,
@@ -909,10 +914,10 @@ function placeProceduralForest(scene: Scene): void {
     const band = hash01(i * 47);
     const r =
       band < 0.35
-        ? 10 + hash01(i * 53) * 8
-        : 18 + hash01(i * 53) * 12;
-    if (r < 11 && a > 0.15 && a < 0.55) continue;
-    const s = 0.7 + hash01(i * 59) * 1.1;
+        ? 14 + hash01(i * 53) * 16
+        : 32 + hash01(i * 53) * 40;
+    if (r < 14 && a > 0.15 && a < 0.55) continue;
+    const s = 1.1 + hash01(i * 59) * 1.4;
     matsUnder.push(
       composeInstanceMatrix(
         Math.cos(a) * r,
@@ -1086,7 +1091,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
 
   const ground = MeshBuilder.CreateGround(
     'clearing',
-    { width: 120, height: 120, subdivisions: 32 },
+    { width: GROUND_EXTENT, height: GROUND_EXTENT, subdivisions: 40 },
     scene,
   );
   const groundMat = new StandardMaterial('clearingMat', scene);
