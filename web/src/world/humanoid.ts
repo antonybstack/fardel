@@ -449,6 +449,29 @@ export function createPlayerHumanoid(
   };
 }
 
+/** Playback snapshot for VE — Reviewer must reject persistMark `T-POSE`. */
+export type HumanoidPlayback = {
+  skinned: number;
+  playing: string | null;
+  idle: string | null;
+};
+
+export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
+  const a = animByRoot.get(parts.root);
+  let skinned = 0;
+  for (const m of parts.root.getChildMeshes(false)) {
+    if (m.skeleton && m.isEnabled() && m.isVisible && m.visibility > 0) skinned += 1;
+  }
+  const playing = a?.cast?.isPlaying
+    ? a.cast.name
+    : a?.walk?.isPlaying
+      ? a.walk.name
+      : a?.idle?.isPlaying
+        ? a.idle.name
+        : null;
+  return { skinned, playing, idle: a?.idle?.name ?? null };
+}
+
 /** Switch Idle ↔ Walk for yard locomotion (no-op if clips missing). */
 export function setHumanoidMoving(parts: HumanoidParts, moving: boolean): void {
   const a = animByRoot.get(parts.root);
