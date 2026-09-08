@@ -298,3 +298,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** First-class pip for `Brigand` (violet). Kind=2 stays coral Hostile. Dummy stays parchment/green. Combat log already uses `npcPlateName`.
 - **Seen in:** #454
 
+### 2026-09-08 — ve,encounter — ?ve=encounter persistMark ignored Kind=3
+- **Cause:** Harness pulled pad A Kind=2 and required `plateLabel === 'Hostile'`. Kind=3 already exists as a skinned person; VE never named Brigand and a close fight follow hid pad C.
+- **Do this:** Require living Kind=2 + Kind=3 skinned + dummy trainer (no humanoid). persistMark names both. `capsule` = fail. Wide frame so pad C is in the shot.
+- **Seen in:** #456
+
