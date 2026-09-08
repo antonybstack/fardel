@@ -57,3 +57,23 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `MeshBuilder.CreateDisc` is XY. `rotation.x = π/2` lays it on XZ; local Z becomes the disc normal (world Y). `scaling.z` does not squash world Z, so DummySpawn (5,0) sat on grass (ellipse 1.008).
 - **Do this:** After that rotation, world-Z ellipse squash is `scaling.y`. Or use `CreateGround` (already XZ). Helper: `placeGroundDisc` in `forest.ts`.
 - **Seen in:** #296 / #299
+
+### 2026-09-08 — humanoid,babylon,skin — GPU skin of Wizard.glb is a sail, not a body
+- **Cause:** Assimp FBX→glTF puts `CharacterArmature` scale 100 (not a joint) and glTF AUTO `__root__` `(1,1,-1)`. Extra parent `pivot.scaling` lands in `mesh.world` but not `boneFinal`, so IBM 0.01 no longer cancels. GPU/CPU skin is a degenerate triangle. Shared `StandardMaterial` compiled without BONES also yields zero fill. Crowd-proxy capsules at origin hide a slim body.
+- **Do this:** Do not `m.skeleton = null`. Do not 1.8m-normalize with an extra scaled ancestor unless IBM is compensated. Hide `proxy_*` for character VE. `computeBonesUsingShaders=false` still double-skins if the effect has BONES (`useBones` ignores that flag).
+- **Seen in:** #303 / #260
+
+### 2026-09-08 — humanoid,babylon,skin — CPU skin deforms the visible wizard; rigid `__draw` is still T-pose
+- **Cause:** GPU bone path + Assimp `CharacterArmature` *100 / -90X (not a joint) is a sail. CPU `applySkeleton` writes that leftover into mesh-local verts; `mesh.world` already has the armature, so the body vanishes unless IBM is multiplied by the armature local matrix. `instantiateModelsToScene` clones share geometry with the container source. `useBones` ignores `computeBonesUsingShaders`; a cached BONES effect double-skins. A `__draw` clone with `skeleton=null` is the old T-pose detach.
+- **Do this:** Keep the skeleton on the **visible** mesh. `makeGeometryUnique`, hide container originals, multiply IBM by CharacterArmature local (scale+rot), `computeBonesUsingShaders=false`, strip JOINTS/WEIGHTS after each `applySkeleton` so the effect has no BONES. Do not rigid-clone. Do not assign a shared `StandardMaterial` onto Wizard.001. Hide `proxy_*` for character VE.
+- **Seen in:** #303 / #260
+
+### 2026-09-08 — humanoid,yaw — local wizard never turns; pose.yaw is always 0
+- **Cause:** `Move` does not write `PlayerPose.Yaw` (spawn 0). Copying `samp.yaw` onto the root each frame fights any client facing.
+- **Do this:** Visual yaw from camera-relative wish (shortest-path slerp). Do not send client positions. Do not copy `pose.yaw` onto the local mesh.
+- **Seen in:** #263
+
+### 2026-09-08 — feel,perf — grounded WASD feels late on the Place-scale pin
+- **Cause:** Local avatar presentation-lerped 20 Hz XZ (up to 50 ms plus a slow frame). `ArcRotateCamera.setTarget` every follow frame rebuilds alpha/beta. Unique GLTF heroes at 5–7× with ALPHATEST on every pack leaf + 80 understory clones melted fillrate.
+- **Do this:** Snap local grounded XZ. Mutate `camera.target` in place (do not `setTarget` on the play follow). ALPHATEST on hero canopies only; cap unique pack understory clones (~24). Do not lerp the local walker.
+- **Seen in:** #315

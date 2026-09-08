@@ -610,8 +610,9 @@ function buildSkyDome(scene: Scene): void {
   sky.material = skyMat;
 }
 
-/** Matte foliage/bark (#275): fog on, alpha-test leaf cards so they dissolve not pop. */
-function mattePackMaterials(meshes: AbstractMesh[]): void {
+/** Matte foliage/bark (#275). Alpha-test only on hero canopies — mid/far/under
+ *  unique GLTF clones with ALPHATEST ate fillrate and made WASD feel late (#315). */
+function mattePackMaterials(meshes: AbstractMesh[], alphaTestLeaves: boolean): void {
   const seen = new Set<Material>();
   for (const mesh of meshes) {
     mesh.applyFog = true;
@@ -627,9 +628,11 @@ function mattePackMaterials(meshes: AbstractMesh[]): void {
       mat.specularIntensity = 0.08;
       if (leafish) {
         mat.albedoColor = new Color3(0.55, 0.85, 0.42);
-        mat.useAlphaFromAlbedoTexture = true;
-        mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHATEST;
-        mat.alphaCutOff = 0.42;
+        if (alphaTestLeaves) {
+          mat.useAlphaFromAlbedoTexture = true;
+          mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHATEST;
+          mat.alphaCutOff = 0.42;
+        }
       }
     } else if (mat instanceof StandardMaterial) {
       mat.specularColor = new Color3(0.02, 0.02, 0.015);
@@ -637,9 +640,11 @@ function mattePackMaterials(meshes: AbstractMesh[]): void {
       mat.fogEnabled = true;
       if (leafish) {
         mat.diffuseColor = new Color3(0.45, 0.7, 0.32);
-        mat.useAlphaFromDiffuseTexture = true;
-        mat.transparencyMode = Material.MATERIAL_ALPHATEST;
-        mat.alphaCutOff = 0.42;
+        if (alphaTestLeaves) {
+          mat.useAlphaFromDiffuseTexture = true;
+          mat.transparencyMode = Material.MATERIAL_ALPHATEST;
+          mat.alphaCutOff = 0.42;
+        }
       }
     }
   }
@@ -658,6 +663,7 @@ async function loadPackRoot(
   scene: Scene,
   fileName: string,
   templateName: string,
+  alphaTestLeaves = false,
 ): Promise<TransformNode | null> {
   try {
     const result = await ImportMeshAsync(fileName, scene, { rootUrl: PACK_ROOT });
@@ -681,7 +687,7 @@ async function loadPackRoot(
       root.name = templateName;
     }
 
-    mattePackMaterials(result.meshes);
+    mattePackMaterials(result.meshes, alphaTestLeaves);
     // Freeze world matrix after we place clones; templates stay hidden at origin.
     root.position.set(0, -500, 0);
     hideTemplate(root);
@@ -728,7 +734,7 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   const heroFiles = ['TwistedTree_1.gltf', 'TwistedTree_2.gltf', 'TwistedTree_3.gltf'] as const;
   const heroTemplates: TransformNode[] = [];
   for (let i = 0; i < heroFiles.length; i++) {
-    const t = await loadPackRoot(scene, heroFiles[i]!, `heroTemplate_${i}`);
+    const t = await loadPackRoot(scene, heroFiles[i]!, `heroTemplate_${i}`, true);
     if (t) heroTemplates.push(t);
   }
   if (heroTemplates.length === 0) return false;
@@ -745,19 +751,18 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   // #272: Quaternius author-scale is toy-yard; WoW/hordes read is player-tiny vs trunks.
   // Heroes sit on the clearing rim so play-cam is not inside a canopy.
   const heroSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
-    { name: 'heroTreeN', x: 6, z: -40, scale: 6.8, yaw: 0.18, ti: 1 },
-    { name: 'heroTreeNE', x: 34, z: -28, scale: 5.8, yaw: 0.45, ti: 0 },
-    { name: 'heroTreeNW', x: -36, z: -24, scale: 6.2, yaw: -0.55, ti: 1 },
-    { name: 'heroTreeSW', x: -32, z: 34, scale: 5.4, yaw: 2.15, ti: 0 },
-    { name: 'heroTreeSE', x: 30, z: 38, scale: 5.0, yaw: 1.05, ti: 2 },
-    { name: 'heroTreeW', x: -28, z: 6, scale: 4.8, yaw: -1.2, ti: 0 },
+    { name: 'heroTreeN', x: 6, z: -40, scale: 5.2, yaw: 0.18, ti: 1 },
+    { name: 'heroTreeNE', x: 34, z: -28, scale: 4.6, yaw: 0.45, ti: 0 },
+    { name: 'heroTreeNW', x: -36, z: -24, scale: 4.8, yaw: -0.55, ti: 1 },
+    { name: 'heroTreeSW', x: -32, z: 34, scale: 4.4, yaw: 2.15, ti: 0 },
+    { name: 'heroTreeSE', x: 30, z: 38, scale: 4.2, yaw: 1.05, ti: 2 },
   ];
   for (const h of heroSpots) {
     const tmpl = heroTemplates[h.ti % heroTemplates.length]!;
     placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
   }
 
-  const ringCount = 36;
+  const ringCount = 24;
   const innerR = 48;
   const outerR = 110;
   for (let i = 0; i < ringCount; i++) {
@@ -780,8 +785,8 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     clone.scaling.y *= yMul;
   }
 
-  for (let i = 0; i < 18; i++) {
-    const a = (i / 18) * Math.PI * 2 + 0.4;
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2 + 0.4;
     const r = 135 + hash01(i * 19) * 40;
     const tmpl = midTemplates[i % midTemplates.length]!;
     const s = 2.0 + hash01(i * 23) * 1.4;
@@ -810,10 +815,10 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     if (t) underTemplates.push(t);
   }
 
-  // #278: 80 clones of 6 pack templates (shared meshes, no uniques).
-  // Mac play-cam floor 30 FPS (`fpsHud.FPS_FLOOR`). SwiftShader VE is not FPS truth.
+  // #315: 80 unique GLTF clones with alpha cards melted play-cam FPS.
+  // ThinInstance ferns below still add density. Cap unique pack clones.
   let underPlaced = 0;
-  for (let i = 0; i < 80 && underTemplates.length > 0; i++) {
+  for (let i = 0; i < 24 && underTemplates.length > 0; i++) {
     const a = hash01(i * 41) * Math.PI * 2;
     const r = 12 + hash01(i * 43) * 95;
     if (r < 11) continue;
@@ -1165,7 +1170,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
 
   const ground = MeshBuilder.CreateGround(
     'clearing',
-    { width: GROUND_EXTENT, height: GROUND_EXTENT, subdivisions: 40 },
+    { width: GROUND_EXTENT, height: GROUND_EXTENT, subdivisions: 1 },
     scene,
   );
   const groundMat = new StandardMaterial('clearingMat', scene);
@@ -1174,6 +1179,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
   groundMat.specularColor = new Color3(0.006, 0.01, 0.005);
   groundMat.emissiveColor = new Color3(0.018, 0.038, 0.012);
   ground.material = groundMat;
+  ground.freezeWorldMatrix();
 
   // Scattered moss clumps — grass variation, not a ring-pad.
   const mossMat = new StandardMaterial('mossMat', scene);

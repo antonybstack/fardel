@@ -2,10 +2,12 @@ import {
   AnimationGroup,
   AssetContainer,
   Color3,
+  Matrix,
   Mesh,
   PBRMaterial,
   Scene,
   SceneLoader,
+  Skeleton,
   StandardMaterial,
   Texture,
   TransformNode,
@@ -78,15 +80,59 @@ export function preloadPlayerHumanoid(scene: Scene): Promise<AssetContainer> {
       scene,
     ).then((c) => {
       sharedContainer = c;
+      // Container originals share geometry with clones. Hide them so a GPU
+      // sail on the source cannot overwrite instance vertex buffers.
+      for (const m of c.meshes) {
+        m.setEnabled(false);
+        m.isVisible = false;
+      }
       return c;
     });
   }
   return sharedLoad;
 }
 
+function findAnim(
+  groups: AnimationGroup[],
+  ...needles: string[]
+): AnimationGroup | null {
+  for (const n of needles) {
+    const hit = groups.find((g) =>
+      g.name.toLowerCase().includes(n.toLowerCase()),
+    );
+    if (hit) return hit;
+  }
+  return null;
+}
+
 function bareName(name: string, prefix: string): string {
   const p = `${prefix}__`;
   return name.startsWith(p) ? name.slice(p.length) : name;
+}
+
+/**
+ * Assimp leaves CharacterArmature *100 / -90X off the joint list, so IBM is
+ * 0.01 and a 90° leftover. CPU apply writes that leftover into mesh-local
+ * verts; mesh.world already has the armature, so the body collapses unless
+ * IBM is multiplied by the armature local matrix.
+ */
+function compensateAssimpIbm(skel: Skeleton, armature: TransformNode): void {
+  const rot = armature.rotationQuaternion;
+  const A = rot
+    ? Matrix.Compose(armature.scaling, rot, Vector3.Zero())
+    : Matrix.Scaling(armature.scaling.x, armature.scaling.y, armature.scaling.z);
+  for (const bone of skel.bones) {
+    const ibm = bone.getAbsoluteInverseBindMatrix().clone();
+    A.multiplyToRef(ibm, ibm);
+    const bind = ibm.clone();
+    bind.invert();
+    const parent = bone.getParent();
+    if (parent) {
+      bind.multiplyToRef(parent.getAbsoluteInverseBindMatrix(), bind);
+    }
+    bone.updateMatrix(bind, false, false);
+    bone._updateAbsoluteBindMatrices(undefined, false);
+  }
 }
 
 function collectMeshes(roots: Node[]): AbstractMesh[] {
@@ -184,10 +230,61 @@ export function createPlayerHumanoid(
     n.parent = pivot;
   }
 
+  let armature: TransformNode | null = null;
+  for (const n of roots) {
+    if (n.name.includes('CharacterArmature')) armature = n as TransformNode;
+    for (const d of n.getDescendants(false)) {
+      if (d.name.includes('CharacterArmature')) armature = d as TransformNode;
+    }
+  }
+
   for (const m of meshes) {
     m.setEnabled(true);
     m.isVisible = true;
     m.visibility = 1;
+    const skel = m.skeleton;
+    if (!skel) continue;
+    // Assimp *100 lives on CharacterArmature (not a joint). GPU skin of that
+    // bind is a degenerate sail. CPU-skin the visible mesh so Idle_Weapon
+    // deforms the 1.8m body. computeBonesUsingShaders=false + dirty defines
+    // so NUM_BONE_INFLUENCERS=0 (useBones ignores the flag; a cached BONES
+    // effect would double-skin). Do not skeleton=null / hide behind a clone.
+    m.alwaysSelectAsActiveMesh = true;
+    m.numBoneInfluencers = 4;
+    skel.useTextureToStoreBoneMatrices = false;
+    if (armature) compensateAssimpIbm(skel, armature);
+    if (m.getClassName() === 'Mesh') {
+      const mesh = m as Mesh;
+      mesh.makeGeometryUnique();
+      mesh.computeBonesUsingShaders = false;
+      mesh._markSubMeshesAsAttributesDirty();
+      skel.prepare(true);
+      const jointIdx = mesh.getVerticesData('matricesIndices');
+      const jointWts = mesh.getVerticesData('matricesWeights');
+      const cpuSkin = () => {
+        if (!jointIdx || !jointWts) return;
+        mesh.setVerticesData('matricesIndices', jointIdx, true);
+        mesh.setVerticesData('matricesWeights', jointWts, true);
+        mesh.applySkeleton(skel);
+        mesh.removeVerticesData('matricesIndices');
+        mesh.removeVerticesData('matricesWeights');
+      };
+      cpuSkin();
+      if (jointIdx && jointWts) {
+        mesh.onBeforeRenderObservable.add(() => {
+          skel.prepare();
+          cpuSkin();
+        });
+      }
+      try {
+        mesh.refreshBoundingInfo(false, true);
+      } catch {
+        /* optional */
+      }
+    } else {
+      skel.prepare(true);
+    }
+    m.material?.markDirty(true);
   }
 
   // Normalize height ~1.8m and plant feet on y=0 (assimp glTF is Y-up).
@@ -285,7 +382,8 @@ export function createPlayerHumanoid(
     if (matl instanceof PBRMaterial) {
       liftPbr(matl);
       clothPbrs.push(matl);
-    } else {
+      if (m.skeleton) matl.markDirty(true);
+    } else if (!m.skeleton) {
       m.material = robeMat;
     }
   }
@@ -324,25 +422,19 @@ export function createPlayerHumanoid(
     staffMesh.material = staffMat;
   }
 
-  // Anim clips drive bone-parented trim; body uses bind-pose (see detach below).
+  const idle =
+    findAnim(animGroups, 'Idle_Weapon', 'Idle') ??
+    (animGroups.length > 0 ? animGroups[0]! : null);
+  // E2.3: locomotion clip. Prefer Walk; weapon-run is the GLB fallback (no Walk_Weapon).
+  const walk = findAnim(animGroups, 'Walk', 'Run_Weapon', 'Run');
+  const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Staff_Attack');
   for (const g of animGroups) {
     g.stop();
-    g.reset();
   }
-  animByRoot.set(root, { idle: null, walk: null, cast: null });
-
-  // Detach skin: post-instantiate skinning draws zero pixels despite valid AABB.
-  // Bind-pose body under Blender *100 node scale is a complete mid-sat wizard.
-  for (const m of meshes) {
-    if (!m.skeleton) continue;
-    m.skeleton = null;
-    m.alwaysSelectAsActiveMesh = true;
-    try {
-      m.refreshBoundingInfo(false, true);
-    } catch {
-      /* optional */
-    }
+  if (idle) {
+    idle.start(true, 1.0, idle.from, idle.to, false);
   }
+  animByRoot.set(root, { idle, walk, cast });
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -357,10 +449,34 @@ export function createPlayerHumanoid(
   };
 }
 
+/** Playback snapshot for VE — Reviewer must reject persistMark `T-POSE`. */
+export type HumanoidPlayback = {
+  skinned: number;
+  playing: string | null;
+  idle: string | null;
+};
+
+export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
+  const a = animByRoot.get(parts.root);
+  let skinned = 0;
+  for (const m of parts.root.getChildMeshes(false)) {
+    if (m.skeleton && m.isEnabled() && m.isVisible && m.visibility > 0) skinned += 1;
+  }
+  const playing = a?.cast?.isPlaying
+    ? a.cast.name
+    : a?.walk?.isPlaying
+      ? a.walk.name
+      : a?.idle?.isPlaying
+        ? a.idle.name
+        : null;
+  return { skinned, playing, idle: a?.idle?.name ?? null };
+}
+
 /** Switch Idle ↔ Walk for yard locomotion (no-op if clips missing). */
 export function setHumanoidMoving(parts: HumanoidParts, moving: boolean): void {
   const a = animByRoot.get(parts.root);
   if (!a) return;
+  if (a.cast?.isPlaying) return;
   if (moving && a.walk) {
     if (a.idle && a.idle.isPlaying) a.idle.stop();
     if (!a.walk.isPlaying) {
@@ -372,17 +488,6 @@ export function setHumanoidMoving(parts: HumanoidParts, moving: boolean): void {
       a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
     }
   }
-}
-
-/** Client-only hop squash/stretch (#139). Does not change pose Y. */
-export function setHumanoidJumpSquash(
-  parts: HumanoidParts,
-  yScale: number,
-  xzScale?: number,
-): void {
-  const y = Math.max(0.55, yScale);
-  const xz = xzScale ?? 1 / Math.sqrt(y);
-  parts.root.scaling.set(xz, y, xz);
 }
 
 /** Play a one-shot cast clip (Spell1) then return to idle/walk. */

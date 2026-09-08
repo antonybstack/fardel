@@ -53,6 +53,7 @@ import {
   partyRobeColor,
   playHumanoidCast,
   preloadPlayerHumanoid,
+  readHumanoidPlayback,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
   setHumanoidMoving,
@@ -2990,6 +2991,9 @@ async function main(): Promise<void> {
   const CAM_FOLLOW_SNAP_METERS = 2.5;
   let camFollowY = CAM_FOLLOW_Y_OFFSET;
   let camFollowYSeeded = false;
+  /** E2.4 visual facing from camera-relative wish. Server pose.yaw stays 0. */
+  const YAW_FACE_HZ = 12;
+  let localFacingYaw = 0;
   const bootParams = new URLSearchParams(window.location.search);
   const ve = bootParams.get('ve') || '';
   const firstSessionVe = ve === 'first-session';
@@ -3177,6 +3181,7 @@ async function main(): Promise<void> {
     y: number,
     z: number,
     yaw: number,
+    opts?: { snapGroundedXz?: boolean },
   ) => {
     if (!i.seeded) {
       i.fx = i.tx = x;
@@ -3189,6 +3194,17 @@ async function main(): Promise<void> {
       return;
     }
     if (x === i.tx && y === i.ty && z === i.tz && yaw === i.tyaw) {
+      return;
+    }
+    // Local grounded WASD: snap XZ/yaw. 20 Hz lerp was up to 50 ms plus a slow
+    // frame, which read as input lag on the Place-scale pin (#315).
+    if (opts?.snapGroundedXz && y <= 0.05) {
+      i.fx = i.tx = x;
+      i.fy = i.ty = y;
+      i.fz = i.tz = z;
+      i.fyaw = i.tyaw = yaw;
+      i.u = 1;
+      i.vx = i.vy = i.vz = 0;
       return;
     }
     const s = clampU(i.u);
@@ -4377,7 +4393,15 @@ async function main(): Promise<void> {
       player.position.x = samp.x;
       player.position.y = samp.y;
       player.position.z = samp.z;
-      player.rotation.y = samp.yaw;
+    }
+    {
+      const wish = wishFromKeys(keys, camera);
+      if (wish.dx !== 0 || wish.dz !== 0) {
+        const targetYaw = Math.atan2(wish.dx, wish.dz);
+        const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
+        localFacingYaw = lerpYaw(localFacingYaw, targetYaw, a);
+      }
+      player.rotation.y = localFacingYaw;
     }
     for (const [key, parts] of remoteMeshes) {
       const ri = remoteInterps.get(key);
@@ -4634,15 +4658,16 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        setHumanoidMoving(humanoid, keys.size > 0);
+        setHumanoidMoving(humanoid, keys.size > 0 && !isAirborne);
       } else {
         moveAccumulator = 0;
         setHumanoidMoving(humanoid, false);
       }
     } else {
       moveAccumulator = 0;
-      setHumanoidMoving(humanoid, false);
+      setHumanoidMoving(humanoid, !isAirborne && keys.size > 0);
     }
+    humanoid.root.scaling.set(1, 1, 1);
 
     // Refresh tonic buff timer + sticky CC chip on self-frame each frame.
     if (net) {
@@ -5253,6 +5278,34 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2 + 0.45;
         camera.beta = Math.PI / 2.38;
         camera.radius = 34;
+      } else if (veFollow === 'idle') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.05;
+        tgt.z = player.position.z;
+        camera.alpha = Math.PI / 2.15;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 8;
+      } else if (veFollow === 'walk' || veFollow === 'yaw' || veFollow === 'jump-pose') {
+        // Side play-cam so Walk stride / wish facing / hop pose reads; lock each frame.
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        camera.setTarget(player.position.add(new Vector3(0, 1.0, 0)));
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = veFollow === 'jump-pose' ? 9 : 7;
+      } else if (veFollow === 'cast-anim') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
+        camera.alpha = Math.PI / 2.2;
+        camera.beta = Math.PI / 2.6;
+        camera.radius = 8;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -5273,10 +5326,15 @@ async function main(): Promise<void> {
           const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
           camFollowY += (targetY - camFollowY) * a;
         }
-        const follow = new Vector3(player.position.x, camFollowY, player.position.z);
-        const radius = camera.radius;
-        camera.setTarget(follow);
-        camera.radius = radius;
+        // Mutate target in place. setTarget() rebuilds alpha/beta/radius from
+        // the camera world position and feels like the view lags WASD (#315).
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
       }
     }
     scene.render();
@@ -5505,12 +5563,14 @@ async function main(): Promise<void> {
   net = await connectToSpacetime(
     onStatus,
     (pose) => {
-      retargetPoseInterp(localInterp, pose.x, pose.y, pose.z, pose.yaw);
+      retargetPoseInterp(localInterp, pose.x, pose.y, pose.z, pose.yaw, {
+        snapGroundedXz: true,
+      });
       const samp = samplePoseInterp(localInterp);
       player.position.x = samp.x;
       player.position.y = samp.y;
       player.position.z = samp.z;
-      player.rotation.y = samp.yaw;
+      player.rotation.y = localFacingYaw;
     },
     (npcs) => {
       syncNpcMeshes(npcs);
@@ -6003,6 +6063,154 @@ async function main(): Promise<void> {
       }
     };
     window.setTimeout(waitQ, 600);
+  }
+
+  // ?ve=walk — E2.3/E2.6 play-cam Walk clip (legs moving, not T-pose).
+  if (ve === 'walk') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'walk') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE walk: waiting for Connected…';
+    let ticks = 0;
+    const playingNames = (): string =>
+      scene.animationGroups
+        .filter((g) => g.isPlaying)
+        .map((g) => g.name.replace(/^player__/, ''))
+        .join(' · ');
+    const waitWalk = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE walk: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitWalk, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitWalk, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitWalk, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      setHumanoidMoving(humanoid, true);
+      const playing = playingNames();
+      if (mark) {
+        mark.textContent = playing
+          ? `Walk OK · ${playing} · Connected`
+          : 'VE walk FAIL · no clip playing';
+      }
+      if (ticks < 240) window.setTimeout(waitWalk, 200);
+    };
+    window.setTimeout(waitWalk, 600);
+  }
+
+  // ?ve=yaw — E2.4 face camera-relative wish (slerp, no client positions).
+  if (ve === 'yaw') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'yaw') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE yaw: waiting for Connected…';
+    let ticks = 0;
+    const waitYaw = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE yaw: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitYaw, 200);
+        return;
+      }
+      if (!net.getLocalPose()) {
+        if (mark) mark.textContent = 'VE yaw: waiting for pose…';
+        if (ticks < 180) window.setTimeout(waitYaw, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitYaw, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitYaw, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      if (mark) {
+        mark.textContent = `Yaw OK · facing wish · y=${localFacingYaw.toFixed(2)} · Connected`;
+      }
+      if (ticks < 240) window.setTimeout(waitYaw, 200);
+    };
+    window.setTimeout(waitYaw, 600);
+  }
+
+  // ?ve=cast-anim — E2.5/E2.7 Spell1 one-shot on Spark/Emberbolt path.
+  if (ve === 'cast-anim') {
+    camera.radius = 8;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'cast-anim') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-anim: waiting for Connected…';
+    let ticks = 0;
+    const playingNames = (): string =>
+      scene.animationGroups
+        .filter((g) => g.isPlaying)
+        .map((g) => g.name.replace(/^player__/, ''))
+        .join(' · ');
+    const waitCast = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-anim: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitCast, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitCast, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitCast, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      const casting = scene.animationGroups.some(
+        (g) => /spell|staff_attack/i.test(g.name) && g.isPlaying,
+      );
+      if (!casting) playHumanoidCast(humanoid);
+      const playing = playingNames();
+      if (mark) {
+        mark.textContent = /spell/i.test(playing)
+          ? `Cast OK · ${playing} · Connected`
+          : `VE cast-anim · ${playing || 'no clip'} · Connected`;
+      }
+      if (ticks < 240) window.setTimeout(waitCast, 250);
+    };
+    window.setTimeout(waitCast, 600);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
@@ -8228,6 +8436,52 @@ async function main(): Promise<void> {
     window.setTimeout(waitApex, 600);
   }
 
+  // ?ve=jump-pose — E2.9 airborne walk off, root.scaling (1,1,1), no squash.
+  if (ve === 'jump-pose') {
+    camera.radius = 9;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'jump-pose') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE jump-pose: waiting for Connected…';
+    let ticks = 0;
+    let jumped = false;
+    const waitJumpPose = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE jump-pose: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitJumpPose, 200);
+        return;
+      }
+      keys.add('w');
+      keys.add(' ');
+      const pose = net.getLocalPose();
+      if (!jumped && pose) {
+        jumped = true;
+        net.sendMove(0.2, 0, true);
+      }
+      const y = pose?.y ?? 0;
+      const scaleY = humanoid.root.scaling.y;
+      const walkOn = scene.animationGroups.some(
+        (g) => /walk/i.test(g.name) && g.isPlaying && !/remote_/i.test(g.name),
+      );
+      const air = y > 0.12;
+      const rigid = Math.abs(scaleY - 1) < 0.04;
+      if (mark) {
+        if (air && rigid && !walkOn) {
+          mark.textContent = `Jump-pose OK · walk off · scale ${scaleY.toFixed(2)} · y=${y.toFixed(2)}`;
+        } else {
+          mark.textContent = `VE jump-pose: y=${y.toFixed(2)} · walk ${walkOn ? 'on' : 'off'} · scale ${scaleY.toFixed(2)}`;
+        }
+      }
+      if (ticks < 200) window.setTimeout(waitJumpPose, 80);
+    };
+    window.setTimeout(waitJumpPose, 600);
+  }
+
   // ?ve=hop-wow — rigid hop, no squash, no camera slam. Does not replace ?ve=jump (#257).
   if (ve === 'hop-wow') {
     camera.radius = 18;
@@ -9620,6 +9874,34 @@ async function main(): Promise<void> {
   }
 
 
+
+  // ?ve=idle — play-cam Idle_Weapon on a skinned mesh. T-pose is a failed VE.
+  if (ve === 'idle' && net) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE idle: waiting for Connected…';
+    let ticks = 0;
+    const waitIdle = () => {
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE idle: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitIdle, 200);
+        return;
+      }
+      setHumanoidMoving(humanoid, false);
+      const pb = readHumanoidPlayback(humanoid);
+      const idleOk =
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /idle/i.test(pb.playing);
+      if (mark) {
+        mark.textContent = idleOk
+          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+      }
+    };
+    window.setTimeout(waitIdle, 800);
+  }
 
   // ?ve=fps — seed crowd proxies; prove FPS HUD visible + near proxies > 0.
   if (ve === 'fps') {
