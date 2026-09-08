@@ -3676,9 +3676,8 @@ async function main(): Promise<void> {
         continue;
       }
 
-      if (rc.castingSpellId === SPELL_EMBERBOLT) {
-        setHumanoidCasting(parts, true);
-      }
+      // CastingSpellId / CastEndsAt drives Spell1 on that remote (not Idle/Walk).
+      setHumanoidCasting(parts, true);
 
       // Windup: orange pulse on remote + beam to target + head bar.
       const pulse = 0.35 + 0.25 * Math.sin(now / 90);
@@ -5869,6 +5868,34 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-cast') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = player.position.x;
+        let fy = player.position.y + 1.05;
+        let fz = player.position.z;
+        let best = -1;
+        for (const [, parts] of remoteMeshes) {
+          const pb = readHumanoidPlayback(parts);
+          const casting =
+            pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
+          const d = Vector3.Distance(parts.root.position, player.position);
+          const rank = (casting ? 1000 : 0) + d;
+          if (rank > best) {
+            best = rank;
+            fx = parts.root.position.x;
+            fy = parts.root.position.y + 1.05;
+            fz = parts.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 8;
       } else if (veFollow === 'cam-collision') {
         // Orbit into the nearest hero bole; collision keeps the camera in the clearing.
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
@@ -7300,16 +7327,16 @@ async function main(): Promise<void> {
     window.setTimeout(waitRemoteWalk, 700);
   }
 
-  // ?ve=remote-cast — wait for remote PlayerCombat target + Emberbolt windup telegraph.
+  // ?ve=remote-cast — E8.16 remote CastingSpell/CastEndsAt drives Spell1.
   if (ve === 'remote-cast') {
-    camera.radius = 18;
-    camera.alpha = Math.PI / 2.4;
-    camera.beta = Math.PI / 3.15;
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
   }
 
   if (net && ve === 'remote-cast') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE remote-cast: waiting for remote + cast telegraph…';
+    if (mark) mark.textContent = 'VE remote-cast: waiting for remotes…';
     let ticks = 0;
     let nudged = false;
     const waitRemoteCast = () => {
@@ -7317,68 +7344,49 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
+        // Park local off the remote close-up (SecondClient stays in dummy range).
+        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
       }
       const remotes = net.getRemotes();
       const combats = net.getRemoteCombats();
       syncRemoteMeshes(remotes);
       syncRemoteCastFx(combats);
       syncNpcMeshes(net.getNpcs());
-
-      const local = net.getLocalPose();
-      const casting = combats.find(
+      const n = remoteMeshes.size;
+      const playbackOf = (hex: string) => {
+        const p = remoteMeshes.get(hex);
+        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null, height: 0 };
+      };
+      const castingCombat = combats.find(
         (c) => c.castingSpellId !== 0 && castRemainingMs(c) > 0,
       );
-      const targeting = combats.find((c) => c.targetNpcId !== 0n);
       const preferred =
         remotes.find((r) => {
-          if (!local) return true;
-          return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
-        }) ?? remotes[0];
-
-      if (preferred) {
-        const dummy =
-          net.getNpcs().find((n) => n.kind === NPC_KIND_DUMMY) ??
-          net.getNpcs()[0];
-        const focus = dummy
-          ? new Vector3(
-              (player.position.x + preferred.x + dummy.x) / 3,
-              1.1,
-              (player.position.z + preferred.z + dummy.z) / 3,
-            )
-          : player.position.add(
-              new Vector3(preferred.x, preferred.y, preferred.z)
-                .subtract(player.position)
-                .scale(0.5)
-                .add(new Vector3(0, 1.2, 0)),
-            );
-        camera.setTarget(focus);
-        camera.radius = 18;
-      }
-
-      const st = latestStatus;
-      if (st.state === 'connected' && preferred && casting) {
-        const bit = `cast spell=${casting.castingSpellId} left=${(castRemainingMs(casting) / 1000).toFixed(1)}s · target npc#${casting.targetNpcId}`;
-        if (mark) {
-          mark.textContent = `Remote-cast OK · remotes ${remotes.length} · ${bit} · remote ${preferred.identityHex.slice(0, 12)}… · local ${st.identityHex.slice(0, 12)}…`;
+          const pb = playbackOf(r.identityHex);
+          return pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
+        }) ??
+        remotes.find((r) => r.identityHex === castingCombat?.identityHex) ??
+        remotes[0];
+      const pb = preferred
+        ? playbackOf(preferred.identityHex)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const castOn =
+        pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
+      if (mark) {
+        if (castOn && preferred) {
+          mark.textContent = `Remote cast OK · ${pb.playing} · skinned ${pb.skinned} · remotes ${n} · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (n > 0 && preferred) {
+          const wind = castingCombat
+            ? `spell=${castingCombat.castingSpellId} left=${(castRemainingMs(castingCombat) / 1000).toFixed(1)}s`
+            : 'waiting windup';
+          mark.textContent = `VE remote-cast: remotes ${n} · ${pb.playing ?? 'idle'} · skinned ${pb.skinned} · ${wind}`;
+        } else {
+          mark.textContent = 'VE remote-cast: remotes 0 (start tools/SecondClient)…';
         }
-        // Hold OK while windup is visible so the screenshot catches the beam/bar.
-        if (castRemainingMs(casting) > 200 && ticks < 160) {
-          window.setTimeout(waitRemoteCast, 180);
-        }
-        return;
       }
-      if (mark && st.state === 'connected') {
-        const tip = targeting
-          ? `target npc#${targeting.targetNpcId} (waiting cast…)`
-          : 'waiting for target/cast…';
-        mark.textContent = `VE remote-cast: Connected · remotes ${remotes.length} · remoteCombats ${combats.length} · ${tip}`;
-      }
-      if (ticks > 160) {
-        if (mark) mark.textContent = 'VE remote-cast: timed out waiting for remote cast/target';
-        return;
-      }
-      window.setTimeout(waitRemoteCast, 250);
+      if (ticks < 280) window.setTimeout(waitRemoteCast, 180);
     };
     window.setTimeout(waitRemoteCast, 700);
   }

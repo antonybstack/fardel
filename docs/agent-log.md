@@ -222,3 +222,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** From pad A melee both yard hostiles sit inside CastRange. `cyclePreferHostiles` sorts by id, so one Tab may land on pad B while pad A is the one swinging.
 - **Do this:** Session fight VEs (`?ve=encounter`) `setTarget` the pulled pad. Do not treat one Tab as the aggroed NPC.
 - **Seen in:** #361
+
+### 2026-09-08 — humanoid,remote,cast — SecondClient 45s patrol + (-3,3) never sticks Emberbolt
+- **Cause:** `tools/SecondClient` walked 45s then stood at (−3, 3). Dummy is (5, 0); CastRange 8 m so that pad is OOR. Move during windup also cancels. `?ve=remote-cast` timed out on Idle/Walk HUD while CastingSpellId stayed 0.
+- **Do this:** Patrol in-range pads, EquipStaff, stand-cast Emberbolt immediately (no Move during CastEndsAt). persistMark via `readHumanoidPlayback`: `Remote cast OK` + Spell named + `skinned` ≥ 1. Mutate `camera.target` for `?ve=remote-cast` (do not `setTarget`). Env `FARDEL_SPACETIME_URI` + `FARDEL_DB` — never `:3000` / db `fardel`.
+- **Seen in:** #403

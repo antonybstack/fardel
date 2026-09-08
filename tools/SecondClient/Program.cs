@@ -58,47 +58,53 @@ try
 
     Console.WriteLine($"spawn ({pose.X}, {pose.Z})");
 
-    // Patrol so ?ve=remote-walk can catch Walk. A one-shot 4m hop arrives
-    // in <1s and the remote is idle before the screenshot.
-    var walkUntil = DateTime.UtcNow.AddSeconds(45);
-    var goPlus = true;
-    while (DateTime.UtcNow < walkUntil)
+    if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
     {
-        if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
-        {
-            await Frame(conn, 50);
-            continue;
-        }
-
-        var destX = goPlus ? targetX : -3.0f;
-        var destZ = goPlus ? targetZ : 3.0f;
-        var dx = destX - cur.X;
-        var dz = destZ - cur.Z;
-        var dist = MathF.Sqrt(dx * dx + dz * dz);
-        if (dist < 0.4f)
-        {
-            goPlus = !goPlus;
-            Console.WriteLine($"turn ({cur.X:F1}, {cur.Z:F1})");
-            await Frame(conn, 50);
-            continue;
-        }
-
-        var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        conn.Reducers.Move(dx * scale, dz * scale, false);
-        await Frame(conn, 50);
-    }
-
-    if (conn.Db.PlayerPose.Identity.Find(identity) is { } finalPose)
-    {
-        Console.WriteLine($"READY remotes-visible-at ({finalPose.X:F2}, {finalPose.Z:F2}) identity={identity}");
+        conn.Reducers.EquipStaff();
+        await Frame(conn, 200);
     }
 
     conn.Reducers.EnsureTrainingDummy();
     await Frame(conn, 200);
 
+    // In-range pads vs dummy (5,0). CastRange=8; (-3,3) was OOR so Emberbolt never
+    // stuck CastingSpellId. Walk between pads for ?ve=remote-walk, then stand-cast
+    // for ?ve=remote-cast (Move during windup cancels).
+    var goPlus = true;
     var castRound = 0;
     while (true)
     {
+        var destX = goPlus ? targetX : 2.0f;
+        var destZ = goPlus ? targetZ : -2.0f;
+        var walkGuard = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < walkGuard)
+        {
+            if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+            {
+                await Frame(conn, 50);
+                continue;
+            }
+
+            var dx = destX - cur.X;
+            var dz = destZ - cur.Z;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist < 0.4f)
+            {
+                Console.WriteLine($"pad ({cur.X:F1}, {cur.Z:F1})");
+                break;
+            }
+
+            var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+            conn.Reducers.Move(dx * scale, dz * scale, false);
+            await Frame(conn, 50);
+        }
+        goPlus = !goPlus;
+
+        if (conn.Db.PlayerPose.Identity.Find(identity) is { } readyPose)
+        {
+            Console.WriteLine($"READY remotes-visible-at ({readyPose.X:F2}, {readyPose.Z:F2}) identity={identity}");
+        }
+
         conn.Reducers.EnsureTrainingDummy();
         await Frame(conn, 100);
 
@@ -107,6 +113,18 @@ try
         {
             await Frame(conn, 200);
             continue;
+        }
+
+        if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+        {
+            await Frame(conn, 400);
+            continue;
+        }
+
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+        {
+            conn.Reducers.EquipStaff();
+            await Frame(conn, 150);
         }
 
         var combat = conn.Db.PlayerCombat.Identity.Find(identity);
@@ -121,23 +139,20 @@ try
             conn.Reducers.SetTarget(dummy.NpcId);
             Console.WriteLine($"SetTarget dummy #{dummy.NpcId}");
             await Frame(conn, 150);
+            combat = conn.Db.PlayerCombat.Identity.Find(identity);
+        }
+
+        if (combat is { CastingSpellId: not 0 })
+        {
+            await Frame(conn, Combat.EmberboltCastMs);
             continue;
         }
 
-        if (conn.Db.PlayerCombat.Identity.Find(identity) is { } c2)
+        var nowMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+        if (combat is { } c2 && c2.GcdReadyAt.MicrosecondsSinceUnixEpoch > nowMicros)
         {
-            if (c2.CastingSpellId != 0)
-            {
-                await Frame(conn, 100);
-                continue;
-            }
-
-            var nowMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
-            if (c2.GcdReadyAt.MicrosecondsSinceUnixEpoch > nowMicros)
-            {
-                await Frame(conn, 80);
-                continue;
-            }
+            await Frame(conn, 80);
+            continue;
         }
 
         castRound++;
@@ -151,6 +166,7 @@ try
             Console.Error.WriteLine("cast error: " + e.Message);
         }
 
+        // Hold still through windup so the browser sees CastingSpellId + Spell1.
         await Frame(conn, Combat.EmberboltCastMs + Combat.GcdMs + 200);
     }
 }
