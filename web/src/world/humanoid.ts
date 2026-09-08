@@ -412,18 +412,25 @@ export function createPlayerHumanoid(
     m.material?.markDirty(true);
   }
 
-  // Normalize height ~1.8m and plant feet on y=0 (assimp glTF is Y-up).
-  let bounds = worldBounds(meshes.filter((m) => !!m.skeleton));
-  if (!bounds) bounds = worldBounds(meshes);
-  if (bounds) {
+  const TARGET_HEIGHT = 1.8;
+  const plantToTargetHeight = (): void => {
+    for (const m of meshes) m.computeWorldMatrix(true);
+    let bounds = worldBounds(meshes.filter((m) => !!m.skeleton));
+    if (!bounds) bounds = worldBounds(meshes);
+    if (!bounds) return;
     const height = Math.max(0.01, bounds.max.y - bounds.min.y);
-    const scale = 1.8 / height;
-    pivot.scaling = new Vector3(scale, scale, scale);
-    bounds = worldBounds(meshes);
-  }
-  if (bounds) {
+    const s = TARGET_HEIGHT / height;
+    pivot.scaling = new Vector3(
+      pivot.scaling.x * s,
+      pivot.scaling.y * s,
+      pivot.scaling.z * s,
+    );
+    for (const m of meshes) m.computeWorldMatrix(true);
+    bounds = worldBounds(meshes.filter((m) => !!m.skeleton)) ?? bounds;
     pivot.position.y -= bounds.min.y;
-  }
+  };
+  // Bind AABB first (no extra ancestor — scale lives on the existing pivot).
+  plantToTargetHeight();
 
   // Staff: parent to Weapon.R (Idle_Weapon grip). Equip API still toggles the GLB mesh.
   const skinnedBody = meshes.find((m) => !!m.skeleton) ?? null;
@@ -561,6 +568,11 @@ export function createPlayerHumanoid(
   if (idle) {
     idle.start(true, 1.0, idle.from, idle.to, false);
   }
+  // Idle deforms vs bind; re-plant after the first CPU skin so feet sit on y=0
+  // at ~1.8 m. Do not introduce another scaled ancestor (breaks Assimp IBM).
+  scene.onBeforeRenderObservable.addOnce(() => {
+    plantToTargetHeight();
+  });
   animByRoot.set(root, {
     idle,
     walk,
@@ -592,14 +604,24 @@ export type HumanoidPlayback = {
   skinned: number;
   playing: string | null;
   idle: string | null;
+  height: number;
 };
 
 export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
   const a = animByRoot.get(parts.root);
   let skinned = 0;
+  let minY = Infinity;
+  let maxY = -Infinity;
   for (const m of parts.root.getChildMeshes(false)) {
-    if (m.skeleton && m.isEnabled() && m.isVisible && m.visibility > 0) skinned += 1;
+    if (m.skeleton && m.isEnabled() && m.isVisible && m.visibility > 0) {
+      skinned += 1;
+      m.computeWorldMatrix(true);
+      const bb = m.getBoundingInfo().boundingBox;
+      minY = Math.min(minY, bb.minimumWorld.y);
+      maxY = Math.max(maxY, bb.maximumWorld.y);
+    }
   }
+  const height = Number.isFinite(minY) ? Math.max(0, maxY - minY) : 0;
   const playing = a?.dead && a.death
     ? a.death.name
     : a?.casting && a.cast
@@ -617,7 +639,7 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
                 : a?.idle?.isPlaying
                   ? a.idle.name
                   : null;
-  return { skinned, playing, idle: a?.idle?.name ?? null };
+  return { skinned, playing, idle: a?.idle?.name ?? null, height };
 }
 
 function stopIfPlaying(

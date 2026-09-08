@@ -7001,7 +7001,7 @@ async function main(): Promise<void> {
       const local = net.getLocalPose();
       const playbackOf = (hex: string) => {
         const p = remoteMeshes.get(hex);
-        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null };
+        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null, height: 0 };
       };
       const preferred =
         remotes.find((r) => {
@@ -7016,7 +7016,7 @@ async function main(): Promise<void> {
         remotes[0];
       const pb = preferred
         ? playbackOf(preferred.identityHex)
-        : { skinned: 0, playing: null, idle: null };
+        : { skinned: 0, playing: null, idle: null, height: 0 };
       const walkOn =
         pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
       if (mark) {
@@ -11002,11 +11002,13 @@ async function main(): Promise<void> {
       const idleOk =
         pb.skinned > 0 &&
         !!pb.playing &&
-        /idle/i.test(pb.playing);
+        /idle/i.test(pb.playing) &&
+        pb.height >= 1.5 &&
+        pb.height <= 2.15;
       if (mark) {
         mark.textContent = idleOk
-          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned}`
-          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned} · ${pb.height.toFixed(2)}m`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · ${pb.height.toFixed(2)}m`;
       }
     };
     window.setTimeout(waitIdle, 800);

@@ -187,3 +187,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Wizard Walk stride is ~2.2 m/s (in-place clip; armature translation 0). Grounded wish is `MOVE_SPEED` 4.5. Remote grounded interp parks at `u=1` so the root eases then stops while feet cycle.
 - **Do this:** `setHumanoidMoving(..., speedMps)` sets `speedRatio = clamp(mps / walk-or-run ref)`. Snap grounded remote XZ (same as local). Refresh Walk hold from the snap delta — snap zeros `vx`, so the #313 `u<1` hold would die.
 - **Seen in:** #334
+
+### 2026-09-08 — humanoid,scale — 1.8m from bind AABB leaves Idle feet off dirt
+- **Cause:** Scale+plant used T-pose bounds before Idle_Weapon CPU-skin. Idle is shorter; feet float. A second scaled ancestor breaks Assimp IBM.
+- **Do this:** Scale the existing pivot only. Re-plant after the first Idle CPU-skin (`onBeforeRender` once). persistMark height 1.5–2.15 m. Do not scale forest.
+- **Seen in:** #336
