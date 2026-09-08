@@ -127,3 +127,9 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** TwistedTree bark primitive includes limbs. World AABB × 0.42 then a 3.4 m clamp parks the player inside a ~6 m-scale bole. Server Move has no obstacle table.
 - **Do this:** Author-scale chest-height radius × instance XZ (TwistedTree ~1.18, CommonTree ~0.52). Clip the WASD *wish* in `forest.ts`; do not send client positions; do not add Lib.cs capsules on E9.1. Keep dummy (5,0) / vendor (−2.5, 2) outside keep-out.
 - **Seen in:** #339
+
+### 2026-09-08 — humanoid,death — greyout still left a standing T
+- **Cause:** Death UX only tinted the robe. Idle/Walk kept playing, so a dead wizard read as a grey T or fidgeting Idle.
+- **Do this:** `setHumanoidDead` plays `Death` once and holds the last frame (`speedRatio` 0). Respawn starts Idle_Weapon. Loco/cast no-op while `dead`.
+- **Seen in:** #329
+

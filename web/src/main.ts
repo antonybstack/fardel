@@ -64,6 +64,7 @@ import {
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
   setHumanoidAirborne,
+  setHumanoidDead,
   setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
@@ -5171,10 +5172,12 @@ async function main(): Promise<void> {
             if (ch.hp <= 0) {
               setDeathGreyout(true);
               setLocalGhost(true);
+              setHumanoidDead(humanoid, true);
             }
           } else if (ch.hp <= 0 && prevPlayerHp > 0) {
             setDeathGreyout(true);
             setLocalGhost(true);
+            setHumanoidDead(humanoid, true);
             pushCombatLog('death', 'You died · respawning at yard');
             pushSystemToast('death', 'You died · respawning at yard', TOAST_VE_TTL_MS);
             selectedTargetId = 0n;
@@ -5183,6 +5186,7 @@ async function main(): Promise<void> {
           } else if (ch.hp > 0 && prevPlayerHp <= 0) {
             setDeathGreyout(false);
             setLocalGhost(false);
+            setHumanoidDead(humanoid, false);
             pushCombatLog('respawn', 'You respawned at yard · full HP');
             pushSystemToast('respawn', 'Respawned at yard · full HP', TOAST_VE_TTL_MS);
             flashMesh(humanoid.mat, new Color3(0.55, 0.85, 1.0), 900);
@@ -12753,6 +12757,7 @@ async function main(): Promise<void> {
         sawDeath = true;
         phase = 'dead';
         setDeathGreyout(true);
+        setHumanoidDead(humanoid, true);
       }
 
       // Prefer screenshot while dead (greyout + empty-ish HP) before respawn clears it.
@@ -12917,6 +12922,7 @@ async function main(): Promise<void> {
         sawDeath = true;
         phase = 'dead';
         setDeathGreyout(true);
+        setHumanoidDead(humanoid, true);
       }
 
       if (
@@ -12930,15 +12936,26 @@ async function main(): Promise<void> {
         // Freeze a clear mid-countdown frame for the screenshot.
         setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
         setLocalGhost(true);
+        setHumanoidDead(humanoid, true);
+        const pb = readHumanoidPlayback(humanoid);
+        const deathOk =
+          pb.skinned > 0 && !!pb.playing && /death/i.test(pb.playing);
         if (mark) {
-          mark.textContent =
-            `Death UX OK · greyout · countdown · toast` +
-            (digText || subText ? ` · ${digText || subText}` : '') +
-            ` · casts ${casts}`;
+          mark.textContent = deathOk
+            ? `Death UX OK · ${pb.playing} · skinned ${pb.skinned}` +
+              (digText || subText ? ` · ${digText || subText}` : '')
+            : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
         }
         const hold = () => {
           setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
           setLocalGhost(true);
+          setHumanoidDead(humanoid, true);
+          const live = readHumanoidPlayback(humanoid);
+          if (mark && live.skinned > 0 && live.playing && /death/i.test(live.playing)) {
+            mark.textContent =
+              `Death UX OK · ${live.playing} · skinned ${live.skinned}` +
+              (digText || subText ? ` · ${digText || subText}` : '');
+          }
           window.setTimeout(hold, 200);
         };
         hold();
