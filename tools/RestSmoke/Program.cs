@@ -2,7 +2,7 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// Rest reducer: out-of-combat heal + cooldown; reject casting / recently damaged / full / dead.
+// Rest reducer: out-of-combat HP heal + ManaRestore; reject casting / recently damaged / full / dead.
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
@@ -64,11 +64,29 @@ try
         await TakeThorns(conn, id, 1);
     }
     mid = conn.Db.Character.Identity.Find(id)!;
-    Console.WriteLine($"after more thorns hp={mid.Hp}/{mid.MaxHp} (need missing>={needMissing})");
+    Console.WriteLine($"after more thorns hp={mid.Hp}/{mid.MaxHp} (need missing>={needMissing}) mana={mid.Mana}/{mid.MaxMana}");
 
-    // --- Wait combat lock, Rest heals (not to full) ---
+    // Spark spend can be smaller than lazy regen over the thorns loop — drain until
+    // ManaRestore is observable (clamped), without filling HP.
+    var manaSlack = Combat.ManaRegenPerTick * 4;
+    while (conn.Db.Character.Identity.Find(id) is { } drain
+           && drain.Hp > Combat.DummyThornsDamage
+           && drain.Hp < drain.MaxHp
+           && drain.Mana > drain.MaxMana - Rest.ManaRestore - manaSlack)
+    {
+        await TakeThorns(conn, id, 1);
+    }
+
+    // --- Wait combat lock, Rest heals HP and restores mana (not to full HP) ---
     await DelayPump(conn, Rest.CombatLockMs + 200);
-    var beforeHeal = conn.Db.Character.Identity.Find(id)!.Hp;
+    var before = conn.Db.Character.Identity.Find(id)!;
+    var beforeHeal = before.Hp;
+    var beforeMana = before.Mana;
+    if (beforeMana >= before.MaxMana)
+    {
+        Fail($"expected missing mana before Rest, got {beforeMana}/{before.MaxMana}");
+        return;
+    }
     conn.Reducers.Rest();
     await PumpUntil(() =>
     {
@@ -88,6 +106,15 @@ try
         Fail("expected Rest to leave missing HP so cooldown reject can run");
         return;
     }
+
+    var expectedMana = Math.Min(afterHeal.MaxMana, beforeMana + Rest.ManaRestore);
+    var manaHi = Math.Min(afterHeal.MaxMana, beforeMana + Rest.ManaRestore + Combat.ManaRegenPerTick * 3);
+    if (afterHeal.Mana < expectedMana || afterHeal.Mana > manaHi)
+    {
+        Fail($"expected mana {expectedMana}..{manaHi} after Rest.ManaRestore={Rest.ManaRestore}, got {afterHeal.Mana} (before {beforeMana})");
+        return;
+    }
+    Console.WriteLine($"Rest mana OK {beforeMana}->{afterHeal.Mana}/{afterHeal.MaxMana} (want {expectedMana}..{manaHi})");
 
     // --- Cooldown reject (immediate; still missing HP, no new damage) ---
     await ExpectRestFail(conn, "Rest on cooldown", "cooldown");
