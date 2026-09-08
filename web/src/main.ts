@@ -4511,6 +4511,25 @@ async function main(): Promise<void> {
         pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${STUN_MANA_COST}`, TOAST_VE_TTL_MS);
         return;
       }
+      const tgtId = net.getCombat()?.targetNpcId ?? 0n;
+      const npc = tgtId !== 0n ? net.getNpcs().find((n) => n.npcId === tgtId) : undefined;
+      if (npc && npc.hp > 0 && (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))) {
+        const label =
+          npc.kind === NPC_KIND_DUMMY
+            ? 'Dummy'
+            : npc.kind === NPC_KIND_BRIGAND
+              ? 'Brigand'
+              : 'Hostile';
+        void net.stunNpc(npc.npcId).then(() => {
+          const bit = `Stun · ${label} #${npc.npcId} · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s`;
+          pushCombatLog('stun', bit);
+          pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          pushSystemToast('rate', msg.slice(0, 96) || 'Stun failed');
+        });
+        return;
+      }
       void net.stunNearestRemote().then((hex) => {
         if (!hex) { pushSystemToast('rate', 'No remote in Stun range'); return; }
         const bit = `Stun · Bash ${hex.slice(0, 8)}… · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s (not silence)`;
@@ -18098,13 +18117,117 @@ async function main(): Promise<void> {
   void CAST_RANGE_METERS;
   void KICK_MANA_COST;
   void KICK_RANGE_METERS;
-  // ?ve=stun / ?ve=bash
-  if (ve === 'stun' || ve === 'bash') {
+  // ?ve=stun — StunNpc Kind=2 lock; dummy still stunnable (#420).
+  // StunRange 5m: dummy in from origin; pads ~7.6m OOR — walk to ~4m (no aggro).
+  if (ve === 'stun') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'stun') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE stun: waiting for dummy + hostile…';
+    let ticks = 0;
+    let dummyStunned = false;
+    let hostileStunned = false;
+    let dummyBusy = false;
+    let hostileBusy = false;
+    let hostileId = 0n;
+    const waitStunNpc = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (ticks < 240) window.setTimeout(waitStunNpc, 200);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const hostile = npcs.find((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const hMesh = hostile ? npcMeshes.get(hostile.npcId.toString()) : undefined;
+      const hLabel = hMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      if (dummyStunned && hostileStunned && toastKindsPresent().has('stun') && hLabel === 'Hostile') {
+        if (mark) {
+          mark.textContent =
+            `Stun OK · Hostile #${hostileId} · lock · dummy stunnable · #420`;
+        }
+        return;
+      }
+      const gcd = gcdRemainingMs(net.getCombat());
+      if (!dummyStunned && !dummyBusy && dummy && gcd <= 0) {
+        dummyBusy = true;
+        net.setTarget(dummy.npcId);
+        void net.stunNpc(dummy.npcId).then(() => {
+          dummyStunned = true;
+          dummyBusy = false;
+          const bit = `Stun · Dummy #${dummy.npcId} · trainer`;
+          pushCombatLog('stun', bit);
+          pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+        }).catch(() => {
+          dummyBusy = false;
+        });
+        window.setTimeout(waitStunNpc, 280);
+        return;
+      }
+      if (dummyStunned && !hostileStunned && !hostileBusy && hostile) {
+        const local = net.getLocalPose();
+        if (local) {
+          const dist = Math.hypot(hostile.x - local.x, hostile.z - local.z);
+          if (dist > STUN_RANGE_METERS - 0.4) {
+            net.sendMove(hostile.x - local.x, hostile.z - local.z, false);
+            if (mark) {
+              mark.textContent =
+                `VE stun: dummy ok · walk ${dist.toFixed(1)}m → Hostile (range ${STUN_RANGE_METERS})`;
+            }
+            window.setTimeout(waitStunNpc, 80);
+            return;
+          }
+        }
+        if (gcd > 0) {
+          window.setTimeout(waitStunNpc, 120);
+          return;
+        }
+        hostileBusy = true;
+        hostileId = hostile.npcId;
+        net.setTarget(hostile.npcId);
+        void net.stunNpc(hostile.npcId).then(() => {
+          hostileStunned = true;
+          hostileBusy = false;
+          const bit = `Stun · Hostile #${hostile.npcId} · lock`;
+          pushCombatLog('stun', bit);
+          pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+        }).catch(() => {
+          hostileBusy = false;
+        });
+        window.setTimeout(waitStunNpc, 280);
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE stun: dummy ${dummyStunned ? 'ok' : dLabel || 'no'} · H ${hostileStunned ? 'ok' : hLabel || 'no'}`;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          mark.textContent =
+            `Stun FAIL · dummy ${dummyStunned ? 'ok' : 'no'} · hostile ${hostileStunned ? 'ok' : 'no'} · #420`;
+        }
+        return;
+      }
+      window.setTimeout(waitStunNpc, 200);
+    };
+    window.setTimeout(waitStunNpc, 600);
+  }
+
+  // ?ve=bash — PvP Stun(Identity) vs a nearby remote (SecondClient).
+  if (ve === 'bash') {
     camera.radius = 14; camera.alpha = Math.PI / 2.3; camera.beta = Math.PI / 3.1;
   }
-  if (net && (ve === 'stun' || ve === 'bash')) {
+  if (net && ve === 'bash') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE stun: waiting…';
+    if (mark) mark.textContent = 'VE bash: waiting…';
     let ticks = 0, stunned = false, nudged = false;
     const waitStun = () => {
       if (!net) return;
@@ -18116,7 +18239,10 @@ async function main(): Promise<void> {
       syncRemoteMeshes(remotes); syncRemoteCastFx(net.getRemoteCombats()); syncNpcMeshes(net.getNpcs());
       const preferred = remotes[0];
       if (preferred) {
-        camera.setTarget(new Vector3((player.position.x + preferred.x) / 2, 1.15, (player.position.z + preferred.z) / 2));
+        const tgt = camera.target;
+        tgt.x = (player.position.x + preferred.x) / 2;
+        tgt.y = 1.15;
+        tgt.z = (player.position.z + preferred.z) / 2;
         const local = net.getLocalPose();
         if (local) {
           const dist = Math.hypot(preferred.x - local.x, preferred.z - local.z);
@@ -18128,7 +18254,7 @@ async function main(): Promise<void> {
         return;
       }
       if (remotes.length < 1) {
-        if (mark) mark.textContent = 'VE stun: remotes 0 (start tools/SecondClient)…';
+        if (mark) mark.textContent = 'VE bash: remotes 0 (start tools/SecondClient)…';
         if (ticks < 300) window.setTimeout(waitStun, 250);
         return;
       }

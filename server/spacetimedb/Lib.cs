@@ -160,6 +160,12 @@ public static partial class Module
         /// <summary>Next auto-attack eligible at this unix micros. 0 = swing on first melee (#356).</summary>
         [SpacetimeDB.Default(0)]
         public long NextSwingAtMicros;
+        /// <summary>
+        /// StunNpc lock: skip chase/swing while now &lt; this micros (#420).
+        /// Same duration as PlayerCombat.StunnedUntilMicros. Dummy does not AI.
+        /// </summary>
+        [SpacetimeDB.Default(0)]
+        public long StunnedUntilMicros;
     }
 
     /// <summary>Ground loot in the yard — SeedLoot / dummy death inserts; Pickup despawns.</summary>
@@ -949,6 +955,102 @@ public static partial class Module
         ctx.Db.PlayerCombat.Identity.Update(targetCombat);
     }
 
+    /// <summary>
+    /// Stun vs Dummy / hostile NPC (#420). Same GCD + StunManaCost + StunDurationMs
+    /// as Stun(Identity). Dummy stays planted (trainer). Hostiles skip chase/swing
+    /// while StunnedUntilMicros. Stun(Identity) stays the PvP hard-CC.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void StunNpc(ReducerContext ctx, ulong npcId)
+    {
+        var selfChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (selfChar.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+
+        if (ctx.Db.Npc.NpcId.Find(npcId) is not { } npc)
+        {
+            throw new Exception("Target missing");
+        }
+        if (npc.Hp <= 0)
+        {
+            throw new Exception("Target dead");
+        }
+        if (npc.Kind != NpcKindDummy && !Combat.IsHostileKind(npc.Kind))
+        {
+            throw new Exception("Invalid target");
+        }
+
+        var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        {
+            var dx = selfPose.X - npc.X;
+            var dz = selfPose.Z - npc.Z;
+            var range = Combat.StunRangeMeters;
+            if (dx * dx + dz * dz > range * range)
+            {
+                throw new Exception("Out of range");
+            }
+        }
+
+        var selfCombat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp < selfCombat.GcdReadyAt)
+        {
+            throw new Exception("GCD");
+        }
+        if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < selfCombat.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
+        if (ctx.Timestamp < selfCombat.CastLockedUntil)
+        {
+            throw new Exception("silenced");
+        }
+        if (selfCombat.CastingSpellId != 0)
+        {
+            throw new Exception("Busy casting");
+        }
+
+        TickManaRegen(ctx, ref selfChar);
+        if (Combat.StunManaCost > 0 && selfChar.Mana < Combat.StunManaCost)
+        {
+            ctx.Db.Character.Identity.Update(selfChar);
+            throw new Exception("Insufficient mana");
+        }
+        if (Combat.StunManaCost > 0)
+        {
+            selfChar.Mana -= Combat.StunManaCost;
+        }
+        ctx.Db.Character.Identity.Update(selfChar);
+
+        selfCombat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
+        selfCombat.LastSpellId = 0;
+        selfCombat.LastCastAt = ctx.Timestamp;
+        ctx.Db.PlayerCombat.Identity.Update(selfCombat);
+
+        var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        var lockUntil = now + (long)Combat.StunNpcLockMs * 1000L;
+        npc.StunnedUntilMicros = lockUntil;
+        if (Combat.IsHostileKind(npc.Kind) && npc.NextSwingAtMicros < lockUntil)
+        {
+            npc.NextSwingAtMicros = lockUntil;
+        }
+        ctx.Db.Npc.NpcId.Update(npc);
+        if (Combat.IsHostileKind(npc.Kind))
+        {
+            Log.Info(
+                $"StunNpc {ctx.Sender} → npc {npc.NpcId} kind={npc.Kind} " +
+                $"(lock {Combat.StunNpcLockMs}ms)");
+        }
+        else
+        {
+            Log.Info($"StunNpc {ctx.Sender} → dummy {npc.NpcId} (trainer lock {Combat.StunNpcLockMs}ms)");
+        }
+    }
+
     /// <summary>Unequip staff — Cast already gates on StaffEquipped (slice 3 nice-to-have).</summary>
     [SpacetimeDB.Reducer]
     public static void UnequipStaff(ReducerContext ctx)
@@ -1443,6 +1545,12 @@ public static partial class Module
                 row.SpawnZ = row.Z;
             }
 
+            if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < row.StunnedUntilMicros)
+            {
+                ctx.Db.Npc.NpcId.Update(row);
+                continue;
+            }
+
             var homeDx = row.X - row.SpawnX;
             var homeDz = row.Z - row.SpawnZ;
             var homeDist = MathF.Sqrt(homeDx * homeDx + homeDz * homeDz);
@@ -1489,6 +1597,10 @@ public static partial class Module
         }
 
         var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        if (now < row.StunnedUntilMicros)
+        {
+            return;
+        }
         if (row.NextSwingAtMicros > 0 && now < row.NextSwingAtMicros)
         {
             return;

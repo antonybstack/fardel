@@ -172,6 +172,12 @@ public static class Combat
     public const int StunManaCost = 15;
     /// <summary>Move + Cast reject with "stunned" while Timestamp &lt; StunnedUntil.</summary>
     public const int StunDurationMs = 1500;
+    /// <summary>
+    /// StunNpc lock on Dummy + hostiles (#420). Same window as PvP Stun.
+    /// StunRangeMeters is 5: Dummy at 5m is in range from origin; pads A/B/C
+    /// (~7.6m) are not — walk to ~4m (inside range, outside AggroRadius 3).
+    /// </summary>
+    public const int StunNpcLockMs = StunDurationMs;
 
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
