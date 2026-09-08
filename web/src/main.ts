@@ -6175,31 +6175,17 @@ async function main(): Promise<void> {
         camZoomRadius = CAM_COLLISION_VE_RADIUS;
         camCollideThisFrame = true;
       } else if (veFollow === 'encounter') {
-        // Play follow + trunk clamp: fight among trees, camera stays out of boles (#361).
-        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
-        if (!camFollowYSeeded) {
-          camFollowY = targetY;
-          camFollowYSeeded = true;
-        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
-          camFollowY = targetY;
-        } else {
-          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
-          camFollowY += (targetY - camFollowY) * a;
-        }
+        // Kind=2 (3,7) + Kind=3 (7,-3) + Dummy (5,0) as people while pad A is pulled (#456).
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
         const tgt = camera.target;
-        const sel =
-          selectedTargetId !== 0n ? npcMeshes.get(selectedTargetId.toString()) : undefined;
-        const hx = sel?.root.position.x ?? player.position.x;
-        const hz = sel?.root.position.z ?? player.position.z;
-        tgt.x = player.position.x * 0.45 + hx * 0.55;
-        tgt.y = camFollowY;
-        tgt.z = player.position.z * 0.45 + hz * 0.55;
-        camera.alpha = -0.62;
-        camera.beta = Math.PI / 2.38;
-        camZoomRadius = 14;
+        tgt.x = 4.2;
+        tgt.y = 1.4;
+        tgt.z = 1.4;
+        camera.alpha = Math.PI / 2.12;
+        camera.beta = Math.PI / 2.55;
+        camZoomRadius = 20;
         camCollideThisFrame = true;
       } else if (
         veFollow !== 'vendor-stall' &&
@@ -10798,11 +10784,11 @@ async function main(): Promise<void> {
     window.setTimeout(waitB, 800);
   }
 
-  // ?ve=encounter — fight a hostile among trees, cam out of trunks, nameplate on (#361).
+  // ?ve=encounter — Kind=2 + Kind=3 people, dummy trainer, fight pad A (#456).
   if (ve === 'encounter') {
-    camera.radius = 14;
-    camera.alpha = -0.62;
-    camera.beta = Math.PI / 2.38;
+    camera.radius = 20;
+    camera.alpha = Math.PI / 2.12;
+    camera.beta = Math.PI / 2.55;
   }
   if (net && ve === 'encounter') {
     const mark = document.getElementById('persistMark');
@@ -10826,15 +10812,20 @@ async function main(): Promise<void> {
       if (!net) return;
       ticks += 1;
       const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
       const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
-      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyOk = !!dummy;
       const padA =
         hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
         hostiles[0];
+      const brigand = brigands[0];
       const hp = net.getCharacter()?.hp ?? 0;
-      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+      if (latestStatus.state !== 'connected' || !padA || !brigand || !dummyOk) {
         if (mark) {
-          mark.textContent = `VE encounter: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+          mark.textContent =
+            `VE encounter: ${latestStatus.state} · H ${hostiles.length} · B ${brigands.length}…`;
         }
         if (ticks < 280) window.setTimeout(waitE, 200);
         return;
@@ -10875,31 +10866,56 @@ async function main(): Promise<void> {
           selectedTargetId = padA.npcId;
           tabbed = true;
         }
-        syncNpcMeshes(net.getNpcs());
         updateTargetFrame(padA);
         const mesh = npcMeshes.get(padA.npcId.toString());
+        const bMesh = npcMeshes.get(brigand.npcId.toString());
+        const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
         const plateOn = !!(mesh?.nameplate && mesh.nameplate.mesh.isEnabled());
         const plateLabel = mesh?.nameplate?.label ?? '';
+        const bLabel = bMesh?.nameplate?.label ?? '';
         const ringOn = !!(mesh && mesh.ring.isEnabled());
         const clipped = camInTrunk();
+        let capsuleLeft = false;
+        let hSkinned = 0;
+        let bSkinned = 0;
+        for (const n of [...hostiles, ...brigands]) {
+          const m = npcMeshes.get(n.npcId.toString());
+          if (m?.humanoid) {
+            const pb = readHumanoidPlayback(m.humanoid);
+            if (n.kind === NPC_KIND_BRIGAND) bSkinned = Math.max(bSkinned, pb.skinned);
+            else hSkinned = Math.max(hSkinned, pb.skinned);
+          } else if (m) {
+            capsuleLeft = true;
+          }
+        }
+        const dummyTrainer = !!dMesh && !dMesh.humanoid;
+        if (capsuleLeft) {
+          if (mark) mark.textContent = 'Encounter FAIL · capsule · #456';
+          return;
+        }
         if (
           padA.aggroed &&
           hp < hp0 &&
           plateOn &&
           plateLabel === 'Hostile' &&
+          bLabel === 'Brigand' &&
           ringOn &&
-          !clipped
+          !clipped &&
+          dummyTrainer &&
+          hSkinned > 0 &&
+          bSkinned > 0
         ) {
           phase = 'done';
           if (mark) {
-            mark.textContent = 'Encounter OK · fighting · plate · cam clear · #361';
+            mark.textContent =
+              `Encounter OK · Hostile · Brigand · dummy trainer · fighting · skinned · #456`;
           }
           return;
         }
         if (mark) {
           mark.textContent =
-            `VE encounter: fight · hp ${hp}/${hp0} · aggro ${padA.aggroed ? 'y' : 'n'} · ` +
-            `plate ${plateLabel || 'no'} · ring ${ringOn ? 'on' : 'off'} · cam ${clipped ? 'clip' : 'clear'}`;
+            `VE encounter: fight · hp ${hp}/${hp0} · H ${plateLabel || 'no'} · B ${bLabel || 'no'} · ` +
+            `skin ${hSkinned}/${bSkinned} · cam ${clipped ? 'clip' : 'clear'}`;
         }
       }
       if (ticks > 280) {
@@ -10909,8 +10925,7 @@ async function main(): Promise<void> {
         if (mark) {
           mark.textContent =
             `Encounter FAIL · phase ${phase} · hp ${hp} · tgt ${tgtFail?.kind ?? 'none'} · ` +
-            `plate ${meshFail?.nameplate?.label || 'no'} · ring ${meshFail?.ring.isEnabled() ? 'on' : 'off'} · ` +
-            `cam ${clippedFail ? 'clip' : 'clear'} · #361`;
+            `plate ${meshFail?.nameplate?.label || 'no'} · cam ${clippedFail ? 'clip' : 'clear'} · #456`;
         }
         return;
       }
