@@ -2456,11 +2456,17 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   marker.setEnabled(false);
 
   let nameplate: Nameplate | null = null;
-  if (isDummy) {
+  const isHostile = npc.kind === NPC_KIND_HOSTILE;
+  if (isDummy || isHostile) {
     nameplate = createNameplate(scene, `npc_${npc.npcId}`);
     nameplate.mesh.parent = root;
-    nameplate.mesh.position.set(0, 2.15, 0);
-    paintNameplate(nameplate, 'Dummy', '#e8c89a', npc.maxHp > 0 ? npc.hp / npc.maxHp : 1);
+    nameplate.mesh.position.set(0, isDummy ? 2.15 : 2.35, 0);
+    paintNameplate(
+      nameplate,
+      isDummy ? 'Dummy' : 'Hostile',
+      isDummy ? '#e8c89a' : '#ff7a62',
+      npc.maxHp > 0 ? npc.hp / npc.maxHp : 1,
+    );
   }
 
   return {
@@ -2847,7 +2853,8 @@ function paintNameplate(
     const bh = 14;
     const fill = Math.max(0, Math.min(1, hpFrac));
     const isDummy = label === 'Dummy';
-    if (isDummy) {
+    const isHostile = label === 'Hostile';
+    if (isDummy || isHostile) {
       ctx.fillStyle = 'rgba(8,10,12,0.92)';
       ctx.fillRect(bx, by, bw, bh);
       ctx.strokeStyle = selected
@@ -2855,8 +2862,13 @@ function paintNameplate(
         : 'rgba(0,0,0,0.95)';
       ctx.lineWidth = selected ? 4 : 3;
       ctx.strokeRect(bx, by, bw, bh);
-      ctx.fillStyle =
-        fill > 0.35
+      ctx.fillStyle = isHostile
+        ? fill > 0.35
+          ? 'rgb(255,110,80)'
+          : fill > 0.15
+            ? 'rgb(245,150,50)'
+            : 'rgb(210,40,40)'
+        : fill > 0.35
           ? 'rgb(55,230,95)'
           : fill > 0.15
             ? 'rgb(245,180,40)'
@@ -4562,6 +4574,16 @@ async function main(): Promise<void> {
         npcLastHp.set(key, npc.hp);
       }
 
+      if (
+        !mesh.nameplate &&
+        (npc.kind === NPC_KIND_DUMMY || npc.kind === NPC_KIND_HOSTILE)
+      ) {
+        const np = createNameplate(scene, `npc_${npc.npcId}`);
+        np.mesh.parent = mesh.root;
+        np.mesh.position.set(0, npc.kind === NPC_KIND_DUMMY ? 2.15 : 2.35, 0);
+        mesh.nameplate = np;
+      }
+
       const wasAlive = (prevHp ?? npc.hp) > 0;
       const isAlive = npc.hp > 0;
       let fx = npcLifeFx.get(key);
@@ -4602,7 +4624,10 @@ async function main(): Promise<void> {
       const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
       if (!animating) {
         mesh.root.setEnabled(isAlive);
-        if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+        if (
+          mesh.nameplate &&
+          (npc.kind === NPC_KIND_DUMMY || npc.kind === NPC_KIND_HOSTILE)
+        ) {
           mesh.nameplate.mesh.setEnabled(isAlive);
         }
       }
@@ -4612,11 +4637,21 @@ async function main(): Promise<void> {
         isAlive &&
         latestRemoteCombats.some((rc) => rc.targetNpcId === npc.npcId);
 
-      if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+      if (
+        mesh.nameplate &&
+        (npc.kind === NPC_KIND_DUMMY || npc.kind === NPC_KIND_HOSTILE)
+      ) {
+        const hostile = npc.kind === NPC_KIND_HOSTILE;
         paintNameplate(
           mesh.nameplate,
-          'Dummy',
-          selected ? '#f4e4a8' : '#e8c89a',
+          hostile ? 'Hostile' : 'Dummy',
+          selected
+            ? hostile
+              ? '#ffb08a'
+              : '#f4e4a8'
+            : hostile
+              ? '#ff7a62'
+              : '#e8c89a',
           npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
           selected,
         );
@@ -5723,7 +5758,11 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.35;
         camera.beta = Math.PI / 2.55;
         camera.radius = 6;
-      } else if (veFollow === 'hostile-spawn' || veFollow === 'leash') {
+      } else if (
+        veFollow === 'hostile-spawn' ||
+        veFollow === 'leash' ||
+        veFollow === 'hostile-read'
+      ) {
         // North of pad: dummy (5,0) + hostiles (3,7)/(-7,3) in one shot.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -5823,6 +5862,7 @@ async function main(): Promise<void> {
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
         veFollow !== 'tab-hostile' &&
+        veFollow !== 'hostile-read' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
@@ -9432,6 +9472,65 @@ async function main(): Promise<void> {
       window.setTimeout(waitT, 200);
     };
     window.setTimeout(waitT, 500);
+  }
+
+  // ?ve=hostile-read — Hostile coral plate vs Dummy parchment vs Vendor mint (#359).
+  if (ve === 'hostile-read') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'hostile-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-read: waiting for hostiles…';
+    let ticks = 0;
+    const waitR = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const vendors = net.getVendors();
+      syncNpcMeshes(npcs);
+      syncVendorMeshes(vendors);
+      const hMesh = hostiles[0]
+        ? npcMeshes.get(hostiles[0].npcId.toString())
+        : undefined;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const vMesh = vendors[0]
+        ? vendorMeshes.get(vendors[0].vendorId.toString())
+        : undefined;
+      const hPlate = !!(hMesh?.nameplate && hMesh.nameplate.mesh.isEnabled());
+      const dPlate = !!(dMesh?.nameplate && dMesh.nameplate.mesh.isEnabled());
+      const vPlate = !!(vMesh?.nameplate && vMesh.nameplate.mesh.isEnabled());
+      const hLabel = hMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const vLabel = vMesh?.nameplate?.label ?? '';
+      if (
+        latestStatus.state === 'connected' &&
+        hPlate &&
+        dPlate &&
+        vPlate &&
+        hLabel === 'Hostile' &&
+        dLabel === 'Dummy' &&
+        /vendor/i.test(vLabel)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE hostile-read: H ${hLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'}`;
+      }
+      if (ticks > 200) {
+        if (mark) mark.textContent = `Hostile-read FAIL · H ${hLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'} · #359`;
+        return;
+      }
+      window.setTimeout(waitR, 200);
+    };
+    window.setTimeout(waitR, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).

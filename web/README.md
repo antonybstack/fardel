@@ -88,6 +88,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |
 | `?ve=tab-target` | Tab-select Dummy; world gold nameplate + HP pip + ring + marker (#142); HUD `Tab-target OK · world gold plate+ring · … · #142` |
 | `?ve=tab-hostile` | Tab prefers in-range hostiles; dummy still in cycle (#358); HUD `Tab-hostile OK · Hostile #… · dummy selectable · #358`. |
+| `?ve=hostile-read` | Hostile coral plate vs Dummy parchment vs Vendor mint at play cam (#359); HUD `Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359`. |
 | `?ve=keys` | Open keybind legend overlay (H); HUD `Keys legend OK · …` (`ve/babylon-keys.png`) |
 | `?ve=keys-read` | Keybind legend chrome readability under #39 cyan fog (#115); HUD `Keys-read OK · …` |
 | `?ve=first-session` | First-connect H legend flash + canvas-focus toast (#134); HUD `First-session OK · H legend · canvas focus · #134` |
