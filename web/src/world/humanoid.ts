@@ -897,6 +897,8 @@ export function setHumanoidTurning(
 /**
  * Equip: show staff + Idle_Weapon / Run_Weapon (grip, not bind-T).
  * Unequip: hide the stick and play unarmed Idle / Run (not a floating grip).
+ * Remotes must follow Character.staffEquipped — hiding the mesh is not enough
+ * (`Idle_Weapon` is an includes-match on `Idle`).
  */
 export function setHumanoidStaffEquipped(
   parts: HumanoidParts,

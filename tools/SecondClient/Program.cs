@@ -67,10 +67,56 @@ try
     conn.Reducers.EnsureTrainingDummy();
     await Frame(conn, 200);
 
+    var sheath = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
     var suicide = string.Equals(
         Environment.GetEnvironmentVariable("FARDEL_SECOND_DIE"),
         "1",
         StringComparison.OrdinalIgnoreCase);
+    if (sheath)
+    {
+        // ?ve=remote-sheathed: stand in-yard with staff off so the browser
+        // sees unarmed Idle (not Idle_Weapon + hidden stick).
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: true })
+        {
+            conn.Reducers.UnequipStaff();
+            await Frame(conn, 200);
+        }
+        var walkGuard = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < walkGuard)
+        {
+            if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+            {
+                await Frame(conn, 50);
+                continue;
+            }
+            var dx = targetX - cur.X;
+            var dz = targetZ - cur.Z;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist < 0.4f)
+            {
+                Console.WriteLine($"sheath-pad ({cur.X:F1}, {cur.Z:F1})");
+                break;
+            }
+            var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+            conn.Reducers.Move(dx * scale, dz * scale, false);
+            await Frame(conn, 50);
+        }
+        if (conn.Db.PlayerPose.Identity.Find(identity) is { } sheathPose)
+        {
+            Console.WriteLine($"READY sheath-pad ({sheathPose.X:F2}, {sheathPose.Z:F2}) identity={identity}");
+        }
+        while (true)
+        {
+            if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: true })
+            {
+                conn.Reducers.UnequipStaff();
+            }
+            await Frame(conn, 400);
+        }
+    }
     if (suicide)
     {
         // ?ve=remote-death: stand in-yard and DummyStrike until Hp=0 so the

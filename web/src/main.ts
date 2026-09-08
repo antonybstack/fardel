@@ -3889,6 +3889,10 @@ async function main(): Promise<void> {
           robeColor: wantParty ? partyRobeColor() : remoteRobeColor(key),
         });
         setHumanoidMoving(parts, false);
+        {
+          const spawnCh = net?.getCharacterFor(key);
+          setHumanoidStaffEquipped(parts, spawnCh?.staffEquipped ?? true);
+        }
         remoteMeshes.set(key, parts);
         remotePartyTint.set(key, wantParty);
         const np = createNameplate(scene, `remote_${key.slice(0, 12)}`);
@@ -3947,6 +3951,10 @@ async function main(): Promise<void> {
         st.dz = stepZ * MOVE_SEND_HZ;
       }
       parts.root.setEnabled(true);
+      {
+        const rChNow = net?.getCharacterFor(key);
+        if (rChNow) setHumanoidStaffEquipped(parts, rChNow.staffEquipped);
+      }
       const rHp = net?.getCharacterFor(key)?.hp;
       if (typeof rHp === 'number') {
         const prev = remoteLastHp.get(key);
@@ -6255,6 +6263,38 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-sheathed') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = player.position.x;
+        let fy = player.position.y + 1.0;
+        let fz = player.position.z;
+        let best = -1;
+        for (const [, parts] of remoteMeshes) {
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const sheathed =
+            pb.skinned > 0 &&
+            /^idle$/i.test(clip) &&
+            !/weapon/i.test(clip) &&
+            !parts.staff.isEnabled();
+          const d = Vector3.Distance(parts.root.position, player.position);
+          const rank = (sheathed ? 1000 : 0) + d;
+          if (rank > best) {
+            best = rank;
+            fx = parts.root.position.x;
+            fy = parts.root.position.y + 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'remote-cast') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6394,6 +6434,7 @@ async function main(): Promise<void> {
         veFollow !== 'hostile-chase' &&
         veFollow !== 'kick' &&
         veFollow !== 'stun' &&
+        veFollow !== 'remote-sheathed' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
@@ -8014,6 +8055,83 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitRemoteWalk, 200);
     };
     window.setTimeout(waitRemoteWalk, 700);
+  }
+
+  // ?ve=remote-sheathed — E8.26 remote Character.staffEquipped=false plays unarmed Idle.
+  if (ve === 'remote-sheathed') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'remote-sheathed') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-sheathed: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let nudged = false;
+    const waitSheath = () => {
+      if (!net) return;
+      ticks += 1;
+      if (!nudged && latestStatus.state === 'connected') {
+        nudged = true;
+        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
+      }
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const n = remoteMeshes.size;
+      const playbackOf = (hex: string) => {
+        const p = remoteMeshes.get(hex);
+        return p
+          ? { pb: readHumanoidPlayback(p), staffOn: p.staff.isEnabled() }
+          : { pb: { skinned: 0, playing: null, idle: null, height: 0 }, staffOn: true };
+      };
+      const preferred =
+        remotes.find((r) => {
+          const ch = net.getCharacterFor(r.identityHex);
+          const { pb, staffOn } = playbackOf(r.identityHex);
+          const clip = clipBare(pb.playing);
+          return (
+            ch != null &&
+            !ch.staffEquipped &&
+            pb.skinned > 0 &&
+            /^idle$/i.test(clip) &&
+            !/weapon/i.test(clip) &&
+            !staffOn
+          );
+        }) ?? remotes[0];
+      const got = preferred ? playbackOf(preferred.identityHex) : null;
+      const clip = clipBare(got?.pb.playing ?? null);
+      const ch = preferred ? net.getCharacterFor(preferred.identityHex) : null;
+      const sheathOk =
+        !!preferred &&
+        !!got &&
+        !!ch &&
+        !ch.staffEquipped &&
+        got.pb.skinned > 0 &&
+        /^idle$/i.test(clip) &&
+        !/weapon/i.test(clip) &&
+        !got.staffOn;
+      if (mark) {
+        if (sheathOk && got) {
+          mark.textContent =
+            `Remote sheathed OK · ${clip} · skinned ${got.pb.skinned} · remotes ${n}`;
+        } else if (n > 0 && got && got.pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${got.pb.playing ?? 'none'} · skeleton=${got.pb.skinned}`;
+        } else if (n > 0 && got) {
+          mark.textContent =
+            `VE remote-sheathed: remotes ${n} · ${clip} · staff ${got.staffOn ? 'on' : 'off'} · skinned ${got.pb.skinned} (FARDEL_SECOND_SHEATH=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-sheathed: remotes 0 (start tools/SecondClient FARDEL_SECOND_SHEATH=1)…';
+        }
+      }
+      if (ticks < 240) window.setTimeout(waitSheath, 200);
+    };
+    window.setTimeout(waitSheath, 700);
   }
 
   // ?ve=remote-cast — E8.16 remote CastingSpell/CastEndsAt drives Spell1.
