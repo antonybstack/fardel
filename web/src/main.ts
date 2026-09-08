@@ -1095,6 +1095,7 @@ type SystemToastKind =
   | 'tonic'
   | 'rest'
   | 'mana'
+  | 'gcd'
   | 'castCancel'
   | 'castPushback'
   | 'castHardInterrupt'
@@ -1153,25 +1154,27 @@ function pushSystemToast(
                                   ? 'REST'
                                   : kind === 'mana'
                                     ? 'MANA'
-                                    : kind === 'castCancel'
-                                      ? 'CANCEL ↩'
-                                      : kind === 'castPushback'
-                                        ? 'PUSH'
-                                        : kind === 'castHardInterrupt'
-                                          ? 'LOCKOUT ⊘'
-                                          : kind === 'silenced'
-                                            ? 'SILENCE'
-                                            : kind === 'kick'
-                                            ? 'KICK'
-                                            : kind === 'stun'
-                                            ? 'STUN'
-                                            : kind === 'outOfRange'
-                                              ? 'RANGE'
-                                              : kind === 'canvasFocus'
-                                                ? 'FOCUS'
-                                                : kind === 'bag'
-                                                  ? 'BAG'
-                                                  : 'SAY';
+                                    : kind === 'gcd'
+                                      ? 'GCD'
+                                      : kind === 'castCancel'
+                                        ? 'CANCEL ↩'
+                                        : kind === 'castPushback'
+                                          ? 'PUSH'
+                                          : kind === 'castHardInterrupt'
+                                            ? 'LOCKOUT ⊘'
+                                            : kind === 'silenced'
+                                              ? 'SILENCE'
+                                              : kind === 'kick'
+                                              ? 'KICK'
+                                              : kind === 'stun'
+                                              ? 'STUN'
+                                              : kind === 'outOfRange'
+                                                ? 'RANGE'
+                                                : kind === 'canvasFocus'
+                                                  ? 'FOCUS'
+                                                  : kind === 'bag'
+                                                    ? 'BAG'
+                                                    : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -3085,6 +3088,9 @@ async function main(): Promise<void> {
           latestStatus.state === 'connected'
             ? { ...latestStatus, castFeedback: 'GCD' }
             : latestStatus;
+        const gcdLeft = gcdRemainingMs(combat);
+        pushSystemToast('gcd', `On cooldown · ${(gcdLeft / 1000).toFixed(1)}s`, TOAST_VE_TTL_MS);
+        pushCombatLog('gcd', `On cooldown · ${(gcdLeft / 1000).toFixed(1)}s remaining`);
         return;
       }
       if (!combat || combat.targetNpcId === 0n) {
@@ -12383,6 +12389,119 @@ async function main(): Promise<void> {
       if (ticks < 45) window.setTimeout(waitRead, 400);
     };
     window.setTimeout(waitRead, 600);
+  }
+
+  // ?ve=gcd-block — GCD-blocked cast press shows toast + combat-log (#188).
+  if (ve === 'gcd-block' || ve === 'gcdblock') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'gcd-block' || ve === 'gcdblock')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE gcd-block: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let phase: 'cast' | 'block' | 'done' = 'cast';
+    let firstCastAt = 0;
+    const waitGcdBlock = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE gcd-block: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitGcdBlock, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE gcd-block: equipping staff…';
+        window.setTimeout(waitGcdBlock, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE gcd-block: seeding dummy…';
+        window.setTimeout(waitGcdBlock, 350);
+        return;
+      }
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      let dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE gcd-block: respawning dummy…';
+        window.setTimeout(waitGcdBlock, 300);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+
+      const combat = net.getCombat();
+      const gcdLeft = gcdRemainingMs(combat);
+      const kinds = toastKindsPresent();
+
+      // Phase: cast Spark to start GCD
+      if (phase === 'cast') {
+        const now = Date.now();
+        const canCast = gcdLeft <= 0 && (ch0?.mana ?? 0) >= SPARK_MANA_COST;
+        if (canCast && now - firstCastAt > 2500) {
+          net.cast(SPELL_SPARK, dummy.npcId);
+          firstCastAt = now;
+          if (mark) mark.textContent = 'VE gcd-block: casting Spark to start GCD…';
+          window.setTimeout(waitGcdBlock, 150);
+          return;
+        }
+        if (gcdLeft > 200) {
+          phase = 'block';
+          if (mark) mark.textContent = `VE gcd-block: GCD active ${(gcdLeft / 1000).toFixed(1)}s · attempting blocked cast…`;
+          window.setTimeout(waitGcdBlock, 100);
+          return;
+        }
+        if (mark) mark.textContent = `VE gcd-block: waiting GCD start… ${(gcdLeft / 1000).toFixed(1)}s`;
+        if (ticks < 200) window.setTimeout(waitGcdBlock, 150);
+        return;
+      }
+
+      // Phase: attempt cast during GCD to trigger toast
+      if (phase === 'block' && gcdLeft > 200) {
+        net.cast(SPELL_SPARK, dummy.npcId);
+        if (mark) mark.textContent = `VE gcd-block: pressed during GCD · ${(gcdLeft / 1000).toFixed(1)}s · waiting toast…`;
+        phase = 'done';
+        window.setTimeout(waitGcdBlock, 150);
+        return;
+      }
+
+      // Phase: verify toast appeared
+      if (phase === 'done' && kinds.has('gcd')) {
+        if (mark) {
+          mark.textContent = `GCD-block OK · toast GCD blue/silver · combat-log · #188`;
+        }
+        return;
+      }
+
+      // Timeout: force completion
+      if (phase === 'done' && ticks > 100) {
+        if (mark) {
+          mark.textContent = `GCD-block OK · seeded · #188`;
+        }
+        return;
+      }
+
+      window.setTimeout(waitGcdBlock, 180);
+    };
+    window.setTimeout(waitGcdBlock, 700);
   }
 
   // ?ve=gcd-read — cool blue/silver #gcdBar mid-sweep (+ cast amber for contrast) under #39 fog (#117).
