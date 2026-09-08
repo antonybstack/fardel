@@ -5242,7 +5242,11 @@ async function main(): Promise<void> {
           } else if (ch.hp !== prevPlayerHp) {
             if (ch.hp < prevPlayerHp) {
               const dmg = prevPlayerHp - ch.hp;
-              pushCombatLog('damage', `Thorns −${dmg} · You ${ch.hp}/${ch.maxHp}`);
+              const hostileHit = (net?.getNpcs() ?? []).some(
+                (n) => n.kind === NPC_KIND_HOSTILE && n.aggroed,
+              );
+              const src = hostileHit ? 'Hostile' : 'Thorns';
+              pushCombatLog('damage', `${src} −${dmg} · You ${ch.hp}/${ch.maxHp}`);
               damageFloaters.push(
                 spawnDamageFloater(
                   scene,
@@ -9006,6 +9010,114 @@ async function main(): Promise<void> {
       window.setTimeout(waitL, 200);
     };
     window.setTimeout(waitL, 500);
+  }
+
+  // ?ve=auto-attack — HP drops in melee, stops after leash (#356).
+  if (ve === 'auto-attack') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'auto-attack') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE auto-attack: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'pull' | 'hit' | 'drop' | 'stop' | 'done' = 'pull';
+    let hp0 = 0;
+    let hpHit = 0;
+    let hpStop = 0;
+    let stopAt = 0;
+    const padAx = 3;
+    const padAz = 7;
+    const waitA = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      const hp = net.getCharacter()?.hp ?? 0;
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE auto-attack: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 280) window.setTimeout(waitA, 200);
+        return;
+      }
+      if (phase === 'pull') {
+        if (!hp0) hp0 = hp;
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (padA.aggroed) {
+          phase = 'hit';
+          if (mark) mark.textContent = `VE auto-attack: pulled · hp ${hp} — waiting swing…`;
+        } else if (mark) {
+          mark.textContent = `VE auto-attack: walking in · d=${dist.toFixed(1)} · hp ${hp}`;
+        }
+      } else if (phase === 'hit') {
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (hp < hp0) {
+          hpHit = hp;
+          phase = 'drop';
+          if (mark) mark.textContent = `VE auto-attack: hit ${hp0}→${hpHit} — running out…`;
+        } else if (mark) {
+          mark.textContent = `VE auto-attack: in melee · hp ${hp}/${hp0} · aggro=${padA.aggroed ? 'y' : 'n'}`;
+        }
+      } else if (phase === 'drop') {
+        const tx = -12;
+        const tz = -8;
+        const dx = tx - player.position.x;
+        const dz = tz - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.6) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        const home = Math.hypot(padA.x - (padA.spawnX || padAx), padA.z - (padA.spawnZ || padAz));
+        if (!padA.aggroed && home < 0.45) {
+          hpStop = hp;
+          stopAt = ticks;
+          phase = 'stop';
+          if (mark) mark.textContent = `VE auto-attack: leashed · hp ${hpStop} — proving stop…`;
+        } else if (mark) {
+          mark.textContent = `VE auto-attack: drop · hp ${hp} · home=${home.toFixed(1)}`;
+        }
+      } else if (phase === 'stop') {
+        if (hp < hpStop) {
+          if (mark) mark.textContent = `Auto-attack FAIL · still hitting ${hpStop}→${hp} · #356`;
+          return;
+        }
+        if (ticks - stopAt >= 10) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = `Auto-attack OK · hp ${hp0}→${hpHit} · stopped ${hpStop} · #356`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent = `VE auto-attack: stopped? hp ${hp} hold ${ticks - stopAt}/10`;
+        }
+      }
+      if (ticks > 280) {
+        if (mark) mark.textContent = `Auto-attack FAIL · phase ${phase} · hp ${hp} · #356`;
+        return;
+      }
+      window.setTimeout(waitA, 200);
+    };
+    window.setTimeout(waitA, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).

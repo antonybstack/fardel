@@ -54,6 +54,19 @@ public static class Combat
     /// <summary>~4 m/s. Players outrun this (MaxStep 0.75 at ~20Hz).</summary>
     public const float HostileStepMeters = 0.4f;
 
+    /// <summary>
+    /// Auto-attack XZ range while aggroed (#356). Inside AggroRadius so a 3m
+    /// pull is not an instant hit until the hostile closes.
+    /// </summary>
+    public const float HostileMeleeRange = 2.0f;
+    /// <summary>Millis between swings. Dummy thorns stay the trainer poke.</summary>
+    public const int HostileAttackMs = 1500;
+    /// <summary>
+    /// Per swing. Sized so PlayerMaxHp survives a short pull and dummy-path
+    /// smokes (CombatSmoke) stay outside AggroRadius.
+    /// </summary>
+    public const int HostileAttackDamage = 8;
+
     /// <summary>Player Character.MaxHp seed (durable).</summary>
     public const int PlayerMaxHp = 100;
 

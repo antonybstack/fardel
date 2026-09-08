@@ -156,6 +156,9 @@ public static partial class Module
         /// <summary>True while chasing a living player. Cleared on leash / no prey.</summary>
         [SpacetimeDB.Default(false)]
         public bool Aggroed;
+        /// <summary>Next auto-attack eligible at this unix micros. 0 = swing on first melee (#356).</summary>
+        [SpacetimeDB.Default(0)]
+        public long NextSwingAtMicros;
     }
 
     /// <summary>Ground loot in the yard — SeedLoot / dummy death inserts; Pickup despawns.</summary>
@@ -1301,7 +1304,7 @@ public static partial class Module
         });
     }
 
-    /// <summary>#355 — proximity aggro / leash. No auto-attack (that is #356).</summary>
+    /// <summary>#355 proximity aggro/leash + #356 melee auto-attack cadence.</summary>
     [SpacetimeDB.Reducer]
     public static void TickHostiles(ReducerContext ctx, PendingHostileTick job)
     {
@@ -1339,7 +1342,7 @@ public static partial class Module
             var homeDx = row.X - row.SpawnX;
             var homeDz = row.Z - row.SpawnZ;
             var homeDist = MathF.Sqrt(homeDx * homeDx + homeDz * homeDz);
-            var hasPrey = TryNearestLivingPlayer(ctx, row.X, row.Z, out _, out var px, out var pz, out var preyDist);
+            var hasPrey = TryNearestLivingPlayer(ctx, row.X, row.Z, out var preyId, out var px, out var pz, out var preyDist);
             var overLeash = homeDist > Combat.HostileLeashRadius;
 
             if (row.Aggroed)
@@ -1347,11 +1350,13 @@ public static partial class Module
                 if (overLeash || !hasPrey)
                 {
                     row.Aggroed = false;
+                    row.NextSwingAtMicros = 0;
                     StepToward(ref row, row.SpawnX, row.SpawnZ, Combat.HostileStepMeters);
                 }
                 else
                 {
                     StepToward(ref row, px, pz, Combat.HostileStepMeters);
+                    MaybeHostileSwing(ctx, ref row, preyId, px, pz);
                 }
             }
             else if (homeDist > 0.2f)
@@ -1362,10 +1367,31 @@ public static partial class Module
             {
                 row.Aggroed = true;
                 StepToward(ref row, px, pz, Combat.HostileStepMeters);
+                MaybeHostileSwing(ctx, ref row, preyId, px, pz);
             }
 
             ctx.Db.Npc.NpcId.Update(row);
         }
+    }
+
+    static void MaybeHostileSwing(ReducerContext ctx, ref Npc row, Identity preyId, float px, float pz)
+    {
+        var dx = px - row.X;
+        var dz = pz - row.Z;
+        var d = MathF.Sqrt(dx * dx + dz * dz);
+        if (d > Combat.HostileMeleeRange)
+        {
+            return;
+        }
+
+        var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        if (row.NextSwingAtMicros > 0 && now < row.NextSwingAtMicros)
+        {
+            return;
+        }
+
+        ApplyPlayerDamage(ctx, preyId, Combat.HostileAttackDamage);
+        row.NextSwingAtMicros = now + (long)Combat.HostileAttackMs * 1000L;
     }
 
     static bool TryNearestLivingPlayer(
