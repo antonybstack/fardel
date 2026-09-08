@@ -6,7 +6,7 @@ var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 15000;
 
-var tcs = new TaskCompletionSource<(bool ok, string detail)>();
+var tcs = new TaskCompletionSource<(bool ok, Identity identity, string detail)>();
 
 DbConnection? conn = null;
 try
@@ -16,17 +16,17 @@ try
         .WithDatabaseName(db)
         .OnConnect((_, identity, _) =>
         {
-            tcs.TrySetResult((true, identity.ToString()));
+            tcs.TrySetResult((true, identity, identity.ToString()));
         })
         .OnConnectError(e =>
         {
-            tcs.TrySetResult((false, e.ToString()));
+            tcs.TrySetResult((false, default, e.ToString()));
         })
         .OnDisconnect((_, e) =>
         {
             if (!tcs.Task.IsCompleted)
             {
-                tcs.TrySetResult((false, e?.ToString() ?? "disconnected before connect"));
+                tcs.TrySetResult((false, default, e?.ToString() ?? "disconnected before connect"));
             }
         })
         .Build();
@@ -45,7 +45,7 @@ try
         return;
     }
 
-    var (ok, detail) = await tcs.Task.ConfigureAwait(false);
+    var (ok, identity, detail) = await tcs.Task.ConfigureAwait(false);
     if (!ok)
     {
         Console.Error.WriteLine("FAIL: " + detail);
@@ -83,8 +83,7 @@ try
     {
         while (pose is null && !cts3.IsCancellationRequested)
         {
-            var parsed = Identity.TryParse(detail, out var id);
-            pose = parsed ? conn.Db.PlayerPose.Identity.Find(id) : null;
+            pose = conn.Db.PlayerPose.Identity.Find(identity);
             if (pose is null)
             {
                 conn.FrameTick();
