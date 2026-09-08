@@ -197,3 +197,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `boleRadiusWorld` used kind==='hero' → TwistedTree 1.18. A unique CommonTree at 5.8× then got a ~6.8 m keep-out (visual bole is ~3 m).
 - **Do this:** Pass pack author (TwistedTree 1.18 / CommonTree 0.52). Kind stays `hero` for camera collision. Do not import extra megakit files.
 - **Seen in:** #344
+
+### 2026-09-08 — place,shadow — player blob vanishes on the dirt pad
+- **Cause:** A grass-tuned radial disc (~0.6 center alpha) matches worn-dirt value, so spawn `?ve=place-wow` looks like no contact shadow. Hero blobs on grass still read.
+- **Do this:** Separate player vs hero blob mats. Player center alpha ~0.88. Disc y≈0.058 above path; `disableDepthWrite`. Do not use cascade `ShadowGenerator` (E9.3 fillrate).
+- **Seen in:** #346
