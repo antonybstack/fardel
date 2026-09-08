@@ -14,6 +14,7 @@ import {
   Quaternion,
   Scene,
   StandardMaterial,
+  Texture,
   TransformNode,
   Vector3,
 } from '@babylonjs/core';
@@ -358,6 +359,27 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
 }
 
 /**
+ * Fog / sky lock (#270 E3.1). Sun/hemi stay on the #39 values (E3.8 may lift).
+ *
+ * | Param        | #39                         | #270                                      |
+ * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 95                  |
+ * | fog color    | (0.34, 0.55, 0.7)           | unchanged                                 |
+ * | clearColor   | (0.24, 0.36, 0.46)          | matches fogColor (was a horizon halo)     |
+ * | sky          | 420-dome, fog on, 64px tex  | fog off, horizon = fogColor, 256px clamp  |
+ *
+ * EXP2 + a fogged low-tess sky painted latitude bands and a color fight vs the
+ * dome. LINEAR + an unfogged fog-matched dome is the hordes dusk-volume read
+ * without the 8-bit halo. Density unused in LINEAR.
+ */
+const FOG_COLOR = new Color3(0.34, 0.55, 0.7);
+const FOG_START = 16;
+const FOG_END = 95;
+
+function fogCss(c: Color3): string {
+  return `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
+}
+
+/**
  * Distant mountain silhouettes (#55): cool grey-blue layered ranges that read
  * through locked #39 cyan fog at play cam. Near/mid/far value steps — mood
  * backdrop only (low lit faces, no busy ridge noise). Procedural DIY.
@@ -495,34 +517,39 @@ function buildMountainBackdrop(scene: Scene): void {
 }
 
 /**
- * Painterly sky dome (#55): soft vertical gradient into locked fog color
- * (0.34/0.55/0.7) so horizon has no hard seam; slightly warmer/lighter zenith.
- * Procedural DynamicTexture — no packs. Does not touch fog/sun/hemi constants.
+ * Painterly sky dome (#55 / #270): vertical gradient into FOG_COLOR so the
+ * horizon has no seam vs LINEAR fog. Fog disabled on the mesh — a fogged
+ * 20-seg sphere is what painted the banding/halos. Procedural DIY, no packs.
  */
 function buildSkyDome(scene: Scene): void {
-  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 420, segments: 20 }, scene);
+  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 2000, segments: 32 }, scene);
   sky.infiniteDistance = true;
   sky.isPickable = false;
+  sky.applyFog = false;
 
-  // V-up gradient: zenith (top) → fog-matched horizon (bottom). Sphere UVs: v~1 at +Y.
-  const size = 64;
-  const tex = new DynamicTexture('skyGradTex', { width: 4, height: size }, scene, false);
+  // V-up gradient: zenith (top) → fog-matched horizon (equator and below).
+  // Sphere UVs: v~0 at +Y. DynamicTexture invertY default maps canvas-top → v=0.
+  const size = 256;
+  const tex = new DynamicTexture('skyGradTex', { width: 32, height: size }, scene, false);
+  tex.wrapU = Texture.CLAMP_ADDRESSMODE;
+  tex.wrapV = Texture.CLAMP_ADDRESSMODE;
   const ctx = tex.getContext();
   const grad = ctx.createLinearGradient(0, 0, 0, size);
-  // Fog lock color ~ rgb(87,140,179) — horizon / lower sky blends into EXP2 fog.
-  grad.addColorStop(0.0, 'rgb(118, 158, 198)'); // zenith: slightly warmer/lighter
-  grad.addColorStop(0.35, 'rgb(100, 148, 188)');
-  grad.addColorStop(0.62, 'rgb(90, 142, 182)');
-  grad.addColorStop(0.82, 'rgb(87, 140, 179)'); // → fogColor 0.34/0.55/0.7
-  grad.addColorStop(1.0, 'rgb(87, 140, 179)');
+  const fog = fogCss(FOG_COLOR);
+  // Slightly lighter zenith; wide lower band is exact fogColor (no halo).
+  grad.addColorStop(0.0, 'rgb(112, 152, 192)');
+  grad.addColorStop(0.22, 'rgb(100, 146, 186)');
+  grad.addColorStop(0.48, fog);
+  grad.addColorStop(1.0, fog);
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 4, size);
+  ctx.fillRect(0, 0, 32, size);
   tex.hasAlpha = false;
   tex.update();
 
   const skyMat = new StandardMaterial('skyMat', scene);
   skyMat.backFaceCulling = false;
   skyMat.disableLighting = true;
+  skyMat.fogEnabled = false;
   skyMat.diffuseColor = new Color3(0, 0, 0);
   skyMat.specularColor = new Color3(0, 0, 0);
   skyMat.emissiveColor = new Color3(1, 1, 1);
@@ -1026,7 +1053,7 @@ function buildClearingPath(scene: Scene): void {
 
 /**
  * Forest clearing: Quaternius Standard heroes + mid + understory (CC0),
- * procedural mountain silhouettes, locked #32/#39 atmosphere (warm sun / cool hemi / cyan fog).
+ * procedural mountain silhouettes, #39 sun/hemi + #270 LINEAR fog/sky lock.
  * Path/ground polish #44 via buildClearingPath; sky/horizon silhouette #55.
  * Procedural fallback uses post-#40 ThinInstance density + LOD.
  */
@@ -1035,13 +1062,13 @@ export async function buildForestClearing(scene: Scene): Promise<{
   hemi: HemisphericLight;
   sun: DirectionalLight;
 }> {
-  // Atmosphere lock from #32/#39: blue/cyan fog mid→far, warm sun + cool hemi, lush ground.
-  // Mood > volumetric soup — StandardMaterial + EXP2 fog only (web-cheap).
-  // Hemi/sun locked for Dev4 (#33) robe mats — do not flip casually.
-  scene.clearColor = new Color4(0.24, 0.36, 0.46, 1);
-  scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.015;
-  scene.fogColor = new Color3(0.34, 0.55, 0.7);
+  // Atmosphere: #39 sun/hemi kept. Fog/sky is the #270 lock (see FOG_COLOR).
+  // Mood > volumetric soup — StandardMaterial + LINEAR fog (web-cheap).
+  scene.clearColor = new Color4(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b, 1);
+  scene.fogMode = Scene.FOGMODE_LINEAR;
+  scene.fogStart = FOG_START;
+  scene.fogEnd = FOG_END;
+  scene.fogColor = FOG_COLOR.clone();
 
   const hemi = new HemisphericLight('hemiForest', new Vector3(0.12, 1, 0.22), scene);
   hemi.intensity = 0.78;
@@ -1059,7 +1086,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
 
   const ground = MeshBuilder.CreateGround(
     'clearing',
-    { width: 120, height: 120, subdivisions: 2 },
+    { width: 120, height: 120, subdivisions: 32 },
     scene,
   );
   const groundMat = new StandardMaterial('clearingMat', scene);
