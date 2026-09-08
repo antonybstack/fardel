@@ -1786,8 +1786,8 @@ async function createScene(engine: Engine): Promise<{
       const now = Date.now();
       const delta = e.deltaY;
       const currentRadius = camera.radius;
-      const lowerLimit = camera.lowerRadiusLimit;
-      const upperLimit = camera.upperRadiusLimit;
+      const lowerLimit = camera.lowerRadiusLimit ?? 4;
+      const upperLimit = camera.upperRadiusLimit ?? 80;
       const isAtMin = currentRadius <= lowerLimit && delta < 0;
       const isAtMax = currentRadius >= upperLimit && delta > 0;
       if ((isAtMin || isAtMax) && now - lastZoomLimitToastMs > ZOOM_LIMIT_TOAST_DEBOUNCE_MS) {
