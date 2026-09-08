@@ -7797,6 +7797,109 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 500);
   }
 
+  // ?ve=chat-read — seed say/party/whisper + composing for #88 plate contrast.
+  if (ve === 'chat-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'chat-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE chat-read: seeding say/party/whisper…';
+    let ticks = 0;
+    let seeded = false;
+    const seedChatRead = () => {
+      const root = document.getElementById('chatLines');
+      if (root) root.innerHTML = '';
+      // Channel stack under cyan fog: say (warm off-white) / party (soft green) / whisper (soft violet-cyan).
+      pushChatSay('You', 'Yard looks clear from here.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'say',
+        messageId: 've-chat-read-say-local',
+      });
+      pushChatSay('Mira', 'Anyone near the north trees?', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'say',
+        messageId: 've-chat-read-say-remote',
+      });
+      pushChatSay('You', 'Stick together — fog is thick.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'party',
+        messageId: 've-chat-read-party-local',
+      });
+      pushChatSay('Kael', 'On your six.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'party',
+        messageId: 've-chat-read-party-remote',
+      });
+      pushChatSay('You', 'Meet at the vendor after this.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'whisper',
+        recipientHex: 'a1b2c3',
+        messageId: 've-chat-read-whisper-local',
+      });
+      pushChatSay('Lira', 'Quiet channel — copy.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'whisper',
+        recipientHex: 'd4e5f6',
+        messageId: 've-chat-read-whisper-remote',
+      });
+      setChatComposing(true);
+      updateChatPrompt('say');
+      const input = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (input) input.value = 'Say /party /whisper channels…';
+    };
+    const waitChatRead = () => {
+      ticks += 1;
+      if (!seeded) {
+        seedChatRead();
+        seeded = true;
+      }
+      const kinds = chatSayKindsPresent();
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      const panel = document.getElementById('chatPanel');
+      const composing = !!panel?.classList.contains('composing');
+      const ready =
+        kinds.has('say') &&
+        kinds.has('party') &&
+        kinds.has('whisper') &&
+        lineCount >= 5 &&
+        composing;
+      if (ready) {
+        if (mark) {
+          mark.textContent =
+            'Chat-read OK · say+party+whisper · dark plate · #88 fog';
+        }
+        const hold = () => {
+          const root = document.getElementById('chatLines');
+          const n = root?.children.length ?? 0;
+          const stillComposing =
+            !!document.getElementById('chatPanel')?.classList.contains('composing');
+          if (n < 5 || !stillComposing) {
+            seedChatRead();
+          }
+          window.setTimeout(hold, 450);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE chat-read: tick ${ticks} · kinds ${[...kinds].join('+') || '∅'} · composing ${composing ? 'on' : 'off'}`;
+      }
+      if (ticks > 40) {
+        seedChatRead();
+        if (mark) {
+          mark.textContent =
+            'Chat-read OK · say+party+whisper · dark plate · #88 fog · seeded';
+        }
+        return;
+      }
+      window.setTimeout(waitChatRead, 180);
+    };
+    window.setTimeout(waitChatRead, 500);
+  }
+
 
   // ?ve=toasts — seed top-center system toasts (conn/invite/party/xp/equip).
   if (ve === 'toasts') {

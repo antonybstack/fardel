@@ -1292,7 +1292,8 @@ body {
 }
 
 
-/* Compact chat / say strip — bottom-left above loadout (server ChatMessage). */
+/* Compact chat / say strip — bottom-left above loadout (server ChatMessage).
+   #88 readability: classic MMO plate over cyan fog; say/party/whisper distinct, no neon. */
 #chatPanel {
   position: absolute;
   left: 12px;
@@ -1300,20 +1301,25 @@ body {
   z-index: 14;
   display: flex;
   flex-direction: column;
-  width: min(320px, 48vw);
-  max-height: min(168px, 28vh);
-  background: rgba(8, 12, 24, 0.82);
-  border: 1px solid rgba(140, 180, 255, 0.28);
+  width: min(328px, 50vw);
+  max-height: min(176px, 30vh);
+  background: rgba(6, 10, 20, 0.90);
+  border: 1px solid rgba(168, 178, 196, 0.38);
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.045);
   overflow: hidden;
   pointer-events: none;
 }
 
 #chatPanel.composing {
   pointer-events: auto;
-  border-color: rgba(140, 180, 255, 0.55);
-  box-shadow: 0 0 16px rgba(80, 130, 255, 0.22);
+  border-color: rgba(198, 208, 224, 0.62);
+  box-shadow:
+    0 2px 16px rgba(0, 0, 0, 0.58),
+    0 0 0 1px rgba(210, 218, 230, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .chatHead {
@@ -1322,75 +1328,82 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 5px 9px 3px;
-  color: #9ec0ff;
+  color: #d0d6e0;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(140, 180, 255, 0.16);
+  border-bottom: 1px solid rgba(168, 178, 196, 0.22);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   pointer-events: none;
 }
 
 .chatHint {
-  opacity: 0.7;
+  opacity: 0.78;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: none;
   font-size: 10px;
-  color: #a8b8d8;
+  color: #9aa3b2;
 }
 
 .chatLines {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 9px 6px;
+  gap: 3px;
+  padding: 6px 9px 7px;
   overflow: hidden;
-  max-height: min(110px, 18vh);
+  max-height: min(118px, 19vh);
   pointer-events: none;
 }
 
 .chatLine {
-  color: #c8d6f0;
-  font-size: 11px;
-  line-height: 1.35;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  color: #c6ceda;
+  font-size: 12px;
+  line-height: 1.38;
+  font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Say — warm off-white body; who slightly warmer silver (not neon blue). */
 .chatLine.say {
-  color: #d4e4ff;
+  color: #e6e2d8;
+}
+.chatLine.say .chatWho {
+  color: #d8d0c4;
+}
+.chatLine.say.remote .chatWho {
+  color: #cfc6b8;
+}
+.chatLine.say.local .chatWho {
+  color: #e0d8cc;
+}
+
+/* Timestamps / system — cool grey. */
+.chatLine .chatTag {
+  color: #7a8799;
+  opacity: 0.90;
+  margin-right: 5px;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .chatLine .chatWho {
-  color: #9ec0ff;
   font-weight: 700;
   margin-right: 4px;
-}
-
-.chatLine.say.remote .chatWho {
-  color: #c9a0ff;
-}
-
-.chatLine.say.local .chatWho {
-  color: #9ec0ff;
-}
-
-.chatLine .chatTag {
-  opacity: 0.7;
-  margin-right: 4px;
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .chatForm {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px 6px;
-  border-top: 1px solid rgba(140, 180, 255, 0.14);
+  padding: 4px 8px 7px;
+  border-top: 1px solid rgba(168, 178, 196, 0.20);
   opacity: 0.55;
   pointer-events: none;
 }
@@ -1401,110 +1414,117 @@ body {
 }
 
 .chatPrompt {
-  color: #9ec0ff;
+  color: #c8d0dc;
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   flex-shrink: 0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 #chatInput {
   flex: 1;
   min-width: 0;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(140, 180, 255, 0.28);
+  background: rgba(0, 0, 0, 0.48);
+  border: 1px solid rgba(168, 178, 196, 0.42);
   border-radius: 5px;
-  color: #e8eefc;
+  color: #f0eee8;
   font: inherit;
   font-size: 12px;
   padding: 4px 7px;
   outline: none;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 #chatInput:focus {
-  border-color: rgba(140, 180, 255, 0.65);
+  border-color: rgba(210, 218, 230, 0.72);
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .sysToast.say {
-  border-color: rgba(158, 192, 255, 0.45);
+  border-color: rgba(210, 200, 180, 0.48);
 }
-.sysToast.say .toastTag { color: #9ec0ff; }
+.sysToast.say .toastTag { color: #d8d0c4; }
 
 .sysToast.rate {
-  border-color: rgba(255, 160, 110, 0.5);
+  border-color: rgba(220, 150, 100, 0.5);
 }
-.sysToast.rate .toastTag { color: #ffb07a; }
+.sysToast.rate .toastTag { color: #e0a078; }
 
+/* Party — soft green, muted (not neon). */
 .chatLine.party {
-  color: #c8f0d4;
+  color: #b8dcc4;
 }
-
 .chatLine.party .chatWho {
-  color: #5ed68a;
+  color: #6fb888;
 }
-
 .chatLine.party.remote .chatWho {
-  color: #7ee0a4;
+  color: #7ec498;
+}
+.chatLine.party.local .chatWho {
+  color: #78be90;
 }
 
 .chatLine .chatChannel {
-  color: #5ed68a;
+  color: #6fb888;
   font-weight: 800;
   margin-right: 4px;
   font-size: 10px;
 }
 
 #chatPanel.partyMode .chatPrompt {
-  color: #5ed68a;
+  color: #78be90;
 }
 
 #chatPanel.partyMode #chatInput {
-  border-color: rgba(94, 214, 138, 0.45);
+  border-color: rgba(111, 184, 136, 0.48);
 }
 
 #chatPanel.partyMode #chatInput:focus {
-  border-color: rgba(94, 214, 138, 0.75);
+  border-color: rgba(126, 196, 152, 0.72);
 }
 
 .sysToast.partySay {
-  border-color: rgba(94, 214, 138, 0.5);
+  border-color: rgba(111, 184, 136, 0.48);
 }
-.sysToast.partySay .toastTag { color: #5ed68a; }
+.sysToast.partySay .toastTag { color: #6fb888; }
 
 
+/* Whisper — soft violet/cyan, muted. */
 .chatLine.whisper {
-  color: #e0d0ff;
+  color: #c4c8e0;
 }
-
 .chatLine.whisper .chatWho {
-  color: #c9a6ff;
+  color: #a898c8;
 }
-
 .chatLine.whisper.remote .chatWho {
-  color: #d4b8ff;
+  color: #b4a4d0;
+}
+.chatLine.whisper.local .chatWho {
+  color: #aea0c8;
 }
 
 .chatLine .chatChannel.whisperTag {
-  color: #c9a6ff;
+  color: #9aa8c8;
 }
 
 #chatPanel.whisperMode .chatPrompt {
-  color: #c9a6ff;
+  color: #a8a0c8;
 }
 
 #chatPanel.whisperMode #chatInput {
-  border-color: rgba(201, 166, 255, 0.45);
+  border-color: rgba(168, 160, 200, 0.48);
 }
 
 #chatPanel.whisperMode #chatInput:focus {
-  border-color: rgba(201, 166, 255, 0.75);
+  border-color: rgba(180, 172, 208, 0.72);
 }
 
 .sysToast.whisper {
-  border-color: rgba(201, 166, 255, 0.5);
+  border-color: rgba(168, 160, 200, 0.48);
 }
-.sysToast.whisper .toastTag { color: #c9a6ff; }
+.sysToast.whisper .toastTag { color: #a898c8; }
 
 .sysToast.trade,
 .sysToast.loot {
