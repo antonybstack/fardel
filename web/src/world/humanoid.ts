@@ -4,6 +4,7 @@ import {
   Color3,
   Matrix,
   Mesh,
+  MeshBuilder,
   PBRMaterial,
   Scene,
   SceneLoader,
@@ -471,36 +472,62 @@ export function createPlayerHumanoid(
     syncRobes();
   };
 
-  // Mid-sat cloth under #39 fog. Keep loader PBR on meshes — assigning a shared
-  // StandardMaterial to skinned Wizard.001 yields a full AABB but zero body pixels.
-  // Lift navy Wizard_Texture via albedoColor multiply + texture.level.
-  const clothLift = new Color3(
-    Math.min(2.8, robeDiffuse.r * 3.5 + 0.45),
-    Math.min(2.6, robeDiffuse.g * 3.0 + 0.38),
-    Math.min(3.0, robeDiffuse.b * 2.7 + 0.5),
+  // Atlas already has cloth/skin/hair. A strong albedo multiply tints Face
+  // indigo and collapses material separation. Do not StandardMaterial Wizard.001.
+  robeMat.diffuseColor = new Color3(
+    0.72 + robeDiffuse.r * 0.55,
+    0.70 + robeDiffuse.g * 0.50,
+    0.78 + robeDiffuse.b * 0.45,
   );
-  robeMat.diffuseColor = clothLift.clone();
   robeMat.emissiveColor = new Color3(
-    Math.min(0.16, clothLift.r * ROBE_EMISSIVE_SCALE),
-    Math.min(0.18, clothLift.g * ROBE_EMISSIVE_SCALE),
-    Math.min(0.24, clothLift.b * ROBE_EMISSIVE_SCALE + 0.02),
+    Math.min(0.1, robeDiffuse.r * ROBE_EMISSIVE_SCALE),
+    Math.min(0.11, robeDiffuse.g * ROBE_EMISSIVE_SCALE),
+    Math.min(0.16, robeDiffuse.b * ROBE_EMISSIVE_SCALE + 0.02),
   );
   robeMat.specularColor = new Color3(0.05, 0.06, 0.08);
   robeMat.ambientColor = new Color3(0.38, 0.42, 0.52);
   robeMat.backFaceCulling = false;
 
   const clothPbrs: PBRMaterial[] = [];
-  const liftPbr = (pbr: PBRMaterial) => {
+  const tuneCloth = (pbr: PBRMaterial) => {
     pbr.albedoColor.copyFrom(robeMat.diffuseColor);
     pbr.emissiveColor.copyFrom(robeMat.emissiveColor);
-    pbr.emissiveIntensity = 0.4;
+    pbr.emissiveIntensity = 0.28;
     pbr.metallic = 0;
-    pbr.roughness = 0.88;
+    pbr.roughness = 0.9;
     pbr.backFaceCulling = false;
     pbr.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
     if (pbr.albedoTexture) {
       const tex = pbr.albedoTexture as Texture;
-      tex.level = 2.2;
+      tex.level = 1.65;
+      tex.hasAlpha = false;
+    }
+  };
+  const tuneSkin = (pbr: PBRMaterial) => {
+    pbr.albedoColor = new Color3(1.14, 0.96, 0.84);
+    pbr.emissiveColor = new Color3(0.07, 0.035, 0.02);
+    pbr.emissiveIntensity = 0.22;
+    pbr.metallic = 0;
+    pbr.roughness = 0.64;
+    pbr.backFaceCulling = false;
+    pbr.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
+    if (pbr.albedoTexture) {
+      const tex = pbr.albedoTexture as Texture;
+      tex.level = 1.4;
+      tex.hasAlpha = false;
+    }
+  };
+  const tuneWood = (pbr: PBRMaterial) => {
+    pbr.albedoColor = new Color3(1.08, 0.78, 0.48);
+    pbr.emissiveColor = new Color3(0.09, 0.045, 0.015);
+    pbr.emissiveIntensity = 0.28;
+    pbr.metallic = 0;
+    pbr.roughness = 0.8;
+    pbr.backFaceCulling = false;
+    pbr.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
+    if (pbr.albedoTexture) {
+      const tex = pbr.albedoTexture as Texture;
+      tex.level = 1.55;
       tex.hasAlpha = false;
     }
   };
@@ -510,9 +537,16 @@ export function createPlayerHumanoid(
     if (m === staffMesh || /staff/i.test(bare)) continue;
     const matl = m.material;
     if (matl instanceof PBRMaterial) {
-      liftPbr(matl);
-      clothPbrs.push(matl);
-      if (m.skeleton) matl.markDirty(true);
+      if (/^face$/i.test(bare)) {
+        const skin = matl.clone(`${prefix}__SkinMat`) as PBRMaterial;
+        m.material = skin;
+        tuneSkin(skin);
+        if (m.skeleton) skin.markDirty(true);
+      } else {
+        tuneCloth(matl);
+        clothPbrs.push(matl);
+        if (m.skeleton) matl.markDirty(true);
+      }
     } else if (!m.skeleton) {
       m.material = robeMat;
     }
@@ -529,24 +563,46 @@ export function createPlayerHumanoid(
     }
     prevD.copyFrom(robeMat.diffuseColor);
     prevE.copyFrom(robeMat.emissiveColor);
-    for (const pbr of clothPbrs) liftPbr(pbr);
+    for (const pbr of clothPbrs) tuneCloth(pbr);
   });
 
   if (staffMesh) {
-    // Keep loader PBR — a StandardMaterial stick vanishes into #39 fog at 12–20 m.
     const sm = staffMesh.material;
     if (sm instanceof PBRMaterial) {
-      sm.albedoColor = new Color3(1.25, 1.1, 0.85);
-      sm.emissiveColor = new Color3(0.22, 0.14, 0.05);
-      sm.emissiveIntensity = 0.45;
-      sm.metallic = 0;
-      sm.roughness = 0.72;
-      sm.backFaceCulling = false;
-      if (sm.albedoTexture) {
-        const tex = sm.albedoTexture as Texture;
-        tex.level = 1.8;
-      }
+      tuneWood(sm);
     }
+    staffMesh.computeWorldMatrix(true);
+    try {
+      if (staffMesh.getClassName() === 'Mesh') {
+        (staffMesh as Mesh).refreshBoundingInfo(true, true);
+      }
+    } catch {
+      /* optional */
+    }
+    const bi = staffMesh.getBoundingInfo();
+    const min = bi.minimum;
+    const max = bi.maximum;
+    const span = Math.max(0.05, max.y - min.y);
+    const orb = MeshBuilder.CreateSphere(
+      `${prefix}__StaffOrb`,
+      { diameter: span * 0.09, segments: 8 },
+      scene,
+    );
+    orb.parent = staffMesh;
+    orb.position.set(
+      (min.x + max.x) * 0.5,
+      max.y - span * 0.06,
+      (min.z + max.z) * 0.5,
+    );
+    const orbMat = new PBRMaterial(`${prefix}__StaffOrbMat`, scene);
+    orbMat.albedoColor = new Color3(0.55, 0.62, 0.74);
+    orbMat.emissiveColor = new Color3(0.1, 0.18, 0.32);
+    orbMat.emissiveIntensity = 0.38;
+    orbMat.metallic = 0.08;
+    orbMat.roughness = 0.32;
+    orbMat.backFaceCulling = false;
+    orb.material = orbMat;
+    orb.alwaysSelectAsActiveMesh = true;
   }
 
   const idle =

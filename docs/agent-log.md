@@ -202,3 +202,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** A grass-tuned radial disc (~0.6 center alpha) matches worn-dirt value, so spawn `?ve=place-wow` looks like no contact shadow. Hero blobs on grass still read.
 - **Do this:** Separate player vs hero blob mats. Player center alpha ~0.88. Disc y≈0.058 above path; `disableDepthWrite`. Do not use cascade `ShadowGenerator` (E9.3 fillrate).
 - **Seen in:** #346
+
+### 2026-09-08 — humanoid,mat — clothLift on shared Wizard_Texture tints Face indigo
+- **Cause:** Face and Wizard.001 share one PBR. `albedoColor` indigo multiply + `texture.level` 2.2 crushes atlas peach skin / blue cloth / brown hair into one robe.
+- **Do this:** Clone a Face skin PBR (warm albedo, no robe multiply). Mild cloth multiply so the atlas still reads. Staff keeps wood PBR + a small tip orb. Do not `StandardMaterial` on Wizard.001.
+- **Seen in:** #337
