@@ -784,7 +784,8 @@ function startLoop(g: AnimationGroup | null): void {
   if (g && !g.isPlaying) g.start(true, 1.0, g.from, g.to, false);
 }
 
-/** Airborne hold: Jump/Fall if present, else frozen Idle_Weapon. No squash. */
+/** Airborne hold: Jump/Fall if present, else frozen Idle_Weapon. No squash.
+ * Remotes use the same hold — Walk must not keep cycling in the air. */
 export function setHumanoidAirborne(
   parts: HumanoidParts,
   airborne: boolean,
