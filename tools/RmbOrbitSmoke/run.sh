@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Node/Playwright RmbOrbitSmoke (#366). Matrix discovers this dir via run.sh.
+# Node/Playwright RmbOrbitSmoke (#366 / #389). Matrix discovers this dir via run.sh.
+# Must RMB-drag; inertial inject is not look.
 # Seat Vite + seat db only — never :3000 / fardel.
 set -euo pipefail
 

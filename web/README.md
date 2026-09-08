@@ -78,7 +78,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=debug-hud` | Force `#status` + `#fpsHud` visible; HUD `Debug HUD OK · status visible · F3/?debug=1` (`ve/babylon-debug-hud.png`) |
 | `?ve=status-read` | Prove Connected · online vs Connecting vs GCD idle are lexically distinct (#129); HUD `Status-read OK · Connected · online · GCD idle · #129` |
 | `?ve=rmb-look` | Prove RMB-look armed clarity (#154): canvas `grabbing` + legend `LOOKING` chip + status `camera: looking`; HUD `RMB-look OK · armed · grabbing · legend LOOKING · status looking · #154` |
-| `?ve=rmb-orbit` | Prove RMB orbit actually moves `camera.alpha` on the **play follow** path (#366). Chrome-only `?ve=rmb-look` is not enough. HUD `RMB orbit OK · dAlpha …` / `RMB orbit FAIL` |
+| `?ve=rmb-orbit` | Prove RMB orbit moves `camera.alpha` on the **play follow** path after a **real pointer RMB-drag** (#366 / #389). Do not inject `inertialAlphaOffset`. Chrome-only `?ve=rmb-look` is not enough. HUD `RMB orbit OK · dAlpha …` / `RMB orbit FAIL` |
 | `?ve=hostile-spawn` | Two yard hostiles as red capsules; dummy stays trainer (#354); HUD `Hostile spawn OK · n=2 · capsule · dummy trainer · #354` |
 | `?ve=leash` | Walk into aggro, hostile leaves pad, run out, it returns (#355); HUD `Leash OK · pulled · returned · #355`. `?ve=aggro` is #360. |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
