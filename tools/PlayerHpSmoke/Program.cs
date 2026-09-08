@@ -165,7 +165,9 @@ try
     }
     Console.WriteLine($"dead jump reject OK (Y={poseAfterJump.Y} VelY={poseAfterJump.VelY} unchanged)");
 
-    // Wait for scheduled respawn: full HP + yard origin pose.
+    var groundedAtDeath = conn.Db.PlayerPose.Identity.Find(id)!.LastGroundedMicros;
+
+    // Wait for scheduled respawn: full HP + yard origin pose (including vertical).
     await PumpUntil(() =>
     {
         var ch = conn.Db.Character.Identity.Find(id);
@@ -173,12 +175,29 @@ try
         return ch is { Hp: var h, MaxHp: var m } && m > 0 && h == m
             && pose is { } p
             && MathF.Abs(p.X - Movement.SpawnX) < 0.05f
-            && MathF.Abs(p.Z - Movement.SpawnZ) < 0.05f;
+            && MathF.Abs(p.Z - Movement.SpawnZ) < 0.05f
+            && MathF.Abs(p.Y - Movement.SpawnY) < 0.05f
+            && p.LastGroundedMicros > groundedAtDeath;
     }, timeoutMs, conn, "respawn full HP at spawn");
 
     var alive = conn.Db.Character.Identity.Find(id)!;
     var poseAlive = conn.Db.PlayerPose.Identity.Find(id)!;
-    Console.WriteLine($"respawn OK hp={alive.Hp}/{alive.MaxHp} pose=({poseAlive.X},{poseAlive.Z})");
+    if (MathF.Abs(poseAlive.Y - Movement.SpawnY) > 0.05f)
+    {
+        Fail($"respawn Y={poseAlive.Y} expected ≈ {Movement.SpawnY}");
+        return;
+    }
+    if (MathF.Abs(poseAlive.VelY) > 0.05f)
+    {
+        Fail($"respawn VelY={poseAlive.VelY} not ≈ 0");
+        return;
+    }
+    if (poseAlive.LastGroundedMicros <= groundedAtDeath)
+    {
+        Fail($"respawn LastGroundedMicros={poseAlive.LastGroundedMicros} not > death={groundedAtDeath}");
+        return;
+    }
+    Console.WriteLine($"respawn OK hp={alive.Hp}/{alive.MaxHp} pose=({poseAlive.X},{poseAlive.Y},{poseAlive.Z}) VelY={poseAlive.VelY} LastGroundedMicros={poseAlive.LastGroundedMicros}");
 
     // Can cast again after respawn.
     conn.Reducers.EnsureTrainingDummy();
