@@ -66,16 +66,24 @@ try
     mid = conn.Db.Character.Identity.Find(id)!;
     Console.WriteLine($"after more thorns hp={mid.Hp}/{mid.MaxHp} (need missing>={needMissing}) mana={mid.Mana}/{mid.MaxMana}");
 
-    // Spark spend can be smaller than lazy regen over the thorns loop — drain until
-    // ManaRestore is observable (clamped), without filling HP.
+    // Emberbolt (cost 20) sinks mana below MaxMana-ManaRestore before the
+    // DummyThornsDamage HP floor; Spark (cost 5) cannot.
     var manaSlack = Combat.ManaRegenPerTick * 4;
     while (conn.Db.Character.Identity.Find(id) is { } drain
            && drain.Hp > Combat.DummyThornsDamage
            && drain.Hp < drain.MaxHp
            && drain.Mana > drain.MaxMana - Rest.ManaRestore - manaSlack)
     {
-        await TakeThorns(conn, id, 1);
+        await TakeEmberThorns(conn, id);
     }
+    var drained = conn.Db.Character.Identity.Find(id)!;
+    var manaCap = drained.MaxMana - Rest.ManaRestore - manaSlack;
+    if (drained.Mana > manaCap)
+    {
+        Fail($"expected mana <= {manaCap} after ember drain, got {drained.Mana}/{drained.MaxMana} (hp {drained.Hp}/{drained.MaxHp})");
+        return;
+    }
+    Console.WriteLine($"ember drain mana={drained.Mana}/{drained.MaxMana} hp={drained.Hp}/{drained.MaxHp}");
 
     // --- Wait combat lock, Rest heals HP and restores mana (not to full HP) ---
     await DelayPump(conn, Rest.CombatLockMs + 200);
@@ -108,7 +116,10 @@ try
     }
 
     var expectedMana = Math.Min(afterHeal.MaxMana, beforeMana + Rest.ManaRestore);
-    var manaHi = Math.Min(afterHeal.MaxMana, beforeMana + Rest.ManaRestore + Combat.ManaRegenPerTick * 3);
+    // Rest TickManaRegen covers last Emberbolt windup + trailing GCD + combat-lock wait.
+    var regenWaitMs = Combat.EmberboltCastMs + Rest.CombatLockMs + Combat.GcdMs + 400;
+    var regenTicks = regenWaitMs / Combat.ManaRegenIntervalMs + 1;
+    var manaHi = Math.Min(afterHeal.MaxMana, beforeMana + Rest.ManaRestore + regenTicks * Combat.ManaRegenPerTick);
     if (afterHeal.Mana < expectedMana || afterHeal.Mana > manaHi)
     {
         Fail($"expected mana {expectedMana}..{manaHi} after Rest.ManaRestore={Rest.ManaRestore}, got {afterHeal.Mana} (before {beforeMana})");
@@ -246,6 +257,34 @@ static async Task TakeThorns(DbConnection conn, Identity id, int sparks)
             timeoutMs, conn, $"thorns #{i}");
         await DelayPump(conn, Combat.GcdMs + 40);
     }
+}
+
+static async Task TakeEmberThorns(DbConnection conn, Identity id)
+{
+    if (conn.Db.Character.Identity.Find(id) is { StaffEquipped: false })
+    {
+        conn.Reducers.EquipStaff();
+        await DelayPump(conn, 80);
+    }
+    conn.Reducers.EnsureTrainingDummy();
+    await PumpUntil(() => FindDummy(conn) is { Hp: > 0 }, timeoutMs, conn, "dummy ember drain");
+    var d = FindDummy(conn)!;
+    conn.Reducers.SetTarget(d.NpcId);
+    await DelayPump(conn, Combat.GcdMs + 40);
+    var ch = conn.Db.Character.Identity.Find(id)!;
+    if (ch.Mana < Combat.EmberboltManaCost)
+    {
+        Fail($"ember drain needs {Combat.EmberboltManaCost} mana, got {ch.Mana}");
+        throw new Exception("ember drain oom");
+    }
+    var beforeHp = ch.Hp;
+    conn.Reducers.Cast(Combat.SpellEmberbolt);
+    await PumpUntil(() =>
+    {
+        var n = conn.Db.Character.Identity.Find(id);
+        return n is not null && (n.Hp < beforeHp || n.Hp == 0);
+    }, timeoutMs, conn, "ember thorns");
+    await DelayPump(conn, Combat.GcdMs + 40);
 }
 
 static async Task ExpectRestFail(DbConnection conn, string needle, string label)
