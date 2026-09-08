@@ -4,6 +4,7 @@
 # Env:
 #   FARDEL_MATRIX_FAIL_FAST=1 (default) stop on first compile error
 #   FARDEL_MATRIX_RETRY=1 (default) retry once on non-compile FAIL
+#   FARDEL_MATRIX_ALLOW_FLAKE=0 (default) FLAKE rows also force non-zero exit (#148)
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -140,3 +141,30 @@ done
 log "=== MATRIX DONE ==="
 cat "$LOGDIR/results.tsv"
 date -u +%Y-%m-%dT%H:%M:%SZ
+
+# Aggregate results.tsv — never soft-green on FAIL (#148)
+ALLOW_FLAKE="${FARDEL_MATRIX_ALLOW_FLAKE:-0}"
+fail_n=0
+flake_n=0
+pass_n=0
+while IFS=$'\t' read -r _name status _rest || [[ -n "${_name:-}" ]]; do
+  [[ -z "${_name:-}" ]] && continue
+  case "$status" in
+    PASS) pass_n=$((pass_n + 1)) ;;
+    FLAKE) flake_n=$((flake_n + 1)) ;;
+    FAIL|COMPILE_FAIL) fail_n=$((fail_n + 1)) ;;
+    *) fail_n=$((fail_n + 1)) ;; # unknown status → treat as fail
+  esac
+done < "$LOGDIR/results.tsv"
+
+log "=== MATRIX GATE pass=$pass_n fail=$fail_n flake=$flake_n allow_flake=$ALLOW_FLAKE ==="
+if [[ "$fail_n" -gt 0 ]]; then
+  log "GATE: FAIL — $fail_n row(s) FAIL/COMPILE_FAIL in $LOGDIR/results.tsv (do not treat 'script completed' as green)"
+  exit 1
+fi
+if [[ "$flake_n" -gt 0 && "$ALLOW_FLAKE" != "1" ]]; then
+  log "GATE: FAIL — $flake_n FLAKE row(s); set FARDEL_MATRIX_ALLOW_FLAKE=1 to allow"
+  exit 1
+fi
+log "GATE: PASS"
+exit 0
