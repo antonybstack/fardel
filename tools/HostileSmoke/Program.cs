@@ -4,7 +4,7 @@ using SpacetimeDB.Types;
 
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
-const int timeoutMs = 70000;
+const int timeoutMs = 90000;
 
 DbConnection? conn = null;
 var connected = new TaskCompletionSource<Identity>();
@@ -75,6 +75,29 @@ try
         return;
     }
     Console.WriteLine($"spawn A id={padA.NpcId} B id={padB.NpcId} C id={padC.NpcId} dummy id={dummyId}");
+
+    await MoveToward(conn, identity, 0f, 0f);
+    await DelayPump(conn, Combat.GcdMs + 80);
+    await ProveKickNpc(conn, padA.NpcId, Combat.NpcKindHostile, dummyId, "Kind=2");
+    await DelayPump(conn, Combat.GcdMs + 80);
+    await ProveKickNpc(conn, padC.NpcId, Combat.NpcKindBrigand, dummyId, "Kind=3");
+    await DelayPump(conn, Combat.GcdMs + 80);
+    await ProveStunNpc(conn, identity, padA.NpcId, Combat.NpcKindHostile, dummyId, "Kind=2");
+    await MoveToward(conn, identity, 0f, 0f);
+    await DelayPump(conn, Combat.GcdMs + 80);
+    await ProveStunNpc(conn, identity, padC.NpcId, Combat.NpcKindBrigand, dummyId, "Kind=3");
+    await MoveToward(conn, identity, 0f, 0f);
+    await DelayPump(conn, Combat.StunNpcLockMs + 200);
+    await PumpUntil(() =>
+    {
+        var a = FindNpc(conn, padA.NpcId);
+        var c = FindNpc(conn, padC.NpcId);
+        return a is { Hp: > 0, Aggroed: false, Kind: Combat.NpcKindHostile }
+            && Dist(a.X, a.Z, Combat.HostileSpawnAx, Combat.HostileSpawnAz) < 0.8f
+            && c is { Hp: > 0, Aggroed: false, Kind: Combat.NpcKindBrigand }
+            && Dist(c.X, c.Z, Combat.HostileSpawnCx, Combat.HostileSpawnCz) < 0.8f;
+    }, timeoutMs, conn, "A+C home after kick/stun");
+    AssertDummyTrainer(conn, dummyId, "after kick/stun");
 
     var hp0 = conn.Db.Character.Identity.Find(identity)!.Hp;
     if (hp0 <= Combat.HostileAttackDamage)
@@ -170,7 +193,7 @@ try
         var p = conn.Db.PlayerPose.Identity.Find(identity);
         return p is not null && Dist(p.X, p.Z, shard.X, shard.Z) <= Loot.PickupRangeMeters;
     }, timeoutMs, conn, "in corpse pickup");
-    conn.Reducers.Pickup();
+    await ExpectPickupOk(conn, "corpse shard");
     await PumpUntil(() => FindLoot(conn, shard.LootId) is null, timeoutMs, conn, "corpse loot despawned");
     await PumpUntil(() =>
     {
@@ -236,7 +259,7 @@ try
         return;
     }
 
-    Console.WriteLine($"OK: HostileSmoke passed types loot respawn dummy {hp0}->{hpHit}");
+    Console.WriteLine($"OK: HostileSmoke passed kick stun types loot respawn dummy {hp0}->{hpHit}");
     Environment.ExitCode = 0;
 }
 catch (Exception e)
@@ -299,6 +322,164 @@ static void AssertDummyTrainer(DbConnection conn, ulong dummyId, string when)
         Fail($"dummy trainer gone {when} kind={dummy?.Kind}");
         Environment.Exit(1);
     }
+}
+
+static async Task ProveKickNpc(DbConnection conn, ulong npcId, int wantKind, ulong dummyId, string label)
+{
+    var n0 = FindNpc(conn, npcId) ?? throw new Exception($"KickNpc {label} missing");
+    if (n0.Kind != wantKind || n0.Hp <= 0)
+    {
+        Fail($"KickNpc {label} kind={n0.Kind} hp={n0.Hp}");
+        throw new Exception("kick pre");
+    }
+    var dummyHp = FindDummy(conn)!.Hp;
+    var x0 = n0.X;
+    var z0 = n0.Z;
+    await ExpectKickNpcOk(conn, npcId, label);
+    await PumpUntil(() =>
+    {
+        var n = FindNpc(conn, npcId);
+        return n is { Hp: > 0, NextSwingAtMicros: > 0 };
+    }, timeoutMs, conn, $"KickNpc {label} interrupt");
+    var kicked = FindNpc(conn, npcId)!;
+    if (kicked.Kind != wantKind)
+    {
+        Fail($"KickNpc changed {label} kind={kicked.Kind}");
+        throw new Exception("kick kind");
+    }
+    var shoved = Dist(kicked.X, kicked.Z, x0, z0);
+    if (shoved < Combat.KickNpcShoveMeters * 0.5f)
+    {
+        Fail($"KickNpc did not shove {label} ({shoved:0.##}m)");
+        throw new Exception("kick shove");
+    }
+    if (FindDummy(conn) is not { Hp: var dHp } || dHp != dummyHp)
+    {
+        Fail($"dummy trainer HP changed during KickNpc {label}");
+        throw new Exception("kick dummy");
+    }
+    AssertDummyTrainer(conn, dummyId, $"KickNpc {label}");
+    Console.WriteLine($"KickNpc {label} OK id={kicked.NpcId} shove={shoved:0.##} swingAt={kicked.NextSwingAtMicros}");
+}
+
+static async Task ProveStunNpc(
+    DbConnection conn,
+    Identity id,
+    ulong npcId,
+    int wantKind,
+    ulong dummyId,
+    string label)
+{
+    var n0 = FindNpc(conn, npcId) ?? throw new Exception($"StunNpc {label} missing");
+    if (n0.Kind != wantKind || n0.Hp <= 0)
+    {
+        Fail($"StunNpc {label} kind={n0.Kind} hp={n0.Hp}");
+        throw new Exception("stun pre");
+    }
+    await WalkStunRange(conn, id, n0);
+    await DelayPump(conn, Combat.GcdMs + 80);
+    n0 = FindNpc(conn, npcId)!;
+    var dummyHp = FindDummy(conn)!.Hp;
+    var x0 = n0.X;
+    var z0 = n0.Z;
+    await ExpectStunNpcOk(conn, npcId, label);
+    await PumpUntil(() =>
+    {
+        var n = FindNpc(conn, npcId);
+        return n is { Hp: > 0, StunnedUntilMicros: > 0 };
+    }, timeoutMs, conn, $"StunNpc {label} lock");
+    var stunned = FindNpc(conn, npcId)!;
+    if (stunned.Kind != wantKind)
+    {
+        Fail($"StunNpc changed {label} kind={stunned.Kind}");
+        throw new Exception("stun kind");
+    }
+    var lockLeft = stunned.StunnedUntilMicros - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+    if (lockLeft < (long)Combat.StunNpcLockMs * 1000L / 2)
+    {
+        Fail($"{label} lock too short leftover={lockLeft}us");
+        throw new Exception("stun lock");
+    }
+    var drifted = Dist(stunned.X, stunned.Z, x0, z0);
+    if (drifted > Combat.HostileStepMeters * 2f)
+    {
+        Fail($"StunNpc {label} drifted {drifted:0.##}m during lock");
+        throw new Exception("stun drift");
+    }
+    if (FindDummy(conn) is not { Hp: var dHp } || dHp != dummyHp)
+    {
+        Fail($"dummy trainer HP changed during StunNpc {label}");
+        throw new Exception("stun dummy");
+    }
+    AssertDummyTrainer(conn, dummyId, $"StunNpc {label}");
+    Console.WriteLine($"StunNpc {label} OK id={stunned.NpcId} lockLeft={lockLeft}us swingAt={stunned.NextSwingAtMicros}");
+}
+
+static async Task WalkStunRange(DbConnection conn, Identity id, Npc npc)
+{
+    var p = conn.Db.PlayerPose.Identity.Find(id)
+        ?? throw new Exception("pose missing for stun walk");
+    var toPad = Dist(p.X, p.Z, npc.X, npc.Z);
+    var standOff = MathF.Min(Combat.StunRangeMeters - 0.8f, toPad - Combat.HostileAggroRadius - 0.4f);
+    if (standOff < 0.5f)
+    {
+        Fail($"cannot stand off stun {toPad:0.##}m (stun={Combat.StunRangeMeters} aggro={Combat.HostileAggroRadius})");
+        throw new Exception("stun range");
+    }
+    var ux = (npc.X - p.X) / toPad;
+    var uz = (npc.Z - p.Z) / toPad;
+    await MoveToward(conn, id, p.X + ux * (toPad - standOff), p.Z + uz * (toPad - standOff));
+}
+
+static async Task ExpectKickNpcOk(DbConnection conn, ulong npcId, string label)
+{
+    var tcs = new TaskCompletionSource();
+    void OnKickNpc(ReducerEventContext ctx, ulong _npcId)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Committed: tcs.TrySetResult(); break;
+            case Status.Failed(var reason): tcs.TrySetException(new Exception($"KickNpc failed ({label}): {reason}")); break;
+            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"KickNpc OOE ({label})")); break;
+        }
+    }
+    conn.Reducers.OnKickNpc += OnKickNpc;
+    try { conn.Reducers.KickNpc(npcId); await Pump(tcs.Task, timeoutMs, conn, "kick npc ok " + label); }
+    finally { conn.Reducers.OnKickNpc -= OnKickNpc; }
+}
+
+static async Task ExpectStunNpcOk(DbConnection conn, ulong npcId, string label)
+{
+    var tcs = new TaskCompletionSource();
+    void OnStunNpc(ReducerEventContext ctx, ulong _npcId)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Committed: tcs.TrySetResult(); break;
+            case Status.Failed(var reason): tcs.TrySetException(new Exception($"StunNpc failed ({label}): {reason}")); break;
+            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"StunNpc OOE ({label})")); break;
+        }
+    }
+    conn.Reducers.OnStunNpc += OnStunNpc;
+    try { conn.Reducers.StunNpc(npcId); await Pump(tcs.Task, timeoutMs, conn, "stun npc ok " + label); }
+    finally { conn.Reducers.OnStunNpc -= OnStunNpc; }
+}
+
+static async Task ExpectPickupOk(DbConnection conn, string label)
+{
+    var tcs = new TaskCompletionSource();
+    void OnPickup(ReducerEventContext ctx)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Committed: tcs.TrySetResult(); break;
+            case Status.Failed(var reason): tcs.TrySetException(new Exception($"Pickup failed ({label}): {reason}")); break;
+            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"Pickup OOE ({label})")); break;
+        }
+    }
+    conn.Reducers.OnPickup += OnPickup;
+    try { conn.Reducers.Pickup(); await Pump(tcs.Task, timeoutMs, conn, "pickup ok " + label); }
+    finally { conn.Reducers.OnPickup -= OnPickup; }
 }
 
 static WorldLoot? FindLootNear(DbConnection conn, float x, float z)

@@ -258,6 +258,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** StunNpc(ulong) for living Dummy + IsHostileKind. Dummy stays planted. Hostiles: StunnedUntilMicros + skip chase/swing for StunNpcLockMs. VE walks to ~4m (inside 5, outside AggroRadius 3). Keep Stun(Identity) for StunSmoke PvP. FindHostileNear pins Kind==2.
 - **Seen in:** #420
 
+### 2026-09-08 — npc,smoke — HostileSmoke Pickup() without commit hangs on leftover shard
+- **Cause:** KickNpc shoves off-pad; corpse linger + extra WorldLoot can make fire-and-forget Pickup miss the LootId the harness stored. PumpUntil "corpse loot despawned" then burns the full timeout.
+- **Do this:** Kick then Stun both kinds from origin / stun stand-off, wait A+C home (`Aggroed=false` on spawn) before the hunt loop. `OnPickup` Committed before waiting that LootId gone. Dummy stays trainer.
+- **Seen in:** #469
+
 ### 2026-09-08 — humanoid,staff — unequip still plays Idle_Weapon (floating grip)
 - **Cause:** `findAnim(..., 'Idle')` is `includes`, so it returns Idle_Weapon. `setHumanoidStaffEquipped(false)` hid the stick then returned without swapping the clip.
 - **Do this:** Exact bare clip names (`Idle` ≠ `Idle_Weapon`, `Run` ≠ `Run_Weapon`). Unequip selects unarmed Idle/Run. `?ve=idle` still Idle_Weapon + skinned. `?ve=sheathed` persistMark `Sheathed OK` + `Idle` (no Weapon) + skinned, staff mesh off.
