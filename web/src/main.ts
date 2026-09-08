@@ -18,6 +18,7 @@ import {
   castRemainingMs,
   SPELL_EMBERBOLT,
   SPELL_SPARK,
+  GCD_MS,
   EMBERBOLT_CAST_MS,
   SPARK_MANA_COST,
   EMBERBOLT_MANA_COST,
@@ -36,6 +37,10 @@ import {
   isTargetOutOfCastRange,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
+  NPC_KIND_HOSTILE,
+  NPC_KIND_BRIGAND,
+  isHostileKind,
+  HOSTILE_AGGRO_RADIUS,
   CROWD_NEAR_COUNT,
   type ConnectionStatus,
   type CrowdProxyView,
@@ -47,17 +52,34 @@ import {
   type VendorView,
   type CombatView,
 } from './net/connection';
-import { buildForestClearing } from './world/forest';
+import {
+  buildForestClearing,
+  COLLISION_VE_HERO,
+  DIRT_SURFACE_Y,
+  getTrunkCapsules,
+  nearestTrunk,
+  PLAYER_TRUNK_RADIUS,
+  setPlayerBlobShadow,
+  slideAgainstTrunks,
+} from './world/forest';
 import {
   createPlayerHumanoid,
+  hostileRobeColor,
   partyRobeColor,
   playHumanoidCast,
+  playHumanoidFlinch,
   preloadPlayerHumanoid,
   readHumanoidPlayback,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
+  setHumanoidAirborne,
+  setHumanoidCasting,
+  setHumanoidDead,
   setHumanoidMoving,
+  setHumanoidStaffEquipped,
+  setHumanoidTurning,
   type HumanoidParts,
+  type HumanoidPlayback,
 } from './world/humanoid';
 import { createTrainingDummy } from './world/dummy';
 import {
@@ -108,6 +130,27 @@ const MOVE_SPEED = 4.5;
 /** Match shared/Fardel.Shared Loot.PickupRangeMeters. */
 const PICKUP_RANGE_METERS = 3;
 
+/** World nameplate label — distinct vs Dummy / Vendor (#418). */
+function npcPlateName(kind: number): string {
+  if (kind === NPC_KIND_DUMMY) return 'Dummy';
+  if (kind === NPC_KIND_HOSTILE) return 'Hostile';
+  if (kind === NPC_KIND_BRIGAND) return 'Brigand';
+  return 'NPC';
+}
+
+/** Coral Hostile / violet Brigand / parchment Dummy. */
+function npcPlateColor(kind: number, selected: boolean): string {
+  if (kind === NPC_KIND_DUMMY) return selected ? '#f4e4a8' : '#e8c89a';
+  if (kind === NPC_KIND_BRIGAND) return selected ? '#e0c4ff' : '#c9a0ff';
+  if (kind === NPC_KIND_HOSTILE) return selected ? '#ffb08a' : '#ff7a62';
+  return '#ffffff';
+}
+
+/** Kind=3 robe — same wizard mesh as Kind=2, distinct tint (body swap is Dev3). */
+function brigandRobeColor(): Color3 {
+  return new Color3(0.48, 0.24, 0.72);
+}
+
 /** Nearest WorldLoot within pickup range (XZ), or null. */
 function nearestLootInPickupRange(
   items: GroundItemView[],
@@ -130,6 +173,43 @@ function nearestLootInPickupRange(
   return best;
 }
 
+/** Tab cycle: in-range hostiles first, then dummy (still selectable), then the rest (#358). */
+function tabTargetCycle(net: GameNet): NpcView[] {
+  const alive = net.getNpcs().filter((n) => n.hp > 0);
+  const pose = net.getLocalPose();
+  const r2 = CAST_RANGE_METERS * CAST_RANGE_METERS;
+  const inRange = (n: NpcView) => {
+    if (!pose) return true;
+    const dx = n.x - pose.x;
+    const dz = n.z - pose.z;
+    return dx * dx + dz * dz <= r2;
+  };
+  const byId = (a: NpcView, b: NpcView) =>
+    a.npcId < b.npcId ? -1 : a.npcId > b.npcId ? 1 : 0;
+  const hostilesNear = alive
+    .filter((n) => isHostileKind(n.kind) && inRange(n))
+    .sort(byId);
+  const dummy = alive.filter((n) => n.kind === NPC_KIND_DUMMY);
+  const hostilesFar = alive
+    .filter((n) => isHostileKind(n.kind) && !inRange(n))
+    .sort(byId);
+  const rest = alive.filter(
+    (n) => !isHostileKind(n.kind) && n.kind !== NPC_KIND_DUMMY,
+  );
+  return [...hostilesNear, ...dummy, ...hostilesFar, ...rest];
+}
+
+function cyclePreferHostiles(net: GameNet): bigint | null {
+  const cycle = tabTargetCycle(net);
+  if (cycle.length === 0) return null;
+  const cur = net.getCombat()?.targetNpcId ?? 0n;
+  let idx = cycle.findIndex((n) => n.npcId === cur);
+  idx = (idx + 1) % cycle.length;
+  const next = cycle[idx]!.npcId;
+  net.setTarget(next);
+  return next;
+}
+
 type NpcMesh = {
   root: Mesh;
   body: Mesh;
@@ -144,6 +224,8 @@ type NpcMesh = {
   remoteRingMat: StandardMaterial;
   markerMat: StandardMaterial;
   nameplate: Nameplate | null;
+  /** Kind=2 skinned body. Dummy stays the scarecrow (null). */
+  humanoid: HumanoidParts | null;
 };
 
 type RemoteFx = {
@@ -280,7 +362,7 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   const idEl = document.getElementById('tfId');
   const fill = document.getElementById('tfHpFill');
   const label = document.getElementById('tfHpLabel');
-  const name = target.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+  const name = npcPlateName(target.kind);
   if (nameEl) nameEl.textContent = name;
   if (idEl) idEl.textContent = `#${target.npcId.toString()}`;
   const frac = target.maxHp > 0 ? Math.max(0, Math.min(1, target.hp / target.maxHp)) : 0;
@@ -932,8 +1014,8 @@ function setRmbLookArmed(armed: boolean): void {
   document.body.dataset.rmbLook = mode;
   if (canvas) {
     canvas.dataset.rmbLook = mode;
-    // grab → grabbing is the always-on cue (legend/status are optional overlays).
-    canvas.style.cursor = armed ? 'grabbing' : 'grab';
+    // Play/RMB orbit: hide cursor (WoW). ?ve=rmb-look keeps grabbing chrome (#154).
+    canvas.style.cursor = armed ? (veRmbLookLock ? 'grabbing' : 'none') : 'grab';
   }
   const chip = document.querySelector(
     '#keysLegend .klChip[data-bind="rmb"]',
@@ -955,7 +1037,7 @@ function setDebugHudVisible(open: boolean): void {
 
 /**
  * CrowdProxy amber capsules are AOI/perf debug — hidden in default play (#271).
- * Visible only with F3/?debug=1 or AOI/minimap/fps VE hooks.
+ * Visible only with F3/?debug=1 or AOI/minimap VE hooks. `?ve=fps` is forest fill, not capsules.
  */
 function showCrowdDebugCapsules(ve: string | null, debugHud: boolean): boolean {
   if (debugHud) return true;
@@ -964,7 +1046,6 @@ function showCrowdDebugCapsules(ve: string | null, debugHud: boolean): boolean {
     case 'minimap':
     case 'minimap-read':
     case 'minimap-pip':
-    case 'fps':
       return true;
     default:
       return false;
@@ -1681,7 +1762,13 @@ function drawMinimap(opts: {
   for (const n of opts.npcs) {
     if (n.hp <= 0) continue;
     const dummy = n.kind === NPC_KIND_DUMMY;
-    plot(n.x, n.z, dummy ? '#c4a06a' : '#c45a5a', dummy ? 3.4 : 3.0);
+    const brigand = n.kind === NPC_KIND_BRIGAND;
+    plot(
+      n.x,
+      n.z,
+      dummy ? '#c4a06a' : brigand ? '#a070d0' : '#c45a5a',
+      dummy ? 3.4 : 3.0,
+    );
   }
   // Non-party remotes (magenta)
   for (const r of opts.remotes) {
@@ -1851,7 +1938,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
               : 'rest: —';
     const tgt = s.targetNpc;
     const targetLine = tgt
-      ? `target: ${tgt.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC'} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
+      ? `target: ${npcPlateName(tgt.kind)} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
       : 'target: (none — Tab)';
     const gcd = gcdRemainingMs(s.combat, nowMs);
     const gcdLine = gcd > 0 ? `GCD cooldown: ${(gcd / 1000).toFixed(2)}s` : 'GCD idle';
@@ -1951,6 +2038,174 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
   return `Disconnected\nconn: offline\nuri: ${s.uri}\ndb: ${s.database}`;
 }
 
+/** #352 — WoW-like zoom stops: close, not inside mesh; establishing, not orbital infinity. */
+const CAM_ZOOM_MIN = 4.5;
+const CAM_ZOOM_MAX = 42;
+
+/** Vertical bole colliders for camera push-in. Quaternius AABB is canopy-wide — do not use it. */
+type TrunkCollider = {
+  name: string;
+  kind: 'hero' | 'mid';
+  x: number;
+  z: number;
+  r: number;
+  y0: number;
+  y1: number;
+};
+
+const CAM_TRUNK_PAD = 1.25;
+const CAM_TRUNK_HERO_BOLE = 1.55;
+const CAM_TRUNK_MID_BOLE = 0.82;
+const CAM_TRUNK_MIN_HIT = 0.55;
+const CAM_COLLISION_VE_RADIUS = 56;
+
+function collectTrunkColliders(scene: Scene): TrunkCollider[] {
+  const trunks: TrunkCollider[] = [];
+  const seen = new Set<string>();
+  const add = (
+    name: string,
+    kind: 'hero' | 'mid',
+    x: number,
+    z: number,
+    r: number,
+    y0: number,
+    y1: number,
+  ): void => {
+    const key = name.replace(/_trunk$/i, '');
+    if (seen.has(key) || !(r > 0.4) || y1 - y0 < 2) return;
+    seen.add(key);
+    trunks.push({ name: key, kind, x, z, r, y0, y1 });
+  };
+
+  for (const mesh of scene.meshes) {
+    if (!mesh.isEnabled() || mesh.isVisible === false) continue;
+    if (/Template/i.test(mesh.name)) continue;
+    mesh.computeWorldMatrix(true);
+    if (mesh.absolutePosition.y < -40) continue;
+
+    if (/_trunk$/i.test(mesh.name)) {
+      const bi = mesh.getBoundingInfo();
+      bi.update(mesh.getWorldMatrix());
+      const bb = bi.boundingBox;
+      const hx = (bb.maximumWorld.x - bb.minimumWorld.x) * 0.5;
+      const hz = (bb.maximumWorld.z - bb.minimumWorld.z) * 0.5;
+      add(
+        mesh.name,
+        /hero/i.test(mesh.name) ? 'hero' : 'mid',
+        (bb.minimumWorld.x + bb.maximumWorld.x) * 0.5,
+        (bb.minimumWorld.z + bb.maximumWorld.z) * 0.5,
+        Math.min(hx, hz) * 0.8,
+        bb.minimumWorld.y,
+        bb.maximumWorld.y,
+      );
+      continue;
+    }
+
+    const parent = mesh.parent as {
+      name: string;
+      getAbsolutePosition: () => Vector3;
+      absoluteScaling: Vector3;
+    } | null;
+    const selfIsRoot =
+      /^(heroTree|heroElder|heroSent)/.test(mesh.name) || /^midTree_/.test(mesh.name);
+    const parentIsRoot =
+      !!parent &&
+      (/^(heroTree|heroElder|heroSent)/.test(parent.name) || /^midTree_/.test(parent.name));
+    if (!selfIsRoot && !parentIsRoot) continue;
+    const root = selfIsRoot ? mesh : parent!;
+    const pos = root.getAbsolutePosition();
+    const scale = Math.max(Math.abs(root.absoluteScaling.x), 0.5);
+    const hero = !/^midTree_/.test(root.name);
+    add(
+      root.name,
+      hero ? 'hero' : 'mid',
+      pos.x,
+      pos.z,
+      scale * (hero ? CAM_TRUNK_HERO_BOLE : CAM_TRUNK_MID_BOLE),
+      0,
+      scale * (hero ? 18 : 8),
+    );
+  }
+  for (const node of scene.transformNodes) {
+    if (/Template/i.test(node.name) || node.getAbsolutePosition().y < -40) continue;
+    const hero = /^(heroTree|heroElder|heroSent)/.test(node.name);
+    const mid = /^midTree_/.test(node.name);
+    if (!hero && !mid) continue;
+    const pos = node.getAbsolutePosition();
+    const scale = Math.max(Math.abs(node.absoluteScaling.x), 0.5);
+    add(
+      node.name,
+      hero ? 'hero' : 'mid',
+      pos.x,
+      pos.z,
+      scale * (hero ? CAM_TRUNK_HERO_BOLE : CAM_TRUNK_MID_BOLE),
+      0,
+      scale * (hero ? 18 : 8),
+    );
+  }
+  if (!trunks.some((t) => t.kind === 'hero')) {
+    const fallback: Array<{ name: string; x: number; z: number; r: number }> = [
+      { name: 'heroTreeN', x: 6, z: -40, r: 8 },
+      { name: 'heroTreeNE', x: 34, z: -28, r: 7.1 },
+      { name: 'heroTreeNW', x: -36, z: -24, r: 7.4 },
+      { name: 'heroTreeSW', x: -32, z: 34, r: 6.8 },
+      { name: 'heroTreeSE', x: 30, z: 38, r: 6.5 },
+    ];
+    for (const h of fallback) add(h.name, 'hero', h.x, h.z, h.r, 0, 28);
+  }
+  return trunks;
+}
+
+function nearestHeroTrunk(x: number, z: number, trunks: TrunkCollider[]): TrunkCollider | null {
+  let best: TrunkCollider | null = null;
+  let bestD = Infinity;
+  for (const t of trunks) {
+    if (t.kind !== 'hero') continue;
+    const d = (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z);
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  return best;
+}
+
+/** Pull ArcRotate radius in so the cam-to-target segment stops at a trunk bole. */
+function clampRadiusVsTrunks(
+  target: Vector3,
+  alpha: number,
+  beta: number,
+  desired: number,
+  minRadius: number,
+  trunks: TrunkCollider[],
+): { radius: number; hit: string | null } {
+  const sinb = Math.sin(beta);
+  const dx = Math.cos(alpha) * sinb;
+  const dy = Math.cos(beta);
+  const dz = Math.sin(alpha) * sinb;
+  let best = desired;
+  let hit: string | null = null;
+  for (const t of trunks) {
+    const ox = target.x - t.x;
+    const oz = target.z - t.z;
+    const r = t.r + CAM_TRUNK_PAD;
+    if (ox * ox + oz * oz <= r * r) continue;
+    const a = dx * dx + dz * dz;
+    if (a < 1e-10) continue;
+    const b = 2 * (ox * dx + oz * dz);
+    const c = ox * ox + oz * oz - r * r;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) continue;
+    const tHit = (-b - Math.sqrt(disc)) / (2 * a);
+    if (tHit <= CAM_TRUNK_MIN_HIT || tHit >= best) continue;
+    const y = target.y + tHit * dy;
+    if (y < t.y0 - 0.4 || y > t.y1 + 0.4) continue;
+    best = tHit;
+    hit = t.name;
+  }
+  return { radius: Math.max(minRadius, best), hit };
+}
+
 async function createScene(engine: Engine): Promise<{
   scene: Scene;
   camera: ArcRotateCamera;
@@ -1958,6 +2213,7 @@ async function createScene(engine: Engine): Promise<{
   humanoid: HumanoidParts;
   proxySource: Mesh;
   setLocalGhost: (on: boolean) => void;
+  trunks: TrunkCollider[];
 }> {
   const scene = new Scene(engine);
 
@@ -1972,8 +2228,8 @@ async function createScene(engine: Engine): Promise<{
   );
   const canvas = engine.getRenderingCanvas();
   camera.attachControl(canvas, true);
-  camera.lowerRadiusLimit = 4;
-  camera.upperRadiusLimit = 80;
+  camera.lowerRadiusLimit = CAM_ZOOM_MIN;
+  camera.upperRadiusLimit = CAM_ZOOM_MAX;
   camera.wheelPrecision = 30;
   camera.panningSensibility = 0;
 
@@ -1983,6 +2239,9 @@ async function createScene(engine: Engine): Promise<{
     | undefined;
   if (pointers) {
     pointers.buttons = [2];
+    camera.invertRotation = false;
+    pointers.angularSensibilityX = Math.abs(pointers.angularSensibilityX || 1000);
+    pointers.angularSensibilityY = Math.abs(pointers.angularSensibilityY || 1000);
   }
 
   // Toast only on overscroll so the #30 soft clamp stays (#192).
@@ -1993,8 +2252,8 @@ async function createScene(engine: Engine): Promise<{
       const now = Date.now();
       const delta = e.deltaY;
       const currentRadius = camera.radius;
-      const lowerLimit = camera.lowerRadiusLimit ?? 4;
-      const upperLimit = camera.upperRadiusLimit ?? 80;
+      const lowerLimit = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
+      const upperLimit = camera.upperRadiusLimit ?? CAM_ZOOM_MAX;
       const isAtMin = currentRadius <= lowerLimit && delta < 0;
       const isAtMax = currentRadius >= upperLimit && delta > 0;
       if ((isAtMin || isAtMax) && now - lastZoomLimitToastMs > ZOOM_LIMIT_TOAST_DEBOUNCE_MS) {
@@ -2017,6 +2276,7 @@ async function createScene(engine: Engine): Promise<{
 
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
   await buildForestClearing(scene);
+  const trunks = collectTrunkColliders(scene);
 
   // Local player: Quaternius CC0 wizard (crowd proxies are debug-only, #271).
   await preloadPlayerHumanoid(scene);
@@ -2058,7 +2318,7 @@ async function createScene(engine: Engine): Promise<{
   proxyMat.emissiveColor = new Color3(0.18, 0.08, 0.02);
   proxySource.material = proxyMat;
 
-  return { scene, camera, player, humanoid, proxySource, setLocalGhost };
+  return { scene, camera, player, humanoid, proxySource, setLocalGhost, trunks };
 }
 
 
@@ -2126,14 +2386,31 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   let body: Mesh;
   let mat: StandardMaterial;
   let extraMats: StandardMaterial[] = [];
+  let humanoid: HumanoidParts | null = null;
   if (isDummy) {
     // Scarecrow / practice dummy — wood post + crossbeam + canvas (not a cylinder).
     const dummy = createTrainingDummy(scene, `npc_${npc.npcId}`);
     body = dummy.body;
     body.parent = root;
-    body.position.y = 0;
+    body.position.y = DIRT_SURFACE_Y;
     mat = dummy.mat;
     extraMats = dummy.extraMats;
+  } else if (isHostileKind(npc.kind)) {
+    // Same wizard clone as remotes (IBM once on the container). Idle_Weapon,
+    // not bind-T, not a red capsule. Dummy stays the scarecrow. Kind=3 uses
+    // a violet robe so the nameplate type reads before Dev3 swaps the body.
+    const brigand = npc.kind === NPC_KIND_BRIGAND;
+    const parts = createPlayerHumanoid(scene, {
+      name: brigand ? `brigand_${npc.npcId}` : `hostile_${npc.npcId}`,
+      robeColor: brigand ? brigandRobeColor() : hostileRobeColor(),
+    });
+    parts.root.parent = root;
+    body = parts.root;
+    mat = parts.mat;
+    humanoid = parts;
+    setHumanoidMoving(parts, false);
+    const yaw = Math.atan2(-npc.x, -npc.z);
+    if (Number.isFinite(yaw)) parts.root.rotation.y = yaw;
   } else {
     body = MeshBuilder.CreateCapsule(
       `npcBody_${npc.npcId}`,
@@ -2144,6 +2421,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     body.position.y = 0.8;
     mat = new StandardMaterial(`npcMat_${npc.npcId}`, scene);
     mat.diffuseColor = new Color3(0.7, 0.35, 0.35);
+    mat.emissiveColor = new Color3(0, 0, 0);
     mat.specularColor = new Color3(0.1, 0.1, 0.1);
     body.material = mat;
   }
@@ -2218,11 +2496,17 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   marker.setEnabled(false);
 
   let nameplate: Nameplate | null = null;
-  if (isDummy) {
+  const isHostile = isHostileKind(npc.kind);
+  if (isDummy || isHostile) {
     nameplate = createNameplate(scene, `npc_${npc.npcId}`);
     nameplate.mesh.parent = root;
-    nameplate.mesh.position.set(0, 2.15, 0);
-    paintNameplate(nameplate, 'Dummy', '#e8c89a', npc.maxHp > 0 ? npc.hp / npc.maxHp : 1);
+    nameplate.mesh.position.set(0, isDummy ? 2.15 : 2.35, 0);
+    paintNameplate(
+      nameplate,
+      npcPlateName(npc.kind),
+      npcPlateColor(npc.kind, false),
+      npc.maxHp > 0 ? npc.hp / npc.maxHp : 1,
+    );
   }
 
   return {
@@ -2237,6 +2521,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     remoteRingMat,
     markerMat,
     nameplate,
+    humanoid,
   };
 }
 
@@ -2249,6 +2534,7 @@ function makeVendorMesh(scene: Scene, vendor: VendorView): { root: Mesh; mat: St
   // desaturated canvas under locked #39 fog/sun; readable at 8–20m play cam.
   const stall = createVendorStall(scene, `vendorStall_${vendor.vendorId}`);
   stall.body.parent = root;
+  stall.body.position.y = DIRT_SURFACE_Y;
   const mat = stall.mat;
 
   const nameplate = createNameplate(scene, `vendor_${vendor.vendorId}`);
@@ -2477,7 +2763,6 @@ function wishFromKeys(
   return { dx: wish.x, dz: wish.z, jump };
 }
 
-
 /** Hide/show staff group + children (Babylon setEnabled on empty parent is not always enough). */
 function setStaffMeshVisible(staff: Mesh, visible: boolean): void {
   staff.setEnabled(visible);
@@ -2609,7 +2894,8 @@ function paintNameplate(
     const bh = 14;
     const fill = Math.max(0, Math.min(1, hpFrac));
     const isDummy = label === 'Dummy';
-    if (isDummy) {
+    const isHostile = label === 'Hostile';
+    if (isDummy || isHostile) {
       ctx.fillStyle = 'rgba(8,10,12,0.92)';
       ctx.fillRect(bx, by, bw, bh);
       ctx.strokeStyle = selected
@@ -2617,8 +2903,13 @@ function paintNameplate(
         : 'rgba(0,0,0,0.95)';
       ctx.lineWidth = selected ? 4 : 3;
       ctx.strokeRect(bx, by, bw, bh);
-      ctx.fillStyle =
-        fill > 0.35
+      ctx.fillStyle = isHostile
+        ? fill > 0.35
+          ? 'rgb(255,110,80)'
+          : fill > 0.15
+            ? 'rgb(245,150,50)'
+            : 'rgb(210,40,40)'
+        : fill > 0.35
           ? 'rgb(55,230,95)'
           : fill > 0.15
             ? 'rgb(245,180,40)'
@@ -2975,7 +3266,8 @@ async function main(): Promise<void> {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  const { scene, camera, player, humanoid, proxySource, setLocalGhost } = await createScene(engine);
+  const { scene, camera, player, humanoid, proxySource, setLocalGhost, trunks } =
+    await createScene(engine);
   const castRangeRing = createCastRangeRing(scene);
 
   let net: GameNet | null = null;
@@ -2992,11 +3284,52 @@ async function main(): Promise<void> {
   const CAM_FOLLOW_SNAP_METERS = 2.5;
   let camFollowY = CAM_FOLLOW_Y_OFFSET;
   let camFollowYSeeded = false;
+  /** Intended wheel radius; collision may pull `camera.radius` in for a frame. */
+  let camZoomRadius = camera.radius;
+  let camAppliedRadius = camera.radius;
+  let camCollideHit: string | null = null;
+  let camCollideThisFrame = false;
+  scene.onBeforeRenderObservable.add(() => {
+    if (!camCollideThisFrame) return;
+    const minR = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
+    const maxR = camera.upperRadiusLimit ?? CAM_ZOOM_MAX;
+    const veCam = new URLSearchParams(window.location.search).get('ve');
+    if (veCam !== 'cam-collision' && Math.abs(camera.radius - camAppliedRadius) > 0.08) {
+      camZoomRadius = camera.radius;
+    }
+    camZoomRadius = Math.min(maxR, Math.max(minR, camZoomRadius));
+    const { radius, hit } = clampRadiusVsTrunks(
+      camera.target,
+      camera.alpha,
+      camera.beta,
+      camZoomRadius,
+      minR,
+      trunks,
+    );
+    camera.radius = radius;
+    camAppliedRadius = radius;
+    camCollideHit = hit;
+  });
   /** E2.4 visual facing from camera-relative wish. Server pose.yaw stays 0. */
   const YAW_FACE_HZ = 12;
+  /** Stationary look / A-D start — slower than loco so 90° is a blend, not a pop. */
+  const YAW_TURN_HZ = 4;
   let localFacingYaw = 0;
+  let localTurningInPlace = false;
   const bootParams = new URLSearchParams(window.location.search);
   const ve = bootParams.get('ve') || '';
+  {
+    const mark = document.getElementById('persistMark');
+    if (mark) {
+      // Harness only (#407). Default `/` stays empty → :empty { display:none }.
+      if (!ve) {
+        mark.textContent = '';
+        mark.hidden = true;
+      } else {
+        mark.hidden = false;
+      }
+    }
+  }
   const firstSessionVe = ve === 'first-session';
   let firstSessionCueShown = false;
   let firstSessionLegendFlash = false;
@@ -3118,6 +3451,7 @@ async function main(): Promise<void> {
   let fpsHudAccum = 0;
 
   const remoteMeshes = new Map<string, HumanoidParts>();
+  const remoteLastHp = new Map<string, number>();
   const remoteNameplates = new Map<string, Nameplate>();
   const remoteFx = new Map<string, RemoteFx>();
   let latestRemoteCombats: RemoteCombat[] = [];
@@ -3371,9 +3705,13 @@ async function main(): Promise<void> {
         if (parts && !casting) {
           // Restore robe emissive after windup (match createPlayerHumanoid scale).
           parts.mat.emissiveColor = parts.mat.diffuseColor.scale(ROBE_EMISSIVE_SCALE);
+          setHumanoidCasting(parts, false);
         }
         continue;
       }
+
+      // CastingSpellId / CastEndsAt drives Spell1 on that remote (not Idle/Walk).
+      setHumanoidCasting(parts, true);
 
       // Windup: orange pulse on remote + beam to target + head bar.
       const pulse = 0.35 + 0.25 * Math.sin(now / 90);
@@ -3470,6 +3808,7 @@ async function main(): Promise<void> {
           name: `remote_${key.slice(0, 12)}`,
           robeColor: wantParty ? partyRobeColor() : remoteRobeColor(key),
         });
+        setHumanoidMoving(parts, false);
         remoteMeshes.set(key, parts);
         remotePartyTint.set(key, wantParty);
         const np = createNameplate(scene, `remote_${key.slice(0, 12)}`);
@@ -3506,18 +3845,43 @@ async function main(): Promise<void> {
         ri = makePoseInterp();
         remoteInterps.set(key, ri);
       }
-      retargetPoseInterp(ri, r.x, r.y, r.z, r.yaw);
+      const prevTx = ri.seeded ? ri.tx : r.x;
+      const prevTz = ri.seeded ? ri.tz : r.z;
+      retargetPoseInterp(ri, r.x, r.y, r.z, r.yaw, {
+        snapGroundedXz: r.y <= 0.05,
+      });
       const samp = samplePoseInterp(ri);
       parts.root.position.x = samp.x;
       parts.root.position.y = samp.y;
       parts.root.position.z = samp.z;
+      const stepX = r.x - prevTx;
+      const stepZ = r.z - prevTz;
+      if (r.y <= 0.05 && Math.hypot(stepX, stepZ) > 0.04) {
+        let st = remoteWalkHold.get(key);
+        if (!st) {
+          st = { hold: 0, dx: 0, dz: 0 };
+          remoteWalkHold.set(key, st);
+        }
+        st.hold = REMOTE_WALK_HOLD_S;
+        st.dx = stepX * MOVE_SEND_HZ;
+        st.dz = stepZ * MOVE_SEND_HZ;
+      }
       parts.root.setEnabled(true);
+      const rHp = net?.getCharacterFor(key)?.hp;
+      if (typeof rHp === 'number') {
+        const prev = remoteLastHp.get(key);
+        if (prev != null && rHp < prev && rHp > 0) {
+          playHumanoidFlinch(parts);
+        }
+        remoteLastHp.set(key, rHp);
+      }
     }
     for (const [key, parts] of remoteMeshes) {
       if (!seen.has(key)) {
         parts.root.dispose();
         remoteMeshes.delete(key);
         remotePartyTint.delete(key);
+        remoteLastHp.delete(key);
         remoteInterps.delete(key);
         remoteWalkHold.delete(key);
         disposeNameplate(remoteNameplates.get(key));
@@ -3529,7 +3893,7 @@ async function main(): Promise<void> {
   const { keys } = bindInput({
     onCycleTarget: () => {
       if (!net) return;
-      const id = net.cycleTarget();
+      const id = cyclePreferHostiles(net);
       if (id != null) selectedTargetId = id;
     },
     onCast: (spellId) => {
@@ -3694,7 +4058,11 @@ async function main(): Promise<void> {
         spellId === SPELL_SPARK ? SPARK_COLOR : EMBER_COLOR,
         spellId === SPELL_SPARK ? 160 : 400,
       );
-      playHumanoidCast(humanoid);
+      if (spellId === SPELL_EMBERBOLT) {
+        setHumanoidCasting(humanoid, true);
+      } else {
+        playHumanoidCast(humanoid);
+      }
       const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
       const mesh = npcMeshes.get(tid.toString());
       const from = casterMuzzle(player.position);
@@ -4055,6 +4423,7 @@ async function main(): Promise<void> {
         if (castUntilMs > Date.now()) {
           castUntilMs = 0;
           castTotalMs = 0;
+          setHumanoidCasting(humanoid, false);
         }
         return;
       }
@@ -4069,6 +4438,7 @@ async function main(): Promise<void> {
         castUntilMs = 0;
         castTotalMs = 0;
         lastCastSpell = 0;
+        setHumanoidCasting(humanoid, false);
         const after = net?.getCharacter();
         if (after) updateSelfFrame(after);
         const refund = after ? Math.max(0, (after.mana ?? 0) - beforeMana) : EMBERBOLT_MANA_COST;
@@ -4248,15 +4618,32 @@ async function main(): Promise<void> {
           latestDamageAmount = delta;
           latestDamageAtMs = Date.now();
           {
-            const label =
-              npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+            const label = npcPlateName(npc.kind);
             pushCombatLog(
               'damage',
               `${label} #${npc.npcId}  −${delta} HP (${npc.hp}/${npc.maxHp})`,
             );
           }
+          // Non-lethal: RecieveHit on the skinned hostile. Dummy stays scarecrow.
+          if (
+            mesh.humanoid &&
+            isHostileKind(npc.kind) &&
+            npc.hp > 0
+          ) {
+            playHumanoidFlinch(mesh.humanoid);
+          }
         }
         npcLastHp.set(key, npc.hp);
+      }
+
+      if (
+        !mesh.nameplate &&
+        (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))
+      ) {
+        const np = createNameplate(scene, `npc_${npc.npcId}`);
+        np.mesh.parent = mesh.root;
+        np.mesh.position.set(0, npc.kind === NPC_KIND_DUMMY ? 2.15 : 2.35, 0);
+        mesh.nameplate = np;
       }
 
       const wasAlive = (prevHp ?? npc.hp) > 0;
@@ -4268,10 +4655,16 @@ async function main(): Promise<void> {
           disposeLifeBurst(fx);
           npcLifeFx.delete(key);
         }
-        fx = beginNpcDeathFx(scene, mesh);
-        npcLifeFx.set(key, fx);
+        if (mesh.humanoid && isHostileKind(npc.kind)) {
+          // Death clip on the body — not the dummy sink/fade despawn.
+          setHumanoidDead(mesh.humanoid, true);
+          fx = undefined;
+        } else {
+          fx = beginNpcDeathFx(scene, mesh);
+          npcLifeFx.set(key, fx);
+        }
         latestDeathAtMs = Date.now();
-        const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+        const label = npcPlateName(npc.kind);
         const defeated =
           npc.kind === NPC_KIND_DUMMY ? 'Dummy defeated' : `${label} defeated`;
         pushCombatLog('death', `${defeated} (#${npc.npcId})`);
@@ -4281,25 +4674,37 @@ async function main(): Promise<void> {
           disposeLifeBurst(fx);
           npcLifeFx.delete(key);
         }
-        fx = beginNpcRespawnFx(mesh);
-        npcLifeFx.set(key, fx);
+        if (mesh.humanoid && isHostileKind(npc.kind)) {
+          setHumanoidDead(mesh.humanoid, false);
+          setHumanoidMoving(mesh.humanoid, false);
+          fx = undefined;
+        } else {
+          fx = beginNpcRespawnFx(mesh);
+          npcLifeFx.set(key, fx);
+        }
         latestRespawnAtMs = Date.now();
-        const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+        const label = npcPlateName(npc.kind);
         const line =
-          npc.kind === NPC_KIND_DUMMY
-            ? 'Dummy respawned'
-            : `${label} respawned`;
+          npc.kind === NPC_KIND_DUMMY ? 'Dummy respawned' : `${label} respawned`;
         pushCombatLog('respawn', `${line} (#${npc.npcId})`);
         pushSystemToast('respawn', line, TOAST_VE_TTL_MS);
       }
 
       mesh.root.position.x = npc.x;
       mesh.root.position.z = npc.z;
+      if (mesh.humanoid && isHostileKind(npc.kind)) {
+        setHumanoidDead(mesh.humanoid, !isAlive);
+      }
 
       const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
       if (!animating) {
-        mesh.root.setEnabled(isAlive);
-        if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+        const corpse =
+          !!mesh.humanoid && isHostileKind(npc.kind) && !isAlive;
+        mesh.root.setEnabled(isAlive || corpse);
+        if (
+          mesh.nameplate &&
+          (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))
+        ) {
           mesh.nameplate.mesh.setEnabled(isAlive);
         }
       }
@@ -4309,11 +4714,14 @@ async function main(): Promise<void> {
         isAlive &&
         latestRemoteCombats.some((rc) => rc.targetNpcId === npc.npcId);
 
-      if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+      if (
+        mesh.nameplate &&
+        (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))
+      ) {
         paintNameplate(
           mesh.nameplate,
-          'Dummy',
-          selected ? '#f4e4a8' : '#e8c89a',
+          npcPlateName(npc.kind),
+          npcPlateColor(npc.kind, selected),
           npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
           selected,
         );
@@ -4399,6 +4807,7 @@ async function main(): Promise<void> {
       player.position.y = samp.y;
       player.position.z = samp.z;
     }
+    setPlayerBlobShadow(player.position.x, player.position.z);
     {
       const wish = wishFromKeys(keys, camera);
       let faceYaw: number | null = null;
@@ -4420,8 +4829,19 @@ async function main(): Promise<void> {
         if (fx * fx + fz * fz > 1e-8) faceYaw = Math.atan2(fx, fz);
       }
       if (faceYaw != null) {
-        const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
+        let d = faceYaw - localFacingYaw;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        const wishMoving = Math.hypot(wish.dx, wish.dz) > 1e-4;
+        // Planted turn while standing (look) or a large A-D facing change.
+        // Aligned loco keeps 12 Hz + Walk/Run (#334 foot lock).
+        localTurningInPlace =
+          Math.abs(d) > 0.28 && (!wishMoving || Math.abs(d) > 0.7);
+        const yawHz = localTurningInPlace ? YAW_TURN_HZ : YAW_FACE_HZ;
+        const a = 1 - Math.exp(-Math.max(0, dt) * yawHz);
         localFacingYaw = lerpYaw(localFacingYaw, faceYaw, a);
+      } else {
+        localTurningInPlace = false;
       }
       player.rotation.y = localFacingYaw;
     }
@@ -4448,7 +4868,14 @@ async function main(): Promise<void> {
         st.hold -= dt;
       }
       const moving = st.hold > 0 && samp.y <= 0.05;
-      setHumanoidMoving(parts, moving);
+      const spd = Math.hypot(st.dx, st.dz);
+      if (samp.y > 0.05) {
+        setHumanoidAirborne(parts, true);
+      } else {
+        setHumanoidAirborne(parts, false);
+        // Walk named (not Run); speedRatio from snap/hold m/s.
+        setHumanoidMoving(parts, moving, false, spd);
+      }
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
         const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
@@ -4693,6 +5120,12 @@ async function main(): Promise<void> {
             dx *= s;
             dz *= s;
           }
+          const poseNow = net.getLocalPose();
+          if (poseNow && (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6)) {
+            const slid = slideAgainstTrunks(poseNow.x, poseNow.z, dx, dz);
+            dx = slid.dx;
+            dz = slid.dz;
+          }
           if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump || isAirborne) {
             if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump) {
               leaveRestIfActive('move');
@@ -4700,14 +5133,43 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        setHumanoidMoving(humanoid, keys.size > 0 && !isAirborne);
+        if (isAirborne) {
+          setHumanoidAirborne(humanoid, true);
+          setHumanoidTurning(humanoid, false);
+        } else {
+          setHumanoidAirborne(humanoid, false);
+          const moving = keys.size > 0 && !localTurningInPlace;
+          const running =
+            moving &&
+            (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
+          setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
+          setHumanoidTurning(humanoid, localTurningInPlace);
+        }
       } else {
         moveAccumulator = 0;
-        setHumanoidMoving(humanoid, false);
+        if (isAirborne) {
+          setHumanoidAirborne(humanoid, true);
+          setHumanoidTurning(humanoid, false);
+        } else {
+          setHumanoidAirborne(humanoid, false);
+          setHumanoidMoving(humanoid, false);
+          setHumanoidTurning(humanoid, localTurningInPlace);
+        }
       }
     } else {
       moveAccumulator = 0;
-      setHumanoidMoving(humanoid, !isAirborne && keys.size > 0);
+      if (isAirborne) {
+        setHumanoidAirborne(humanoid, true);
+        setHumanoidTurning(humanoid, false);
+      } else {
+        setHumanoidAirborne(humanoid, false);
+        const moving = keys.size > 0 && !localTurningInPlace;
+        const running =
+          moving &&
+          (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
+        setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
+        setHumanoidTurning(humanoid, localTurningInPlace);
+      }
     }
     humanoid.root.scaling.set(1, 1, 1);
 
@@ -4803,6 +5265,14 @@ async function main(): Promise<void> {
         castHardInterruptToasted = false;
       }
       prevLocalCasting = serverCasting || castUntilMs > now;
+      if (ve === 'cast-anim') {
+        setHumanoidCasting(humanoid, true);
+      } else {
+        const emberHold =
+          (combatNow?.castingSpellId === SPELL_EMBERBOLT && serverCasting) ||
+          (lastCastSpell === SPELL_EMBERBOLT && castUntilMs > now);
+        setHumanoidCasting(humanoid, emberHold);
+      }
     }
     const castLeft = Math.max(0, castUntilMs - now);
     if (gcdLeft > 0 || castLeft > 0 || now - latestDamageAtMs < 1600) {
@@ -4881,6 +5351,7 @@ async function main(): Promise<void> {
           const staffMsg = ch.staffEquipped ? 'Staff equipped' : 'Staff unequipped';
           pushCombatLog('equip', staffMsg);
           pushSystemToast('equip', staffMsg);
+          setHumanoidStaffEquipped(humanoid, ch.staffEquipped);
           prevStaffEquipped = ch.staffEquipped;
         }
         if (prevRobesEquipped === null) {
@@ -4930,10 +5401,12 @@ async function main(): Promise<void> {
             if (ch.hp <= 0) {
               setDeathGreyout(true);
               setLocalGhost(true);
+              setHumanoidDead(humanoid, true);
             }
           } else if (ch.hp <= 0 && prevPlayerHp > 0) {
             setDeathGreyout(true);
             setLocalGhost(true);
+            setHumanoidDead(humanoid, true);
             pushCombatLog('death', 'You died · respawning at yard');
             pushSystemToast('death', 'You died · respawning at yard', TOAST_VE_TTL_MS);
             selectedTargetId = 0n;
@@ -4942,6 +5415,7 @@ async function main(): Promise<void> {
           } else if (ch.hp > 0 && prevPlayerHp <= 0) {
             setDeathGreyout(false);
             setLocalGhost(false);
+            setHumanoidDead(humanoid, false);
             pushCombatLog('respawn', 'You respawned at yard · full HP');
             pushSystemToast('respawn', 'Respawned at yard · full HP', TOAST_VE_TTL_MS);
             flashMesh(humanoid.mat, new Color3(0.55, 0.85, 1.0), 900);
@@ -4950,7 +5424,11 @@ async function main(): Promise<void> {
           } else if (ch.hp !== prevPlayerHp) {
             if (ch.hp < prevPlayerHp) {
               const dmg = prevPlayerHp - ch.hp;
-              pushCombatLog('damage', `Thorns −${dmg} · You ${ch.hp}/${ch.maxHp}`);
+              const pulled = (net?.getNpcs() ?? []).find(
+                (n) => isHostileKind(n.kind) && n.aggroed,
+              );
+              const src = pulled ? npcPlateName(pulled.kind) : 'Thorns';
+              pushCombatLog('damage', `${src} −${dmg} · You ${ch.hp}/${ch.maxHp}`);
               damageFloaters.push(
                 spawnDamageFloater(
                   scene,
@@ -4961,6 +5439,7 @@ async function main(): Promise<void> {
                 ),
               );
               flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
+              playHumanoidFlinch(humanoid);
             } else if (ch.hp > prevPlayerHp && prevPlayerHp > 0) {
               const healed = ch.hp - prevPlayerHp;
               // Authority-backed heal (Rest). Hotkey also toasts; avoid duplicate log spam.
@@ -5303,6 +5782,7 @@ async function main(): Promise<void> {
     // Skip follow for framed VE shots so the subject stays on-camera.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
+      camCollideThisFrame = false;
       if (veFollow === 'minimap-pip') {
         camera.alpha = Math.PI / 2.45;
         camera.beta = Math.PI / 3.3;
@@ -5315,11 +5795,35 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.48;
         camera.radius = 32;
       } else if (veFollow === 'place-wow') {
-        // Establishing: SW of pad, looking north — huge trees, path, dusk-blue range.
-        camera.setTarget(player.position.add(new Vector3(0, 7, 2)));
-        camera.alpha = Math.PI / 2 + 0.45;
+        // Establishing vs hordes-place-ref: player tiny vs trunks, path recedes
+        // into dusk-blue volume, canopy leaves the frame (#350). Ignore characters.
+        camera.setTarget(player.position.add(new Vector3(-3, 2.6, -22)));
+        camera.alpha = Math.PI / 2 + 0.1;
+        camera.beta = Math.PI / 2.52;
+        camera.radius = 24;
+      } else if (veFollow === 'collision') {
+        // Side-on: player pressed against the north hero bole.
+        const hx = COLLISION_VE_HERO.x;
+        const hz = COLLISION_VE_HERO.z;
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x * 0.4 + hx * 0.6;
+        tgt.y = 3.4;
+        tgt.z = player.position.z * 0.4 + hz * 0.6;
+        camera.alpha = 0.42;
         camera.beta = Math.PI / 2.38;
-        camera.radius = 34;
+        camera.radius = 16;
+      } else if (veFollow === 'fps') {
+        // Play-cam into the north hero/mid ring (dense view, not the spawn pad).
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = 2.2;
+        tgt.z = player.position.z - 8;
+        camera.alpha = Math.PI / 2 + 0.12;
+        camera.beta = Math.PI / 2.48;
+        camera.radius = 16;
       } else if (veFollow === 'idle') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -5330,14 +5834,78 @@ async function main(): Promise<void> {
         tgt.z = player.position.z;
         camera.alpha = Math.PI / 2.15;
         camera.beta = Math.PI / 2.55;
+        // E8.7: far-cam Idle must still read staff-grip (not 8m close-up).
+        camera.radius = 16;
+      } else if (veFollow === 'humanoid-polish') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.05;
+        tgt.z = player.position.z;
+        camera.alpha = Math.PI / 2.35;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 6;
+      } else if (
+        veFollow === 'hostile-spawn' ||
+        veFollow === 'hostile-body' ||
+        veFollow === 'leash' ||
+        veFollow === 'aggro' ||
+        veFollow === 'hostile-read' ||
+        veFollow === 'hostile-types'
+      ) {
+        // Dummy (5,0) + Kind=2 (3,7)/(-7,3) + Kind=3 (7,-3) in one shot.
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = 0;
+        tgt.y = 1.4;
+        tgt.z = 3;
+        camera.alpha = Math.PI / 2.05;
+        camera.beta = Math.PI / 2.7;
+        camera.radius = 18;
+      } else if (veFollow === 'hostile-hit') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = 3;
+        let fy = 1.05;
+        let fz = 7;
+        let best = -1;
+        for (const [, mesh] of npcMeshes) {
+          if (!mesh.humanoid) continue;
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          const hit =
+            pb.skinned > 0 &&
+            !!pb.playing &&
+            /recievehit|death/i.test(pb.playing);
+          const rank = (hit ? 1000 : 0) + mesh.root.position.z;
+          if (rank > best) {
+            best = rank;
+            fx = mesh.root.position.x;
+            fy = mesh.root.position.y + 1.05;
+            fz = mesh.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
         camera.radius = 8;
       } else if (
         veFollow === 'walk' ||
+        veFollow === 'run' ||
+        veFollow === 'flinch' ||
         veFollow === 'yaw' ||
         veFollow === 'jump-pose' ||
-        veFollow === 'look-at'
+        veFollow === 'look-at' ||
+        veFollow === 'character-wow'
       ) {
-        // Side play-cam so Walk stride / wish facing / hop pose / look-at reads.
+        // Side play-cam so Walk/Run stride / wish facing / hop pose / look-at reads.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -5357,30 +5925,126 @@ async function main(): Promise<void> {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
-        let focus = player.position.add(new Vector3(0, 1.0, 0));
+        const tgt = camera.target;
+        let fx = player.position.x;
+        let fy = player.position.y + 1.0;
+        let fz = player.position.z;
         let best = -1;
-        for (const [key, parts] of remoteMeshes) {
-          const walking = (remoteWalkHold.get(key)?.hold ?? 0) > 0;
+        for (const [, parts] of remoteMeshes) {
+          const pb = readHumanoidPlayback(parts);
+          const walking =
+            pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
           const d = Vector3.Distance(parts.root.position, player.position);
           const rank = (walking ? 1000 : 0) + d;
           if (rank > best) {
             best = rank;
-            focus = parts.root.position.add(new Vector3(0, 1.0, 0));
+            fx = parts.root.position.x;
+            fy = parts.root.position.y + 1.0;
+            fz = parts.root.position.z;
           }
         }
-        camera.setTarget(focus);
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
-        camera.radius = 9;
+        camera.radius = 7;
+      } else if (veFollow === 'remote-cast') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = player.position.x;
+        let fy = player.position.y + 1.05;
+        let fz = player.position.z;
+        let best = -1;
+        for (const [, parts] of remoteMeshes) {
+          const pb = readHumanoidPlayback(parts);
+          const casting =
+            pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
+          const d = Vector3.Distance(parts.root.position, player.position);
+          const rank = (casting ? 1000 : 0) + d;
+          if (rank > best) {
+            best = rank;
+            fx = parts.root.position.x;
+            fy = parts.root.position.y + 1.05;
+            fz = parts.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 8;
+      } else if (veFollow === 'cam-collision') {
+        // Orbit into the nearest hero bole; collision keeps the camera in the clearing.
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
+        const hero = nearestHeroTrunk(player.position.x, player.position.z, trunks);
+        if (hero) {
+          // Graze the bole so the trunk reads in-frame; look-at stays the player in the clearing.
+          camera.alpha =
+            Math.atan2(hero.z - player.position.z, hero.x - player.position.x) + 0.16;
+        }
+        camera.beta = Math.PI / 2.18;
+        camZoomRadius = CAM_COLLISION_VE_RADIUS;
+        camCollideThisFrame = true;
+      } else if (veFollow === 'encounter') {
+        // Play follow + trunk clamp: fight among trees, camera stays out of boles (#361).
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        const sel =
+          selectedTargetId !== 0n ? npcMeshes.get(selectedTargetId.toString()) : undefined;
+        const hx = sel?.root.position.x ?? player.position.x;
+        const hz = sel?.root.position.z ?? player.position.z;
+        tgt.x = player.position.x * 0.45 + hx * 0.55;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z * 0.45 + hz * 0.55;
+        camera.alpha = -0.62;
+        camera.beta = Math.PI / 2.38;
+        camZoomRadius = 14;
+        camCollideThisFrame = true;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
         veFollow !== 'vendor-interact' &&
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
+        veFollow !== 'tab-hostile' &&
+        veFollow !== 'hostile-read' &&
+        veFollow !== 'hostile-types' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
-        veFollow !== 'path-ground'
+        veFollow !== 'path-ground' &&
+        veFollow !== 'zoom-stop'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -5395,12 +6059,13 @@ async function main(): Promise<void> {
         // Mutate target in place. setTarget() rebuilds alpha/beta/radius from
         // the camera world position and feels like the view lags WASD (#315).
         // Do NOT zero inertialAlpha/Beta/Radius here — Babylon RMB orbit and
-        // wheel zoom write those offsets (#366). VE shots that lock alpha may
-        // still clear inertia on their own branches.
+        // wheel zoom write those offsets (#366). Collision reads the post-input
+        // radius onBeforeRender and may pull it in vs trunks.
         const tgt = camera.target;
         tgt.x = player.position.x;
         tgt.y = camFollowY;
         tgt.z = player.position.z;
+        camCollideThisFrame = true;
       }
     }
     scene.render();
@@ -5851,7 +6516,7 @@ async function main(): Promise<void> {
       if (st.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Atmosphere OK · fog+cool dusk+canopy fill · Connected · yard mood';
+            'Atmosphere OK · no banding · sky=fogColor · cool dusk · Connected';
         }
         return;
       }
@@ -5863,8 +6528,8 @@ async function main(): Promise<void> {
   // ?ve=path-ground — dirt trail vs lush grass, not a plastic disc (#44 / #274).
   if (ve === 'path-ground') {
     camera.radius = 16;
-    camera.alpha = Math.PI / 3.2;
-    camera.beta = Math.PI / 2.65;
+    camera.alpha = Math.PI / 2 + 0.35;
+    camera.beta = Math.PI / 2.55;
   }
 
   if (net && ve === 'path-ground') {
@@ -5874,10 +6539,10 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        camera.setTarget(player.position.add(new Vector3(7, 0.25, 10)));
+        camera.setTarget(player.position.add(new Vector3(-2, 0.25, -8)));
         camera.radius = 16;
-        camera.alpha = Math.PI / 3.2;
-        camera.beta = Math.PI / 2.65;
+        camera.alpha = Math.PI / 2 + 0.35;
+        camera.beta = Math.PI / 2.55;
         if (mark) {
           mark.textContent =
             'Path-ground OK · dirt trail vs lush grass · Connected';
@@ -5889,7 +6554,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitPathGround, 600);
   }
 
-  // ?ve=place-wow — E3.7 establishing shot vs hordes place ref (scale/fog/path).
+  // ?ve=place-wow — E9.12 establishing shot vs hordes-place-ref (scale/fog/path).
   if (net && ve === 'place-wow') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE place-wow: waiting for Connected…';
@@ -5898,13 +6563,105 @@ async function main(): Promise<void> {
       if (latestStatus.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Place-wow OK · huge trees · fog · no capsules · Connected';
+            'Place-wow OK · huge trees · receding path · cool dusk · sky=fogColor · no capsules · Connected';
         }
         return;
       }
       window.setTimeout(waitPlaceWow, 300);
     };
     window.setTimeout(waitPlaceWow, 600);
+  }
+
+  // ?ve=collision — E9.1 blocked path against a hero bole (#339).
+  if (ve === 'collision') {
+    camera.radius = 16;
+    camera.beta = Math.PI / 2.38;
+    camera.alpha = 0.42;
+  }
+  if (net && ve === 'collision') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE collision: waiting for Connected…';
+    let ticks = 0;
+    let blockedTicks = 0;
+    const yardClear = (): boolean => {
+      for (const c of getTrunkCapsules()) {
+        const dDummy = Math.hypot(c.x - 5, c.z - 0);
+        const dVendor = Math.hypot(c.x - -2.5, c.z - 2);
+        if (dDummy < c.radius + PLAYER_TRUNK_RADIUS + 2.5) return false;
+        if (dVendor < c.radius + PLAYER_TRUNK_RADIUS + 2.5) return false;
+      }
+      return true;
+    };
+    const waitCollision = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE collision: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitCollision, 200);
+        else if (mark) mark.textContent = 'VE collision FAIL · not Connected';
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE collision: waiting for pose…';
+        if (ticks < 240) window.setTimeout(waitCollision, 200);
+        return;
+      }
+      const hero =
+        getTrunkCapsules().find(
+          (c) =>
+            c.kind === 'hero' &&
+            Math.hypot(c.x - COLLISION_VE_HERO.x, c.z - COLLISION_VE_HERO.z) < 0.5,
+        ) ?? nearestTrunk(pose.x, pose.z, 'hero');
+      if (!hero) {
+        if (mark) mark.textContent = 'VE collision FAIL · no hero capsules';
+        return;
+      }
+      const dx = hero.x - pose.x;
+      const dz = hero.z - pose.z;
+      const d = Math.hypot(dx, dz);
+      const surface = hero.radius + PLAYER_TRUNK_RADIUS;
+      const ghosted = d < surface - 0.5;
+      if (ghosted) {
+        if (mark) {
+          mark.textContent =
+            `Collision FAIL · ghosted hero r=${hero.radius.toFixed(2)} d=${d.toFixed(2)}`;
+        }
+        return;
+      }
+      const step = Math.min(MAX_STEP_METERS, Math.max(0, d));
+      if (step > 1e-4) {
+        const slid = slideAgainstTrunks(pose.x, pose.z, (dx / d) * step, (dz / d) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+        if (slid.blocked || d <= surface + 0.4) blockedTicks += 1;
+      } else if (d <= surface + 0.4) {
+        blockedTicks += 1;
+      }
+      const dummyOk = yardClear();
+      if (blockedTicks >= 4 && dummyOk) {
+        if (mark) {
+          mark.textContent =
+            `Collision OK · blocked against a hero trunk · r=${hero.radius.toFixed(1)} d=${d.toFixed(2)} · dummy/vendor clear`;
+        }
+        return;
+      }
+      if (ticks > 180) {
+        if (mark) {
+          mark.textContent =
+            `Collision FAIL · d=${d.toFixed(1)} surface=${surface.toFixed(1)} blocked=${blockedTicks} dummy=${dummyOk ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE collision: walk hero d=${d.toFixed(1)} / ${surface.toFixed(1)} · r=${hero.radius.toFixed(1)}`;
+      }
+      window.setTimeout(waitCollision, 50);
+    };
+    window.setTimeout(waitCollision, 600);
   }
 
   // ?ve=sky-horizon — establishing shot of layered mountain ranges (#55 / #273).
@@ -5918,7 +6675,7 @@ async function main(): Promise<void> {
       if (st.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Sky-horizon OK · distant layered ranges · Connected';
+            'Sky-horizon OK · no banding · sky=fogColor · distant layered ranges · Connected';
         }
         return;
       }
@@ -5986,33 +6743,31 @@ async function main(): Promise<void> {
       }
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
-      camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
-      camera.radius = 11;
-      camera.alpha = Math.PI / 2.55;
-      camera.beta = Math.PI / 2.65;
+      setHumanoidMoving(humanoid, false);
       const staffOn = humanoid.staff.isEnabled();
       const robesOn = humanoid.robes.isEnabled();
-      if (staffOn && robesOn) {
-        if (mark) {
-          mark.textContent =
-            'Humanoid polish OK · silhouette · robes/staff · canonical forest lights';
-        }
-        return;
+      const pb = readHumanoidPlayback(humanoid);
+      const polishOk =
+        staffOn &&
+        robesOn &&
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /idle/i.test(pb.playing);
+      if (mark) {
+        mark.textContent = polishOk
+          ? `Humanoid polish OK · ${pb.playing} · skinned ${pb.skinned} · cloth/skin/wood`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
       }
-      if (ticks > 120) {
-        if (mark) mark.textContent = 'VE humanoid-polish: timed out';
-        return;
-      }
-      window.setTimeout(waitPolish, 200);
+      if (ticks < 240) window.setTimeout(waitPolish, 200);
     };
     window.setTimeout(waitPolish, 600);
   }
 
   // ?ve=dummy — frame scarecrow/practice dummy at play-cam under canonical #39 lights.
   if (ve === 'dummy') {
-    camera.radius = 9.5;
+    camera.radius = 8.4;
     camera.alpha = Math.PI / 2.15;
-    camera.beta = Math.PI / 2.75;
+    camera.beta = Math.PI / 2.48;
   }
   if (net && ve === 'dummy') {
     const mark = document.getElementById('persistMark');
@@ -6047,13 +6802,13 @@ async function main(): Promise<void> {
         camera.setTarget(
           new Vector3(
             player.position.x * 0.15 + dummy.x * 0.85,
-            1.2,
+            0.72,
             player.position.z * 0.15 + dummy.z * 0.85,
           ),
         );
-        camera.radius = 9.5;
+        camera.radius = 8.4;
         camera.alpha = Math.PI / 2.15;
-        camera.beta = Math.PI / 2.75;
+        camera.beta = Math.PI / 2.48;
       }
       const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
       const scarecrow =
@@ -6068,7 +6823,7 @@ async function main(): Promise<void> {
         okTicks += 1;
         if (mark) {
           mark.textContent =
-            `Dummy OK · scarecrow silhouette · wood+canvas · canonical forest lights · #${dummy.npcId}`;
+            `Dummy OK · post on dirt · no float · scarecrow · #${dummy.npcId}`;
         }
         if (okTicks < 6 && ticks < 140) {
           window.setTimeout(waitDummy, 180);
@@ -6141,11 +6896,6 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE walk: waiting for Connected…';
     let ticks = 0;
-    const playingNames = (): string =>
-      scene.animationGroups
-        .filter((g) => g.isPlaying)
-        .map((g) => g.name.replace(/^player__/, ''))
-        .join(' · ');
     const waitWalk = () => {
       if (!net) return;
       ticks += 1;
@@ -6169,16 +6919,146 @@ async function main(): Promise<void> {
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
       keys.add('w');
-      setHumanoidMoving(humanoid, true);
-      const playing = playingNames();
+      setHumanoidMoving(humanoid, true, false, MOVE_SPEED);
+      const pb = readHumanoidPlayback(humanoid);
+      const walkOk =
+        pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
       if (mark) {
-        mark.textContent = playing
-          ? `Walk OK · ${playing} · Connected`
-          : 'VE walk FAIL · no clip playing';
+        mark.textContent = walkOk
+          ? `Walk OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
       }
       if (ticks < 240) window.setTimeout(waitWalk, 200);
     };
     window.setTimeout(waitWalk, 600);
+  }
+
+  // ?ve=run — E8.2 play-cam Run_Weapon (fast/forward gait, not Walk / T-pose).
+  if (ve === 'run') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'run') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE run: waiting for Connected…';
+    let ticks = 0;
+    const waitRun = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE run: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitRun, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitRun, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitRun, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      setHumanoidMoving(humanoid, true, true, MOVE_SPEED);
+      const pb = readHumanoidPlayback(humanoid);
+      const runOk =
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /run/i.test(pb.playing);
+      if (mark) {
+        mark.textContent = runOk
+          ? `Run OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+      }
+      if (ticks < 240) window.setTimeout(waitRun, 200);
+    };
+    window.setTimeout(waitRun, 600);
+  }
+
+  // ?ve=flinch — E8.5 RecieveHit on dummy thorns; Move intents still flow.
+  if (ve === 'flinch') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.5;
+  }
+  if (net && ve === 'flinch') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE flinch: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let lastCastAt = 0;
+    let startHp: number | null = null;
+    const waitFlinch = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE flinch: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitFlinch, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitFlinch, 250);
+        return;
+      }
+      if (startHp == null && ch) startHp = ch.hp;
+      const pb = readHumanoidPlayback(humanoid);
+      const flinchOk =
+        pb.skinned > 0 && !!pb.playing && /recievehit|flinch/i.test(pb.playing);
+      if (flinchOk) {
+        if (mark) {
+          mark.textContent = `Flinch OK · ${pb.playing} · skinned ${pb.skinned}`;
+        }
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        window.setTimeout(waitFlinch, 300);
+        return;
+      }
+      const cycle = net.getTargetCycle();
+      const dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (!dummy || dummy.hp <= 0) {
+        net.ensureTrainingDummy();
+        window.setTimeout(waitFlinch, 280);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      const gcd = gcdRemainingMs(net.getCombat());
+      const now = Date.now();
+      if (ch && ch.hp > 0 && gcd <= 0 && now - lastCastAt > 1250) {
+        lastCastSpell = SPELL_SPARK;
+        net.cast(SPELL_SPARK);
+        lastCastAt = now;
+      }
+      if (mark) {
+        mark.textContent = flinchOk
+          ? `Flinch OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `VE flinch: You ${ch?.hp ?? '?'}/${ch?.maxHp ?? '?'} · clip=${pb.playing ?? 'none'}`;
+      }
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        }
+        return;
+      }
+      window.setTimeout(waitFlinch, 140);
+    };
+    window.setTimeout(waitFlinch, 600);
   }
 
   // ?ve=yaw — E2.4 face camera-relative wish (slerp, no client positions).
@@ -6219,10 +7099,33 @@ async function main(): Promise<void> {
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
       keys.add('w');
-      if (mark) {
-        mark.textContent = `Yaw OK · facing wish · y=${localFacingYaw.toFixed(2)} · Connected`;
+      const pb = readHumanoidPlayback(humanoid);
+      const turned = Math.abs(localFacingYaw) > 0.2;
+      const yawOk =
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        turned;
+      if (yawOk) {
+        if (mark) {
+          mark.textContent =
+            `Yaw OK · ${pb.playing} · skinned ${pb.skinned} · facing wish · y=${localFacingYaw.toFixed(2)}`;
+        }
+        return;
       }
-      if (ticks < 240) window.setTimeout(waitYaw, 200);
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent =
+            pb.skinned < 1
+              ? `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · y=${localFacingYaw.toFixed(2)}`
+              : `Yaw FAIL · clip=${pb.playing ?? 'none'} · skinned ${pb.skinned} · y=${localFacingYaw.toFixed(2)}`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE yaw: y=${localFacingYaw.toFixed(2)} · clip=${pb.playing ?? 'none'} · skinned ${pb.skinned}…`;
+      }
+      window.setTimeout(waitYaw, 200);
     };
     window.setTimeout(waitYaw, 600);
   }
@@ -6267,7 +7170,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitLook, 600);
   }
 
-  // ?ve=cast-anim — E2.5/E2.7 Spell1 one-shot on Spark/Emberbolt path.
+  // ?ve=cast-anim — E8.6 hold Spell1 for Emberbolt windup (Spark stays one-shot).
   if (ve === 'cast-anim') {
     camera.radius = 8;
     camera.alpha = Math.PI / 2.2;
@@ -6277,11 +7180,6 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE cast-anim: waiting for Connected…';
     let ticks = 0;
-    const playingNames = (): string =>
-      scene.animationGroups
-        .filter((g) => g.isPlaying)
-        .map((g) => g.name.replace(/^player__/, ''))
-        .join(' · ');
     const waitCast = () => {
       if (!net) return;
       ticks += 1;
@@ -6304,19 +7202,98 @@ async function main(): Promise<void> {
       }
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
-      const casting = scene.animationGroups.some(
-        (g) => /spell|staff_attack/i.test(g.name) && g.isPlaying,
-      );
-      if (!casting) playHumanoidCast(humanoid);
-      const playing = playingNames();
+      setHumanoidCasting(humanoid, true);
+      const pb = readHumanoidPlayback(humanoid);
+      const castOk =
+        pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
       if (mark) {
-        mark.textContent = /spell/i.test(playing)
-          ? `Cast OK · ${playing} · Connected`
-          : `VE cast-anim · ${playing || 'no clip'} · Connected`;
+        mark.textContent = castOk
+          ? `Cast OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
       }
-      if (ticks < 240) window.setTimeout(waitCast, 250);
+      if (!castOk && ticks < 240) window.setTimeout(waitCast, 200);
     };
     window.setTimeout(waitCast, 600);
+  }
+
+  // ?ve=character-wow — E8.12 play-cam reel: idle, walk, run, hop pose, Spell.
+  if (ve === 'character-wow') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'character-wow') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE character-wow: waiting for Connected…';
+    let ticks = 0;
+    const seen: string[] = [];
+    let t0 = 0;
+    const waitWow = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE character-wow: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitWow, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitWow, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitWow, 250);
+        return;
+      }
+      if (!t0) t0 = Date.now();
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      const elapsed = (Date.now() - t0) / 1000;
+      if (elapsed < 1.2) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidMoving(humanoid, false);
+      } else if (elapsed < 2.6) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidMoving(humanoid, true, false, MOVE_SPEED);
+      } else if (elapsed < 4.0) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidMoving(humanoid, true, true, MOVE_SPEED);
+      } else if (elapsed < 5.4) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidMoving(humanoid, false);
+        setHumanoidAirborne(humanoid, true);
+      } else {
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidCasting(humanoid, true);
+      }
+      const pb = readHumanoidPlayback(humanoid);
+      if (pb.playing && !seen.includes(pb.playing)) seen.push(pb.playing);
+      if (elapsed >= 4.0 && elapsed < 5.4 && !seen.includes('hop-pose')) {
+        seen.push('hop-pose');
+      }
+      const wowOk =
+        pb.skinned > 0 &&
+        seen.some((n) => /idle/i.test(n)) &&
+        seen.some((n) => /walk/i.test(n)) &&
+        seen.some((n) => /run/i.test(n)) &&
+        seen.includes('hop-pose') &&
+        seen.some((n) => /spell/i.test(n));
+      if (mark) {
+        mark.textContent = wowOk
+          ? `Character wow OK · ${seen.join(' · ')} · skinned ${pb.skinned}`
+          : pb.skinned <= 0
+            ? `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`
+            : `VE character-wow · ${seen.join(' · ') || pb.playing || '…'} · skinned ${pb.skinned}`;
+      }
+      if (ticks < 80) window.setTimeout(waitWow, 200);
+    };
+    window.setTimeout(waitWow, 700);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
@@ -6389,29 +7366,40 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
+        // Park local off the remote close-up (patrol is (4,2.5)/(-3,3)).
+        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
       }
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes);
-      const playing = scene.animationGroups
-        .filter((g) => /remote_/i.test(g.name) && g.isPlaying)
-        .map((g) => g.name.replace(/^remote_[^_]+__/, ''))
-        .join(' · ');
-      const walkOn = /walk/i.test(playing);
       const n = remoteMeshes.size;
       const local = net.getLocalPose();
+      const playbackOf = (hex: string) => {
+        const p = remoteMeshes.get(hex);
+        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null, height: 0 };
+      };
       const preferred =
+        remotes.find((r) => {
+          const pb = playbackOf(r.identityHex);
+          return pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
+        }) ??
         remotes.find((r) => (remoteWalkHold.get(r.identityHex)?.hold ?? 0) > 0) ??
         remotes.find((r) => {
           if (!local) return true;
           return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
         }) ??
         remotes[0];
+      const pb = preferred
+        ? playbackOf(preferred.identityHex)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const walkOn =
+        pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
       if (mark) {
         if (walkOn && preferred) {
-          mark.textContent = `Remote walk OK · remotes ${n} · Walk · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
+          mark.textContent = `Remote walk OK · ${pb.playing} · skinned ${pb.skinned} · remotes ${n} · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
         } else if (n > 0 && preferred) {
-          mark.textContent = `VE remote-walk: remotes ${n} · ${playing || 'idle'} @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)}) (waiting pose delta)`;
+          mark.textContent = `VE remote-walk: remotes ${n} · ${pb.playing ?? 'idle'} · skinned ${pb.skinned} @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)}) (waiting pose delta)`;
         } else {
           mark.textContent = 'VE remote-walk: remotes 0 (start tools/SecondClient)…';
         }
@@ -6421,16 +7409,16 @@ async function main(): Promise<void> {
     window.setTimeout(waitRemoteWalk, 700);
   }
 
-  // ?ve=remote-cast — wait for remote PlayerCombat target + Emberbolt windup telegraph.
+  // ?ve=remote-cast — E8.16 remote CastingSpell/CastEndsAt drives Spell1.
   if (ve === 'remote-cast') {
-    camera.radius = 18;
-    camera.alpha = Math.PI / 2.4;
-    camera.beta = Math.PI / 3.15;
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
   }
 
   if (net && ve === 'remote-cast') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE remote-cast: waiting for remote + cast telegraph…';
+    if (mark) mark.textContent = 'VE remote-cast: waiting for remotes…';
     let ticks = 0;
     let nudged = false;
     const waitRemoteCast = () => {
@@ -6438,68 +7426,49 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
+        // Park local off the remote close-up (SecondClient stays in dummy range).
+        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
       }
       const remotes = net.getRemotes();
       const combats = net.getRemoteCombats();
       syncRemoteMeshes(remotes);
       syncRemoteCastFx(combats);
       syncNpcMeshes(net.getNpcs());
-
-      const local = net.getLocalPose();
-      const casting = combats.find(
+      const n = remoteMeshes.size;
+      const playbackOf = (hex: string) => {
+        const p = remoteMeshes.get(hex);
+        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null, height: 0 };
+      };
+      const castingCombat = combats.find(
         (c) => c.castingSpellId !== 0 && castRemainingMs(c) > 0,
       );
-      const targeting = combats.find((c) => c.targetNpcId !== 0n);
       const preferred =
         remotes.find((r) => {
-          if (!local) return true;
-          return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
-        }) ?? remotes[0];
-
-      if (preferred) {
-        const dummy =
-          net.getNpcs().find((n) => n.kind === NPC_KIND_DUMMY) ??
-          net.getNpcs()[0];
-        const focus = dummy
-          ? new Vector3(
-              (player.position.x + preferred.x + dummy.x) / 3,
-              1.1,
-              (player.position.z + preferred.z + dummy.z) / 3,
-            )
-          : player.position.add(
-              new Vector3(preferred.x, preferred.y, preferred.z)
-                .subtract(player.position)
-                .scale(0.5)
-                .add(new Vector3(0, 1.2, 0)),
-            );
-        camera.setTarget(focus);
-        camera.radius = 18;
-      }
-
-      const st = latestStatus;
-      if (st.state === 'connected' && preferred && casting) {
-        const bit = `cast spell=${casting.castingSpellId} left=${(castRemainingMs(casting) / 1000).toFixed(1)}s · target npc#${casting.targetNpcId}`;
-        if (mark) {
-          mark.textContent = `Remote-cast OK · remotes ${remotes.length} · ${bit} · remote ${preferred.identityHex.slice(0, 12)}… · local ${st.identityHex.slice(0, 12)}…`;
+          const pb = playbackOf(r.identityHex);
+          return pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
+        }) ??
+        remotes.find((r) => r.identityHex === castingCombat?.identityHex) ??
+        remotes[0];
+      const pb = preferred
+        ? playbackOf(preferred.identityHex)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const castOn =
+        pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
+      if (mark) {
+        if (castOn && preferred) {
+          mark.textContent = `Remote cast OK · ${pb.playing} · skinned ${pb.skinned} · remotes ${n} · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (n > 0 && preferred) {
+          const wind = castingCombat
+            ? `spell=${castingCombat.castingSpellId} left=${(castRemainingMs(castingCombat) / 1000).toFixed(1)}s`
+            : 'waiting windup';
+          mark.textContent = `VE remote-cast: remotes ${n} · ${pb.playing ?? 'idle'} · skinned ${pb.skinned} · ${wind}`;
+        } else {
+          mark.textContent = 'VE remote-cast: remotes 0 (start tools/SecondClient)…';
         }
-        // Hold OK while windup is visible so the screenshot catches the beam/bar.
-        if (castRemainingMs(casting) > 200 && ticks < 160) {
-          window.setTimeout(waitRemoteCast, 180);
-        }
-        return;
       }
-      if (mark && st.state === 'connected') {
-        const tip = targeting
-          ? `target npc#${targeting.targetNpcId} (waiting cast…)`
-          : 'waiting for target/cast…';
-        mark.textContent = `VE remote-cast: Connected · remotes ${remotes.length} · remoteCombats ${combats.length} · ${tip}`;
-      }
-      if (ticks > 160) {
-        if (mark) mark.textContent = 'VE remote-cast: timed out waiting for remote cast/target';
-        return;
-      }
-      window.setTimeout(waitRemoteCast, 250);
+      if (ticks < 280) window.setTimeout(waitRemoteCast, 180);
     };
     window.setTimeout(waitRemoteCast, 700);
   }
@@ -7039,7 +8008,7 @@ async function main(): Promise<void> {
       }
       const unequippedOk = ch && !ch.staffEquipped;
       if (unequippedOk) {
-        setStaffMeshVisible(humanoid.staff, false);
+        setHumanoidStaffEquipped(humanoid, false);
       }
       if (unequippedOk && !castAttempted) {
         net.ensureTrainingDummy();
@@ -8243,7 +9212,8 @@ async function main(): Promise<void> {
     window.setTimeout(waitStatusRead, 500);
   }
 
-  // ?ve=rmb-orbit — play follow must NOT eat RMB inertia (#366). Inject offset; alpha must move.
+  // ?ve=rmb-orbit — play follow must NOT eat RMB. Observe alpha after a real
+  // pointer drag (#389). Do not inject inertialAlphaOffset (#366 inject is not look).
   if (ve === 'rmb-orbit') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE rmb-orbit: waiting for Connected…';
@@ -8256,25 +9226,841 @@ async function main(): Promise<void> {
         return;
       }
       const a0 = camera.alpha;
-      camera.inertialAlphaOffset += 0.45;
-      let frames = 0;
+      if (mark) mark.textContent = 'VE rmb-orbit: waiting for RMB drag';
+      const t0 = performance.now();
+      let peak = 0;
+      let extra = 0;
+      let latched = false;
       const tick = () => {
-        frames += 1;
-        if (frames < 18) {
-          window.requestAnimationFrame(tick);
+        const d = camera.alpha - a0;
+        if (Math.abs(d) > Math.abs(peak)) peak = d;
+        if (!latched && Math.abs(peak) > 0.15) {
+          latched = true;
+          extra = 24;
+        }
+        if (latched) {
+          extra -= 1;
+          if (extra <= 0) {
+            const canvasEl = document.getElementById('renderCanvas');
+            const cur = canvasEl?.style.cursor || '';
+            if (mark) {
+              mark.textContent =
+                cur === 'none'
+                  ? `RMB orbit OK · dAlpha ${peak.toFixed(3)} · cursor none`
+                  : `RMB orbit OK · dAlpha ${peak.toFixed(3)}`;
+            }
+            return;
+          }
+        }
+        if (performance.now() - t0 > 12000) {
+          if (mark) {
+            mark.textContent = `RMB orbit FAIL · dAlpha ${peak.toFixed(3)}`;
+          }
           return;
         }
-        const d = camera.alpha - a0;
-        if (mark) {
-          mark.textContent =
-            Math.abs(d) > 0.04
-              ? `RMB orbit OK · dAlpha ${d.toFixed(3)}`
-              : `RMB orbit FAIL · dAlpha ${d.toFixed(3)}`;
-        }
+        window.requestAnimationFrame(tick);
       };
       window.requestAnimationFrame(tick);
     };
-    window.setTimeout(waitOrbit, 800);
+    window.setTimeout(waitOrbit, 200);
+  }
+
+  // ?ve=hostile-spawn / ?ve=hostile-body — two Kind=2 people + dummy trainer (#405).
+  if (ve === 'hostile-spawn' || ve === 'hostile-body') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && (ve === 'hostile-spawn' || ve === 'hostile-body')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-body: waiting for hostiles…';
+    let ticks = 0;
+    const waitH = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const dummyRow = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyMesh = dummyRow
+        ? npcMeshes.get(dummyRow.npcId.toString())
+        : undefined;
+      const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
+      const hostileParts: HumanoidParts[] = [];
+      let capsuleLeft = false;
+      let livingIdle: HumanoidPlayback | null = null;
+      for (const n of hostiles) {
+        const mesh = npcMeshes.get(n.npcId.toString());
+        if (mesh?.humanoid) {
+          if (n.hp > 0) setHumanoidMoving(mesh.humanoid, false);
+          hostileParts.push(mesh.humanoid);
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          if (
+            n.hp > 0 &&
+            pb.skinned > 0 &&
+            !!pb.playing &&
+            /idle/i.test(pb.playing) &&
+            pb.height >= 1.5 &&
+            pb.height <= 2.15
+          ) {
+            livingIdle = pb;
+          }
+        } else if (mesh) {
+          capsuleLeft = true;
+        }
+      }
+      const pbs = hostileParts.map(readHumanoidPlayback);
+      const peopleOk =
+        pbs.length >= 2 &&
+        pbs.every(
+          (pb) =>
+            pb.skinned > 0 &&
+            !!pb.playing &&
+            /idle|death/i.test(pb.playing),
+        );
+      if (
+        hostiles.length >= 2 &&
+        dummyTrainer &&
+        peopleOk &&
+        livingIdle &&
+        !capsuleLeft
+      ) {
+        if (mark) {
+          mark.textContent =
+            `Hostile body OK · n=${hostiles.length} · ${livingIdle.playing} · skinned ${livingIdle.skinned} · dummy trainer`;
+        }
+        return;
+      }
+      const pb0 = pbs[0];
+      if (ticks > 160) {
+        if (mark) {
+          if (capsuleLeft) {
+            mark.textContent = 'Hostile body FAIL · capsule · dummy trainer';
+          } else if (pb0 && pb0.skinned <= 0) {
+            mark.textContent = `T-POSE · clip=${pb0.playing ?? 'none'} · skeleton=${pb0.skinned}`;
+          } else {
+            mark.textContent =
+              `Hostile body FAIL · hostiles ${hostiles.length}/2 · body ${hostileParts.length} · dummy ${dummyTrainer ? 'trainer' : 'n'}`;
+          }
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE hostile-body: hostiles ${hostiles.length}/2 · body ${hostileParts.length} · dummy ${dummyTrainer ? 'y' : 'n'}…`;
+      }
+      window.setTimeout(waitH, 250);
+    };
+    window.setTimeout(waitH, 800);
+  }
+
+  // ?ve=hostile-hit — E8.17 RecieveHit then Death on Kind=2; dummy trainer.
+  if (ve === 'hostile-hit') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'hostile-hit') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-hit: waiting for hostiles…';
+    let ticks = 0;
+    let lastCastAt = 0;
+    let sawFlinch = false;
+    const waitHit = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE hostile-hit: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitHit, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitHit, 250);
+        return;
+      }
+      syncNpcMeshes(net.getNpcs());
+      const npcs = net.getNpcs();
+      const dummyMesh = npcs
+        .filter((n) => n.kind === NPC_KIND_DUMMY)
+        .map((n) => npcMeshes.get(n.npcId.toString()))
+        .find((m) => m);
+      const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const playbackOf = (n: (typeof hostiles)[number]) => {
+        const m = npcMeshes.get(n.npcId.toString());
+        return m?.humanoid
+          ? readHumanoidPlayback(m.humanoid)
+          : { skinned: 0, playing: null, idle: null, height: 0 };
+      };
+      const flinchNpc = hostiles.find((n) => {
+        const pb = playbackOf(n);
+        return pb.skinned > 0 && !!pb.playing && /recievehit/i.test(pb.playing);
+      });
+      const deadNpc = hostiles.find((n) => {
+        const pb = playbackOf(n);
+        return pb.skinned > 0 && !!pb.playing && /death/i.test(pb.playing);
+      });
+      if (flinchNpc) sawFlinch = true;
+      const preferred = deadNpc ?? flinchNpc ?? hostiles.find((n) => n.hp > 0) ?? hostiles[0];
+      const pb = preferred
+        ? playbackOf(preferred)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const deathOk =
+        dummyTrainer &&
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /death/i.test(pb.playing);
+      const hitOk =
+        dummyTrainer &&
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /recievehit/i.test(pb.playing);
+      if (mark) {
+        if (deathOk) {
+          mark.textContent = `Hostile death OK · ${pb.playing} · skinned ${pb.skinned}${sawFlinch ? ' · RecieveHit seen' : ''}`;
+        } else if (hitOk) {
+          mark.textContent = `Hostile hit OK · ${pb.playing} · skinned ${pb.skinned}`;
+        } else if (preferred && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else {
+          mark.textContent = `VE hostile-hit: hostiles ${hostiles.length} · ${pb.playing ?? 'idle'} · skinned ${pb.skinned} · dummy ${dummyTrainer ? 'trainer' : 'n'}…`;
+        }
+      }
+      if (deathOk) return;
+      const live =
+        hostiles.find((n) => n.hp > 0) ??
+        hostiles[0];
+      if (live) {
+        net.setTarget(live.npcId);
+        selectedTargetId = live.npcId;
+        const pose = net.getLocalPose();
+        if (pose) {
+          const dist = Math.hypot(live.x - pose.x, live.z - pose.z);
+          if (dist > 6.5) {
+            net.sendMove((live.x - pose.x) * 0.25, (live.z - pose.z) * 0.25, false);
+          }
+        }
+        const gcd = gcdRemainingMs(net.getCombat());
+        const now = Date.now();
+        if (ch && ch.hp > 0 && gcd <= 0 && now - lastCastAt > 1250) {
+          lastCastSpell = SPELL_SPARK;
+          net.cast(SPELL_SPARK);
+          lastCastAt = now;
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitHit, 180);
+    };
+    window.setTimeout(waitHit, 700);
+  }
+
+  // ?ve=leash — pull then drop (#355). ?ve=aggro is the #360 session shot.
+  if (ve === 'leash' || ve === 'aggro') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && (ve === 'leash' || ve === 'aggro')) {
+    const aggroVe = ve === 'aggro';
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = aggroVe ? 'VE aggro: waiting for hostiles…' : 'VE leash: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'pull' | 'drop' | 'done' = 'pull';
+    let pulledId: bigint | null = null;
+    const padAx = 3;
+    const padAz = 7;
+    const waitL = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 240) window.setTimeout(waitL, 200);
+        return;
+      }
+      const home = Math.hypot(padA.x - (padA.spawnX || padAx), padA.z - (padA.spawnZ || padAz));
+      if (phase === 'pull') {
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > HOSTILE_AGGRO_RADIUS - 0.4 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (padA.aggroed || home > 0.7) {
+          pulledId = padA.npcId;
+          phase = 'drop';
+          if (mark) mark.textContent = aggroVe ? 'VE aggro: pulled — dropping leash…' : 'VE leash: pulled — running out…';
+        } else if (mark) {
+          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: walking in · d=${dist.toFixed(1)} · home=${home.toFixed(2)}`;
+        }
+      } else if (phase === 'drop') {
+        const tx = -12;
+        const tz = -8;
+        const dx = tx - player.position.x;
+        const dz = tz - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.6) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        const victim = hostiles.find((n) => n.npcId === pulledId) ?? padA;
+        const vHome = Math.hypot(
+          victim.x - (victim.spawnX || padAx),
+          victim.z - (victim.spawnZ || padAz),
+        );
+        if (!victim.aggroed && vHome < 0.45) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = aggroVe
+              ? 'Aggro OK · pulled · leashed · #360'
+              : 'Leash OK · pulled · returned · #355';
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: drop · aggro=${victim.aggroed ? 'y' : 'n'} · home=${vHome.toFixed(1)}`;
+        }
+      }
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent = aggroVe
+            ? `Aggro FAIL · phase ${phase} · #360`
+            : `Leash FAIL · phase ${phase} · #355`;
+        }
+        return;
+      }
+      window.setTimeout(waitL, 200);
+    };
+    window.setTimeout(waitL, 500);
+  }
+
+  // ?ve=auto-attack — HP drops in melee, stops after leash (#356).
+  if (ve === 'auto-attack') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'auto-attack') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE auto-attack: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'pull' | 'hit' | 'drop' | 'stop' | 'done' = 'pull';
+    let hp0 = 0;
+    let hpHit = 0;
+    let hpStop = 0;
+    let stopAt = 0;
+    const padAx = 3;
+    const padAz = 7;
+    const waitA = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      const hp = net.getCharacter()?.hp ?? 0;
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE auto-attack: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 280) window.setTimeout(waitA, 200);
+        return;
+      }
+      if (phase === 'pull') {
+        if (!hp0) hp0 = hp;
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (padA.aggroed) {
+          phase = 'hit';
+          if (mark) mark.textContent = `VE auto-attack: pulled · hp ${hp} — waiting swing…`;
+        } else if (mark) {
+          mark.textContent = `VE auto-attack: walking in · d=${dist.toFixed(1)} · hp ${hp}`;
+        }
+      } else if (phase === 'hit') {
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (hp < hp0) {
+          hpHit = hp;
+          phase = 'drop';
+          if (mark) mark.textContent = `VE auto-attack: hit ${hp0}→${hpHit} — running out…`;
+        } else if (mark) {
+          mark.textContent = `VE auto-attack: in melee · hp ${hp}/${hp0} · aggro=${padA.aggroed ? 'y' : 'n'}`;
+        }
+      } else if (phase === 'drop') {
+        const tx = -12;
+        const tz = -8;
+        const dx = tx - player.position.x;
+        const dz = tz - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.6) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        const home = Math.hypot(padA.x - (padA.spawnX || padAx), padA.z - (padA.spawnZ || padAz));
+        if (!padA.aggroed && home < 0.45) {
+          hpStop = hp;
+          stopAt = ticks;
+          phase = 'stop';
+          if (mark) mark.textContent = `VE auto-attack: leashed · hp ${hpStop} — proving stop…`;
+        } else if (mark) {
+          mark.textContent = `VE auto-attack: drop · hp ${hp} · home=${home.toFixed(1)}`;
+        }
+      } else if (phase === 'stop') {
+        if (hp < hpStop) {
+          if (mark) mark.textContent = `Auto-attack FAIL · still hitting ${hpStop}→${hp} · #356`;
+          return;
+        }
+        if (ticks - stopAt >= 10) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = `Auto-attack OK · hp ${hp0}→${hpHit} · stopped ${hpStop} · #356`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent = `VE auto-attack: stopped? hp ${hp} hold ${ticks - stopAt}/10`;
+        }
+      }
+      if (ticks > 280) {
+        if (mark) mark.textContent = `Auto-attack FAIL · phase ${phase} · hp ${hp} · #356`;
+        return;
+      }
+      window.setTimeout(waitA, 200);
+    };
+    window.setTimeout(waitA, 500);
+  }
+
+  // ?ve=hunt-loot — kill pad A from outside aggro, corpse WorldLoot, F pickup (#357).
+  if (ve === 'hunt-loot') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.1;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'hunt-loot') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hunt-loot: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'kill' | 'walk' | 'pick' | 'done' = 'kill';
+    let lastCast = 0;
+    let sparkleHold = 0;
+    const padAx = 3;
+    const padAz = 7;
+    const waitH = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      const items = net.getGroundItems();
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE hunt-loot: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 320) window.setTimeout(waitH, 200);
+        return;
+      }
+      if (phase === 'kill') {
+        if (padA.hp > 0) {
+          net.setTarget(padA.npcId);
+          const now = Date.now();
+          if (now - lastCast >= GCD_MS + 80) {
+            net.cast(SPELL_SPARK);
+            lastCast = now;
+          }
+          if (mark) {
+            mark.textContent = `VE hunt-loot: spark pad A · hp ${padA.hp}/${padA.maxHp}`;
+          }
+        } else {
+          phase = 'walk';
+          if (mark) mark.textContent = 'VE hunt-loot: corpse — waiting shard…';
+        }
+      } else if (phase === 'walk') {
+        const shard =
+          items.find((it) => Math.hypot(it.x - padAx, it.z - padAz) < 2.5) ?? items[0];
+        if (!shard) {
+          if (mark) mark.textContent = `VE hunt-loot: waiting WorldLoot · ground ${items.length}`;
+        } else {
+          const dx = shard.x - player.position.x;
+          const dz = shard.z - player.position.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist > PICKUP_RANGE_METERS - 0.4) {
+            const step = Math.min(MAX_STEP_METERS, dist);
+            net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+            if (mark) {
+              mark.textContent = `VE hunt-loot: walking to shard · d=${dist.toFixed(1)}`;
+            }
+          } else {
+            sparkleHold += 1;
+            if (sparkleHold < 8) {
+              if (mark) {
+                mark.textContent = `Hunt-loot OK · corpse shard · F pickup · #357`;
+              }
+            } else {
+              phase = 'pick';
+              void net.pickup().catch(() => undefined);
+            }
+          }
+        }
+      } else if (phase === 'pick') {
+        const shardLeft = items.some((it) => Math.hypot(it.x - padAx, it.z - padAz) < 2.5);
+        const bag = !!net.getCharacter()?.hasEmberShard;
+        if (!shardLeft && bag) {
+          phase = 'done';
+          if (mark) mark.textContent = 'Hunt-loot OK · corpse shard · F pickup · #357';
+          return;
+        }
+        if (mark) {
+          mark.textContent = `VE hunt-loot: picking · ground ${items.length} · bag ${bag ? 'y' : 'n'}`;
+        }
+      }
+      if (ticks > 320) {
+        if (mark) mark.textContent = `Hunt-loot FAIL · phase ${phase} · #357`;
+        return;
+      }
+      window.setTimeout(waitH, 200);
+    };
+    window.setTimeout(waitH, 500);
+  }
+
+  // ?ve=tab-hostile — Tab prefers in-range hostiles; dummy stays selectable (#358).
+  if (ve === 'tab-hostile') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'tab-hostile') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-hostile: waiting for hostiles…';
+    let ticks = 0;
+    let tabbed = false;
+    let okTicks = 0;
+    const waitT = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      if (latestStatus.state !== 'connected' || hostiles.length < 2 || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE tab-hostile: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 200) window.setTimeout(waitT, 200);
+        return;
+      }
+      if (!tabbed) {
+        const id = cyclePreferHostiles(net);
+        if (id != null) selectedTargetId = id;
+        tabbed = true;
+      }
+      syncNpcMeshes(net.getNpcs());
+      const cycle = tabTargetCycle(net);
+      const tgt = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
+      const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY);
+      updateTargetFrame(tgt);
+      if (tgt && tgt.kind === NPC_KIND_HOSTILE) {
+        camera.setTarget(new Vector3(tgt.x, 1.2, tgt.z));
+        camera.radius = 14;
+        camera.beta = Math.PI / 3.1;
+      }
+      const mesh = tgt ? npcMeshes.get(tgt.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const frame = document.getElementById('targetFrame');
+      const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+      const frameName = document.getElementById('tfName')?.textContent ?? '';
+      if (
+        tgt &&
+        tgt.kind === NPC_KIND_HOSTILE &&
+        dummyInCycle &&
+        ringOn &&
+        frameVisible &&
+        /hostile/i.test(frameName)
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent = `Tab-hostile OK · Hostile #${tgt.npcId} · dummy selectable · #358`;
+        }
+        if (okTicks < 8 && ticks < 180) window.setTimeout(waitT, 180);
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE tab-hostile: tgt ${tgt ? tgt.kind : 'none'} · dummyCycle ${dummyInCycle ? 'y' : 'n'} · ring ${ringOn ? 'on' : 'off'} · frame ${frameName}`;
+      }
+      if (ticks > 180) {
+        if (mark) mark.textContent = `Tab-hostile FAIL · tgt ${tgt?.kind ?? 'none'} · #358`;
+        return;
+      }
+      window.setTimeout(waitT, 200);
+    };
+    window.setTimeout(waitT, 500);
+  }
+
+  // ?ve=hostile-read — Hostile coral plate vs Dummy parchment vs Vendor mint (#359).
+  if (ve === 'hostile-read' || ve === 'hostile-types') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'hostile-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-read: waiting for hostiles…';
+    let ticks = 0;
+    const waitR = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const vendors = net.getVendors();
+      syncNpcMeshes(npcs);
+      syncVendorMeshes(vendors);
+      const hMesh = hostiles[0]
+        ? npcMeshes.get(hostiles[0].npcId.toString())
+        : undefined;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const vMesh = vendors[0]
+        ? vendorMeshes.get(vendors[0].vendorId.toString())
+        : undefined;
+      const hPlate = !!(hMesh?.nameplate && hMesh.nameplate.mesh.isEnabled());
+      const dPlate = !!(dMesh?.nameplate && dMesh.nameplate.mesh.isEnabled());
+      const vPlate = !!(vMesh?.nameplate && vMesh.nameplate.mesh.isEnabled());
+      const hLabel = hMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const vLabel = vMesh?.nameplate?.label ?? '';
+      if (
+        latestStatus.state === 'connected' &&
+        hPlate &&
+        dPlate &&
+        vPlate &&
+        hLabel === 'Hostile' &&
+        dLabel === 'Dummy' &&
+        /vendor/i.test(vLabel)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE hostile-read: H ${hLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'}`;
+      }
+      if (ticks > 200) {
+        if (mark) mark.textContent = `Hostile-read FAIL · H ${hLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'} · #359`;
+        return;
+      }
+      window.setTimeout(waitR, 200);
+    };
+    window.setTimeout(waitR, 500);
+  }
+
+  // ?ve=hostile-types — Kind=2 Hostile coral vs Kind=3 Brigand violet (#418).
+  if (net && ve === 'hostile-types') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-types: waiting for both kinds…';
+    let ticks = 0;
+    const waitTypes = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const vendors = net.getVendors();
+      syncNpcMeshes(npcs);
+      syncVendorMeshes(vendors);
+      const hMesh = hostiles[0]
+        ? npcMeshes.get(hostiles[0].npcId.toString())
+        : undefined;
+      const bMesh = brigands[0]
+        ? npcMeshes.get(brigands[0].npcId.toString())
+        : undefined;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const vMesh = vendors[0]
+        ? vendorMeshes.get(vendors[0].vendorId.toString())
+        : undefined;
+      const hLabel = hMesh?.nameplate?.label ?? '';
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const vLabel = vMesh?.nameplate?.label ?? '';
+      const platesOn =
+        !!(hMesh?.nameplate && hMesh.nameplate.mesh.isEnabled()) &&
+        !!(bMesh?.nameplate && bMesh.nameplate.mesh.isEnabled()) &&
+        !!(dMesh?.nameplate && dMesh.nameplate.mesh.isEnabled()) &&
+        !!(vMesh?.nameplate && vMesh.nameplate.mesh.isEnabled());
+      if (
+        latestStatus.state === 'connected' &&
+        platesOn &&
+        hLabel === 'Hostile' &&
+        bLabel === 'Brigand' &&
+        dLabel === 'Dummy' &&
+        /vendor/i.test(vLabel)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE hostile-types: H ${hLabel || 'no'} · B ${bLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'}`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `Hostile-types FAIL · H ${hLabel || 'no'} · B ${bLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'} · #418`;
+        }
+        return;
+      }
+      window.setTimeout(waitTypes, 200);
+    };
+    window.setTimeout(waitTypes, 500);
+  }
+
+  // ?ve=encounter — fight a hostile among trees, cam out of trunks, nameplate on (#361).
+  if (ve === 'encounter') {
+    camera.radius = 14;
+    camera.alpha = -0.62;
+    camera.beta = Math.PI / 2.38;
+  }
+  if (net && ve === 'encounter') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE encounter: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'pull' | 'fight' | 'done' = 'pull';
+    let tabbed = false;
+    let hp0 = 0;
+    const padAx = 3;
+    const padAz = 7;
+    const camInTrunk = (): boolean => {
+      const p = camera.position;
+      return trunks.some(
+        (t) =>
+          Math.hypot(p.x - t.x, p.z - t.z) < t.r &&
+          p.y >= t.y0 - 0.3 &&
+          p.y <= t.y1 + 0.3,
+      );
+    };
+    const waitE = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      const hp = net.getCharacter()?.hp ?? 0;
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE encounter: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 280) window.setTimeout(waitE, 200);
+        return;
+      }
+      if (hp <= 0) {
+        phase = 'pull';
+        tabbed = false;
+        hp0 = 0;
+        if (mark) mark.textContent = 'VE encounter: dead — waiting respawn…';
+        if (ticks < 280) window.setTimeout(waitE, 200);
+        return;
+      }
+      if (phase === 'pull') {
+        if (!hp0) hp0 = hp;
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (padA.aggroed) {
+          phase = 'fight';
+          if (mark) mark.textContent = `VE encounter: pulled · hp ${hp} — waiting swing…`;
+        } else if (mark) {
+          mark.textContent = `VE encounter: walking in · d=${dist.toFixed(1)} · hp ${hp}`;
+        }
+      } else if (phase === 'fight') {
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (!tabbed || selectedTargetId !== padA.npcId) {
+          net.setTarget(padA.npcId);
+          selectedTargetId = padA.npcId;
+          tabbed = true;
+        }
+        syncNpcMeshes(net.getNpcs());
+        updateTargetFrame(padA);
+        const mesh = npcMeshes.get(padA.npcId.toString());
+        const plateOn = !!(mesh?.nameplate && mesh.nameplate.mesh.isEnabled());
+        const plateLabel = mesh?.nameplate?.label ?? '';
+        const ringOn = !!(mesh && mesh.ring.isEnabled());
+        const clipped = camInTrunk();
+        if (
+          padA.aggroed &&
+          hp < hp0 &&
+          plateOn &&
+          plateLabel === 'Hostile' &&
+          ringOn &&
+          !clipped
+        ) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = 'Encounter OK · fighting · plate · cam clear · #361';
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE encounter: fight · hp ${hp}/${hp0} · aggro ${padA.aggroed ? 'y' : 'n'} · ` +
+            `plate ${plateLabel || 'no'} · ring ${ringOn ? 'on' : 'off'} · cam ${clipped ? 'clip' : 'clear'}`;
+        }
+      }
+      if (ticks > 280) {
+        const tgtFail = npcs.find((n) => n.npcId === selectedTargetId);
+        const meshFail = tgtFail ? npcMeshes.get(tgtFail.npcId.toString()) : undefined;
+        const clippedFail = camInTrunk();
+        if (mark) {
+          mark.textContent =
+            `Encounter FAIL · phase ${phase} · hp ${hp} · tgt ${tgtFail?.kind ?? 'none'} · ` +
+            `plate ${meshFail?.nameplate?.label || 'no'} · ring ${meshFail?.ring.isEnabled() ? 'on' : 'off'} · ` +
+            `cam ${clippedFail ? 'clip' : 'clear'} · #361`;
+        }
+        return;
+      }
+      window.setTimeout(waitE, 200);
+    };
+    window.setTimeout(waitE, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
@@ -8430,30 +10216,85 @@ async function main(): Promise<void> {
     window.setTimeout(waitCue, 300);
   }
 
-  // ?ve=zoom-stop — wheel into lowerRadiusLimit (deltaY<0 zooms in / min).
+  // ?ve=zoom-stop — wheel into min then max (#352). deltaY<0 zooms in.
   if (ve === 'zoom-stop') {
-    const lower = camera.lowerRadiusLimit ?? 4;
-    camera.radius = lower;
-    camera.alpha = Math.PI / 2.3;
-    camera.beta = Math.PI / 3.1;
+    const lower = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
+    const upper = camera.upperRadiusLimit ?? CAM_ZOOM_MAX;
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE zoom-stop: seeding Zoom min…';
     const canvasEl = document.getElementById('renderCanvas');
+    let phase: 'min' | 'max' = 'min';
+    let minOk = false;
+    let maxOk = false;
     const hold = () => {
-      camera.radius = lower;
-      canvasEl?.dispatchEvent(
-        new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }),
-      );
-      const toast = document.querySelector('.sysToast.zoomLimit');
-      const ok = !!toast && /Zoom min/i.test(toast.textContent || '');
-      if (mark) {
-        mark.textContent = ok
-          ? 'Zoom-stop OK · Zoom min toast · wheel deltaY<0 at lowerRadiusLimit · #192'
-          : 'VE zoom-stop: firing wheel deltaY<0 at min…';
+      if (phase === 'min') {
+        camera.radius = lower;
+        camera.alpha = Math.PI / 2.15;
+        camera.beta = Math.PI / 2.55;
+        canvasEl?.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }),
+        );
+        const toast = document.querySelector('.sysToast.zoomLimit');
+        minOk = !!toast && /Zoom min/i.test(toast.textContent || '');
+        if (mark) {
+          mark.textContent = minOk
+            ? `Zoom-stop min OK · r=${lower} · Zoom min toast`
+            : 'VE zoom-stop: firing wheel deltaY<0 at min…';
+        }
+        if (minOk) {
+          phase = 'max';
+          window.setTimeout(hold, 1600);
+          return;
+        }
+      } else {
+        camera.radius = upper;
+        camera.alpha = Math.PI / 2.45;
+        camera.beta = Math.PI / 3.2;
+        canvasEl?.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }),
+        );
+        const toast = document.querySelector('.sysToast.zoomLimit');
+        maxOk = !!toast && /Zoom max/i.test(toast.textContent || '');
+        if (mark) {
+          mark.textContent =
+            minOk && maxOk
+              ? `Zoom-stop OK · min ${lower} · max ${upper} · Zoom min+max toasts · #352`
+              : `VE zoom-stop: min ok · firing wheel deltaY>0 at max…`;
+        }
       }
       window.setTimeout(hold, 900);
     };
     window.setTimeout(hold, 500);
+  }
+
+  // ?ve=cam-collision — orbit into a hero bole; camera stays in the clearing (#351).
+  if (ve === 'cam-collision') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = CAM_COLLISION_VE_RADIUS;
+    camZoomRadius = CAM_COLLISION_VE_RADIUS;
+    const hero0 = nearestHeroTrunk(player.position.x, player.position.z, trunks);
+    if (hero0) {
+      camera.alpha =
+        Math.atan2(hero0.z - player.position.z, hero0.x - player.position.x) + 0.16;
+    }
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision: orbiting into trunk…';
+    let ticks = 0;
+    const waitCol = () => {
+      ticks += 1;
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const ok = !!hit && got + 0.5 < want;
+      const cam = camera.position;
+      if (mark) {
+        mark.textContent = ok
+          ? `Cam-collision OK · r=${got.toFixed(1)} < want=${want.toFixed(0)} · ${hit} · clearing`
+          : `VE cam-collision: r=${got.toFixed(1)} want=${want.toFixed(0)} hit=${hit ?? 'none'} · n=${trunks.length} xz=${Math.hypot(cam.x, cam.z).toFixed(1)}`;
+      }
+      if (ticks < 80) window.setTimeout(waitCol, 200);
+    };
+    window.setTimeout(waitCol, 400);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
@@ -8670,11 +10511,11 @@ async function main(): Promise<void> {
     window.setTimeout(waitJumpPose, 600);
   }
 
-  // ?ve=hop-wow — rigid hop, no squash, no camera slam. Does not replace ?ve=jump (#257).
+  // ?ve=hop-wow — rigid hop, no squash. Close enough that airborne pose reads (#328).
   if (ve === 'hop-wow') {
-    camera.radius = 18;
+    camera.radius = 12;
     camera.alpha = Math.PI / 2.45;
-    camera.beta = Math.PI / 3.2;
+    camera.beta = Math.PI / 2.5;
   }
   if (net && ve === 'hop-wow') {
     const mark = document.getElementById('persistMark');
@@ -8688,7 +10529,7 @@ async function main(): Promise<void> {
     const waitHop = () => {
       if (!net) return;
       ticks += 1;
-      camera.radius = 18;
+      camera.radius = 12;
       const st = latestStatus;
       if (st.state !== 'connected') {
         if (mark) mark.textContent = `VE hop-wow: ${st.state}…`;
@@ -8704,7 +10545,7 @@ async function main(): Promise<void> {
       if (!jumpAttempted && ticks > 5) {
         jumpAttempted = true;
         net.sendMove(0, 0, true);
-        if (mark) mark.textContent = 'VE hop-wow: Space tapped · play-cam r=18…';
+        if (mark) mark.textContent = 'VE hop-wow: Space tapped · play-cam r=12…';
         window.setTimeout(waitHop, 120);
         return;
       }
@@ -8716,7 +10557,7 @@ async function main(): Promise<void> {
       }
       const scaleY = humanoid.root.scaling.y;
       const rigidOk = Math.abs(scaleY - 1) < 0.05;
-      const radiusOk = camera.radius >= 14 && camera.radius <= 22;
+      const radiusOk = camera.radius >= 9 && camera.radius <= 16;
       const airNow = pose.y > 0.35;
       if (!hopOk && peakY > 0.5 && rigidOk && radiusOk && airNow) {
         hopOk = true;
@@ -8725,9 +10566,18 @@ async function main(): Promise<void> {
       }
       if (hopOk) {
         okPeak = Math.max(okPeak, peakY);
+        const pb = readHumanoidPlayback(humanoid);
+        const locoOn = scene.animationGroups.some(
+          (g) =>
+            /(walk|run)/i.test(g.name) &&
+            g.isPlaying &&
+            !/remote_/i.test(g.name),
+        );
         if (mark) {
           mark.textContent =
-            `Hop-wow OK · rigid y=${okScaleY.toFixed(2)} · no slam · r=18 · peak=${okPeak.toFixed(2)}m · #257`;
+            !locoOn && pb.skinned > 0 && pb.playing && !/walk|run/i.test(pb.playing)
+              ? `Hop-wow OK · ${pb.playing} · skinned ${pb.skinned} · rigid y=${okScaleY.toFixed(2)} · peak=${okPeak.toFixed(2)}m`
+              : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · loco ${locoOn ? 'on' : 'off'}`;
         }
         window.setTimeout(waitHop, 200);
         return;
@@ -10077,27 +11927,37 @@ async function main(): Promise<void> {
         return;
       }
       setHumanoidMoving(humanoid, false);
+      const chIdle = net.getCharacter();
+      if (chIdle && !chIdle.staffEquipped) {
+        net.equipStaff();
+        if (ticks < 200) window.setTimeout(waitIdle, 200);
+        return;
+      }
+      setHumanoidStaffEquipped(humanoid, true);
       const pb = readHumanoidPlayback(humanoid);
       const idleOk =
         pb.skinned > 0 &&
         !!pb.playing &&
-        /idle/i.test(pb.playing);
+        /idle_weapon/i.test(pb.playing) &&
+        pb.height >= 1.5 &&
+        pb.height <= 2.15;
       if (mark) {
         mark.textContent = idleOk
-          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned}`
-          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned} · ${pb.height.toFixed(2)}m`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · ${pb.height.toFixed(2)}m`;
       }
+      if (!idleOk && ticks < 240) window.setTimeout(waitIdle, 200);
     };
     window.setTimeout(waitIdle, 800);
   }
 
-  // ?ve=fps — seed crowd proxies; prove FPS HUD visible + near proxies > 0.
+  // ?ve=fps — E9.3 dense play-cam floor. Forest fill, not amber crowd capsules.
   if (ve === 'fps') {
-    camera.radius = 22;
-    camera.alpha = Math.PI / 2.5;
-    camera.beta = Math.PI / 3.55;
-    debugHudVisible = true;
-    setDebugHudVisible(true);
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2 + 0.12;
+    camera.beta = Math.PI / 2.48;
+    const fpsHud = document.getElementById('fpsHud');
+    if (fpsHud) fpsHud.classList.remove('hidden');
   }
   if (net && ve === 'fps') {
     const mark = document.getElementById('persistMark');
@@ -10112,31 +11972,27 @@ async function main(): Promise<void> {
         if (ticks < 200) window.setTimeout(waitFps, 200);
         return;
       }
-      net.seedCrowdProxies();
-      syncProxyMeshes(net.getProxies());
-      const proxies = net.getProxies();
-      const near = proxies.filter((p) => !p.far);
-      const far = proxies.filter((p) => p.far);
       const hud = document.getElementById('fpsHud');
+      if (hud) hud.classList.remove('hidden');
       const fpsVal = document.getElementById('fpsValue')?.textContent ?? '—';
       const hudVisible = !!hud && hud.offsetWidth > 0;
       const fpsNum = Number.parseInt(fpsVal, 10);
-      const fpsOk = Number.isFinite(fpsNum) && fpsNum > 0;
-      if (hudVisible && near.length > 0 && fpsOk) {
+      const fpsOk = Number.isFinite(fpsNum) && fpsNum >= FPS_FLOOR;
+      if (hudVisible && fpsOk && ticks > 10) {
         if (mark) {
           mark.textContent =
-            `FPS OK · ${fpsNum} fps (floor ${FPS_FLOOR} / target ${FPS_TARGET}) · near ${near.length} · far ${far.length} · remotes ${(net.getRemotes() ?? []).length} · box ref`;
+            `FPS OK · ${fpsNum} fps (floor ${FPS_FLOOR} / target ${FPS_TARGET}) · far impostors`;
         }
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE fps: Connected · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} · near ${near.length} (waiting…)`;
+          `VE fps: Connected · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} (waiting dense ≥${FPS_FLOOR}…)`;
       }
       if (ticks > 220) {
         if (mark) {
           mark.textContent =
-            `VE fps: timed out · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} · near ${near.length}`;
+            `VE fps: timed out · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal}`;
         }
         return;
       }
@@ -11455,7 +13311,7 @@ async function main(): Promise<void> {
     const STALL_X = -2.5;
     const STALL_Z = 2.0;
     const preview = createVendorStall(scene, 'veVendorPanelStall');
-    preview.body.position.set(STALL_X, 0, STALL_Z);
+    preview.body.position.set(STALL_X, DIRT_SURFACE_Y, STALL_Z);
     const plate = createNameplate(scene, 'veVendorPanelStall');
     plate.mesh.parent = preview.body;
     plate.mesh.position.set(0, 2.45, 0);
@@ -11521,21 +13377,21 @@ async function main(): Promise<void> {
 
   // ?ve=vendor-stall — play-cam frame of shop silhouette (posts+counter+awning) under #39 fog (#58).
   if (ve === 'vendor-stall') {
-    // Face stall front (counter/-Z); play-cam height so awning+counter read.
-    camera.radius = 11;
+    // Face stall front (counter/-Z); tilt so posts meet dirt (#347).
+    camera.radius = 9.5;
     camera.alpha = -Math.PI / 2.15;
-    camera.beta = Math.PI / 2.35;
+    camera.beta = Math.PI / 2.42;
     // Presentation preview at known YardVendor spawn — independent of syncVendorMeshes
     // so empty yard_vendor sub cannot dispose it mid-shot.
     const STALL_X = -2.5;
     const STALL_Z = 2.0;
     const preview = createVendorStall(scene, 'veVendorStall');
-    preview.body.position.set(STALL_X, 0, STALL_Z);
+    preview.body.position.set(STALL_X, DIRT_SURFACE_Y, STALL_Z);
     const plate = createNameplate(scene, 'veVendorStall');
     plate.mesh.parent = preview.body;
     plate.mesh.position.set(0, 2.45, 0);
     paintNameplate(plate, 'Vendor', '#7dffb5', 1);
-    camera.setTarget(new Vector3(STALL_X, 1.1, STALL_Z));
+    camera.setTarget(new Vector3(STALL_X, 0.55, STALL_Z));
   }
   if (net && ve === 'vendor-stall') {
     const mark = document.getElementById('persistMark');
@@ -11554,13 +13410,13 @@ async function main(): Promise<void> {
       const live = net.getVendors()[0];
       const x = live?.x ?? STALL_X;
       const z = live?.z ?? STALL_Z;
-      camera.setTarget(new Vector3(x, 1.1, z));
-      camera.radius = 11;
+      camera.setTarget(new Vector3(x, 0.55, z));
+      camera.radius = 9.5;
       camera.alpha = -Math.PI / 2.15;
-      camera.beta = Math.PI / 2.35;
+      camera.beta = Math.PI / 2.42;
       if (mark) {
         mark.textContent =
-          'Vendor-stall OK · shop silhouette · Connected';
+          'Vendor-stall OK · posts on dirt · no float · shop silhouette · Connected';
       }
     };
     window.setTimeout(waitStall, 600);
@@ -12261,6 +14117,7 @@ async function main(): Promise<void> {
         sawDeath = true;
         phase = 'dead';
         setDeathGreyout(true);
+        setHumanoidDead(humanoid, true);
       }
 
       // Prefer screenshot while dead (greyout + empty-ish HP) before respawn clears it.
@@ -12425,6 +14282,7 @@ async function main(): Promise<void> {
         sawDeath = true;
         phase = 'dead';
         setDeathGreyout(true);
+        setHumanoidDead(humanoid, true);
       }
 
       if (
@@ -12438,15 +14296,26 @@ async function main(): Promise<void> {
         // Freeze a clear mid-countdown frame for the screenshot.
         setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
         setLocalGhost(true);
+        setHumanoidDead(humanoid, true);
+        const pb = readHumanoidPlayback(humanoid);
+        const deathOk =
+          pb.skinned > 0 && !!pb.playing && /death/i.test(pb.playing);
         if (mark) {
-          mark.textContent =
-            `Death UX OK · greyout · countdown · toast` +
-            (digText || subText ? ` · ${digText || subText}` : '') +
-            ` · casts ${casts}`;
+          mark.textContent = deathOk
+            ? `Death UX OK · ${pb.playing} · skinned ${pb.skinned}` +
+              (digText || subText ? ` · ${digText || subText}` : '')
+            : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
         }
         const hold = () => {
           setDeathGreyout(true, 'Respawn in 2s…', { freezeSub: true });
           setLocalGhost(true);
+          setHumanoidDead(humanoid, true);
+          const live = readHumanoidPlayback(humanoid);
+          if (mark && live.skinned > 0 && live.playing && /death/i.test(live.playing)) {
+            mark.textContent =
+              `Death UX OK · ${live.playing} · skinned ${live.skinned}` +
+              (digText || subText ? ` · ${digText || subText}` : '');
+          }
           window.setTimeout(hold, 200);
         };
         hold();

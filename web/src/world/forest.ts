@@ -384,21 +384,268 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
 }
 
 /**
+ * Thin-instance a pack tree. Merge to one mesh so the glTF source at origin
+ * does not also draw in the clearing (SetBuffer still renders the parented
+ * child bind-pose at 0,0).
+ */
+function thinInstancePackRoot(root: TransformNode, matrices: Matrix[]): void {
+  if (matrices.length === 0) {
+    hideTemplate(root);
+    return;
+  }
+  root.setEnabled(true);
+  root.position.set(0, 0, 0);
+  root.scaling.setAll(1);
+  root.rotation.setAll(0);
+  const sources: Mesh[] = [];
+  const consider = (m: AbstractMesh): void => {
+    if (m instanceof Mesh && m.getTotalVertices() > 0) sources.push(m);
+  };
+  if (root instanceof Mesh) consider(root);
+  for (const m of root.getChildMeshes(true)) consider(m);
+  if (sources.length === 0) {
+    hideTemplate(root);
+    return;
+  }
+  for (const s of sources) s.computeWorldMatrix(true);
+  const merged = Mesh.MergeMeshes(sources, false, true, undefined, false, true);
+  hideTemplate(root);
+  if (merged) {
+    merged.name = `${root.name}_inst`;
+    merged.isPickable = false;
+    merged.applyFog = true;
+    merged.position.set(0, 0, 0);
+    merged.setEnabled(true);
+    merged.isVisible = true;
+    thinInstanceFromMatrices(merged, matrices);
+    return;
+  }
+  for (const m of sources) {
+    m.setEnabled(true);
+    m.isVisible = true;
+    m.isPickable = false;
+    m.applyFog = true;
+    thinInstanceFromMatrices(m, matrices);
+  }
+}
+
+/**
  * Fog / sky (#270) + lighting (#277, lifts #39). Stylized dusk forest, not photoreal.
  *
  * | Param        | #39                         | now                                       |
- * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 200 (#272)          |
+ * | fog mode     | EXP2 dens 0.015             | LINEAR start 22 / end 260 (#348)          |
  * | fog color    | (0.34, 0.55, 0.7)           | unchanged                                 |
  * | clearColor   | (0.24, 0.36, 0.46)          | matches fogColor                          |
  * | hemi         | 0.78 cool (0.68,0.78,0.86)  | 0.88 cooler canopy fill (#277)            |
  * | sun          | 0.98 warm (1.0,0.82,0.52)   | 0.48 cool-dusk key (#277)                 |
+ *
+ * E9.10: 16/200 on a 480 m place made a cardboard band at fogEnd (trees vanish,
+ * unfogged mountains continue). Longer LINEAR ramp; do not raise end to reach
+ * ridges (those stay applyFog=false). Sky lower band = fogColor. No EXP2.
  */
 const FOG_COLOR = new Color3(0.34, 0.55, 0.7);
-const FOG_START = 16;
-/** #272: 120 m pad is gone — fog must reach the larger forest, not clip at 95. */
-const FOG_END = 200;
+const FOG_START = 22;
+/** #348: dissolve the 480 m forest; mountains stay unfogged baked steps. */
+const FOG_END = 260;
 /** Grass plane extent (m). 120 was the toy disc. */
 const GROUND_EXTENT = 480;
+
+/** Dummy / vendor XZ — keep these reachable (matches Combat/Vendor spawn). */
+const YARD_DUMMY_X = 5;
+const YARD_DUMMY_Z = 0;
+const YARD_VENDOR_X = -2.5;
+const YARD_VENDOR_Z = 2;
+
+/** Dirt-disc top. Dummy post / vendor feet plant here — not grass y=0 (#347). */
+export const DIRT_SURFACE_Y = 0.036;
+
+/** North landmark hero — `?ve=collision` walks into this bole. */
+export const COLLISION_VE_HERO = { x: 6, z: -40 } as const;
+
+/**
+ * Receding path polyline (#342): pad → west of the north hero bole → bend →
+ * a second clearing silhouette in fog. Not a second zone / biome.
+ * Polar `a ∈ (0.15, 0.55)` was the old SE strip and hid this from `?ve=place-wow`.
+ * E9.12 lock vs hordes-place-ref: player tiny vs trunks, path into dusk-blue,
+ * sky=fogColor. Ignore characters.
+ */
+const PATH_POINTS: ReadonlyArray<{ x: number; z: number }> = [
+  { x: 0.4, z: 1.0 },
+  { x: -3.5, z: -12 },
+  { x: -10, z: -32 },
+  { x: 2, z: -50 },
+  { x: 12, z: -68 },
+  { x: 16, z: -88 },
+];
+const SECOND_CLEARING = { x: 12, z: -68 } as const;
+const PATH_TREE_KEEP = 7.5;
+const PATH_UNDER_KEEP = 5.5;
+const SECOND_CLEARING_R = 11;
+
+function distPointToSeg(
+  x: number,
+  z: number,
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+): number {
+  const dx = bx - ax;
+  const dz = bz - az;
+  const len2 = dx * dx + dz * dz;
+  if (len2 < 1e-8) return Math.hypot(x - ax, z - az);
+  let t = ((x - ax) * dx + (z - az) * dz) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(x - (ax + t * dx), z - (az + t * dz));
+}
+
+function distToPath(x: number, z: number): number {
+  let best = Infinity;
+  for (let i = 0; i < PATH_POINTS.length - 1; i++) {
+    const a = PATH_POINTS[i]!;
+    const b = PATH_POINTS[i + 1]!;
+    const d = distPointToSeg(x, z, a.x, a.z, b.x, b.z);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function inSecondClearing(x: number, z: number, extra = 0): boolean {
+  return Math.hypot(x - SECOND_CLEARING.x, z - SECOND_CLEARING.z) < SECOND_CLEARING_R + extra;
+}
+
+function pathBlocksTree(x: number, z: number): boolean {
+  return inSecondClearing(x, z, 1) || distToPath(x, z) < PATH_TREE_KEEP;
+}
+
+function pathBlocksUnderstory(x: number, z: number): boolean {
+  return inSecondClearing(x, z, 2) || distToPath(x, z) < PATH_UNDER_KEEP;
+}
+
+export type TrunkCapsule = {
+  x: number;
+  z: number;
+  radius: number;
+  kind: 'hero' | 'mid';
+};
+
+/** Player XZ radius vs bole capsules. Intent slide only — not client positions. */
+export const PLAYER_TRUNK_RADIUS = 0.42;
+
+const trunkCapsules: TrunkCapsule[] = [];
+
+export function getTrunkCapsules(): readonly TrunkCapsule[] {
+  return trunkCapsules;
+}
+
+export function nearestTrunk(
+  px: number,
+  pz: number,
+  kind?: TrunkCapsule['kind'],
+): TrunkCapsule | null {
+  let best: TrunkCapsule | null = null;
+  let bestD = Infinity;
+  for (const c of trunkCapsules) {
+    if (kind && c.kind !== kind) continue;
+    const d = (c.x - px) * (c.x - px) + (c.z - pz) * (c.z - pz);
+    if (d < bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+function yardPropBlocked(x: number, z: number, radius: number): boolean {
+  const pad = PLAYER_TRUNK_RADIUS + 3.2;
+  const dummyR = radius + pad;
+  const dxD = x - YARD_DUMMY_X;
+  const dzD = z - YARD_DUMMY_Z;
+  if (dxD * dxD + dzD * dzD < dummyR * dummyR) return true;
+  const vendorR = radius + pad + 1.2;
+  const dxV = x - YARD_VENDOR_X;
+  const dzV = z - YARD_VENDOR_Z;
+  return dxV * dxV + dzV * dzV < vendorR * vendorR;
+}
+
+function registerTrunk(x: number, z: number, radius: number, kind: TrunkCapsule['kind']): void {
+  if (!(radius > 0) || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(radius)) {
+    return;
+  }
+  if (yardPropBlocked(x, z, radius)) return;
+  trunkCapsules.push({ x, z, radius, kind });
+}
+
+/**
+ * Pack bark radius at chest height (p90 of y∈[0,1.2] verts) × instance XZ scale.
+ * Do not use the full bark AABB — branches inflate it, then a 3.4 clamp sinks
+ * the player into the visual bole.
+ */
+function boleRadiusWorld(
+  xzScale: number,
+  kind: TrunkCapsule['kind'],
+  /** Pack bark author radius. TwistedTree ~1.18, CommonTree ~0.52 — do not
+   *  use Twisted author on a CommonTree hero (#344). */
+  authorBole?: number,
+): number {
+  const author = authorBole ?? (kind === 'hero' ? 1.18 : 0.52);
+  return Math.max(kind === 'hero' ? 1.6 : 0.55, author * xzScale);
+}
+
+/**
+ * Slide an XZ wish against hero/mid bole capsules. Still an intent (dx/dz);
+ * server Move is unchanged. Far trees / mountains are not solids.
+ */
+export function slideAgainstTrunks(
+  px: number,
+  pz: number,
+  dx: number,
+  dz: number,
+  playerR = PLAYER_TRUNK_RADIUS,
+): { dx: number; dz: number; blocked: boolean } {
+  if (trunkCapsules.length === 0) return { dx, dz, blocked: false };
+  const inLen = Math.hypot(dx, dz);
+  let nx = px + dx;
+  let nz = pz + dz;
+  let blocked = false;
+  for (let iter = 0; iter < 6; iter++) {
+    let hit = false;
+    for (const c of trunkCapsules) {
+      const minD = c.radius + playerR;
+      let ox = nx - c.x;
+      let oz = nz - c.z;
+      let d2 = ox * ox + oz * oz;
+      if (d2 >= minD * minD) continue;
+      hit = true;
+      blocked = true;
+      if (d2 < 1e-10) {
+        ox = px - c.x;
+        oz = pz - c.z;
+        d2 = ox * ox + oz * oz;
+        if (d2 < 1e-10) {
+          ox = 1;
+          oz = 0;
+          d2 = 1;
+        }
+      }
+      const d = Math.sqrt(d2);
+      const k = minD / d;
+      nx = c.x + ox * k;
+      nz = c.z + oz * k;
+    }
+    if (!hit) break;
+  }
+  let odx = nx - px;
+  let odz = nz - pz;
+  if (inLen < 1e-8) return { dx: 0, dz: 0, blocked };
+  const outLen = Math.hypot(odx, odz);
+  if (outLen > inLen && outLen > 1e-8) {
+    const s = inLen / outLen;
+    odx *= s;
+    odz *= s;
+  }
+  return { dx: odx, dz: odz, blocked };
+}
 
 function fogCss(c: Color3): string {
   return `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
@@ -406,7 +653,7 @@ function fogCss(c: Color3): string {
 
 /**
  * Distant mountain silhouettes (#273): farther / taller layered ranges.
- * LINEAR fogEnd 200 would flatten anything past the forest into a cardboard
+ * LINEAR fogEnd would flatten anything past the forest into a cardboard
  * wall, so ridges use applyFog=false and baked dusk-blue value steps.
  * Procedural DIY — no packs.
  */
@@ -575,7 +822,7 @@ function buildMountainBackdrop(scene: Scene): void {
  * 20-seg sphere is what painted the banding/halos. Procedural DIY, no packs.
  */
 function buildSkyDome(scene: Scene): void {
-  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 2000, segments: 32 }, scene);
+  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 2000, segments: 48 }, scene);
   sky.infiniteDistance = true;
   sky.isPickable = false;
   sky.applyFog = false;
@@ -589,10 +836,12 @@ function buildSkyDome(scene: Scene): void {
   const ctx = tex.getContext();
   const grad = ctx.createLinearGradient(0, 0, 0, size);
   const fog = fogCss(FOG_COLOR);
-  // Slightly lighter zenith; wide lower band is exact fogColor (no halo).
+  // Slightly lighter zenith; extra stop into fogColor so the 480 m horizon
+  // has no stacked band / halo (#348). Wide lower band is exact fogColor.
   grad.addColorStop(0.0, 'rgb(112, 152, 192)');
-  grad.addColorStop(0.22, 'rgb(100, 146, 186)');
-  grad.addColorStop(0.48, fog);
+  grad.addColorStop(0.18, 'rgb(104, 148, 188)');
+  grad.addColorStop(0.36, 'rgb(94, 144, 184)');
+  grad.addColorStop(0.52, fog);
   grad.addColorStop(1.0, fog);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 32, size);
@@ -632,6 +881,10 @@ function mattePackMaterials(meshes: AbstractMesh[], alphaTestLeaves: boolean): v
           mat.useAlphaFromAlbedoTexture = true;
           mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHATEST;
           mat.alphaCutOff = 0.42;
+        } else {
+          // Pack glTF ships MASK on CommonTree leaves; keep ALPHATEST on heroes only (#340).
+          mat.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
+          mat.useAlphaFromAlbedoTexture = false;
         }
       }
     } else if (mat instanceof StandardMaterial) {
@@ -644,6 +897,9 @@ function mattePackMaterials(meshes: AbstractMesh[], alphaTestLeaves: boolean): v
           mat.useAlphaFromDiffuseTexture = true;
           mat.transparencyMode = Material.MATERIAL_ALPHATEST;
           mat.alphaCutOff = 0.42;
+        } else {
+          mat.transparencyMode = Material.MATERIAL_OPAQUE;
+          mat.useAlphaFromDiffuseTexture = false;
         }
       }
     }
@@ -664,6 +920,7 @@ async function loadPackRoot(
   fileName: string,
   templateName: string,
   alphaTestLeaves = false,
+  forThinInstance = false,
 ): Promise<TransformNode | null> {
   try {
     const result = await ImportMeshAsync(fileName, scene, { rootUrl: PACK_ROOT });
@@ -688,9 +945,14 @@ async function loadPackRoot(
     }
 
     mattePackMaterials(result.meshes, alphaTestLeaves);
-    // Freeze world matrix after we place clones; templates stay hidden at origin.
-    root.position.set(0, -500, 0);
-    hideTemplate(root);
+    if (forThinInstance) {
+      // Instance source must sit at origin; parking at -500 culls every instance.
+      root.position.set(0, 0, 0);
+      root.setEnabled(true);
+    } else {
+      root.position.set(0, -500, 0);
+      hideTemplate(root);
+    }
     return root;
   } catch (err) {
     console.warn(`[forest] failed to load ${fileName}`, err);
@@ -730,77 +992,151 @@ function placeClone(
 }
 
 async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
-  // Heroes: few unique large TwistedTree trunks/canopies.
-  const heroFiles = ['TwistedTree_1.gltf', 'TwistedTree_2.gltf', 'TwistedTree_3.gltf'] as const;
+  // Heroes: few unique large trunks. Twisted (gnarled) + unused CommonTree
+  // (straight classic) so play-cam reads ≥3 silhouettes (#344). Not 80 clones.
+  const twistedFiles = ['TwistedTree_1.gltf', 'TwistedTree_2.gltf', 'TwistedTree_3.gltf'] as const;
   const heroTemplates: TransformNode[] = [];
-  for (let i = 0; i < heroFiles.length; i++) {
-    const t = await loadPackRoot(scene, heroFiles[i]!, `heroTemplate_${i}`, true);
+  for (let i = 0; i < twistedFiles.length; i++) {
+    const t = await loadPackRoot(scene, twistedFiles[i]!, `heroTemplate_${i}`, true);
     if (t) heroTemplates.push(t);
   }
   if (heroTemplates.length === 0) return false;
 
-  // Mid: 2–4 variants for ring (classic / tall / stubby).
+  const classicFiles = ['CommonTree_3.gltf', 'CommonTree_5.gltf'] as const;
+  const classicTemplates: TransformNode[] = [];
+  for (let i = 0; i < classicFiles.length; i++) {
+    const t = await loadPackRoot(scene, classicFiles[i]!, `heroClassic_${i}`, true);
+    if (t) classicTemplates.push(t);
+  }
+
+  // Mid: 2–4 variants for ring (classic / tall / stubby). ThinInstances — not unique clones (#340).
   const midFiles = ['CommonTree_1.gltf', 'CommonTree_3.gltf', 'CommonTree_5.gltf'] as const;
   const midTemplates: TransformNode[] = [];
   for (let i = 0; i < midFiles.length; i++) {
-    const t = await loadPackRoot(scene, midFiles[i]!, `midTemplate_${i}`);
+    const t = await loadPackRoot(scene, midFiles[i]!, `midTemplate_${i}`, false, true);
     if (t) midTemplates.push(t);
   }
   if (midTemplates.length === 0) return false;
 
   // #272: Quaternius author-scale is toy-yard; WoW/hordes read is player-tiny vs trunks.
   // Heroes sit on the clearing rim so play-cam is not inside a canopy.
+  // All three Twisted variants on the north rim (NW was a T2 duplicate).
   const heroSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
-    { name: 'heroTreeN', x: 6, z: -40, scale: 5.2, yaw: 0.18, ti: 1 },
+    { name: 'heroTreeN', x: COLLISION_VE_HERO.x, z: COLLISION_VE_HERO.z, scale: 5.2, yaw: 0.18, ti: 1 },
     { name: 'heroTreeNE', x: 34, z: -28, scale: 4.6, yaw: 0.45, ti: 0 },
-    { name: 'heroTreeNW', x: -36, z: -24, scale: 4.8, yaw: -0.55, ti: 1 },
+    { name: 'heroTreeNW', x: -36, z: -24, scale: 4.8, yaw: -0.55, ti: 2 },
     { name: 'heroTreeSW', x: -32, z: 34, scale: 4.4, yaw: 2.15, ti: 0 },
-    { name: 'heroTreeSE', x: 30, z: 38, scale: 4.2, yaw: 1.05, ti: 2 },
+    { name: 'heroTreeSE', x: 30, z: 38, scale: 4.2, yaw: 1.05, ti: 1 },
   ];
   for (const h of heroSpots) {
     const tmpl = heroTemplates[h.ti % heroTemplates.length]!;
     placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
+    registerTrunk(h.x, h.z, boleRadiusWorld(h.scale, 'hero', 1.18), 'hero');
   }
 
+  // Unused pack CommonTrees as unique classic heroes (ALPHATEST canopies).
+  // East/west of the north bole — in the place-wow / play-cam frame, off the path.
+  const classicSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
+    { name: 'heroTreeClassicE', x: 20, z: -36, scale: 5.8, yaw: 0.72, ti: 0 },
+    { name: 'heroTreeClassicW', x: -24, z: -38, scale: 6.4, yaw: -0.88, ti: 1 },
+  ];
+  for (const h of classicSpots) {
+    if (classicTemplates.length === 0) break;
+    const tmpl = classicTemplates[h.ti % classicTemplates.length]!;
+    placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
+    registerTrunk(h.x, h.z, boleRadiusWorld(h.scale, 'hero', 0.52), 'hero');
+  }
+
+  const midMats: Matrix[][] = midTemplates.map(() => []);
   const ringCount = 24;
   const innerR = 48;
   const outerR = 110;
   for (let i = 0; i < ringCount; i++) {
     const a = (i / ringCount) * Math.PI * 2 + hash01(i * 3) * 0.35;
     const r = innerR + hash01(i * 7) * (outerR - innerR);
-    // Keep south-east approach / path readable.
-    if (a > 0.15 && a < 0.55 && r < 62) continue;
-    const tmpl = midTemplates[i % midTemplates.length]!;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
+    if (pathBlocksTree(mx, mz)) continue;
+    const ti = i % midTemplates.length;
     const s = 2.4 + hash01(i * 11) * 1.6;
-    // Variant personality: classic / taller / stubbier via Y scale.
     const yMul = i % 3 === 1 ? 1.28 : i % 3 === 2 ? 0.82 : 1.0;
-    const clone = placeClone(
-      tmpl,
-      `midTree_${i}`,
-      Math.cos(a) * r,
-      Math.sin(a) * r,
-      s,
-      hash01(i * 17) * Math.PI * 2,
+    midMats[ti]!.push(
+      composeInstanceMatrix(
+        mx,
+        mz,
+        s,
+        s * yMul,
+        s,
+        hash01(i * 17) * Math.PI * 2,
+      ),
     );
-    clone.scaling.y *= yMul;
+    // Named empty root so #351 camera collision still finds mid boles (no unique mesh).
+    const mark = new TransformNode(`midTree_${i}`, scene);
+    mark.position.set(mx, 0, mz);
+    mark.scaling.setAll(s);
+    registerTrunk(mx, mz, boleRadiusWorld(s, 'mid'), 'mid');
   }
 
+  // Far ring: cheap LOD impostors, not pack GLTF ThinInstances (#349).
+  const farTrunk = makeTrunkMat(scene, 'farImpostorTrunk', new Color3(0.22, 0.18, 0.16));
+  const farFoliage = makeFoliageMat(scene, 'farImpostorFoliage', new Color3(0.14, 0.28, 0.18));
+  const farImpostor = buildFarLodTree(scene, 'farImpostor', farTrunk, farFoliage);
+  farImpostor.applyFog = true;
+  const farMats: Matrix[] = [];
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2 + 0.4;
     const r = 135 + hash01(i * 19) * 40;
-    const tmpl = midTemplates[i % midTemplates.length]!;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
+    if (pathBlocksTree(mx, mz)) continue;
     const s = 2.0 + hash01(i * 23) * 1.4;
-    placeClone(
-      tmpl,
-      `farTree_${i}`,
-      Math.cos(a) * r,
-      Math.sin(a) * r,
-      s,
-      hash01(i * 29) * Math.PI * 2,
+    farMats.push(
+      composeInstanceMatrix(mx, mz, s, s * (1.05 + hash01(i * 31) * 0.3), s, hash01(i * 29) * Math.PI * 2),
     );
   }
+  for (let i = 0; i < 20; i++) {
+    const a = (i / 20) * Math.PI * 2 + hash01(i * 37) * 0.2;
+    const r = 175 + hash01(i * 41) * 50;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
+    if (pathBlocksTree(mx, mz)) continue;
+    const s = 1.8 + hash01(i * 43) * 1.3;
+    farMats.push(
+      composeInstanceMatrix(mx, mz, s, s * (1.1 + hash01(i * 47) * 0.35), s, hash01(i * 53) * Math.PI * 2),
+    );
+  }
+  thinInstanceFromMatrices(farImpostor, farMats);
+  // Second clearing ring — fogged tree silhouette, path mouth left open (#342).
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + 0.35;
+    const rr = 13 + hash01(i * 91) * 4;
+    const mx = SECOND_CLEARING.x + Math.cos(a) * rr;
+    const mz = SECOND_CLEARING.z + Math.sin(a) * rr;
+    if (distToPath(mx, mz) < 5.5) continue;
+    const ti = i % midTemplates.length;
+    const s = 2.2 + hash01(i * 93) * 1.2;
+    const yMul = i % 3 === 1 ? 1.22 : 1.0;
+    midMats[ti]!.push(
+      composeInstanceMatrix(
+        mx,
+        mz,
+        s,
+        s * yMul,
+        s,
+        hash01(i * 97) * Math.PI * 2,
+      ),
+    );
+    const mark = new TransformNode(`midTree_clearing_${i}`, scene);
+    mark.position.set(mx, 0, mz);
+    mark.scaling.setAll(s);
+    registerTrunk(mx, mz, boleRadiusWorld(s, 'mid'), 'mid');
+  }
+  for (let i = 0; i < midTemplates.length; i++) {
+    thinInstancePackRoot(midTemplates[i]!, midMats[i]!);
+  }
 
-  // Understory: grass / fern / rock / bush clusters (budget-friendly counts).
+  // Understory: pack grass/fern/rock/bush as ThinInstances only (#345).
+  // Unique GLTF clones (even 24) still cost MASK/draw. Opaque merge + instances.
   const underFiles = [
     'Grass_Common_Tall.gltf',
     'Grass_Wispy_Short.gltf',
@@ -811,34 +1147,38 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   ] as const;
   const underTemplates: TransformNode[] = [];
   for (let i = 0; i < underFiles.length; i++) {
-    const t = await loadPackRoot(scene, underFiles[i]!, `underTemplate_${i}`);
+    const t = await loadPackRoot(scene, underFiles[i]!, `underTemplate_${i}`, false, true);
     if (t) underTemplates.push(t);
   }
-
-  // #315: 80 unique GLTF clones with alpha cards melted play-cam FPS.
-  // ThinInstance ferns below still add density. Cap unique pack clones.
-  let underPlaced = 0;
-  for (let i = 0; i < 24 && underTemplates.length > 0; i++) {
+  const underMats: Matrix[][] = underTemplates.map(() => []);
+  const underCount = 36;
+  for (let i = 0; i < underCount && underTemplates.length > 0; i++) {
     const a = hash01(i * 41) * Math.PI * 2;
     const r = 12 + hash01(i * 43) * 95;
     if (r < 11) continue;
-    if (a > 0.15 && a < 0.55 && r < 32) continue; // path/clearing readable
+    const ux = Math.cos(a) * r;
+    const uz = Math.sin(a) * r;
+    if (pathBlocksUnderstory(ux, uz)) continue;
     const plantish = i % 8 < 6;
     const ti = plantish ? i % 3 : 3 + (i % 3);
-    const tmpl = underTemplates[ti % underTemplates.length]!;
-    const isRock = tmpl.name.includes('Rock') || ti >= 4;
+    const tmplI = ti % underTemplates.length;
+    const tmpl = underTemplates[tmplI]!;
+    const isRock = tmpl.name.includes('Rock') || tmplI >= 4;
     const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.5 + hash01(i * 47) * 2.4;
-    placeClone(
-      tmpl,
-      `under_${i}`,
-      Math.cos(a) * r,
-      Math.sin(a) * r,
-      s,
-      hash01(i * 53) * Math.PI * 2,
+    underMats[tmplI]!.push(
+      composeInstanceMatrix(
+        ux,
+        uz,
+        s,
+        s,
+        s,
+        hash01(i * 53) * Math.PI * 2,
+      ),
     );
-    underPlaced++;
   }
-  void underPlaced;
+  for (let i = 0; i < underTemplates.length; i++) {
+    thinInstancePackRoot(underTemplates[i]!, underMats[i]!);
+  }
 
   return true;
 }
@@ -859,6 +1199,7 @@ function placeProceduralForest(scene: Scene): void {
   ];
   for (let i = 0; i < limeSpots.length; i++) {
     const s = limeSpots[i]!;
+    if (pathBlocksUnderstory(s.x, s.z)) continue;
     placeGroundDisc(scene, `limeMoss_${i}`, s.x, s.z, 0.025, s.r, 16, 1, 1, limeMat);
   }
 
@@ -869,12 +1210,31 @@ function placeProceduralForest(scene: Scene): void {
   const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.16, 0.34, 0.16));
   const underMat = makeUnderstoryMat(scene, 'understoryMat', new Color3(0.2, 0.42, 0.16));
 
+  const registerProcHero = (
+    x: number,
+    z: number,
+    scale: number,
+    silhouette: 'landmark' | 'sentinel' | 'standard',
+  ): void => {
+    const tr = (silhouette === 'landmark' ? 1.7 : silhouette === 'sentinel' ? 1.25 : 1.05) * scale;
+    registerTrunk(x, z, Math.min(3.4, Math.max(1.35, tr * 1.05)), 'hero');
+  };
   placeHeroTree(scene, 'heroElderN', 6, -40, 3.4, 0.18, trunkMatA, foliageB, 'landmark');
+  registerProcHero(6, -40, 3.4, 'landmark');
   placeHeroTree(scene, 'heroElderSW', -32, 34, 3.0, 2.15, trunkMatB, foliageA, 'landmark');
+  registerProcHero(-32, 34, 3.0, 'landmark');
   placeHeroTree(scene, 'heroSentNE', 34, -28, 2.7, 0.45, trunkMatA, foliageA, 'sentinel');
+  registerProcHero(34, -28, 2.7, 'sentinel');
   placeHeroTree(scene, 'heroSentNW', -36, -24, 2.8, -0.55, trunkMatB, foliageB, 'sentinel');
+  registerProcHero(-36, -24, 2.8, 'sentinel');
   placeHeroTree(scene, 'heroSentSE', 30, 38, 2.4, 1.05, trunkMatA, foliageC, 'standard');
+  registerProcHero(30, 38, 2.4, 'standard');
   placeHeroTree(scene, 'heroSentW', -28, 6, 2.5, -1.2, trunkMatB, foliageC, 'sentinel');
+  registerProcHero(-28, 6, 2.5, 'sentinel');
+  placeHeroTree(scene, 'heroClassicE', 20, -36, 2.6, 0.72, trunkMatA, foliageC, 'standard');
+  registerProcHero(20, -36, 2.6, 'standard');
+  placeHeroTree(scene, 'heroClassicW', -24, -38, 2.9, -0.88, trunkMatB, foliageA, 'sentinel');
+  registerProcHero(-24, -38, 2.9, 'sentinel');
 
   const midClassic = buildMergedMidTree(scene, 'midClassic', trunkMatB, foliageB, {
     trunkHeight: 7.5,
@@ -919,12 +1279,14 @@ function placeProceduralForest(scene: Scene): void {
   for (let i = 0; i < innerCount; i++) {
     const a = (i / innerCount) * Math.PI * 2 + hash01(i * 3) * 0.28;
     const r = innerR0 + hash01(i * 7) * (innerR1 - innerR0);
-    if (a > 0.12 && a < 0.52 && r < 72) continue;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
+    if (pathBlocksTree(mx, mz)) continue;
     const s = 1.6 + hash01(i * 11) * 1.4;
     const sy = s * (0.88 + hash01(i * 13) * 0.38);
     const m = composeInstanceMatrix(
-      Math.cos(a) * r,
-      Math.sin(a) * r,
+      mx,
+      mz,
       s,
       sy,
       s,
@@ -934,16 +1296,27 @@ function placeProceduralForest(scene: Scene): void {
     if (pick < 0.38) matsClassic.push(m);
     else if (pick < 0.72) matsTall.push(m);
     else matsStubby.push(m);
+    const bole =
+      pick < 0.38 ? 1.1 : pick < 0.72 ? 0.95 : 1.35;
+    registerTrunk(
+      mx,
+      mz,
+      Math.min(1.55, Math.max(0.55, (bole * 0.5) * s * 0.95)),
+      'mid',
+    );
   }
 
   const midCount = 40;
   for (let i = 0; i < midCount; i++) {
     const a = (i / midCount) * Math.PI * 2 + 0.22 + hash01(i * 5) * 0.2;
     const r = 100 + hash01(i * 9) * 28;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
+    if (pathBlocksTree(mx, mz)) continue;
     const s = 1.5 + hash01(i * 15) * 1.1;
     const m = composeInstanceMatrix(
-      Math.cos(a) * r,
-      Math.sin(a) * r,
+      mx,
+      mz,
       s,
       s * (0.95 + hash01(i * 21) * 0.25),
       s,
@@ -953,17 +1326,27 @@ function placeProceduralForest(scene: Scene): void {
     if (pick < 0.45) matsClassic.push(m);
     else if (pick < 0.78) matsTall.push(m);
     else matsStubby.push(m);
+    const bole = pick < 0.45 ? 1.1 : pick < 0.78 ? 0.95 : 1.35;
+    registerTrunk(
+      mx,
+      mz,
+      Math.min(1.55, Math.max(0.55, (bole * 0.5) * s * 0.95)),
+      'mid',
+    );
   }
 
   const farCount = 48;
   for (let i = 0; i < farCount; i++) {
     const a = (i / farCount) * Math.PI * 2 + hash01(i * 19) * 0.15;
     const r = 135 + hash01(i * 23) * 40;
+    const mx = Math.cos(a) * r;
+    const mz = Math.sin(a) * r;
+    if (pathBlocksTree(mx, mz)) continue;
     const s = 1.6 + hash01(i * 29) * 1.2;
     matsFar.push(
       composeInstanceMatrix(
-        Math.cos(a) * r,
-        Math.sin(a) * r,
+        mx,
+        mz,
         s,
         s * (1.05 + hash01(i * 31) * 0.35),
         s,
@@ -981,18 +1364,41 @@ function placeProceduralForest(scene: Scene): void {
       band < 0.35
         ? 14 + hash01(i * 53) * 16
         : 32 + hash01(i * 53) * 40;
-    if (r < 14 && a > 0.15 && a < 0.55) continue;
+    const ux = Math.cos(a) * r;
+    const uz = Math.sin(a) * r;
+    if (pathBlocksUnderstory(ux, uz)) continue;
     const s = 1.1 + hash01(i * 59) * 1.4;
     matsUnder.push(
       composeInstanceMatrix(
-        Math.cos(a) * r,
-        Math.sin(a) * r,
+        ux,
+        uz,
         s * (0.8 + hash01(i * 61) * 0.5),
         s,
         s * (0.8 + hash01(i * 67) * 0.5),
         hash01(i * 71) * Math.PI * 2,
       ),
     );
+  }
+
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + 0.35;
+    const rr = 13 + hash01(i * 91) * 4;
+    const mx = SECOND_CLEARING.x + Math.cos(a) * rr;
+    const mz = SECOND_CLEARING.z + Math.sin(a) * rr;
+    if (distToPath(mx, mz) < 5.5) continue;
+    const s = 1.8 + hash01(i * 93) * 1.0;
+    const m = composeInstanceMatrix(
+      mx,
+      mz,
+      s,
+      s * (i % 3 === 1 ? 1.22 : 1.0),
+      s,
+      hash01(i * 97) * Math.PI * 2,
+    );
+    if (i % 3 === 0) matsClassic.push(m);
+    else if (i % 3 === 1) matsTall.push(m);
+    else matsStubby.push(m);
+    registerTrunk(mx, mz, Math.min(1.55, Math.max(0.55, 0.52 * s)), 'mid');
   }
 
   thinInstanceFromMatrices(midClassic, matsClassic);
@@ -1018,11 +1424,13 @@ function placeThinUnderstory(scene: Scene): void {
     const a = hash01(i * 73) * Math.PI * 2;
     const r = 16 + hash01(i * 79) * 72;
     if (r < 12) continue;
-    if (a > 0.12 && a < 0.58 && r < 40) continue;
+    const ux = Math.cos(a) * r;
+    const uz = Math.sin(a) * r;
+    if (pathBlocksUnderstory(ux, uz)) continue;
     const s = 1.15 + hash01(i * 83) * 1.55;
     const m = composeInstanceMatrix(
-      Math.cos(a) * r,
-      Math.sin(a) * r,
+      ux,
+      uz,
       s * (0.75 + hash01(i * 89) * 0.5),
       s,
       s * (0.75 + hash01(i * 97) * 0.5),
@@ -1036,8 +1444,9 @@ function placeThinUnderstory(scene: Scene): void {
 }
 
 /**
- * Clearing path (#274): dirt vs grass, not a shiny disc. Small worn hollow
- * plus a trail that recedes SE into fog. Matte, procedural DIY.
+ * Clearing path (#274 / #342): dirt vs grass, not a shiny disc. Worn pad
+ * hollows plus a trail that *bends* north around the hero bole into a second
+ * clearing silhouette (trees/fog) — not a second zone.
  */
 function buildClearingPath(scene: Scene): void {
   const matteDirt = (name: string, diff: Color3, emit: Color3): StandardMaterial => {
@@ -1049,31 +1458,91 @@ function buildClearingPath(scene: Scene): void {
   };
 
   // Small irregular worn hollows at spawn — not a concentric disc pad.
-  // DummySpawn (5, 0) and vendor (-2.5, 2) must sit on dirt (ellipse < 1).
+  // DummySpawn (5, 0) and vendor (−2.5, 2) must sit on dirt (ellipse < 1) (#347).
   const hollowMat = matteDirt('dirtMat', new Color3(0.46, 0.34, 0.24), new Color3(0.012, 0.009, 0.006));
-  const hollows: Array<{ x: number; z: number; r: number; sx: number; sz: number }> = [
+  const hollows: Array<{ x: number; z: number; r: number; sx: number; sz: number; y?: number }> = [
     { x: 0.4, z: 0.2, r: 3.4, sx: 1.52, sz: 0.82 },
     { x: 2.6, z: 2.8, r: 2.2, sx: 1.4, sz: 0.65 },
     { x: -2.2, z: -1.4, r: 1.8, sx: 0.9, sz: 1.2 },
     { x: 1.2, z: -2.6, r: 1.5, sx: 1.5, sz: 0.7 },
-    { x: 5.0, z: 0.0, r: 1.7, sx: 1.2, sz: 0.85 },
+    { x: 5.0, z: 0.0, r: 2.05, sx: 1.28, sz: 1.05, y: DIRT_SURFACE_Y - 0.006 },
+    { x: -2.5, z: 2.0, r: 1.95, sx: 1.22, sz: 1.08, y: DIRT_SURFACE_Y - 0.006 },
   ];
   for (let i = 0; i < hollows.length; i++) {
     const h = hollows[i]!;
-    placeGroundDisc(scene, `dirtHollow_${i}`, h.x, h.z, 0.028, h.r, 16, h.sx, h.sz, hollowMat);
+    placeGroundDisc(
+      scene,
+      `dirtHollow_${i}`,
+      h.x,
+      h.z,
+      h.y ?? 0.028,
+      h.r,
+      16,
+      h.sx,
+      h.sz,
+      hollowMat,
+    );
   }
 
   const trailMat = matteDirt('pathTrailMat', new Color3(0.45, 0.33, 0.23), new Color3(0.011, 0.008, 0.005));
-  const placeTrail = (name: string, x: number, z: number, w: number, len: number, yaw: number, y: number): void => {
-    const t = MeshBuilder.CreateGround(name, { width: w, height: len, subdivisions: 2 }, scene);
-    t.position.set(x, y, z);
-    t.rotation.y = yaw;
+  for (let i = 0; i < PATH_POINTS.length - 1; i++) {
+    const a = PATH_POINTS[i]!;
+    const b = PATH_POINTS[i + 1]!;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len = Math.hypot(dx, dz);
+    const t = MeshBuilder.CreateGround(
+      `pathTrail_${i}`,
+      { width: 3.15 - i * 0.32, height: len + 1.4, subdivisions: 2 },
+      scene,
+    );
+    t.position.set((a.x + b.x) * 0.5, 0.03 - i * 0.002, (a.z + b.z) * 0.5);
+    t.rotation.y = Math.atan2(dx, dz);
     t.material = trailMat;
-  };
-  // Recedes SE through the tree gap, then a second beat further into fog.
-  placeTrail('pathTrail', 7.2, 10, 3.1, 28, -0.52, 0.03);
-  placeTrail('pathTrailFar', 18, 32, 2.5, 36, -0.38, 0.028);
-  placeTrail('pathTrailFar2', 28, 58, 2.1, 28, -0.22, 0.026);
+    t.isPickable = false;
+  }
+  for (let i = 1; i < PATH_POINTS.length - 1; i++) {
+    const p = PATH_POINTS[i]!;
+    const t = i / (PATH_POINTS.length - 1);
+    placeGroundDisc(
+      scene,
+      `pathBend_${i}`,
+      p.x,
+      p.z,
+      0.032,
+      2.4 - t * 0.6,
+      14,
+      1,
+      1,
+      trailMat,
+    );
+  }
+
+  // Second clearing — a worn hollow in fog, same dirt language as the pad.
+  placeGroundDisc(
+    scene,
+    'secondClearingHollow',
+    SECOND_CLEARING.x,
+    SECOND_CLEARING.z,
+    0.027,
+    6.4,
+    18,
+    1.15,
+    0.88,
+    hollowMat,
+  );
+  placeGroundDisc(
+    scene,
+    'secondClearingHollow2',
+    SECOND_CLEARING.x + 2.4,
+    SECOND_CLEARING.z - 1.6,
+    0.026,
+    3.6,
+    14,
+    1.2,
+    0.75,
+    hollowMat,
+  );
 
   // Faint moss patches near path — soft grass→dirt value variation (no terrain system).
   const mossPatchMat = new StandardMaterial('pathMossPatchMat', scene);
@@ -1083,8 +1552,9 @@ function buildClearingPath(scene: Scene): void {
   const mossPatches: Array<{ x: number; z: number; r: number }> = [
     { x: -7.2, z: 3.4, r: 1.1 },
     { x: 6.8, z: -5.5, r: 0.95 },
-    { x: -4.5, z: -7.0, r: 1.05 },
-    { x: 8.8, z: 2.2, r: 0.85 },
+    { x: -8.2, z: -18, r: 1.05 },
+    { x: 1.8, z: -48, r: 0.9 },
+    { x: 8.8, z: -72, r: 1.0 },
   ];
   for (let i = 0; i < mossPatches.length; i++) {
     const p = mossPatches[i]!;
@@ -1096,16 +1566,19 @@ function buildClearingPath(scene: Scene): void {
   cobbleMat.diffuseColor = new Color3(0.46, 0.4, 0.32);
   cobbleMat.specularColor = new Color3(0.012, 0.01, 0.008);
   cobbleMat.emissiveColor = new Color3(0.01, 0.008, 0.006);
-  const cobbleSpots: Array<{ x: number; z: number; r: number }> = [
-    { x: 0.6, z: 0.8, r: 0.5 },
-    { x: 4.2, z: 5.5, r: 0.42 },
-    { x: 8.0, z: 11.5, r: 0.4 },
-    { x: 12.5, z: 20, r: 0.38 },
-    { x: 17, z: 30, r: 0.44 },
-    { x: 22, z: 40, r: 0.36 },
-    { x: 26, z: 52, r: 0.4 },
-    { x: 30, z: 64, r: 0.34 },
-  ];
+  const cobbleSpots: Array<{ x: number; z: number; r: number }> = [];
+  for (let i = 0; i < 10; i++) {
+    const u = i / 9;
+    const seg = Math.min(PATH_POINTS.length - 2, Math.floor(u * (PATH_POINTS.length - 1)));
+    const a = PATH_POINTS[seg]!;
+    const b = PATH_POINTS[seg + 1]!;
+    const tt = u * (PATH_POINTS.length - 1) - seg;
+    cobbleSpots.push({
+      x: a.x + (b.x - a.x) * tt + (hash01(i * 71) - 0.5) * 1.4,
+      z: a.z + (b.z - a.z) * tt + (hash01(i * 73) - 0.5) * 1.2,
+      r: 0.5 - i * 0.016,
+    });
+  }
   for (let i = 0; i < cobbleSpots.length; i++) {
     const s = cobbleSpots[i]!;
     placeGroundDisc(scene, `pathCobble_${i}`, s.x, s.z, 0.04, s.r, 10, 1, 1, cobbleMat);
@@ -1127,15 +1600,151 @@ function buildClearingPath(scene: Scene): void {
   stoneProto.material = stoneMat;
   for (let i = 0; i < 16; i++) {
     const inst = stoneProto.createInstance(`pathStone_${i}`);
-    const t = i / 15;
-    const x = 1.2 + t * 28 + (hash01(i * 41) - 0.5) * 2.4;
-    const z = 0.8 + t * 62 + (hash01(i * 47) - 0.5) * 2.2;
+    const u = i / 15;
+    const seg = Math.min(PATH_POINTS.length - 2, Math.floor(u * (PATH_POINTS.length - 1)));
+    const a = PATH_POINTS[seg]!;
+    const b = PATH_POINTS[seg + 1]!;
+    const tt = u * (PATH_POINTS.length - 1) - seg;
+    const x = a.x + (b.x - a.x) * tt + (hash01(i * 41) - 0.5) * 2.0;
+    const z = a.z + (b.z - a.z) * tt + (hash01(i * 47) - 0.5) * 1.8;
     inst.position.set(x, 0.045, z);
     inst.rotation.y = hash01(i * 53) * Math.PI;
     const s = 0.55 + hash01(i * 59) * 0.9;
     inst.scaling.set(s, 0.7 + hash01(i * 61) * 0.5, s * (0.7 + hash01(i * 67) * 0.5));
     inst.setEnabled(true);
   }
+}
+
+/**
+ * Cheap contact blobs (#346) — not cascade ShadowGenerator (fillrate).
+ * Disc + radial DynamicTexture, ALPHABLEND, no depth write. Sit above path
+ * discs (y≈0.04) so they do not z-fight the dirt.
+ */
+const BLOB_Y = 0.058;
+const PLAYER_BLOB_R = 1.05;
+/** Sun dir XZ (#277) so blobs fall slightly off-center, not a stamp. */
+const BLOB_FALL_X = -0.72;
+const BLOB_FALL_Z = -0.28;
+let playerBlobShadow: Mesh | null = null;
+
+function makeBlobShadowMat(
+  scene: Scene,
+  name: string,
+  /** Center opacity. Player sits on dirt hollows — needs more than grass. */
+  centerAlpha: number,
+): StandardMaterial {
+  const size = 64;
+  const tex = new DynamicTexture(`${name}Tex`, size, scene, false);
+  tex.hasAlpha = true;
+  tex.wrapU = Texture.CLAMP_ADDRESSMODE;
+  tex.wrapV = Texture.CLAMP_ADDRESSMODE;
+  const ctx = tex.getContext();
+  const g = ctx.createRadialGradient(
+    size * 0.5,
+    size * 0.5,
+    1,
+    size * 0.5,
+    size * 0.5,
+    size * 0.48,
+  );
+  g.addColorStop(0, `rgba(4,6,10,${centerAlpha})`);
+  g.addColorStop(0.38, `rgba(4,6,10,${centerAlpha * 0.5})`);
+  g.addColorStop(0.78, `rgba(4,6,10,${centerAlpha * 0.1})`);
+  g.addColorStop(1, 'rgba(4,6,10,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  tex.update();
+
+  const m = new StandardMaterial(name, scene);
+  m.diffuseTexture = tex;
+  m.opacityTexture = tex;
+  m.diffuseColor = new Color3(0.04, 0.045, 0.05);
+  m.emissiveColor = new Color3(0, 0, 0);
+  m.specularColor = new Color3(0, 0, 0);
+  m.useAlphaFromDiffuseTexture = true;
+  m.transparencyMode = Material.MATERIAL_ALPHABLEND;
+  m.backFaceCulling = false;
+  m.disableLighting = true;
+  m.disableDepthWrite = true;
+  m.needDepthPrePass = false;
+  m.zOffset = -2;
+  m.fogEnabled = true;
+  return m;
+}
+
+function placeBlobDisc(
+  scene: Scene,
+  name: string,
+  x: number,
+  z: number,
+  radius: number,
+  mat: StandardMaterial,
+): Mesh {
+  const d = MeshBuilder.CreateDisc(name, { radius, tessellation: 18 }, scene);
+  d.rotation.x = Math.PI / 2;
+  d.position.set(x, BLOB_Y, z);
+  // After rot.x=π/2, scaling.y is world-Z ellipse (#299).
+  d.scaling.x = 1.18;
+  d.scaling.y = 0.8;
+  d.material = mat;
+  d.isPickable = false;
+  d.receiveShadows = false;
+  d.applyFog = true;
+  d.checkCollisions = false;
+  return d;
+}
+
+function placeContactShadows(scene: Scene): void {
+  playerBlobShadow = null;
+  const heroMat = makeBlobShadowMat(scene, 'heroBlobShadowMat', 0.62);
+  const playerMat = makeBlobShadowMat(scene, 'playerBlobShadowMat', 0.88);
+  const fl = Math.hypot(BLOB_FALL_X, BLOB_FALL_Z) || 1;
+  const ux = BLOB_FALL_X / fl;
+  const uz = BLOB_FALL_Z / fl;
+  playerBlobShadow = placeBlobDisc(
+    scene,
+    'playerBlobShadow',
+    ux * 0.1,
+    uz * 0.1,
+    PLAYER_BLOB_R,
+    playerMat,
+  );
+
+  let n = 0;
+  for (const c of trunkCapsules) {
+    if (c.kind !== 'hero') continue;
+    const r = Math.max(2.2, Math.min(3.8, c.radius * 0.45));
+    const d = placeBlobDisc(
+      scene,
+      `heroBlobShadow_${n}`,
+      c.x + ux * r * 0.28,
+      c.z + uz * r * 0.28,
+      r,
+      heroMat,
+    );
+    d.freezeWorldMatrix();
+    n += 1;
+  }
+  if (n === 0) {
+    const r = 2.8;
+    const d = placeBlobDisc(
+      scene,
+      'heroBlobShadow_0',
+      COLLISION_VE_HERO.x + ux * r * 0.28,
+      COLLISION_VE_HERO.z + uz * r * 0.28,
+      r,
+      heroMat,
+    );
+    d.freezeWorldMatrix();
+  }
+}
+
+/** Presentation follow for the player contact blob. Not a client position. */
+export function setPlayerBlobShadow(x: number, z: number): void {
+  if (!playerBlobShadow) return;
+  const fl = Math.hypot(BLOB_FALL_X, BLOB_FALL_Z) || 1;
+  playerBlobShadow.position.x = x + (BLOB_FALL_X / fl) * 0.1;
+  playerBlobShadow.position.z = z + (BLOB_FALL_Z / fl) * 0.1;
 }
 
 /**
@@ -1149,6 +1758,8 @@ export async function buildForestClearing(scene: Scene): Promise<{
   hemi: HemisphericLight;
   sun: DirectionalLight;
 }> {
+  trunkCapsules.length = 0;
+
   // Atmosphere: #270 fog/sky + #277 cool forest interior (lifts #39 midday key).
   scene.clearColor = new Color4(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b, 1);
   scene.fogMode = Scene.FOGMODE_LINEAR;
@@ -1189,10 +1800,10 @@ export async function buildForestClearing(scene: Scene): Promise<{
   const mossClumps: Array<{ x: number; z: number; r: number }> = [
     { x: -5.5, z: 4.2, r: 2.4 },
     { x: 6.5, z: -3.8, r: 2.0 },
-    { x: -3.2, z: -6.5, r: 1.7 },
-    { x: 8.5, z: 5.0, r: 1.9 },
-    { x: 14, z: 16, r: 2.2 },
-    { x: 22, z: 36, r: 1.8 },
+    { x: -8.4, z: -20, r: 1.7 },
+    { x: -14, z: -40, r: 1.9 },
+    { x: 6, z: -70, r: 2.0 },
+    { x: 20, z: -80, r: 1.8 },
   ];
   for (let i = 0; i < mossClumps.length; i++) {
     const c = mossClumps[i]!;
@@ -1220,6 +1831,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
     placeProceduralForest(scene);
   }
   placeThinUnderstory(scene);
+  placeContactShadows(scene);
 
   // Hybrid: mountains stay procedural (pack mountains optional / heavy).
   buildMountainBackdrop(scene);

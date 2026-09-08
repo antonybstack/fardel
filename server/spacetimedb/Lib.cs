@@ -5,7 +5,9 @@ using SpacetimeDB;
 
 public static partial class Module
 {
-    public const int NpcKindDummy = 1;
+    public const int NpcKindDummy = Combat.NpcKindDummy;
+    public const int NpcKindHostile = Combat.NpcKindHostile;
+    public const int NpcKindBrigand = Combat.NpcKindBrigand;
 
     [SpacetimeDB.Table(Accessor = "PlayerPose", Public = true)]
     public partial struct PlayerPose
@@ -145,6 +147,19 @@ public static partial class Module
         public float Z;
         public int Hp;
         public int MaxHp;
+        /// <summary>Home pad. Hostiles leash back here (#355). Dummy unused.</summary>
+        [SpacetimeDB.Default(0f)]
+        public float SpawnX;
+        [SpacetimeDB.Default(0f)]
+        public float SpawnY;
+        [SpacetimeDB.Default(0f)]
+        public float SpawnZ;
+        /// <summary>True while chasing a living player. Cleared on leash / no prey.</summary>
+        [SpacetimeDB.Default(false)]
+        public bool Aggroed;
+        /// <summary>Next auto-attack eligible at this unix micros. 0 = swing on first melee (#356).</summary>
+        [SpacetimeDB.Default(0)]
+        public long NextSwingAtMicros;
     }
 
     /// <summary>Ground loot in the yard — SeedLoot / dummy death inserts; Pickup despawns.</summary>
@@ -266,11 +281,22 @@ public static partial class Module
         public Identity Player;
     }
 
+    /// <summary>#355 — repeating proximity aggro / leash tick. Not public (clients watch Npc XZ).</summary>
+    [SpacetimeDB.Table(Accessor = "PendingHostileTick", Scheduled = nameof(TickHostiles), ScheduledAt = nameof(ScheduledAt))]
+    public partial struct PendingHostileTick
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong ScheduleId;
+        public ScheduleAt ScheduledAt;
+    }
+
     [SpacetimeDB.Reducer(ReducerKind.ClientConnected)]
     public static void ClientConnected(ReducerContext ctx)
     {
         Log.Info($"Client connected: {ctx.Sender}");
         EnsureDummy(ctx);
+        EnsureHostiles(ctx);
+        EnsureHostileTicker(ctx);
         EnsureVendor(ctx);
         EnsureCharacter(ctx, ctx.Sender);
         EnsureSession(ctx, ctx.Sender);
@@ -1194,6 +1220,240 @@ public static partial class Module
         });
     }
 
+    static bool HasHostileForPad(ReducerContext ctx, float x, float z)
+    {
+        foreach (var n in ctx.Db.Npc.Iter())
+        {
+            if (!Combat.IsHostileKind(n.Kind))
+            {
+                continue;
+            }
+            var hx = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnX : n.X;
+            var hz = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnZ : n.Z;
+            var dx = hx - x;
+            var dz = hz - z;
+            if (dx * dx + dz * dz < 0.25f)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static void InsertHostile(ReducerContext ctx, float x, float y, float z, int kind)
+    {
+        ctx.Db.Npc.Insert(new Npc
+        {
+            Kind = kind,
+            X = x,
+            Y = y,
+            Z = z,
+            Hp = Combat.HostileMaxHp,
+            MaxHp = Combat.HostileMaxHp,
+            SpawnX = x,
+            SpawnY = y,
+            SpawnZ = z,
+            Aggroed = false,
+        });
+    }
+
+    /// <summary>#354 Kind=2 pads A/B + #418 Kind=3 pad C (dummy stays trainer).</summary>
+    static void EnsureHostiles(ReducerContext ctx)
+    {
+        if (!HasHostileForPad(ctx, Combat.HostileSpawnAx, Combat.HostileSpawnAz))
+        {
+            InsertHostile(ctx, Combat.HostileSpawnAx, Combat.HostileSpawnAy, Combat.HostileSpawnAz, NpcKindHostile);
+        }
+        if (!HasHostileForPad(ctx, Combat.HostileSpawnBx, Combat.HostileSpawnBz))
+        {
+            InsertHostile(ctx, Combat.HostileSpawnBx, Combat.HostileSpawnBy, Combat.HostileSpawnBz, NpcKindHostile);
+        }
+        if (!HasHostileForPad(ctx, Combat.HostileSpawnCx, Combat.HostileSpawnCz))
+        {
+            InsertHostile(ctx, Combat.HostileSpawnCx, Combat.HostileSpawnCy, Combat.HostileSpawnCz, NpcKindBrigand);
+        }
+
+        var backfill = new System.Collections.Generic.List<Npc>();
+        foreach (var n in ctx.Db.Npc.Iter())
+        {
+            if (!Combat.IsHostileKind(n.Kind))
+            {
+                continue;
+            }
+            if (MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f)
+            {
+                continue;
+            }
+            var row = n;
+            row.SpawnX = n.X;
+            row.SpawnY = n.Y;
+            row.SpawnZ = n.Z;
+            backfill.Add(row);
+        }
+        foreach (var row in backfill)
+        {
+            ctx.Db.Npc.NpcId.Update(row);
+        }
+    }
+
+    static void EnsureHostileTicker(ReducerContext ctx)
+    {
+        foreach (var _ in ctx.Db.PendingHostileTick.Iter())
+        {
+            return;
+        }
+
+        ctx.Db.PendingHostileTick.Insert(new PendingHostileTick
+        {
+            ScheduledAt = new ScheduleAt.Time(ctx.Timestamp + Ms(Combat.HostileTickMs)),
+        });
+    }
+
+    /// <summary>#355 proximity aggro/leash + #356 melee auto-attack cadence.</summary>
+    [SpacetimeDB.Reducer]
+    public static void TickHostiles(ReducerContext ctx, PendingHostileTick job)
+    {
+        _ = job;
+        StepHostiles(ctx);
+        ctx.Db.PendingHostileTick.Insert(new PendingHostileTick
+        {
+            ScheduledAt = new ScheduleAt.Time(ctx.Timestamp + Ms(Combat.HostileTickMs)),
+        });
+    }
+
+    static void StepHostiles(ReducerContext ctx)
+    {
+        var snapshot = new System.Collections.Generic.List<Npc>();
+        foreach (var n in ctx.Db.Npc.Iter())
+        {
+            snapshot.Add(n);
+        }
+
+        foreach (var n in snapshot)
+        {
+            if (!Combat.IsHostileKind(n.Kind) || n.Hp <= 0)
+            {
+                continue;
+            }
+
+            var row = n;
+            if (MathF.Abs(row.SpawnX) < 0.01f && MathF.Abs(row.SpawnZ) < 0.01f)
+            {
+                row.SpawnX = row.X;
+                row.SpawnY = row.Y;
+                row.SpawnZ = row.Z;
+            }
+
+            var homeDx = row.X - row.SpawnX;
+            var homeDz = row.Z - row.SpawnZ;
+            var homeDist = MathF.Sqrt(homeDx * homeDx + homeDz * homeDz);
+            var hasPrey = TryNearestLivingPlayer(ctx, row.X, row.Z, out var preyId, out var px, out var pz, out var preyDist);
+            var overLeash = homeDist > Combat.HostileLeashRadius;
+
+            if (row.Aggroed)
+            {
+                if (overLeash || !hasPrey)
+                {
+                    row.Aggroed = false;
+                    row.NextSwingAtMicros = 0;
+                    StepToward(ref row, row.SpawnX, row.SpawnZ, Combat.HostileStepMeters);
+                }
+                else
+                {
+                    StepToward(ref row, px, pz, Combat.HostileStepMeters);
+                    MaybeHostileSwing(ctx, ref row, preyId, px, pz);
+                }
+            }
+            else if (homeDist > 0.2f)
+            {
+                StepToward(ref row, row.SpawnX, row.SpawnZ, Combat.HostileStepMeters);
+            }
+            else if (hasPrey && preyDist <= Combat.HostileAggroRadius)
+            {
+                row.Aggroed = true;
+                StepToward(ref row, px, pz, Combat.HostileStepMeters);
+                MaybeHostileSwing(ctx, ref row, preyId, px, pz);
+            }
+
+            ctx.Db.Npc.NpcId.Update(row);
+        }
+    }
+
+    static void MaybeHostileSwing(ReducerContext ctx, ref Npc row, Identity preyId, float px, float pz)
+    {
+        var dx = px - row.X;
+        var dz = pz - row.Z;
+        var d = MathF.Sqrt(dx * dx + dz * dz);
+        if (d > Combat.HostileMeleeRange)
+        {
+            return;
+        }
+
+        var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        if (row.NextSwingAtMicros > 0 && now < row.NextSwingAtMicros)
+        {
+            return;
+        }
+
+        ApplyPlayerDamage(ctx, preyId, Combat.HostileAttackDamage);
+        row.NextSwingAtMicros = now + (long)Combat.HostileAttackMs * 1000L;
+    }
+
+    static bool TryNearestLivingPlayer(
+        ReducerContext ctx,
+        float x,
+        float z,
+        out Identity id,
+        out float px,
+        out float pz,
+        out float dist)
+    {
+        id = default;
+        px = 0f;
+        pz = 0f;
+        dist = float.MaxValue;
+        var found = false;
+        foreach (var pose in ctx.Db.PlayerPose.Iter())
+        {
+            if (ctx.Db.Character.Identity.Find(pose.Identity) is not { Hp: > 0 })
+            {
+                continue;
+            }
+
+            var dx = pose.X - x;
+            var dz = pose.Z - z;
+            var d = MathF.Sqrt(dx * dx + dz * dz);
+            if (d >= dist)
+            {
+                continue;
+            }
+
+            dist = d;
+            id = pose.Identity;
+            px = pose.X;
+            pz = pose.Z;
+            found = true;
+        }
+
+        return found;
+    }
+
+    static void StepToward(ref Npc n, float tx, float tz, float step)
+    {
+        var dx = tx - n.X;
+        var dz = tz - n.Z;
+        var len = MathF.Sqrt(dx * dx + dz * dz);
+        if (len <= step || len <= 1e-4f)
+        {
+            n.X = tx;
+            n.Z = tz;
+            return;
+        }
+
+        n.X += dx / len * step;
+        n.Z += dz / len * step;
+    }
+
     static void ApplyDamage(ReducerContext ctx, Identity caster, ulong npcId, int damage)
     {
         if (ctx.Db.Npc.NpcId.Find(npcId) is not { } row || row.Hp <= 0)
@@ -1202,20 +1462,28 @@ public static partial class Module
         }
 
         row.Hp = Math.Max(0, row.Hp - damage);
+        if (row.Hp == 0)
+        {
+            row.Aggroed = false;
+        }
         ctx.Db.Npc.NpcId.Update(row);
 
         if (row.Hp == 0 && ctx.Db.Character.Identity.Find(caster) is { } character)
         {
             AddCharacterXp(ref character, Combat.XpPerKill);
             ctx.Db.Character.Identity.Update(character);
-            Log.Info($"Dummy killed by {caster}, xp={character.Xp} level={character.Level}");
+            Log.Info($"Npc {row.NpcId} kind={row.Kind} killed by {caster}, xp={character.Xp} level={character.Level}");
             SharePartyKillXp(ctx, caster);
+            // Dummy + hostiles both drop ember_shard WorldLoot. Pickup is F. (#357)
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
             SharePartyLootDrop(ctx, caster, row.X, row.Y, row.Z);
         }
 
-        // Dummy thorns — light player HP proof without changing Cast targeting.
-        ApplyPlayerDamage(ctx, caster, Combat.DummyThornsDamage);
+        // Dummy thorns only — hostiles hit back in #356, not here.
+        if (row.Kind == NpcKindDummy)
+        {
+            ApplyPlayerDamage(ctx, caster, Combat.DummyThornsDamage);
+        }
     }
 
     /// <summary>Subtract player HP; on Hp≤0 clear target and schedule yard respawn.</summary>

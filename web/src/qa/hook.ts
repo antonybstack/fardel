@@ -11,7 +11,12 @@ export type QaState = {
   database: string;
   identityHex: string | null;
   player: { x: number; y: number; z: number };
-  camera: { alpha: number; beta: number; radius: number };
+  camera: {
+    alpha: number;
+    beta: number;
+    radius: number;
+    inertialAlphaOffset: number;
+  };
   keys: string[];
   targetNpcId: string | null;
   hp: number | null;
@@ -62,7 +67,12 @@ export function installQaHook(api: QaApi): void {
         database: status.database,
         identityHex: status.state === 'connected' ? status.identityHex : null,
         player: { x: player.position.x, y: player.position.y, z: player.position.z },
-        camera: { alpha: camera.alpha, beta: camera.beta, radius: camera.radius },
+        camera: {
+          alpha: camera.alpha,
+          beta: camera.beta,
+          radius: camera.radius,
+          inertialAlphaOffset: camera.inertialAlphaOffset,
+        },
         keys: [...api.getKeys()],
         targetNpcId: combat && combat.targetNpcId !== 0n ? combat.targetNpcId.toString() : null,
         hp: ch?.hp ?? null,

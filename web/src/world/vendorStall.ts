@@ -100,6 +100,17 @@ export function createVendorStall(
     post.position.set(sx * halfW, postH * 0.5, sz * halfD);
     post.material = woodMat;
     post.isPickable = false;
+
+    // Foot block — post meets dirt, not a hover over grass (#347).
+    const foot = MeshBuilder.CreateBox(
+      `${prefix}_foot_${tag}`,
+      { width: 0.18, height: 0.05, depth: 0.18 },
+      scene,
+    );
+    foot.parent = body;
+    foot.position.set(sx * halfW, 0.025, sz * halfD);
+    foot.material = woodMat;
+    foot.isPickable = false;
   }
 
   // Ridge beams (front/back) + side beams under awning.

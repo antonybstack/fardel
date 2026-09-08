@@ -16,7 +16,7 @@ public static class Loot
     public const float SeedY = 0.4f;
     public const float SeedZ = 1.2f;
 
-    /// <summary>Offset from dead dummy when auto-dropping ember_shard.</summary>
+    /// <summary>Offset from dead dummy/hostile corpse when auto-dropping ember_shard (#357 reuses WorldLoot).</summary>
     public const float DeathDropOffsetX = 0.6f;
     public const float DeathDropOffsetZ = 0.4f;
 

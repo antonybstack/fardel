@@ -60,6 +60,11 @@ export const Npc = __t.object("Npc", {
   z: __t.f32(),
   hp: __t.i32(),
   maxHp: __t.i32(),
+  spawnX: __t.f32(),
+  spawnY: __t.f32(),
+  spawnZ: __t.f32(),
+  aggroed: __t.bool(),
+  nextSwingAtMicros: __t.i64(),
 });
 export type Npc = __Infer<typeof Npc>;
 
@@ -94,6 +99,12 @@ export const PendingCast = __t.object("PendingCast", {
   targetNpcId: __t.u64(),
 });
 export type PendingCast = __Infer<typeof PendingCast>;
+
+export const PendingHostileTick = __t.object("PendingHostileTick", {
+  scheduleId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+});
+export type PendingHostileTick = __Infer<typeof PendingHostileTick>;
 
 export const PendingPlayerRespawn = __t.object("PendingPlayerRespawn", {
   scheduleId: __t.u64(),

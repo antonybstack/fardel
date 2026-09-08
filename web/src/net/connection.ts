@@ -33,6 +33,22 @@ export const STUN_MANA_COST = 15;
 export const STUN_RANGE_METERS = 5;
 export const STUN_DURATION_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
+/** Match Combat.NpcKindHostile — yard hostiles (#354). Dummy stays trainer. */
+export const NPC_KIND_HOSTILE = 2;
+/** Match Combat.NpcKindBrigand — second hostile type (#418). Same AI as Kind=2. */
+export const NPC_KIND_BRIGAND = 3;
+
+/** Match Combat.IsHostileKind — Kind=2 and Kind=3 share hunt AI. */
+export function isHostileKind(kind: number): boolean {
+  return kind === NPC_KIND_HOSTILE || kind === NPC_KIND_BRIGAND;
+}
+/** Match Combat.HostileAggroRadius / HostileLeashRadius (#355). */
+export const HOSTILE_AGGRO_RADIUS = 3;
+export const HOSTILE_LEASH_RADIUS = 12;
+/** Match Combat.HostileMeleeRange / HostileAttackMs / HostileAttackDamage (#356). */
+export const HOSTILE_MELEE_RANGE = 2;
+export const HOSTILE_ATTACK_MS = 1500;
+export const HOSTILE_ATTACK_DAMAGE = 8;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
 export const EMBERBOLT_MANA_COST = 20;
@@ -73,6 +89,10 @@ export type NpcView = {
   z: number;
   hp: number;
   maxHp: number;
+  spawnX: number;
+  spawnY: number;
+  spawnZ: number;
+  aggroed: boolean;
 };
 
 export type CrowdProxyView = {
@@ -454,6 +474,10 @@ type NpcRow = {
   z: number;
   hp: number;
   maxHp: number;
+  spawnX?: number;
+  spawnY?: number;
+  spawnZ?: number;
+  aggroed?: boolean;
 };
 
 type CharacterRow = {
@@ -553,6 +577,10 @@ function npcView(row: NpcRow): NpcView {
     z: row.z,
     hp: row.hp,
     maxHp: row.maxHp,
+    spawnX: row.spawnX ?? 0,
+    spawnY: row.spawnY ?? 0,
+    spawnZ: row.spawnZ ?? 0,
+    aggroed: !!row.aggroed,
   };
 }
 

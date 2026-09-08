@@ -31,6 +31,61 @@ public static class Combat
     public const float DummySpawnY = 0f;
     public const float DummySpawnZ = 0f;
 
+    /// <summary>Training dummy (Kind=1). Hostiles are a separate type.</summary>
+    public const int NpcKindDummy = 1;
+    /// <summary>Hostile NPC kind. Two yard spawns, not origin. Dummy stays trainer.</summary>
+    public const int NpcKindHostile = 2;
+    /// <summary>
+    /// Second hostile type (#418). Same aggro/leash/auto-attack/loot as Kind=2.
+    /// Distinct nameplate (Brigand). Dummy stays trainer.
+    /// </summary>
+    public const int NpcKindBrigand = 3;
+
+    /// <summary>Kind=2 and Kind=3 share hunt AI. Dummy (1) is the trainer.</summary>
+    public static bool IsHostileKind(int kind) =>
+        kind == NpcKindHostile || kind == NpcKindBrigand;
+
+    public const int HostileMaxHp = 40;
+    public const float HostileSpawnAx = 3f;
+    public const float HostileSpawnAy = 0f;
+    public const float HostileSpawnAz = 7f;
+    public const float HostileSpawnBx = -7f;
+    public const float HostileSpawnBy = 0f;
+    public const float HostileSpawnBz = 3f;
+    /// <summary>
+    /// Kind=3 pad C. ~7.6m from origin (no connect pull). ~3.6m from dummy so
+    /// CombatSmoke at dummy stays outside AggroRadius (3.0). CastRangeSmoke
+    /// far-pose (−5,0) is ~12m — keep AggroRadius under 3.6.
+    /// Pads A/B stay Kind=2 so Hostile* smokes that pin Kind==2 stay green.
+    /// </summary>
+    public const float HostileSpawnCx = 7f;
+    public const float HostileSpawnCy = 0f;
+    public const float HostileSpawnCz = -3f;
+
+    /// <summary>
+    /// Proximity pull (#355). Must stay under CastRangeSmoke far-pose vs pad B
+    /// (~3.6m at x=-5,z=0). Origin is ~7.6m from both pads — no pull on connect.
+    /// </summary>
+    public const float HostileAggroRadius = 3.0f;
+    /// <summary>Drop chase and walk home when the hostile is this far from spawn.</summary>
+    public const float HostileLeashRadius = 12f;
+    public const int HostileTickMs = 100;
+    /// <summary>~4 m/s. Players outrun this (MaxStep 0.75 at ~20Hz).</summary>
+    public const float HostileStepMeters = 0.4f;
+
+    /// <summary>
+    /// Auto-attack XZ range while aggroed (#356). Inside AggroRadius so a 3m
+    /// pull is not an instant hit until the hostile closes.
+    /// </summary>
+    public const float HostileMeleeRange = 2.0f;
+    /// <summary>Millis between swings. Dummy thorns stay the trainer poke.</summary>
+    public const int HostileAttackMs = 1500;
+    /// <summary>
+    /// Per swing. Sized so PlayerMaxHp survives a short pull and dummy-path
+    /// smokes (CombatSmoke) stay outside AggroRadius.
+    /// </summary>
+    public const int HostileAttackDamage = 8;
+
     /// <summary>Player Character.MaxHp seed (durable).</summary>
     public const int PlayerMaxHp = 100;
 
