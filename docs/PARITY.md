@@ -12,7 +12,7 @@ The 2026-09-08 Pages cut (`00cfbcfe`) shipped a working *session* (connect, WASD
 
 1. **Hop** — `#139` squash/stretch on `root.scaling` rubber-bands the wizard; `jumpCamDipY` slams the camera on land; `Move` applies full XZ wish in air (not WoW air-control).
 2. **Body** — `humanoid.ts` **detaches skeletons** (`m.skeleton = null`) and nulls Idle/Walk/Spell groups because skinned draw was a black mesh. Live character is a T-pose bind-pose. Clips are in the GLB; we turned them off.
-3. **Place** — 120 m disc, orange debug capsules, locked `#39` EXP2 cyan fog (`density 0.015`) fighting the sky dome. Kitbash, not a WoW clearing.
+3. **Place** — 120 m disc, orange debug capsules, locked `#39` EXP2 cyan fog (`density 0.015`) fighting the sky dome. Kitbash, not a WoW/hordes clearing. **Frame of reference (ignore blocky characters):** [hordes Guardstone Forest](https://ve.sparkify.dev/parity/hordes-place-ref.jpg) — player tiny vs trunks, path receding into dusk-blue volume, lush understory. Do not copy those meshes.
 
 Hunt NPCs and toast chrome do not fix these. This document is the replacement north star until hop, body, and place are on Pages.
 
@@ -32,7 +32,7 @@ Hunt NPCs and toast chrome do not fix these. This document is the replacement no
 |------|----------------|-----------------|-------|
 | **E1 Hop** | Rubber-band + camera slam + full air-strafe | Revert squash/dip; damp air XZ; retune jump; camera spring | Slopes, fall distance, collision, jump-queue |
 | **E2 Body** | T-pose, no look, no walk/cast | Skinned draw + Idle/Walk/yaw + cast clip | Jump/fall poses, remotes, death, look-at |
-| **E3 Place** | Toy pad, fog artifacts, capsules | Fog/sky match; hide capsules; scale trees/mountains; lift `#39` | Pack pass, understory, second clearing |
+| **E3 Place** | Toy pad, fog artifacts, capsules | Match [hordes place ref](https://ve.sparkify.dev/parity/hordes-place-ref.jpg): scale, receding path, dusk-blue depth, no capsules | Pack pass, understory, second clearing |
 | **E4 Camera** | Orbit exists; slam/collision do not | Covered under E1 camera spring | Camera collision vs trees, zoom stops, RMB feel |
 | **E5 Combat body** | Spells work; body does not sell them | Cast clip in E2 | 4-skill book, telegraphs that match anim |
 | **E6 Hunt** | Dummy is the game | **Parked** until E1–E3 on Pages | Hostiles, aggro, corpse loot |
@@ -99,6 +99,18 @@ If any of the three fail, do not start hunt/PvP.
 | 10 | Optional: look-at / head toward target | client | After yaw. |
 
 ### E3 Place — Dev4
+
+**Visual lock (ignore characters):** [hordes.io Guardstone Forest](https://ve.sparkify.dev/parity/hordes-place-ref.jpg)
+
+| Copy | Do not copy |
+|------|-------------|
+| Player **tiny vs trunks**; canopy leaves the frame | Blocky cube avatars, hordes HUD, chat |
+| Path that **recedes into dusk-blue volume** | 120 m dirt disc |
+| Layered cool fog; distant trees dissolve | Cyan EXP2 banding / sky-fog mismatch |
+| Lush grass + understory beside the path | Plastic green pad + orange capsules |
+| Cool forest interior light | Midday toy lighting |
+
+Judge `?ve=place-wow` against that shot. Free/OSS or our kitbash only — do not rip hordes meshes.
 
 | Order | Issue intent | Lane | Notes |
 |-------|----------------|------|-------|
