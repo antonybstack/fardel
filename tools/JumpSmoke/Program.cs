@@ -109,6 +109,83 @@ try
         return;
     }
 
+    // Airborne anti multi-jump (#120): after VelY has decayed, a discrete second
+    // Move(0,0,jump:true) must not snap VelY back to JumpVelocity. Distinct from
+    // hold-Space continuous jump:true (#157).
+    PlayerPose? decayPose = conn.Db.PlayerPose.Identity.Find(identity);
+    using (var decayCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!decayCts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            decayPose = conn.Db.PlayerPose.Identity.Find(identity);
+            if (decayPose is { } d
+                && d.Y > Movement.GroundY + 0.08f
+                && d.VelY < Movement.JumpVelocity - 1f)
+            {
+                break;
+            }
+            conn.Reducers.Move(0f, 0f, jump: false);
+            try
+            {
+                await Task.Delay(50, decayCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (decayPose is null
+        || decayPose.Y <= Movement.GroundY + 0.08f
+        || decayPose.VelY >= Movement.JumpVelocity - 1f)
+    {
+        Fail($"airborne decay timeout before anti multi-jump (Y={decayPose?.Y} VelY={decayPose?.VelY})");
+        return;
+    }
+    var airVelBefore = decayPose.VelY;
+    var airYBefore = decayPose.Y;
+    conn.Reducers.Move(0f, 0f, jump: true);
+    PlayerPose? airAfterJump = null;
+    using (var airJumpCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!airJumpCts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            airAfterJump = conn.Db.PlayerPose.Identity.Find(identity);
+            if (airAfterJump is { } a && MathF.Abs(a.VelY - airVelBefore) > 0.01f)
+            {
+                break;
+            }
+            try
+            {
+                await Task.Delay(16, airJumpCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+    if (airAfterJump is null)
+    {
+        Fail("PlayerPose missing after airborne second jump");
+        return;
+    }
+    if (MathF.Abs(airAfterJump.VelY - Movement.JumpVelocity) < 0.5f)
+    {
+        Fail($"airborne second jump re-boosted VelY to {airAfterJump.VelY} (was {airVelBefore})");
+        return;
+    }
+    if (airAfterJump.Y <= Movement.GroundY + 0.05f)
+    {
+        Fail($"airborne second jump not airborne after (Y={airAfterJump.Y})");
+        return;
+    }
+    Console.WriteLine(
+        $"airborne second jump: Y={airYBefore}->{airAfterJump.Y} velY {airVelBefore}->{airAfterJump.VelY} (no re-boost)");
+
     // Air-phase: server gravity / ground-clamp only run inside Move — pump until land.
     // (Merged #96 WaitTick only FrameTick'd; never advanced physics.)
     var airTick = 0;
@@ -330,33 +407,36 @@ try
         return;
     }
 
-    // Second jump while airborne should not re-boost (anti multi-jump)
-    // Get current pose
+    // Grounded second jump after land is still allowed (#120).
     if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseBeforeSecond)
     {
-        Fail("PlayerPose missing before second jump");
+        Fail("PlayerPose missing before grounded second jump");
+        return;
+    }
+    if (MathF.Abs(poseBeforeSecond.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(poseBeforeSecond.VelY) > 0.1f)
+    {
+        Fail($"grounded second jump requires land Y={poseBeforeSecond.Y} VelY={poseBeforeSecond.VelY}");
         return;
     }
 
     var beforeVelY = poseBeforeSecond.VelY;
-
-    // Try immediate second jump
     conn.Reducers.Move(0f, 0f, jump: true);
     await PumpFrames(conn, 200);
+    conn.FrameTick();
 
-    if (conn.Db.PlayerPose.Identity.Find(identity) is { } poseAfterSecond)
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseAfterSecond)
     {
-        // VelY should not jump back to JumpVelocity if already landed/grounded
-        if (MathF.Abs(poseAfterSecond.VelY - Movement.JumpVelocity) < 0.5f && MathF.Abs(beforeVelY) < 0.1f)
-        {
-            // This is fine - we jumped again from ground
-            Console.WriteLine($"second jump from ground: velY {beforeVelY} -> {poseAfterSecond.VelY}");
-        }
-        else
-        {
-            Console.WriteLine($"second jump check: velY {beforeVelY} -> {poseAfterSecond.VelY}");
-        }
+        Fail("PlayerPose missing after grounded second jump");
+        return;
     }
+    if (MathF.Abs(poseAfterSecond.VelY - Movement.JumpVelocity) > 1f
+        && poseAfterSecond.Y <= Movement.GroundY + 0.01f)
+    {
+        Fail($"grounded second jump did not raise Y or set VelY (Y={poseAfterSecond.Y} VelY={poseAfterSecond.VelY})");
+        return;
+    }
+    Console.WriteLine($"grounded second jump: velY {beforeVelY} -> {poseAfterSecond.VelY} Y={poseAfterSecond.Y}");
 
     // Small XZ move with jump=false still works
     var beforeX = poseBeforeSecond.X;
