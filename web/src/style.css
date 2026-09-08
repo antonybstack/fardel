@@ -224,6 +224,7 @@ body {
 }
 
 
+/* Minimap plate — dark + cool silver rim so cyan #39 fog cannot wash blips/N (#103). */
 #minimap {
   position: absolute;
   right: 12px;
@@ -233,9 +234,12 @@ body {
   height: 160px;
   pointer-events: none;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(6, 10, 20, 0.72);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(168, 178, 196, 0.48);
+  background: rgba(6, 10, 20, 0.94);
+  box-shadow:
+    0 0 0 2px rgba(4, 8, 16, 0.92),
+    0 4px 20px rgba(0, 0, 0, 0.58),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* Selected-target frame — gold select chrome; crisp vs #39 cyan fog / grass. */
