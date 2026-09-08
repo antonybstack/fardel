@@ -38,6 +38,8 @@ import {
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
   NPC_KIND_HOSTILE,
+  NPC_KIND_BRIGAND,
+  isHostileKind,
   HOSTILE_AGGRO_RADIUS,
   CROWD_NEAR_COUNT,
   type ConnectionStatus,
@@ -128,6 +130,27 @@ const MOVE_SPEED = 4.5;
 /** Match shared/Fardel.Shared Loot.PickupRangeMeters. */
 const PICKUP_RANGE_METERS = 3;
 
+/** World nameplate label — distinct vs Dummy / Vendor (#418). */
+function npcPlateName(kind: number): string {
+  if (kind === NPC_KIND_DUMMY) return 'Dummy';
+  if (kind === NPC_KIND_HOSTILE) return 'Hostile';
+  if (kind === NPC_KIND_BRIGAND) return 'Brigand';
+  return 'NPC';
+}
+
+/** Coral Hostile / violet Brigand / parchment Dummy. */
+function npcPlateColor(kind: number, selected: boolean): string {
+  if (kind === NPC_KIND_DUMMY) return selected ? '#f4e4a8' : '#e8c89a';
+  if (kind === NPC_KIND_BRIGAND) return selected ? '#e0c4ff' : '#c9a0ff';
+  if (kind === NPC_KIND_HOSTILE) return selected ? '#ffb08a' : '#ff7a62';
+  return '#ffffff';
+}
+
+/** Kind=3 robe — same wizard mesh as Kind=2, distinct tint (body swap is Dev3). */
+function brigandRobeColor(): Color3 {
+  return new Color3(0.48, 0.24, 0.72);
+}
+
 /** Nearest WorldLoot within pickup range (XZ), or null. */
 function nearestLootInPickupRange(
   items: GroundItemView[],
@@ -164,14 +187,14 @@ function tabTargetCycle(net: GameNet): NpcView[] {
   const byId = (a: NpcView, b: NpcView) =>
     a.npcId < b.npcId ? -1 : a.npcId > b.npcId ? 1 : 0;
   const hostilesNear = alive
-    .filter((n) => n.kind === NPC_KIND_HOSTILE && inRange(n))
+    .filter((n) => isHostileKind(n.kind) && inRange(n))
     .sort(byId);
   const dummy = alive.filter((n) => n.kind === NPC_KIND_DUMMY);
   const hostilesFar = alive
-    .filter((n) => n.kind === NPC_KIND_HOSTILE && !inRange(n))
+    .filter((n) => isHostileKind(n.kind) && !inRange(n))
     .sort(byId);
   const rest = alive.filter(
-    (n) => n.kind !== NPC_KIND_HOSTILE && n.kind !== NPC_KIND_DUMMY,
+    (n) => !isHostileKind(n.kind) && n.kind !== NPC_KIND_DUMMY,
   );
   return [...hostilesNear, ...dummy, ...hostilesFar, ...rest];
 }
@@ -339,12 +362,7 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   const idEl = document.getElementById('tfId');
   const fill = document.getElementById('tfHpFill');
   const label = document.getElementById('tfHpLabel');
-  const name =
-    target.kind === NPC_KIND_DUMMY
-      ? 'Dummy'
-      : target.kind === NPC_KIND_HOSTILE
-        ? 'Hostile'
-        : 'NPC';
+  const name = npcPlateName(target.kind);
   if (nameEl) nameEl.textContent = name;
   if (idEl) idEl.textContent = `#${target.npcId.toString()}`;
   const frac = target.maxHp > 0 ? Math.max(0, Math.min(1, target.hp / target.maxHp)) : 0;
@@ -1744,7 +1762,13 @@ function drawMinimap(opts: {
   for (const n of opts.npcs) {
     if (n.hp <= 0) continue;
     const dummy = n.kind === NPC_KIND_DUMMY;
-    plot(n.x, n.z, dummy ? '#c4a06a' : '#c45a5a', dummy ? 3.4 : 3.0);
+    const brigand = n.kind === NPC_KIND_BRIGAND;
+    plot(
+      n.x,
+      n.z,
+      dummy ? '#c4a06a' : brigand ? '#a070d0' : '#c45a5a',
+      dummy ? 3.4 : 3.0,
+    );
   }
   // Non-party remotes (magenta)
   for (const r of opts.remotes) {
@@ -1914,13 +1938,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
               : 'rest: —';
     const tgt = s.targetNpc;
     const targetLine = tgt
-      ? `target: ${
-          tgt.kind === NPC_KIND_DUMMY
-            ? 'Dummy'
-            : tgt.kind === NPC_KIND_HOSTILE
-              ? 'Hostile'
-              : 'NPC'
-        } #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
+      ? `target: ${npcPlateName(tgt.kind)} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
       : 'target: (none — Tab)';
     const gcd = gcdRemainingMs(s.combat, nowMs);
     const gcdLine = gcd > 0 ? `GCD cooldown: ${(gcd / 1000).toFixed(2)}s` : 'GCD idle';
@@ -2377,12 +2395,14 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     body.position.y = DIRT_SURFACE_Y;
     mat = dummy.mat;
     extraMats = dummy.extraMats;
-  } else if (npc.kind === NPC_KIND_HOSTILE) {
+  } else if (isHostileKind(npc.kind)) {
     // Same wizard clone as remotes (IBM once on the container). Idle_Weapon,
-    // not bind-T, not a red capsule. Dummy stays the scarecrow.
+    // not bind-T, not a red capsule. Dummy stays the scarecrow. Kind=3 uses
+    // a violet robe so the nameplate type reads before Dev3 swaps the body.
+    const brigand = npc.kind === NPC_KIND_BRIGAND;
     const parts = createPlayerHumanoid(scene, {
-      name: `hostile_${npc.npcId}`,
-      robeColor: hostileRobeColor(),
+      name: brigand ? `brigand_${npc.npcId}` : `hostile_${npc.npcId}`,
+      robeColor: brigand ? brigandRobeColor() : hostileRobeColor(),
     });
     parts.root.parent = root;
     body = parts.root;
@@ -2476,15 +2496,15 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   marker.setEnabled(false);
 
   let nameplate: Nameplate | null = null;
-  const isHostile = npc.kind === NPC_KIND_HOSTILE;
+  const isHostile = isHostileKind(npc.kind);
   if (isDummy || isHostile) {
     nameplate = createNameplate(scene, `npc_${npc.npcId}`);
     nameplate.mesh.parent = root;
     nameplate.mesh.position.set(0, isDummy ? 2.15 : 2.35, 0);
     paintNameplate(
       nameplate,
-      isDummy ? 'Dummy' : 'Hostile',
-      isDummy ? '#e8c89a' : '#ff7a62',
+      npcPlateName(npc.kind),
+      npcPlateColor(npc.kind, false),
       npc.maxHp > 0 ? npc.hp / npc.maxHp : 1,
     );
   }
@@ -4598,12 +4618,7 @@ async function main(): Promise<void> {
           latestDamageAmount = delta;
           latestDamageAtMs = Date.now();
           {
-            const label =
-              npc.kind === NPC_KIND_DUMMY
-                ? 'Dummy'
-                : npc.kind === NPC_KIND_HOSTILE
-                  ? 'Hostile'
-                  : 'NPC';
+            const label = npcPlateName(npc.kind);
             pushCombatLog(
               'damage',
               `${label} #${npc.npcId}  −${delta} HP (${npc.hp}/${npc.maxHp})`,
@@ -4612,7 +4627,7 @@ async function main(): Promise<void> {
           // Non-lethal: RecieveHit on the skinned hostile. Dummy stays scarecrow.
           if (
             mesh.humanoid &&
-            npc.kind === NPC_KIND_HOSTILE &&
+            isHostileKind(npc.kind) &&
             npc.hp > 0
           ) {
             playHumanoidFlinch(mesh.humanoid);
@@ -4623,7 +4638,7 @@ async function main(): Promise<void> {
 
       if (
         !mesh.nameplate &&
-        (npc.kind === NPC_KIND_DUMMY || npc.kind === NPC_KIND_HOSTILE)
+        (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))
       ) {
         const np = createNameplate(scene, `npc_${npc.npcId}`);
         np.mesh.parent = mesh.root;
@@ -4640,7 +4655,7 @@ async function main(): Promise<void> {
           disposeLifeBurst(fx);
           npcLifeFx.delete(key);
         }
-        if (mesh.humanoid && npc.kind === NPC_KIND_HOSTILE) {
+        if (mesh.humanoid && isHostileKind(npc.kind)) {
           // Death clip on the body — not the dummy sink/fade despawn.
           setHumanoidDead(mesh.humanoid, true);
           fx = undefined;
@@ -4649,13 +4664,9 @@ async function main(): Promise<void> {
           npcLifeFx.set(key, fx);
         }
         latestDeathAtMs = Date.now();
-        const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+        const label = npcPlateName(npc.kind);
         const defeated =
-          npc.kind === NPC_KIND_DUMMY
-            ? 'Dummy defeated'
-            : npc.kind === NPC_KIND_HOSTILE
-              ? 'Hostile defeated'
-              : `${label} defeated`;
+          npc.kind === NPC_KIND_DUMMY ? 'Dummy defeated' : `${label} defeated`;
         pushCombatLog('death', `${defeated} (#${npc.npcId})`);
         pushSystemToast('death', defeated, TOAST_VE_TTL_MS);
       } else if (!wasAlive && isAlive && (!fx || fx.phase !== 'spawning')) {
@@ -4663,7 +4674,7 @@ async function main(): Promise<void> {
           disposeLifeBurst(fx);
           npcLifeFx.delete(key);
         }
-        if (mesh.humanoid && npc.kind === NPC_KIND_HOSTILE) {
+        if (mesh.humanoid && isHostileKind(npc.kind)) {
           setHumanoidDead(mesh.humanoid, false);
           setHumanoidMoving(mesh.humanoid, false);
           fx = undefined;
@@ -4672,31 +4683,27 @@ async function main(): Promise<void> {
           npcLifeFx.set(key, fx);
         }
         latestRespawnAtMs = Date.now();
-        const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+        const label = npcPlateName(npc.kind);
         const line =
-          npc.kind === NPC_KIND_DUMMY
-            ? 'Dummy respawned'
-            : npc.kind === NPC_KIND_HOSTILE
-              ? 'Hostile respawned'
-              : `${label} respawned`;
+          npc.kind === NPC_KIND_DUMMY ? 'Dummy respawned' : `${label} respawned`;
         pushCombatLog('respawn', `${line} (#${npc.npcId})`);
         pushSystemToast('respawn', line, TOAST_VE_TTL_MS);
       }
 
       mesh.root.position.x = npc.x;
       mesh.root.position.z = npc.z;
-      if (mesh.humanoid && npc.kind === NPC_KIND_HOSTILE) {
+      if (mesh.humanoid && isHostileKind(npc.kind)) {
         setHumanoidDead(mesh.humanoid, !isAlive);
       }
 
       const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
       if (!animating) {
         const corpse =
-          !!mesh.humanoid && npc.kind === NPC_KIND_HOSTILE && !isAlive;
+          !!mesh.humanoid && isHostileKind(npc.kind) && !isAlive;
         mesh.root.setEnabled(isAlive || corpse);
         if (
           mesh.nameplate &&
-          (npc.kind === NPC_KIND_DUMMY || npc.kind === NPC_KIND_HOSTILE)
+          (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))
         ) {
           mesh.nameplate.mesh.setEnabled(isAlive);
         }
@@ -4709,19 +4716,12 @@ async function main(): Promise<void> {
 
       if (
         mesh.nameplate &&
-        (npc.kind === NPC_KIND_DUMMY || npc.kind === NPC_KIND_HOSTILE)
+        (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))
       ) {
-        const hostile = npc.kind === NPC_KIND_HOSTILE;
         paintNameplate(
           mesh.nameplate,
-          hostile ? 'Hostile' : 'Dummy',
-          selected
-            ? hostile
-              ? '#ffb08a'
-              : '#f4e4a8'
-            : hostile
-              ? '#ff7a62'
-              : '#e8c89a',
+          npcPlateName(npc.kind),
+          npcPlateColor(npc.kind, selected),
           npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
           selected,
         );
@@ -5424,10 +5424,10 @@ async function main(): Promise<void> {
           } else if (ch.hp !== prevPlayerHp) {
             if (ch.hp < prevPlayerHp) {
               const dmg = prevPlayerHp - ch.hp;
-              const hostileHit = (net?.getNpcs() ?? []).some(
-                (n) => n.kind === NPC_KIND_HOSTILE && n.aggroed,
+              const pulled = (net?.getNpcs() ?? []).find(
+                (n) => isHostileKind(n.kind) && n.aggroed,
               );
-              const src = hostileHit ? 'Hostile' : 'Thorns';
+              const src = pulled ? npcPlateName(pulled.kind) : 'Thorns';
               pushCombatLog('damage', `${src} −${dmg} · You ${ch.hp}/${ch.maxHp}`);
               damageFloaters.push(
                 spawnDamageFloater(
@@ -5852,9 +5852,10 @@ async function main(): Promise<void> {
         veFollow === 'hostile-body' ||
         veFollow === 'leash' ||
         veFollow === 'aggro' ||
-        veFollow === 'hostile-read'
+        veFollow === 'hostile-read' ||
+        veFollow === 'hostile-types'
       ) {
-        // North of pad: dummy (5,0) + hostiles (3,7)/(-7,3) in one shot.
+        // Dummy (5,0) + Kind=2 (3,7)/(-7,3) + Kind=3 (7,-3) in one shot.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -6039,6 +6040,7 @@ async function main(): Promise<void> {
         veFollow !== 'tab-target' &&
         veFollow !== 'tab-hostile' &&
         veFollow !== 'hostile-read' &&
+        veFollow !== 'hostile-types' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
@@ -9818,7 +9820,7 @@ async function main(): Promise<void> {
   }
 
   // ?ve=hostile-read — Hostile coral plate vs Dummy parchment vs Vendor mint (#359).
-  if (ve === 'hostile-read') {
+  if (ve === 'hostile-read' || ve === 'hostile-types') {
     camera.radius = 18;
     camera.alpha = Math.PI / 2.05;
     camera.beta = Math.PI / 2.7;
@@ -9874,6 +9876,70 @@ async function main(): Promise<void> {
       window.setTimeout(waitR, 200);
     };
     window.setTimeout(waitR, 500);
+  }
+
+  // ?ve=hostile-types — Kind=2 Hostile coral vs Kind=3 Brigand violet (#418).
+  if (net && ve === 'hostile-types') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-types: waiting for both kinds…';
+    let ticks = 0;
+    const waitTypes = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const vendors = net.getVendors();
+      syncNpcMeshes(npcs);
+      syncVendorMeshes(vendors);
+      const hMesh = hostiles[0]
+        ? npcMeshes.get(hostiles[0].npcId.toString())
+        : undefined;
+      const bMesh = brigands[0]
+        ? npcMeshes.get(brigands[0].npcId.toString())
+        : undefined;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const vMesh = vendors[0]
+        ? vendorMeshes.get(vendors[0].vendorId.toString())
+        : undefined;
+      const hLabel = hMesh?.nameplate?.label ?? '';
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const vLabel = vMesh?.nameplate?.label ?? '';
+      const platesOn =
+        !!(hMesh?.nameplate && hMesh.nameplate.mesh.isEnabled()) &&
+        !!(bMesh?.nameplate && bMesh.nameplate.mesh.isEnabled()) &&
+        !!(dMesh?.nameplate && dMesh.nameplate.mesh.isEnabled()) &&
+        !!(vMesh?.nameplate && vMesh.nameplate.mesh.isEnabled());
+      if (
+        latestStatus.state === 'connected' &&
+        platesOn &&
+        hLabel === 'Hostile' &&
+        bLabel === 'Brigand' &&
+        dLabel === 'Dummy' &&
+        /vendor/i.test(vLabel)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE hostile-types: H ${hLabel || 'no'} · B ${bLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'}`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `Hostile-types FAIL · H ${hLabel || 'no'} · B ${bLabel || 'no'} · D ${dLabel || 'no'} · V ${vLabel || 'no'} · #418`;
+        }
+        return;
+      }
+      window.setTimeout(waitTypes, 200);
+    };
+    window.setTimeout(waitTypes, 500);
   }
 
   // ?ve=encounter — fight a hostile among trees, cam out of trunks, nameplate on (#361).
