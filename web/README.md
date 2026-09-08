@@ -142,6 +142,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=cam-collision` | Orbit into a **hero** bole; camera stays in the clearing (#351); HUD `Cam-collision OK · r=… · heroTree… · clearing` |
 | `?ve=cam-collision-mid` | Orbit into a **midTree_*** bole; camera stays in the open (#465); HUD `Cam-collision OK · r=… · midTree_… · mid`. Hero-only hit = fail |
 | `?ve=cam-collision-dummy` | Min-zoom orbit into **Dummy**; camera stays outside the scarecrow (#466); HUD `Cam-collision OK · Dummy · r=… · min-zoom`. Living Hostile/Brigand use the same cylinders; corpses ignored |
+| `?ve=cam-collision-vendor` | Min-zoom orbit into the **vendor stall**; camera stays outside the awning (#497); HUD `Cam-collision OK · Vendor · stall · r=… · min-zoom`. Dummy + living hostiles still collide |
 | `?ve=cam-collision-hop` | Space-hop while orbiting into a **hero** (or mid) bole (#483); HUD `Cam-collision OK · r=… · heroTree… · hop y=…`. Grounded-only hit = fail. E1 Y-spring stays |
 | `?ve=fps` | Dense play-cam FPS HUD ≥30 (#341); persistMark `FPS OK · N fps (floor 30) · dense play-cam` |
 | `?ve=vendor-panel` | Vendor buy/sell panel chrome vs #39 fog (#106) — bronze buy / mint sell on silver plate; interim capture `/workspace/ve-capture/pr-vendor-panel.png` (no `ve/*.png` commit) |
