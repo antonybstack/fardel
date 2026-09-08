@@ -165,6 +165,19 @@ try
         Console.WriteLine("note: baseline already boosted (prior buff); will compare after Use");
     }
 
+    // Optional baseline vertical asserts (#170)
+    if (MathF.Abs(poseB.Y - Movement.GroundY) > 0.05f)
+    {
+        Fail($"baseline Y={poseB.Y} not ≈ GroundY={Movement.GroundY}");
+        return;
+    }
+    if (MathF.Abs(poseB.VelY) > 0.5f)
+    {
+        Fail($"baseline VelY={poseB.VelY} not ≈ 0");
+        return;
+    }
+    Console.WriteLine($"baseline pose Y={poseB.Y} VelY={poseB.VelY} OK");
+
     conn.Reducers.UseYardTonic();
     await PumpUntil(() =>
     {
@@ -195,6 +208,24 @@ try
         Fail($"buffed delta {buffDelta} not greater than baseline {baseDelta}");
         return;
     }
+
+    // Assert vertical after buffed grounded Move (#170)
+    if (MathF.Abs(poseD.Y - Movement.GroundY) > 0.05f)
+    {
+        Fail($"buffed Y={poseD.Y} not ≈ GroundY={Movement.GroundY}");
+        return;
+    }
+    if (MathF.Abs(poseD.VelY) > 0.5f)
+    {
+        Fail($"buffed VelY={poseD.VelY} not ≈ 0");
+        return;
+    }
+    if (poseD.LastGroundedMicros == 0 || poseD.LastGroundedMicros < poseC.LastGroundedMicros)
+    {
+        Fail($"buffed LastGroundedMicros={poseD.LastGroundedMicros} not updated (was {poseC.LastGroundedMicros})");
+        return;
+    }
+    Console.WriteLine($"buffed pose Y={poseD.Y} VelY={poseD.VelY} LastGroundedMicros={poseD.LastGroundedMicros} OK");
 
     Console.WriteLine("OK: TonicSmoke passed");
     Environment.ExitCode = 0;
