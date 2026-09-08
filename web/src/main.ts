@@ -6139,17 +6139,93 @@ async function main(): Promise<void> {
   }
 
 
-  // ?ve=staff-block — HUD-only toast + combat log for staff-required failure (#189).
+  // ?ve=staff-block — Connected → unequip → key 1 so bindInput runs onCast (#189).
   if (ve === 'staff-block') {
     camera.radius = 9;
     camera.alpha = Math.PI / 2.3;
     camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'staff-block') {
     const mark = document.getElementById('persistMark');
-    window.setTimeout(() => {
-      pushSystemToast('equip', 'Staff required · equip staff · I', TOAST_VE_TTL_MS);
-      pushCombatLog('equip', 'Staff required · equip with I');
-      if (mark) mark.textContent = 'Staff-block OK · toast + combat log';
-    }, 400);
+    if (mark) mark.textContent = 'VE staff-block: waiting for Connected…';
+    let ticks = 0;
+    let pressed = false;
+    const waitBlock = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE staff-block: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitBlock, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 8.5;
+      const ch = net.getCharacter();
+      if (!ch) {
+        if (mark) mark.textContent = 'VE staff-block: waiting character…';
+        if (ticks < 200) window.setTimeout(waitBlock, 200);
+        return;
+      }
+      if (ch.staffEquipped) {
+        net.unequipStaff();
+        if (mark) mark.textContent = 'VE staff-block: unequipping…';
+        if (ticks < 200) window.setTimeout(waitBlock, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, false);
+      updateSpellHotbar({
+        gcdMs: 0,
+        castingMs: 0,
+        castingTotal: 0,
+        castingSpell: 0,
+        staffEquipped: false,
+        mana: ch.mana ?? 0,
+        knowsSpark: ch.knowsSpark,
+        knowsEmberbolt: ch.knowsEmberbolt,
+      });
+      if (!pressed) {
+        setChatComposing(false);
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '1',
+            code: 'Digit1',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        pressed = true;
+        if (mark) mark.textContent = 'VE staff-block: pressed 1 · waiting onCast…';
+        window.setTimeout(waitBlock, 200);
+        return;
+      }
+      const toastText = document.getElementById('toastStack')?.textContent ?? '';
+      const logText = document.getElementById('combatLogLines')?.textContent ?? '';
+      const spark = document.getElementById('slotSpark');
+      const ember = document.getElementById('slotEmberbolt');
+      const staffChrome =
+        !!spark?.classList.contains('disabled') &&
+        !!ember?.classList.contains('disabled');
+      const toastOk = toastText.includes('equip staff · I');
+      const logOk = logText.includes('equip with I');
+      if (toastOk && logOk && staffChrome) {
+        if (mark) {
+          mark.textContent =
+            'Staff-block OK · onCast 1 · toast + log · STAFF chrome · I';
+        }
+        return;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `VE staff-block: fail · toast=${toastOk ? 'y' : 'n'} ` +
+            `log=${logOk ? 'y' : 'n'} staff=${staffChrome ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitBlock, 160);
+    };
+    window.setTimeout(waitBlock, 600);
   }
 
 
