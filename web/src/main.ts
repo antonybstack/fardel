@@ -3298,6 +3298,18 @@ async function main(): Promise<void> {
   let localTurningInPlace = false;
   const bootParams = new URLSearchParams(window.location.search);
   const ve = bootParams.get('ve') || '';
+  {
+    const mark = document.getElementById('persistMark');
+    if (mark) {
+      // Harness only (#407). Default `/` stays empty → :empty { display:none }.
+      if (!ve) {
+        mark.textContent = '';
+        mark.hidden = true;
+      } else {
+        mark.hidden = false;
+      }
+    }
+  }
   const firstSessionVe = ve === 'first-session';
   let firstSessionCueShown = false;
   let firstSessionLegendFlash = false;
@@ -11860,7 +11872,7 @@ async function main(): Promise<void> {
       const idleOk =
         pb.skinned > 0 &&
         !!pb.playing &&
-        /idle/i.test(pb.playing) &&
+        /idle_weapon/i.test(pb.playing) &&
         pb.height >= 1.5 &&
         pb.height <= 2.15;
       if (mark) {
@@ -11868,6 +11880,7 @@ async function main(): Promise<void> {
           ? `Idle OK · ${pb.playing} · skinned ${pb.skinned} · ${pb.height.toFixed(2)}m`
           : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · ${pb.height.toFixed(2)}m`;
       }
+      if (!idleOk && ticks < 240) window.setTimeout(waitIdle, 200);
     };
     window.setTimeout(waitIdle, 800);
   }
