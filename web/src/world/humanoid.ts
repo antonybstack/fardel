@@ -51,6 +51,7 @@ type HumanoidAnim = {
   /** Jump/Fall if the GLB has one; Wizard.glb does not. */
   air: AnimationGroup | null;
   death: AnimationGroup | null;
+  flinch: AnimationGroup | null;
   cast: AnimationGroup | null;
   airborne: boolean;
   dead: boolean;
@@ -436,6 +437,10 @@ export function createPlayerHumanoid(
   const walk = findAnim(animGroups, 'Walk') ?? run;
   const air = findAnim(animGroups, 'Jump', 'Falling', 'Fall');
   const death = findAnim(animGroups, 'Death');
+  // Pack spelling is RecieveHit (not Receive). Prefer the non-Attacking clip.
+  const flinch =
+    animGroups.find((g) => /recievehit$/i.test(g.name)) ??
+    findAnim(animGroups, 'RecieveHit');
   const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Staff_Attack');
   for (const g of animGroups) {
     g.stop();
@@ -449,6 +454,7 @@ export function createPlayerHumanoid(
     run,
     air,
     death,
+    flinch,
     cast,
     airborne: false,
     dead: false,
@@ -484,15 +490,17 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
     ? a.death.name
     : a?.cast?.isPlaying
       ? a.cast.name
-      : a?.air?.isPlaying
-        ? a.air.name
-        : a?.run?.isPlaying
-          ? a.run.name
-          : a?.walk?.isPlaying
-            ? a.walk.name
-            : a?.idle?.isPlaying
-              ? a.idle.name
-              : null;
+      : a?.flinch?.isPlaying
+        ? a.flinch.name
+        : a?.air?.isPlaying
+          ? a.air.name
+          : a?.run?.isPlaying
+            ? a.run.name
+            : a?.walk?.isPlaying
+              ? a.walk.name
+              : a?.idle?.isPlaying
+                ? a.idle.name
+                : null;
   return { skinned, playing, idle: a?.idle?.name ?? null };
 }
 
@@ -521,6 +529,7 @@ export function setHumanoidAirborne(
     return;
   }
   if (a.cast?.isPlaying) return;
+  stopIfPlaying(a.flinch);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
   if (a.air) {
@@ -545,6 +554,7 @@ export function setHumanoidMoving(
   if (!a) return;
   if (a.dead || a.airborne) return;
   if (a.cast?.isPlaying) return;
+  if (a.flinch?.isPlaying) return;
   if (a.idle) a.idle.speedRatio = 1;
   if (!moving) {
     stopIfPlaying(a.walk);
@@ -587,6 +597,7 @@ export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
   stopIfPlaying(a.run);
   stopIfPlaying(a.cast);
   stopIfPlaying(a.air);
+  stopIfPlaying(a.flinch);
   if (!a.death) return;
   a.death.speedRatio = 1;
   a.death.onAnimationGroupEndObservable.addOnce(() => {
@@ -597,10 +608,28 @@ export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
   a.death.start(false, 1.0, a.death.from, a.death.to, false);
 }
 
+/** One-shot hit react. Does not touch Move intents; loco resumes after. */
+export function playHumanoidFlinch(parts: HumanoidParts): void {
+  const a = animByRoot.get(parts.root);
+  if (!a?.flinch || a.airborne || a.dead) return;
+  if (a.cast?.isPlaying) return;
+  stopIfPlaying(a.idle);
+  stopIfPlaying(a.walk);
+  stopIfPlaying(a.run);
+  if (a.idle) a.idle.speedRatio = 1;
+  stopIfPlaying(a.flinch);
+  a.flinch.onAnimationGroupEndObservable.addOnce(() => {
+    if (a.dead) return;
+    setHumanoidMoving(parts, false);
+  });
+  a.flinch.start(false, 1.0, a.flinch.from, a.flinch.to, false);
+}
+
 /** Play a one-shot cast clip (Spell1) then return to idle/walk. */
 export function playHumanoidCast(parts: HumanoidParts): void {
   const a = animByRoot.get(parts.root);
   if (!a?.cast || a.dead) return;
+  stopIfPlaying(a.flinch);
   if (a.idle?.isPlaying) a.idle.stop();
   if (a.walk?.isPlaying) a.walk.stop();
   if (a.run?.isPlaying) a.run.stop();
