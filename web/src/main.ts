@@ -441,10 +441,16 @@ function updateSelfFrame(character: {
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
-    frame.classList.add('hidden');
+    // Skip hide if veRestChromeLock is active (VE rest-chrome freezes frame visible).
+    if (!veRestChromeLock) {
+      frame.classList.add('hidden');
+    }
     return;
   }
-  frame.classList.remove('hidden');
+  // Skip unhide if veRestChromeLock is active (VE controls visibility).
+  if (!veRestChromeLock) {
+    frame.classList.remove('hidden');
+  }
   const nameEl = document.getElementById('sfName');
   const levelEl = document.getElementById('sfLevel');
   const xpEl = document.getElementById('sfXp');
@@ -10476,15 +10482,15 @@ async function main(): Promise<void> {
         const chatPanel = document.getElementById('chatPanel');
         if (chatPanel) chatPanel.style.display = 'none';
         
-        // Force selfFrame into TOP-LEFT safe zone (bottom keeps clipping).
+        // Seed resting state for screenshot FIRST (frozen — no auto-exit via veRestChromeLock).
+        setRestingState('enter');
+        
+        // THEN force selfFrame visible into TOP-LEFT safe zone (order matters — after setRestingState).
         const selfFrame = document.getElementById('selfFrame');
         if (selfFrame) {
           selfFrame.classList.remove('hidden');
           selfFrame.style.cssText = 'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
         }
-        
-        // Seed resting state for screenshot (frozen — no auto-exit via veRestChromeLock).
-        setRestingState('enter');
         
         // Force sfRest badge visible.
         const sfRest = document.getElementById('sfRest');
@@ -10496,12 +10502,14 @@ async function main(): Promise<void> {
         // Lock HP frame updates so updateSelfFrame doesn't fight demo.
         veFrameHpLock = true;
         
-        // Re-apply forced visibility every 500ms for 10s (prevent re-hide).
+        // Re-apply forced visibility every 250ms (prevent re-hide from any tick).
         let reapplyCount = 0;
         const reapplyInterval = window.setInterval(() => {
           const sf = document.getElementById('selfFrame');
           if (sf) {
             sf.classList.remove('hidden');
+            // Keep resting class (don't remove it).
+            if (!sf.classList.contains('resting')) sf.classList.add('resting');
             sf.style.cssText = 'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
           }
           const badge = document.getElementById('sfRest');
@@ -10513,8 +10521,8 @@ async function main(): Promise<void> {
           if (chat) chat.style.display = 'none';
           
           reapplyCount += 1;
-          if (reapplyCount >= 20) window.clearInterval(reapplyInterval);
-        }, 500);
+          if (reapplyCount >= 40) window.clearInterval(reapplyInterval);
+        }, 250);
         
         seeded = true;
         if (mark) {
