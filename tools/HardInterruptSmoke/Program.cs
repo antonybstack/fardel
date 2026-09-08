@@ -3,7 +3,7 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // After CastPushbackHardAfter pushbacks (or remain < CastHardInterruptRemainMs),
-// next DummyStrike hard-cancels windup with no mana refund.
+// next DummyStrike hard-cancels windup with no mana refund and CastLockedUntil silence.
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
@@ -146,6 +146,16 @@ try
         Fail($"CastPushbackCount expected 0 after hard interrupt, got {combatCleared.CastPushbackCount}");
         return;
     }
+    if (combatCleared.CastLockedUntil.MicrosecondsSinceUnixEpoch <= 0)
+    {
+        Fail("CastLockedUntil not set after count-path hard interrupt");
+        return;
+    }
+    Console.WriteLine($"count-path CastLockedUntil micros={combatCleared.CastLockedUntil.MicrosecondsSinceUnixEpoch}");
+
+    // Wait past GCD so silence (not GCD) is the reject reason.
+    await DelayPump(conn, Combat.GcdMs + 80);
+    await ExpectCastFail(conn, Combat.SpellEmberbolt, "silenced", "count-path silence");
 
     // Wait past any prior CastEndsAt — dummy must not take Emberbolt damage.
     await DelayPump(conn, Combat.EmberboltCastMs + Combat.CastPushbackMs * (Combat.CastPushbackHardAfter + 1) + 300);
@@ -218,6 +228,16 @@ try
     }
     Console.WriteLine($"remain-threshold hard interrupt no-refund OK mana {manaRemainMid}->{manaRemainAfter}");
 
+    var remainCleared = conn.Db.PlayerCombat.Identity.Find(id)!;
+    if (remainCleared.CastLockedUntil.MicrosecondsSinceUnixEpoch <= 0)
+    {
+        Fail("CastLockedUntil not set after remain-threshold hard interrupt");
+        return;
+    }
+    Console.WriteLine($"remain-path CastLockedUntil micros={remainCleared.CastLockedUntil.MicrosecondsSinceUnixEpoch}");
+    await DelayPump(conn, Combat.GcdMs + 80);
+    await ExpectCastFail(conn, Combat.SpellEmberbolt, "silenced", "remain-path silence");
+
     await DelayPump(conn, Combat.CastHardInterruptRemainMs + 400);
     var dummyRemainAfter = FindDummy(conn)!.Hp;
     if (dummyRemainAfter != dummyRemainBefore)
@@ -226,6 +246,32 @@ try
         return;
     }
     Console.WriteLine("remain-threshold no-damage OK");
+
+    // After CastSilenceMs, Cast must succeed again.
+    await DelayPump(conn, Combat.CastSilenceMs + 200);
+    await TopUpMana(conn, id);
+    var manaReady = conn.Db.Character.Identity.Find(id)!.Mana;
+    if (manaReady < Combat.EmberboltManaCost)
+    {
+        Fail($"expected mana for post-silence Cast, got {manaReady}");
+        return;
+    }
+    conn.Reducers.EnsureTrainingDummy();
+    await PumpUntil(() => FindDummy(conn) is { Hp: var h } && h == Combat.DummyMaxHp,
+        timeoutMs, conn, "dummy full post-silence");
+    dummy = FindDummy(conn)!;
+    conn.Reducers.SetTarget(dummy.NpcId);
+    await DelayPump(conn, 40);
+    conn.Reducers.Cast(Combat.SpellEmberbolt);
+    await PumpUntil(() =>
+        conn.Db.PlayerCombat.Identity.Find(id) is { } pc && pc.CastingSpellId == Combat.SpellEmberbolt,
+        timeoutMs, conn, "ember casting after silence");
+    await PumpUntil(() =>
+    {
+        var ch = conn.Db.Character.Identity.Find(id);
+        return ch is not null && ch.Mana < manaReady;
+    }, timeoutMs, conn, "ember mana spent after silence");
+    Console.WriteLine("post-silence Cast OK");
 
     Console.WriteLine("OK: HardInterruptSmoke passed");
     Environment.ExitCode = 0;
@@ -237,6 +283,45 @@ catch (Exception e)
 finally
 {
     try { conn?.Disconnect(); } catch { /* ignore */ }
+}
+
+static async Task ExpectCastFail(DbConnection conn, int spellId, string needle, string label)
+{
+    string? fail = null;
+    var tcs = new TaskCompletionSource();
+    void OnCast(ReducerEventContext ctx, int _spellId)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                fail = reason;
+                tcs.TrySetResult();
+                break;
+            case Status.Committed:
+                tcs.TrySetException(new Exception($"Cast committed when expecting fail ({label})"));
+                break;
+            case Status.OutOfEnergy(_):
+                tcs.TrySetException(new Exception($"Cast out of energy ({label})"));
+                break;
+        }
+    }
+    conn.Reducers.OnCast += OnCast;
+    try
+    {
+        conn.Reducers.Cast(spellId);
+        await Pump(tcs.Task, timeoutMs, conn, "cast fail " + label);
+    }
+    finally
+    {
+        conn.Reducers.OnCast -= OnCast;
+    }
+    if (string.IsNullOrEmpty(fail) ||
+        fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected '{needle}' on Cast ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("cast fail mismatch");
+    }
+    Console.WriteLine($"Cast reject OK ({label}): {fail}");
 }
 
 static async Task TopUpMana(DbConnection conn, Identity id)
