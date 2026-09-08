@@ -104,6 +104,30 @@ const REST_HEAL_AMOUNT = 25;
 const BANDAGE_HEAL_AMOUNT = 40;
 /** Client wish speed (m/s); each reducer call is clamped server-side. */
 const MOVE_SPEED = 4.5;
+/** Match shared/Fardel.Shared Loot.PickupRangeMeters. */
+const PICKUP_RANGE_METERS = 3;
+
+/** Nearest WorldLoot within pickup range (XZ), or null. */
+function nearestLootInPickupRange(
+  items: GroundItemView[],
+  pose: { x: number; z: number } | null,
+  rangeMeters = PICKUP_RANGE_METERS,
+): GroundItemView | null {
+  if (!pose || items.length === 0) return null;
+  const r2 = rangeMeters * rangeMeters;
+  let best: GroundItemView | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (const it of items) {
+    const dx = it.x - pose.x;
+    const dz = it.z - pose.z;
+    const d = dx * dx + dz * dz;
+    if (d <= r2 && d < bestD) {
+      bestD = d;
+      best = it;
+    }
+  }
+  return best;
+}
 
 type NpcMesh = {
   root: Mesh;
@@ -2879,6 +2903,7 @@ async function main(): Promise<void> {
   let groundBootstrapped = false;
   let toastedPartyLootKey = '';
   let vendorInRangeToasted = false;
+  let lootInRangeToasted = false;
   const npcLastHp = new Map<string, number>();
   const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
@@ -4877,6 +4902,17 @@ async function main(): Promise<void> {
     {
       const items = net?.getGroundItems() ?? latestGround;
       syncGroundSparkles(scene, items, groundSparkles, now / 1000);
+      const pose = net?.getLocalPose() ?? null;
+      const nearL = nearestLootInPickupRange(items, pose);
+      if (nearL) {
+        const msg = `Loot nearby · F pickup ${nearL.itemId}`;
+        if (!lootInRangeToasted) {
+          lootInRangeToasted = true;
+          pushSystemToast('loot', msg, TOAST_VE_TTL_MS);
+        }
+      } else {
+        lootInRangeToasted = false;
+      }
     }
 
     {
@@ -4947,7 +4983,8 @@ async function main(): Promise<void> {
         veFollow !== 'vendor-panel' &&
         veFollow !== 'vendor-interact' &&
         veFollow !== 'dummy-hp' &&
-        veFollow !== 'tab-target'
+        veFollow !== 'tab-target' &&
+        veFollow !== 'loot-f'
       ) {
         const follow = player.position.add(new Vector3(0, 1.35, 0));
         const radius = camera.radius;
@@ -10088,7 +10125,9 @@ async function main(): Promise<void> {
         bagOpen = true;
         setBagPanelOpen(true);
         pushCombatLog('loot', 'Ground loot: ember_shard');
-        pushSystemToast('loot', 'Ember shard nearby · F to pick', TOAST_VE_TTL_MS);
+        if (!toastKindsPresent().has('loot')) {
+          pushSystemToast('loot', 'Ember shard nearby · F to pick', TOAST_VE_TTL_MS);
+        }
       }
       // Hold sparkles on-screen for VE shot, then auto-pickup for bag-flag proof.
       if (items.length >= 1 && !picked) {
@@ -10144,8 +10183,70 @@ async function main(): Promise<void> {
     window.setTimeout(waitLoot, 700);
   }
 
-
-
+  // ?ve=loot-f — approach WorldLoot into pickup range; toast-only F-pickup affordance (no auto-pickup).
+  if (ve === 'loot-f') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'loot-f') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE loot-f: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitLootF = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE loot-f: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitLootF, 200);
+        return;
+      }
+      if (!seeded) {
+        seeded = true;
+        if (mark) mark.textContent = 'VE loot-f: seeding ember_shard…';
+        net.seedLoot();
+        window.setTimeout(waitLootF, 350);
+        return;
+      }
+      const items = net.getGroundItems();
+      const item = items[0] ?? null;
+      if (!item) {
+        if (mark) mark.textContent = 'VE loot-f: waiting ground shard…';
+        if (ticks < 240) window.setTimeout(waitLootF, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(item.x, 0.9, item.z));
+      camera.radius = 10;
+      const pose = net.getLocalPose();
+      const near = nearestLootInPickupRange(items, pose);
+      if (!near) {
+        if (pose) net.sendMove(item.x - pose.x, item.z - pose.z, false);
+        if (mark) mark.textContent = 'VE loot-f: approaching…';
+        if (ticks < 280) window.setTimeout(waitLootF, 220);
+        return;
+      }
+      const toastOk = toastKindsPresent().has('loot');
+      const toastText = document.getElementById('toastStack')?.textContent ?? '';
+      const cueOk = /F pickup/i.test(toastText);
+      if (toastOk && cueOk) {
+        if (mark) mark.textContent = 'Loot-F OK · in range · F pickup toast';
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE loot-f: in range · toast ${toastOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 360) {
+        if (mark) {
+          mark.textContent = `VE loot-f: timed out · toast ${toastOk ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitLootF, 220);
+    };
+    window.setTimeout(waitLootF, 700);
+  }
 
   // ?ve=trade — SeedLoot+Pickup → OfferTrade to TradeMate remote → Accept → toast + bag.
   if (ve === 'trade') {
