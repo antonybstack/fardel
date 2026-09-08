@@ -55,7 +55,6 @@ import {
   preloadPlayerHumanoid,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
-  setHumanoidJumpSquash,
   setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
@@ -2961,13 +2960,11 @@ async function main(): Promise<void> {
   let net: GameNet | null = null;
   let bagOpen = false;
   let keysLegendOpen = false;
-  /** #139 — client-only hop presence (squash/stretch + camera dip + JUMP toast). */
+  /** #252 — hop presence is JUMP toast only; no squash/stretch or camera dip. */
   let jumpWasAirborne = false;
   let jumpTakeoffMs = 0;
   let jumpApexToasted = false;
   let jumpPeakY = 0;
-  let jumpLandSquashUntil = 0;
-  let jumpCamDipY = 0;
   const bootParams = new URLSearchParams(window.location.search);
   const firstSessionVe = (bootParams.get('ve') || '') === 'first-session';
   let firstSessionCueShown = false;
@@ -4525,7 +4522,7 @@ async function main(): Promise<void> {
     const pose = net?.getLocalPose();
     const isAirborne = pose && pose.y > GROUND_Y + AIRBORNE_THRESHOLD;
 
-    // #139 — hop presence at play-cam: stretch while airborne, squat on land, brief JUMP toast.
+    // #252 — hop presence: JUMP toast only. Rigid scale; no camera dip.
     {
       const y = pose?.y ?? player.position.y;
       const air = y > GROUND_Y + AIRBORNE_THRESHOLD;
@@ -4537,9 +4534,6 @@ async function main(): Promise<void> {
         }
         jumpWasAirborne = true;
         jumpPeakY = Math.max(jumpPeakY, y);
-        const t = Math.min(1, (now - jumpTakeoffMs) / 280);
-        setHumanoidJumpSquash(humanoid, 1.1 + 0.32 * t);
-        jumpCamDipY = -0.55 * (1 - t) + 0.18 * t;
         const nearApex = now - jumpTakeoffMs > 160 && y + 0.02 >= jumpPeakY;
         if (!jumpApexToasted && (nearApex || y > 0.18)) {
           jumpApexToasted = true;
@@ -4549,17 +4543,7 @@ async function main(): Promise<void> {
           pushSystemToast('jump', 'Jump', ttl);
         }
       } else {
-        if (jumpWasAirborne) jumpLandSquashUntil = now + 180;
         jumpWasAirborne = false;
-        if (now < jumpLandSquashUntil) {
-          const u = (jumpLandSquashUntil - now) / 180;
-          setHumanoidJumpSquash(humanoid, 1 - 0.28 * u, 1 + 0.2 * u);
-          jumpCamDipY = -0.22 * u;
-        } else {
-          setHumanoidJumpSquash(humanoid, 1, 1);
-          jumpCamDipY *= Math.max(0, 1 - dt * 8);
-          if (Math.abs(jumpCamDipY) < 0.01) jumpCamDipY = 0;
-        }
       }
     }
 
@@ -5202,7 +5186,7 @@ async function main(): Promise<void> {
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit'
       ) {
-        const follow = player.position.add(new Vector3(0, 1.35 + jumpCamDipY, 0));
+        const follow = player.position.add(new Vector3(0, 1.35, 0));
         const radius = camera.radius;
         camera.setTarget(follow);
         camera.radius = radius;
@@ -8079,7 +8063,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitJump, 600);
   }
 
-  // ?ve=jump-apex — play-cam hop presence (JUMP toast + stretch). Do not replace ?ve=jump (#139).
+  // ?ve=jump-apex — play-cam rigid hop (JUMP toast, no squash). Do not replace ?ve=jump (#252).
   if (ve === 'jump-apex') {
     camera.radius = 22;
     camera.alpha = Math.PI / 2.45;
@@ -8091,7 +8075,7 @@ async function main(): Promise<void> {
     let jumpAttempted = false;
     let peakY = 0;
     let apexOk = false;
-    let okStretch = 0;
+    let okScaleY = 0;
     let okPeak = 0;
     const GROUND_THRESHOLD = 0.08;
     const waitApex = () => {
@@ -8125,18 +8109,18 @@ async function main(): Promise<void> {
       }
       const toastEl = document.querySelector('.sysToast.jump');
       const toastOk = !!toastEl && /Jump/i.test(toastEl.textContent || '');
-      const stretchY = humanoid.root.scaling.y;
-      const stretchOk = stretchY > 1.08;
+      const scaleY = humanoid.root.scaling.y;
+      const rigidOk = Math.abs(scaleY - 1) < 0.05;
       const radiusOk = camera.radius >= 20;
-      if (!apexOk && peakY > 0.3 && toastOk && stretchOk && radiusOk) {
+      if (!apexOk && peakY > 0.3 && toastOk && rigidOk && radiusOk) {
         apexOk = true;
-        okStretch = stretchY;
+        okScaleY = scaleY;
         okPeak = peakY;
       }
       if (apexOk) {
         if (mark) {
           mark.textContent =
-            `Jump-apex OK · JUMP toast · stretch y=${okStretch.toFixed(2)} · r=22 · peak=${okPeak.toFixed(2)}m · #139`;
+            `Jump-apex OK · JUMP toast · rigid y=${okScaleY.toFixed(2)} · r=22 · peak=${okPeak.toFixed(2)}m · #252`;
         }
         window.setTimeout(waitApex, 400);
         return;
@@ -8144,13 +8128,13 @@ async function main(): Promise<void> {
       if (ticks > 90) {
         if (mark) {
           mark.textContent =
-            `Jump-apex FAIL · peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
+            `Jump-apex FAIL · peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · rigid ${rigidOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
         }
         return;
       }
       if (mark && jumpAttempted) {
         mark.textContent =
-          `VE jump-apex: peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchY.toFixed(2)}`;
+          `VE jump-apex: peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · scaleY ${scaleY.toFixed(2)}`;
       }
       window.setTimeout(waitApex, 100);
     };
