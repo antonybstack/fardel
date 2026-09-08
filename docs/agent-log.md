@@ -103,7 +103,17 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Keep `ve === 'walk'` on Walk. `?ve=run` holds W and requests running. Do not `findAnim(Walk, Run_Weapon)` — Run must not alias as Walk.
 - **Seen in:** #327
 
+### 2026-09-08 — place,instance — parented glTF thin instances also draw at origin
+- **Cause:** `thinInstanceSetBuffer` on a child of a pack `__root__` still renders the bind-pose mesh at the parent origin, so a CommonTree appeared on the dummy pad.
+- **Do this:** `Mesh.MergeMeshes` the pack meshes (don't dispose sources), hide the template, instance the merged mesh at origin. Do not `placeClone` unique mid GLTFs. Parking the parent at y=-500 culls every instance (world = parent × instance).
+- **Seen in:** #340
+
 ### 2026-09-08 — camera,trunk — Quaternius tree world AABB is not a bole
 - **Cause:** TwistedTree bark+leaves share one mesh. Hero scale ~5.2 makes the XZ AABB ~30 m, which swallows the clearing if used as a collision cylinder.
 - **Do this:** Discover `heroTree*` / `midTree_*` / `*_trunk` roots and collide a vertical cylinder of `scale * bole` (~1.55 hero / ~0.82 mid). Do not raycast foliage or the full world bbox. Keep E1 Y-spring; do not `setTarget` on the play follow.
 - **Seen in:** #351
+
+### 2026-09-08 — place,perf — pack glTF MASK on mid leaves survives unless forced opaque
+- **Cause:** CommonTree glTF ships `alphaMode: MASK`. Skipping the ALPHATEST *set* still leaves the loader MASK, so unique or ThinInstance mids alpha-test every leaf (#315 fillrate).
+- **Do this:** When `alphaTestLeaves` is false, force `PBRMATERIAL_OPAQUE` / `MATERIAL_OPAQUE` and clear `useAlphaFromAlbedoTexture`. ALPHATEST only on hero canopies. Mid ring is ThinInstances (`thinInstancePackRoot`), not unique clones.
+- **Seen in:** #340 / #315

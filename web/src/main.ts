@@ -10464,7 +10464,7 @@ async function main(): Promise<void> {
       const fpsVal = document.getElementById('fpsValue')?.textContent ?? '—';
       const hudVisible = !!hud && hud.offsetWidth > 0;
       const fpsNum = Number.parseInt(fpsVal, 10);
-      const fpsOk = Number.isFinite(fpsNum) && fpsNum > 0;
+      const fpsOk = Number.isFinite(fpsNum) && fpsNum >= FPS_FLOOR;
       if (hudVisible && near.length > 0 && fpsOk) {
         if (mark) {
           mark.textContent =
