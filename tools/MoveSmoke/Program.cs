@@ -101,6 +101,32 @@ try
         return;
     }
 
+    // After #83: grounded Move also writes Y / VelY / LastGroundedMicros
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } finalPose)
+    {
+        Fail("PlayerPose missing after move");
+        return;
+    }
+
+    if (MathF.Abs(finalPose.Y - Movement.GroundY) > 0.05f)
+    {
+        Fail($"grounded move Y={finalPose.Y} not ≈ GroundY={Movement.GroundY}");
+        return;
+    }
+
+    if (MathF.Abs(finalPose.VelY) > 0.1f)
+    {
+        Fail($"grounded move VelY={finalPose.VelY} not ≈ 0");
+        return;
+    }
+
+    if (finalPose.LastGroundedMicros == 0)
+    {
+        Fail("grounded move LastGroundedMicros not updated (still zero)");
+        return;
+    }
+
+    Console.WriteLine($"grounded move contract OK: Y={finalPose.Y} VelY={finalPose.VelY} LastGroundedMicros={finalPose.LastGroundedMicros}");
     Console.WriteLine("OK: MoveSmoke passed");
     Environment.ExitCode = 0;
 }
