@@ -108,11 +108,6 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `Mesh.MergeMeshes` the pack meshes (don't dispose sources), hide the template, instance the merged mesh at origin. Do not `placeClone` unique mid GLTFs. Parking the parent at y=-500 culls every instance (world = parent × instance).
 - **Seen in:** #340
 
-### 2026-09-08 — camera,rmb — play RMB hides the cursor; ?ve=rmb-look is grabbing chrome
-- **Cause:** #154 VE asserts `canvas.style.cursor === 'grabbing'`. WoW RMB-hold hides the pointer. One `setRmbLookArmed` drives both.
-- **Do this:** Play / `?ve=rmb-orbit` → `cursor: none`. Keep grabbing only when `veRmbLookLock` (`?ve=rmb-look`). Do not fail RmbOrbitSmoke: persistMark still `/^RMB orbit OK/` + `dAlpha`.
-- **Seen in:** #353 / #154 / #366
-
 ### 2026-09-08 — camera,trunk — Quaternius tree world AABB is not a bole
 - **Cause:** TwistedTree bark+leaves share one mesh. Hero scale ~5.2 makes the XZ AABB ~30 m, which swallows the clearing if used as a collision cylinder.
 - **Do this:** Discover `heroTree*` / `midTree_*` / `*_trunk` roots and collide a vertical cylinder of `scale * bole` (~1.55 hero / ~0.82 mid). Do not raycast foliage or the full world bbox. Keep E1 Y-spring; do not `setTarget` on the play follow.
@@ -162,3 +157,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `Wizard_Staff` is a rigid child of joint `Weapon.R`, not skinned. `Skeleton.clone` / IBM `updateMatrix` after Assimp *100 can leave bones on the container source, so the staff stays bind-T while CPU-skin Idle deforms the body. A StandardMaterial stick also vanishes into #39 fog at 12–20 m.
 - **Do this:** After IBM compensate, `linkTransformNode` onto the cloned `Weapon.R`. Keep staff parented to that node (`alwaysSelectAsActiveMesh`). Keep loader PBR on the staff. Do not rigid-clone. Do not `skeleton=null`.
 - **Seen in:** #332
+
+### 2026-09-08 — camera,rmb — play RMB hides the cursor; ?ve=rmb-look is grabbing chrome
+- **Cause:** #154 VE asserts `canvas.style.cursor === 'grabbing'`. WoW RMB-hold hides the pointer. One `setRmbLookArmed` drives both.
+- **Do this:** Play / `?ve=rmb-orbit` → `cursor: none`. Keep grabbing only when `veRmbLookLock` (`?ve=rmb-look`). Do not fail RmbOrbitSmoke: persistMark still `/^RMB orbit OK/` + `dAlpha`.
+- **Seen in:** #353 / #154 / #366
