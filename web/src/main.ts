@@ -5241,6 +5241,12 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 3.3;
         camera.setTarget(player.position.add(new Vector3(0, CAM_FOLLOW_Y_OFFSET, 0)));
         camera.radius = 22;
+      } else if (veFollow === 'sky-horizon') {
+        // Lock every frame: setTarget(player) rebuilds alpha/beta and eats the range shot.
+        camera.setTarget(player.position.add(new Vector3(0, 8, -8)));
+        camera.alpha = Math.PI / 2.55;
+        camera.beta = Math.PI / 2.48;
+        camera.radius = 32;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -5751,13 +5757,8 @@ async function main(): Promise<void> {
     window.setTimeout(waitPathGround, 600);
   }
 
-  // ?ve=sky-horizon — play-cam frame of layered mountain silhouette + sky gradient (#55).
-  if (ve === 'sky-horizon') {
-    camera.radius = 18;
-    camera.alpha = Math.PI / 2.05;
-    camera.beta = Math.PI / 2.55;
-  }
-
+  // ?ve=sky-horizon — establishing shot of layered mountain ranges (#55 / #273).
+  // Pose is locked each frame in the render loop (follow rebuilds alpha/beta).
   if (net && ve === 'sky-horizon') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE sky-horizon: waiting for Connected…';
@@ -5765,14 +5766,9 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        // Face distant N mountains; mid play-cam so ridges read through cyan fog.
-        camera.setTarget(player.position.add(new Vector3(0, 2.5, -12)));
-        camera.radius = 18;
-        camera.alpha = Math.PI / 2.05;
-        camera.beta = Math.PI / 2.55;
         if (mark) {
           mark.textContent =
-            'Sky-horizon OK · layered ridges + fog-matched sky · Connected';
+            'Sky-horizon OK · distant layered ranges · Connected';
         }
         return;
       }
