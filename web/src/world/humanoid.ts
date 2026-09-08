@@ -50,8 +50,10 @@ type HumanoidAnim = {
   run: AnimationGroup | null;
   /** Jump/Fall if the GLB has one; Wizard.glb does not. */
   air: AnimationGroup | null;
+  death: AnimationGroup | null;
   cast: AnimationGroup | null;
   airborne: boolean;
+  dead: boolean;
 };
 
 const animByRoot = new WeakMap<Mesh, HumanoidAnim>();
@@ -433,6 +435,7 @@ export function createPlayerHumanoid(
   const run = findAnim(animGroups, 'Run_Weapon', 'Run');
   const walk = findAnim(animGroups, 'Walk') ?? run;
   const air = findAnim(animGroups, 'Jump', 'Falling', 'Fall');
+  const death = findAnim(animGroups, 'Death');
   const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Staff_Attack');
   for (const g of animGroups) {
     g.stop();
@@ -440,7 +443,16 @@ export function createPlayerHumanoid(
   if (idle) {
     idle.start(true, 1.0, idle.from, idle.to, false);
   }
-  animByRoot.set(root, { idle, walk, run, air, cast, airborne: false });
+  animByRoot.set(root, {
+    idle,
+    walk,
+    run,
+    air,
+    death,
+    cast,
+    airborne: false,
+    dead: false,
+  });
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -468,17 +480,19 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
   for (const m of parts.root.getChildMeshes(false)) {
     if (m.skeleton && m.isEnabled() && m.isVisible && m.visibility > 0) skinned += 1;
   }
-  const playing = a?.cast?.isPlaying
-    ? a.cast.name
-    : a?.air?.isPlaying
-      ? a.air.name
-      : a?.run?.isPlaying
-        ? a.run.name
-        : a?.walk?.isPlaying
-          ? a.walk.name
-          : a?.idle?.isPlaying
-            ? a.idle.name
-            : null;
+  const playing = a?.dead && a.death
+    ? a.death.name
+    : a?.cast?.isPlaying
+      ? a.cast.name
+      : a?.air?.isPlaying
+        ? a.air.name
+        : a?.run?.isPlaying
+          ? a.run.name
+          : a?.walk?.isPlaying
+            ? a.walk.name
+            : a?.idle?.isPlaying
+              ? a.idle.name
+              : null;
   return { skinned, playing, idle: a?.idle?.name ?? null };
 }
 
@@ -499,7 +513,7 @@ export function setHumanoidAirborne(
   airborne: boolean,
 ): void {
   const a = animByRoot.get(parts.root);
-  if (!a) return;
+  if (!a || a.dead) return;
   a.airborne = airborne;
   if (!airborne) {
     stopIfPlaying(a.air);
@@ -529,7 +543,7 @@ export function setHumanoidMoving(
 ): void {
   const a = animByRoot.get(parts.root);
   if (!a) return;
-  if (a.airborne) return;
+  if (a.dead || a.airborne) return;
   if (a.cast?.isPlaying) return;
   if (a.idle) a.idle.speedRatio = 1;
   if (!moving) {
@@ -549,10 +563,44 @@ export function setHumanoidMoving(
   startLoop(loc);
 }
 
+/** Play Death once and hold the fallen pose. Respawn restores Idle_Weapon. */
+export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
+  const a = animByRoot.get(parts.root);
+  if (!a) return;
+  if (a.dead === dead) {
+    if (dead && a.death && !a.death.isPlaying) {
+      a.death.start(false, 1.0, a.death.to, a.death.to, false);
+      a.death.speedRatio = 0;
+    }
+    return;
+  }
+  a.dead = dead;
+  if (!dead) {
+    stopIfPlaying(a.death);
+    if (a.death) a.death.speedRatio = 1;
+    startLoop(a.idle);
+    return;
+  }
+  a.airborne = false;
+  stopIfPlaying(a.idle);
+  stopIfPlaying(a.walk);
+  stopIfPlaying(a.run);
+  stopIfPlaying(a.cast);
+  stopIfPlaying(a.air);
+  if (!a.death) return;
+  a.death.speedRatio = 1;
+  a.death.onAnimationGroupEndObservable.addOnce(() => {
+    if (!a.dead || !a.death) return;
+    a.death.start(false, 1.0, a.death.to, a.death.to, false);
+    a.death.speedRatio = 0;
+  });
+  a.death.start(false, 1.0, a.death.from, a.death.to, false);
+}
+
 /** Play a one-shot cast clip (Spell1) then return to idle/walk. */
 export function playHumanoidCast(parts: HumanoidParts): void {
   const a = animByRoot.get(parts.root);
-  if (!a?.cast) return;
+  if (!a?.cast || a.dead) return;
   if (a.idle?.isPlaying) a.idle.stop();
   if (a.walk?.isPlaying) a.walk.stop();
   if (a.run?.isPlaying) a.run.stop();
