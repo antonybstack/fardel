@@ -2984,6 +2984,12 @@ async function main(): Promise<void> {
   let jumpTakeoffMs = 0;
   let jumpApexToasted = false;
   let jumpPeakY = 0;
+  /** #256 — follow Y spring so land does not punch the camera. */
+  const CAM_FOLLOW_Y_OFFSET = 1.35;
+  const CAM_FOLLOW_Y_HZ = 10;
+  const CAM_FOLLOW_SNAP_METERS = 2.5;
+  let camFollowY = CAM_FOLLOW_Y_OFFSET;
+  let camFollowYSeeded = false;
   const bootParams = new URLSearchParams(window.location.search);
   const ve = bootParams.get('ve') || '';
   const firstSessionVe = ve === 'first-session';
@@ -5205,7 +5211,7 @@ async function main(): Promise<void> {
       if (veFollow === 'minimap-pip') {
         camera.alpha = Math.PI / 2.45;
         camera.beta = Math.PI / 3.3;
-        camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
+        camera.setTarget(player.position.add(new Vector3(0, CAM_FOLLOW_Y_OFFSET, 0)));
         camera.radius = 22;
       } else if (
         veFollow !== 'vendor-stall' &&
@@ -5216,7 +5222,17 @@ async function main(): Promise<void> {
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit'
       ) {
-        const follow = player.position.add(new Vector3(0, 1.35, 0));
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        const follow = new Vector3(player.position.x, camFollowY, player.position.z);
         const radius = camera.radius;
         camera.setTarget(follow);
         camera.radius = radius;
