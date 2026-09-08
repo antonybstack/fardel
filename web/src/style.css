@@ -1981,3 +1981,6 @@ body {
 .sysToast.stun { border-color: rgba(120, 200, 255, 0.75); }
 .sysToast.stun .toastTag { color: #7ec8ff; }
 .clLine.stun .clTag { color: #b8c0cc; }
+
+.sysToast.canvasFocus { border-color: rgba(100, 180, 255, 0.8); }
+.sysToast.canvasFocus .toastTag { color: #64b4ff; }
