@@ -5340,6 +5340,7 @@ async function main(): Promise<void> {
             moving &&
             (ve === 'run' ||
               (ve !== 'walk' &&
+                ve !== 'walk-stop' &&
                 ve !== 'face-target-walk' &&
                 keys.has('w') &&
                 !keys.has('s')));
@@ -5373,6 +5374,7 @@ async function main(): Promise<void> {
           moving &&
           (ve === 'run' ||
             (ve !== 'walk' &&
+              ve !== 'walk-stop' &&
               ve !== 'face-target-walk' &&
               keys.has('w') &&
               !keys.has('s')));
@@ -6201,6 +6203,7 @@ async function main(): Promise<void> {
         camera.radius = 8;
       } else if (
         veFollow === 'walk' ||
+        veFollow === 'walk-stop' ||
         veFollow === 'run' ||
         veFollow === 'flinch' ||
         veFollow === 'yaw' ||
@@ -7374,6 +7377,78 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitWalk, 200);
     };
     window.setTimeout(waitWalk, 600);
+  }
+
+  // ?ve=walk-stop — E8.28 Walk-to-Idle: no leftover Walk stride at 0 wish.
+  if (ve === 'walk-stop') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'walk-stop') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE walk-stop: waiting for Connected…';
+    let ticks = 0;
+    let sawWalk = false;
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    const waitStop = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE walk-stop: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitStop, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitStop, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitStop, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      const holding = ticks <= 10;
+      if (holding) {
+        keys.add('w');
+        setHumanoidMoving(humanoid, true, false, MOVE_SPEED);
+      } else {
+        keys.delete('w');
+        setHumanoidMoving(humanoid, false);
+      }
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = clipBare(pb.playing);
+      if (/walk/i.test(clip) && pb.skinned > 0) sawWalk = true;
+      const idleOk =
+        !holding &&
+        sawWalk &&
+        pb.skinned > 0 &&
+        /^idle/i.test(clip) &&
+        !/walk/i.test(clip) &&
+        !/t-pose/i.test(clip);
+      if (mark) {
+        if (idleOk) {
+          mark.textContent = `Idle OK · ${pb.playing} · skinned ${pb.skinned} · walk-stop`;
+        } else if (pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (holding) {
+          mark.textContent = `VE walk-stop: walking · ${clip} · skinned ${pb.skinned}`;
+        } else {
+          mark.textContent = `VE walk-stop: stopping · ${clip} · skinned ${pb.skinned}`;
+        }
+      }
+      if (ticks < 240) window.setTimeout(waitStop, 200);
+    };
+    window.setTimeout(waitStop, 600);
   }
 
   // ?ve=run — E8.2 play-cam Run_Weapon (fast/forward gait, not Walk / T-pose).

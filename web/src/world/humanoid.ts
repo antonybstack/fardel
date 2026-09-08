@@ -837,13 +837,20 @@ export function setHumanoidMoving(
   applyStaffClips(a);
   if (a.idle) a.idle.speedRatio = 1;
   if (!moving) {
-    stopIfPlaying(a.walk);
-    stopIfPlaying(a.run);
-    stopIfPlaying(a.runWeapon, a.run);
-    stopIfPlaying(a.runUnarmed, a.run);
+    // Start Idle while Walk/Run still play, then stop them. Stopping first
+    // leaves one CPU-skin frame of mid-stride Walk at 0 wish (skate) or no
+    // group (bind-T). Same order as cast-cancel.
+    if (a.walk) a.walk.speedRatio = 0;
+    if (a.run) a.run.speedRatio = 0;
+    if (a.runWeapon) a.runWeapon.speedRatio = 0;
+    if (a.runUnarmed) a.runUnarmed.speedRatio = 0;
+    startLoop(a.idle);
+    stopIfPlaying(a.walk, a.idle);
+    stopIfPlaying(a.run, a.idle);
+    stopIfPlaying(a.runWeapon, a.idle);
+    stopIfPlaying(a.runUnarmed, a.idle);
     stopIfPlaying(a.idleWeapon, a.idle);
     stopIfPlaying(a.idleUnarmed, a.idle);
-    startLoop(a.idle);
     return;
   }
   const loc = running && a.run ? a.run : (a.walk ?? a.run);
