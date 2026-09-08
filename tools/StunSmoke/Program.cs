@@ -3,7 +3,7 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Stun/Bash: hard-CC breaks windup without CastLockedUntil; StunnedUntilMicros
-// locks Move + Cast with "stunned" (distinct from silence).
+// locks Move (XZ and jump:true) + Cast with "stunned" (distinct from silence).
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
@@ -115,9 +115,19 @@ try
     }
     Console.WriteLine($"Stun mana OK victim {manaMid}->{manaAfterStun} stunner {manaBBefore}->{manaBAfter}");
 
-    // Move must reject while stunned
-    await ExpectMoveFail(connA, 0.5f, 0f, "stunned", "during stun move");
+    // Move must reject while stunned (XZ and jump intent — live Space path).
+    await ExpectMoveFail(connA, 0.5f, 0f, jump: false, "stunned", "during stun move");
     Console.WriteLine("Stun move reject OK");
+    var velYBeforeJump = connA.Db.PlayerPose.Identity.Find(idA)!.VelY;
+    await ExpectMoveFail(connA, 0f, 0f, jump: true, "stunned", "during stun jump");
+    var poseJumpFail = connA.Db.PlayerPose.Identity.Find(idA)!;
+    if (MathF.Abs(poseJumpFail.VelY - Movement.JumpVelocity) < 0.5f
+        && MathF.Abs(velYBeforeJump - Movement.JumpVelocity) > 0.5f)
+    {
+        Fail($"stun jump boosted VelY {velYBeforeJump}->{poseJumpFail.VelY}");
+        return;
+    }
+    Console.WriteLine($"Stun jump reject OK VelY={poseJumpFail.VelY}");
 
     // Wait past GCD so stun (not GCD) is the Cast reject reason.
     await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
@@ -134,9 +144,27 @@ try
     dummy = FindDummy(connA)!;
     connA.Reducers.SetTarget(dummy.NpcId);
     await DelayPumpBoth(connA, connB, 40);
-    // Move should work after stun
+    // Move should work after stun — including jump:true.
     await MoveTo(connA, idA, 0.3f, 0f, connB);
     Console.WriteLine("post-Stun Move OK");
+    connA.Reducers.Move(0f, 0f, jump: true);
+    await PumpUntilBoth(() =>
+    {
+        var p = connA.Db.PlayerPose.Identity.Find(idA);
+        return p is not null
+            && (p.Y > Movement.GroundY + 0.05f
+                || MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f);
+    }, timeoutMs, connA, connB, "post-stun jump");
+    Console.WriteLine($"post-Stun jump OK Y={connA.Db.PlayerPose.Identity.Find(idA)!.Y} VelY={connA.Db.PlayerPose.Identity.Find(idA)!.VelY}");
+    // Land so later idle-stun Move isn't fighting air physics.
+    var landGuard = 0;
+    while (connA.Db.PlayerPose.Identity.Find(idA) is { } air
+           && (MathF.Abs(air.Y - Movement.GroundY) > 0.05f || MathF.Abs(air.VelY) > 0.2f)
+           && landGuard++ < 40)
+    {
+        connA.Reducers.Move(0f, 0f, jump: false);
+        await DelayPumpBoth(connA, connB, 50);
+    }
     connA.Reducers.Cast(Combat.SpellEmberbolt);
     await PumpUntilBoth(() =>
         connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == Combat.SpellEmberbolt,
@@ -162,8 +190,10 @@ try
         Fail("idle stun should not leave casting");
         return;
     }
-    await ExpectMoveFail(connA, 0.4f, 0f, "stunned", "idle stun move");
+    await ExpectMoveFail(connA, 0.4f, 0f, jump: false, "stunned", "idle stun move");
     Console.WriteLine("idle Stun move reject OK");
+    await ExpectMoveFail(connA, 0f, 0f, jump: true, "stunned", "idle stun jump");
+    Console.WriteLine("idle Stun jump reject OK");
 
     var dummyAfter = FindDummy(connA)!.Hp;
     if (dummyAfter != dummyHpBefore && dummyAfter != Combat.DummyMaxHp)
@@ -205,7 +235,7 @@ static async Task ExpectStunFail(DbConnection conn, Identity target, string need
     Console.WriteLine($"Stun reject OK ({label}): {fail}");
 }
 
-static async Task ExpectMoveFail(DbConnection conn, float dx, float dz, string needle, string label)
+static async Task ExpectMoveFail(DbConnection conn, float dx, float dz, bool jump, string needle, string label)
 {
     string? fail = null;
     var tcs = new TaskCompletionSource();
@@ -219,7 +249,7 @@ static async Task ExpectMoveFail(DbConnection conn, float dx, float dz, string n
         }
     }
     conn.Reducers.OnMove += OnMove;
-    try { conn.Reducers.Move(dx, dz, false); await Pump(tcs.Task, timeoutMs, conn, "move fail " + label); }
+    try { conn.Reducers.Move(dx, dz, jump); await Pump(tcs.Task, timeoutMs, conn, "move fail " + label); }
     finally { conn.Reducers.OnMove -= OnMove; }
     if (string.IsNullOrEmpty(fail) || fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
     {
