@@ -258,8 +258,8 @@ try
     }
     conn.Reducers.Move(0f, 0f, jump: true);
     // Burst gravity + coyote jump in one wall-clock window (CoyoteTimeMicros=50ms).
-    // Per-tick waits were racing the window before later asserts.
-    for (var i = 0; i < 6; i++)
+    var ticksToApex = TicksToApex();
+    for (var i = 0; i < ticksToApex; i++)
     {
         conn.Reducers.Move(0f, 0f, jump: false);
     }
@@ -269,14 +269,14 @@ try
         conn.Reducers.Move(0f, 0f, jump: false);
         conn.FrameTick();
     }
-    // Single hop peaks ~1.05m; stacked coyote re-boost exceeds that.
-    var coyoteBoost = await WaitPoseTight(conn, identity, p => p.Y > 1.4f, 2000);
-    if (coyoteBoost is null || coyoteBoost.Y <= 1.4f)
+    var stackedMin = EstimateHopPeak() + 0.4f;
+    var coyoteBoost = await WaitPoseTight(conn, identity, p => p.Y > stackedMin, 2000);
+    if (coyoteBoost is null || coyoteBoost.Y <= stackedMin)
     {
-        Fail($"coyote within window did not re-boost (Y={coyoteBoost?.Y} VelY={coyoteBoost?.VelY})");
+        Fail($"coyote within window did not re-boost (Y={coyoteBoost?.Y} VelY={coyoteBoost?.VelY} need >{stackedMin:F2})");
         return;
     }
-    Console.WriteLine($"coyote jump: Y={coyoteBoost.Y} velY={coyoteBoost.VelY}");
+    Console.WriteLine($"coyote jump: Y={coyoteBoost.Y} velY={coyoteBoost.VelY} stackedMin={stackedMin:F2}");
 
     PlayerPose? coyoteFalling = coyoteBoost;
     using (var expireCts = new CancellationTokenSource(timeoutMs))
@@ -621,6 +621,39 @@ static void Fail(string msg)
     Environment.ExitCode = 1;
 }
 
+
+static int TicksToApex()
+{
+    const float dt = 0.05f;
+    var step = MathF.Abs(Movement.Gravity) * dt;
+    if (step < 1e-4f)
+    {
+        return 8;
+    }
+    return Math.Max(1, (int)MathF.Round(Movement.JumpVelocity / step));
+}
+
+static float EstimateHopPeak()
+{
+    const float dt = 0.05f;
+    var velY = Movement.JumpVelocity;
+    var y = velY * dt;
+    var peak = y;
+    for (var i = 0; i < 64; i++)
+    {
+        velY += Movement.Gravity * dt;
+        y += velY * dt;
+        if (y > peak)
+        {
+            peak = y;
+        }
+        if (y <= Movement.GroundY)
+        {
+            break;
+        }
+    }
+    return peak;
+}
 
 static async Task<PlayerPose?> WaitPose(DbConnection conn, Identity identity, Func<PlayerPose, bool> pred, int timeoutMs)
 {
