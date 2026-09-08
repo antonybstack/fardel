@@ -2776,7 +2776,7 @@ async function main(): Promise<void> {
   paintNameplate(localNameplate, 'You', '#b8d4ff', -1);
   let moveAccumulator = 0;
   const MOVE_SEND_HZ = 20;
-  /** Presentation lerp between 20 Hz snapshots — mesh only, not send/authority (#212). */
+  /** Presentation lerp only; snap teleports. */
   const POSE_SNAP_METERS = 2.5;
   type PoseInterp = {
     seeded: boolean;
@@ -2809,10 +2809,7 @@ async function main(): Promise<void> {
     while (d < -Math.PI) d += Math.PI * 2;
     return a + d * t;
   };
-  const smoothU = (u: number) => {
-    const t = u < 0 ? 0 : u > 1 ? 1 : u;
-    return t * t * (3 - 2 * t);
-  };
+  const clampU = (u: number) => (u < 0 ? 0 : u > 1 ? 1 : u);
   const retargetPoseInterp = (
     i: PoseInterp,
     x: number,
@@ -2829,7 +2826,10 @@ async function main(): Promise<void> {
       i.seeded = true;
       return;
     }
-    const s = smoothU(i.u);
+    if (x === i.tx && y === i.ty && z === i.tz && yaw === i.tyaw) {
+      return;
+    }
+    const s = clampU(i.u);
     const cx = lerpN(i.fx, i.tx, s);
     const cy = lerpN(i.fy, i.ty, s);
     const cz = lerpN(i.fz, i.tz, s);
@@ -2854,7 +2854,7 @@ async function main(): Promise<void> {
     i.u = 0;
   };
   const samplePoseInterp = (i: PoseInterp) => {
-    const s = smoothU(i.u);
+    const s = clampU(i.u);
     return {
       x: lerpN(i.fx, i.tx, s),
       y: lerpN(i.fy, i.ty, s),
@@ -3922,7 +3922,7 @@ async function main(): Promise<void> {
     const dt = engine.getDeltaTime() / 1000;
     const now = Date.now();
 
-    // Display-rate lerp toward latest 20 Hz snapshots (#212). Authority stays net pose.
+    // Presentation only; snap teleports.
     advancePoseInterp(localInterp, dt);
     if (localInterp.seeded) {
       const samp = samplePoseInterp(localInterp);
