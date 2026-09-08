@@ -82,3 +82,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Grounded `advancePoseInterp` parks at `u=1` between snapshots. Frame-to-frame `hypot(dx,dz)/dt` on `samplePoseInterp` is 0 most frames, so `setHumanoidMoving(false)` stops Walk and restarts it from frame 0 on the next snap.
 - **Do this:** Drive remote Walk from `PoseInterp` `vx,vz` while `u<1`, with ~150ms hold. Do not use parked sample deltas. `?ve=remote-walk` needs a moving other identity (`tools/SecondClient`); local `sendMove` does not create a remote XZ delta.
 - **Seen in:** #313 / #267
+
+### 2026-09-08 — ve,rebase — `veFollow` else-if chain conflicts on every E2 VE
+- **Cause:** Each body PR adds a `veFollow === '…'` branch next to walk/yaw. Parallel PRs all edit the same else-if.
+- **Do this:** Keep idle / walk / yaw / jump-pose / look-at / remote-walk / cast-anim as one chain. OR the new mode in; do not drop `idle` or `jump-pose`.
+- **Seen in:** #317 / #269 vs #313/#318
