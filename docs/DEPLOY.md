@@ -147,9 +147,18 @@ Unity WebGL Connect was the previous Pages payload. It is preserved only on
 
 ## Visual evidence host (`ve.sparkify.dev`)
 
-PR screenshots are **not** committed to git and **not** pasted via GitHub user-attachments.
+PR screenshots are **not** committed to git and **not** pasted via GitHub user-attachments for new work.
 
 - **Bucket:** Cloudflare R2 `fardel-ve` (public custom domain `ve.sparkify.dev`)
-- **Upload (all seats):** `tools/scripts/ve-upload.sh <local.png> <key>` with shared `CLOUDFLARE_API_TOKEN` on the box
-- **Embed:** `https://ve.sparkify.dev/<key>` in the PR body/comment
-- **One-time setup:** enable R2 in the Cloudflare dashboard; create token with R2 edit; set `CLOUDFLARE_API_TOKEN` for the box; attach custom domain `ve.sparkify.dev` to the bucket
+- **Upload (all seats):** `tools/scripts/ve-upload.sh <local.png> <key>` with shared `CLOUDFLARE_API_TOKEN`
+  - Example: `tools/scripts/ve-upload.sh /tmp/chat.png 98/chat-read.png`
+- **Embed in PR:** `![description](https://ve.sparkify.dev/<key>)` or `<img src="https://ve.sparkify.dev/<key>" />`
+- **Account ID:** `6ea5db25020bce6cbefd6c1cc999bef3` (hardcoded in script)
+- **Token location:**
+  - Grok Bot box: may live in box secrets; export into shell for wrangler
+  - Mac Studio: set in parent/env once for all seats (`export CLOUDFLARE_API_TOKEN="..."`)
+- **Fallback:** if seat lacks token, capture to shared folder and ping Lead to upload (never ask Antony for GitHub sign-in)
+- **Forbidden for new work:** committing `ve/*.png` to git, GitHub `user-attachments` paste, `raw.githubusercontent.com` VE embeds, relative `ve/` links in PR
+- **Reviewer bar:** URL must be `https://ve.sparkify.dev/…`, HTTP 200 `image/png`, renders in PR UI
+
+For full VE policy, see [ORCHESTRATION.md § 16](ORCHESTRATION.md#16-visual-evidence-ve-policy--canonical).
