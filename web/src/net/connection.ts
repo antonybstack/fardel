@@ -33,6 +33,8 @@ export const STUN_MANA_COST = 15;
 export const STUN_RANGE_METERS = 5;
 export const STUN_DURATION_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
+/** Match Combat.NpcKindHostile — yard hostiles (#354). Dummy stays trainer. */
+export const NPC_KIND_HOSTILE = 2;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
 export const EMBERBOLT_MANA_COST = 20;

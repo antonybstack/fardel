@@ -153,11 +153,7 @@ try
             await Frame(conn, 150);
             for (var guard = 0; guard < 40; guard++)
             {
-                Npc? dummyK = null;
-                foreach (var n in conn.Db.Npc.Iter())
-                {
-                    if (n.Hp > 0) { dummyK = n; break; }
-                }
+                Npc? dummyK = FindDummy(conn);
                 if (dummyK is null)
                 {
                     try { conn.Reducers.EnsureTrainingDummy(); } catch { /* ignore */ }
@@ -201,11 +197,7 @@ try
             {
                 try { conn.Reducers.EnsureTrainingDummy(); } catch { /* ignore */ }
                 await Frame(conn, 120);
-                Npc? dummy = null;
-                foreach (var n in conn.Db.Npc.Iter())
-                {
-                    if (n.Hp > 0) { dummy = n; break; }
-                }
+                Npc? dummy = FindDummy(conn);
                 if (dummy is null) break;
                 try
                 {
@@ -265,6 +257,18 @@ static async Task MoveTo(DbConnection conn, Identity id, float tx, float tz)
         conn.Reducers.Move(dx * scale, dz * scale, false);
         await Frame(conn, 16);
     }
+}
+
+static Npc? FindDummy(DbConnection conn)
+{
+    Npc? dead = null;
+    foreach (var n in conn.Db.Npc.Iter())
+    {
+        if (n.Kind != Combat.NpcKindDummy) continue;
+        if (n.Hp > 0) return n;
+        dead = n;
+    }
+    return dead;
 }
 
 static void Fail(string msg)

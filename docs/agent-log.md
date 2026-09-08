@@ -143,3 +143,7 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `setHumanoidCasting` loops Spell until CastEndsAt / cancel / interrupt. Spark stays the one-shot. Do not treat animation-end as the windup end.
 - **Seen in:** #331
 
+### 2026-09-08 — npc,smoke — first `Npc.Iter()` living row is not Dummy after hostiles
+- **Cause:** #354 inserts Kind=2 yard hostiles. `if (n.Hp > 0) break` can pick a hostile; dummy thorns never fire.
+- **Do this:** Find Dummy by `Kind == Combat.NpcKindDummy` (1). Do not assume Iter() order.
+- **Seen in:** #354

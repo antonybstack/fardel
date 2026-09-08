@@ -31,6 +31,18 @@ public static class Combat
     public const float DummySpawnY = 0f;
     public const float DummySpawnZ = 0f;
 
+    /// <summary>Training dummy (Kind=1). Hostiles are a separate type.</summary>
+    public const int NpcKindDummy = 1;
+    /// <summary>Hostile NPC kind. Two yard spawns, not origin. Dummy stays trainer.</summary>
+    public const int NpcKindHostile = 2;
+    public const int HostileMaxHp = 40;
+    public const float HostileSpawnAx = 3f;
+    public const float HostileSpawnAy = 0f;
+    public const float HostileSpawnAz = 7f;
+    public const float HostileSpawnBx = -7f;
+    public const float HostileSpawnBy = 0f;
+    public const float HostileSpawnBz = 3f;
+
     /// <summary>Player Character.MaxHp seed (durable).</summary>
     public const int PlayerMaxHp = 100;
 
