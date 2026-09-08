@@ -7018,6 +7018,37 @@ async function main(): Promise<void> {
     window.setTimeout(waitBag, 700);
   }
 
+  // ?ve=bag-feel — demo bag open/close transitions + toast (#152).
+  if (ve === 'bag-feel') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (net && ve === 'bag-feel') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE bag-feel: waiting for Connected…';
+    let toastShown = false;
+    const waitBagFeel = () => {
+      if (!net) return;
+      const st = latestStatus;
+      const ch = net.getCharacter();
+      if (st.state === 'connected' && ch && !toastShown) {
+        bagOpen = true;
+        setBagPanelOpen(true);
+        toastShown = true;
+        if (mark) {
+          mark.textContent = 'Bag-feel OK · panel open + BAG toast';
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = 'VE bag-feel: waiting for Character…';
+      }
+      window.setTimeout(waitBagFeel, 400);
+    };
+    window.setTimeout(waitBagFeel, 700);
+  }
+
   // ?ve=loadout-buff — mixed equipped/missing chips + active tonic buff (#91). HUD only.
   if (ve === 'loadout-buff') {
     camera.radius = 12;
