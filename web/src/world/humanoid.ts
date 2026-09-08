@@ -144,6 +144,48 @@ function compensateAssimpIbm(skel: Skeleton, armature: TransformNode): void {
   }
 }
 
+/** Skeleton.clone / IBM updateMatrix can leave bones on the container source. */
+function relinkSkeletonToClones(
+  skel: Skeleton,
+  pivot: TransformNode,
+  prefix: string,
+): void {
+  const nodes: TransformNode[] = [];
+  const visit = (n: Node): void => {
+    if (n instanceof TransformNode) nodes.push(n);
+    for (const c of n.getChildren()) visit(c);
+  };
+  visit(pivot);
+  for (const bone of skel.bones) {
+    const bn = bone.name;
+    const tn =
+      nodes.find((n) => n.name === bn) ??
+      nodes.find((n) => n.name.endsWith(bn)) ??
+      nodes.find((n) => bareName(n.name, prefix) === bn);
+    if (tn) bone.linkTransformNode(tn);
+  }
+}
+
+/** Wizard_Staff is a rigid child of joint Weapon.R — not skinned. */
+function attachStaffToWeaponBone(
+  staffMesh: AbstractMesh,
+  skel: Skeleton | null,
+  skinned: AbstractMesh | null,
+): void {
+  staffMesh.alwaysSelectAsActiveMesh = true;
+  if (!skel) return;
+  const weapon =
+    skel.bones.find((b) => /weapon\.r$/i.test(b.name)) ??
+    skel.bones.find((b) => /weapon/i.test(b.name));
+  if (!weapon) return;
+  const grip = weapon.getTransformNode();
+  if (grip) {
+    if (staffMesh.parent !== grip) staffMesh.parent = grip;
+    return;
+  }
+  if (skinned) staffMesh.attachToBone(weapon, skinned);
+}
+
 function collectMeshes(roots: Node[]): AbstractMesh[] {
   const meshes: AbstractMesh[] = [];
   for (const n of roots) {
@@ -247,6 +289,18 @@ export function createPlayerHumanoid(
     }
   }
 
+  let staffMesh: AbstractMesh | null = null;
+  const robeMeshes: AbstractMesh[] = [];
+  for (const m of meshes) {
+    const bare = bareName(m.name, prefix);
+    if (/wizard_staff|^staff$/i.test(bare) || bare === 'Wizard_Staff') {
+      staffMesh = m;
+    }
+    if (/shoulderpad|pouch/i.test(bare)) {
+      robeMeshes.push(m);
+    }
+  }
+
   for (const m of meshes) {
     m.setEnabled(true);
     m.isVisible = true;
@@ -262,6 +316,7 @@ export function createPlayerHumanoid(
     m.numBoneInfluencers = 4;
     skel.useTextureToStoreBoneMatrices = false;
     if (armature) compensateAssimpIbm(skel, armature);
+    relinkSkeletonToClones(skel, pivot, prefix);
     if (m.getClassName() === 'Mesh') {
       const mesh = m as Mesh;
       mesh.makeGeometryUnique();
@@ -277,6 +332,16 @@ export function createPlayerHumanoid(
         mesh.applySkeleton(skel);
         mesh.removeVerticesData('matricesIndices');
         mesh.removeVerticesData('matricesWeights');
+        if (staffMesh) {
+          staffMesh.computeWorldMatrix(true);
+          try {
+            if (staffMesh.getClassName() === 'Mesh') {
+              (staffMesh as Mesh).refreshBoundingInfo(true, true);
+            }
+          } catch {
+            /* optional */
+          }
+        }
       };
       cpuSkin();
       if (jointIdx && jointWts) {
@@ -309,18 +374,10 @@ export function createPlayerHumanoid(
     pivot.position.y -= bounds.min.y;
   }
 
-  // Staff: keep armature parenting; also mirror under staff group for equip API
-  // by parenting a thin proxy and toggling the real mesh in setEnabled observers.
-  let staffMesh: AbstractMesh | null = null;
-  const robeMeshes: AbstractMesh[] = [];
-  for (const m of meshes) {
-    const bare = bareName(m.name, prefix);
-    if (/wizard_staff|^staff$/i.test(bare) || bare === 'Wizard_Staff') {
-      staffMesh = m;
-    }
-    if (/shoulderpad|pouch/i.test(bare)) {
-      robeMeshes.push(m);
-    }
+  // Staff: parent to Weapon.R (Idle_Weapon grip). Equip API still toggles the GLB mesh.
+  const skinnedBody = meshes.find((m) => !!m.skeleton) ?? null;
+  if (staffMesh) {
+    attachStaffToWeaponBone(staffMesh, skinnedBody?.skeleton ?? null, skinnedBody);
   }
 
   // Wire equip hide: when staff/robes containers toggle, mirror onto real meshes.
@@ -412,23 +469,20 @@ export function createPlayerHumanoid(
   });
 
   if (staffMesh) {
-    const staffMat = mat(
-      scene,
-      `${prefix}StaffWoodMat`,
-      new Color3(0.62, 0.42, 0.2),
-      0.06,
-    );
-    staffMat.specularColor = new Color3(0.2, 0.14, 0.06);
+    // Keep loader PBR — a StandardMaterial stick vanishes into #39 fog at 12–20 m.
     const sm = staffMesh.material;
-    if (sm instanceof PBRMaterial && sm.albedoTexture) {
-      try {
-        staffMat.diffuseTexture = sm.albedoTexture as Texture;
-        staffMat.diffuseColor = new Color3(1.2, 1.05, 0.9);
-      } catch {
-        /* wood */
+    if (sm instanceof PBRMaterial) {
+      sm.albedoColor = new Color3(1.25, 1.1, 0.85);
+      sm.emissiveColor = new Color3(0.22, 0.14, 0.05);
+      sm.emissiveIntensity = 0.45;
+      sm.metallic = 0;
+      sm.roughness = 0.72;
+      sm.backFaceCulling = false;
+      if (sm.albedoTexture) {
+        const tex = sm.albedoTexture as Texture;
+        tex.level = 1.8;
       }
     }
-    staffMesh.material = staffMat;
   }
 
   const idle =

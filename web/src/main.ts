@@ -5644,7 +5644,8 @@ async function main(): Promise<void> {
         tgt.z = player.position.z;
         camera.alpha = Math.PI / 2.15;
         camera.beta = Math.PI / 2.55;
-        camera.radius = 8;
+        // E8.7: far-cam Idle must still read staff-grip (not 8m close-up).
+        camera.radius = 16;
       } else if (veFollow === 'hostile-spawn') {
         // North of pad: dummy (5,0) + hostiles (3,7)/(-7,3) in one shot.
         camera.inertialAlphaOffset = 0;

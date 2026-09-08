@@ -152,3 +152,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Mid/understory keep-out used polar angle, so a north/bent path stayed walled in and `?ve=place-wow` (looking north) never showed a receding trail.
 - **Do this:** Keep-out with distance-to-polyline (`distToPath` in `forest.ts`). Polar SE skip does not follow a bent path.
 - **Seen in:** #342
+
+### 2026-09-08 — humanoid,staff — far play-cam Idle reads as a T
+- **Cause:** `Wizard_Staff` is a rigid child of joint `Weapon.R`, not skinned. `Skeleton.clone` / IBM `updateMatrix` after Assimp *100 can leave bones on the container source, so the staff stays bind-T while CPU-skin Idle deforms the body. A StandardMaterial stick also vanishes into #39 fog at 12–20 m.
+- **Do this:** After IBM compensate, `linkTransformNode` onto the cloned `Weapon.R`. Keep staff parented to that node (`alwaysSelectAsActiveMesh`). Keep loader PBR on the staff. Do not rigid-clone. Do not `skeleton=null`.
+- **Seen in:** #332
