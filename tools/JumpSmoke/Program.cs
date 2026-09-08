@@ -257,46 +257,26 @@ try
         return;
     }
     conn.Reducers.Move(0f, 0f, jump: true);
-    var coyoteLeft = await WaitPoseTight(
-        conn, identity,
-        p => p.Y > Movement.GroundY + 0.05f || MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f,
-        2000);
-    if (coyoteLeft is null)
+    // Burst gravity + coyote jump in one wall-clock window (CoyoteTimeMicros=50ms).
+    // Per-tick waits were racing the window before later asserts.
+    for (var i = 0; i < 6; i++)
     {
-        Fail("coyote: jump did not leave ground");
-        return;
-    }
-    var coyoteApex = coyoteLeft;
-    for (var i = 0; i < 16; i++)
-    {
-        if (coyoteApex.Y > Movement.GroundY + 0.05f && coyoteApex.VelY <= 0.01f)
-        {
-            break;
-        }
-        var velBefore = coyoteApex.VelY;
         conn.Reducers.Move(0f, 0f, jump: false);
-        var stepped = await WaitPoseTight(conn, identity, p => p.VelY < velBefore - 0.1f, 500);
-        if (stepped is null)
-        {
-            Fail($"coyote: burst gravity timeout (Y={coyoteApex.Y} VelY={coyoteApex.VelY})");
-            return;
-        }
-        coyoteApex = stepped;
-    }
-    if (coyoteApex.Y <= Movement.GroundY + 0.05f || coyoteApex.VelY > 0.01f)
-    {
-        Fail($"coyote: never reached airborne apex Y={coyoteApex.Y} VelY={coyoteApex.VelY}");
-        return;
     }
     conn.Reducers.Move(0f, 0f, jump: true);
-    var coyoteBoost = await WaitPoseTight(
-        conn, identity, p => MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f, 500);
-    if (coyoteBoost is null || MathF.Abs(coyoteBoost.VelY - Movement.JumpVelocity) > 1f)
+    for (var i = 0; i < 4; i++)
     {
-        Fail($"coyote within window did not boost VelY (Y={coyoteApex.Y} VelY={coyoteApex.VelY} -> {coyoteBoost?.VelY})");
+        conn.Reducers.Move(0f, 0f, jump: false);
+        conn.FrameTick();
+    }
+    // Single hop peaks ~1.05m; stacked coyote re-boost exceeds that.
+    var coyoteBoost = await WaitPoseTight(conn, identity, p => p.Y > 1.4f, 2000);
+    if (coyoteBoost is null || coyoteBoost.Y <= 1.4f)
+    {
+        Fail($"coyote within window did not re-boost (Y={coyoteBoost?.Y} VelY={coyoteBoost?.VelY})");
         return;
     }
-    Console.WriteLine($"coyote jump: Y={coyoteApex.Y}->{coyoteBoost.Y} velY {coyoteApex.VelY}->{coyoteBoost.VelY}");
+    Console.WriteLine($"coyote jump: Y={coyoteBoost.Y} velY={coyoteBoost.VelY}");
 
     PlayerPose? coyoteFalling = coyoteBoost;
     using (var expireCts = new CancellationTokenSource(timeoutMs))
@@ -485,10 +465,12 @@ try
     Console.WriteLine($"jump+XZ: X {xzBeforeX}->{xzJump.X} (d={xzDx:F3} clamped {xzExpected}) Y={xzJump.Y} velY={xzJump.VelY}");
 
     // Air-phase strafe: Move(dx,0,jump:false) still integrates gravity.
+    // Airborne XZ is scaled (E1.2 #253) — same wish is much smaller than grounded.
     var airBeforeX = xzJump.X;
     var airBeforeY = xzJump.Y;
     var airBeforeVelY = xzJump.VelY;
     var airStrafe = 0.4f;
+    var airExpected = airStrafe * Movement.AirControlScale;
     conn.Reducers.Move(airStrafe, 0f, jump: false);
     var xzAir = await WaitPose(conn, identity, p => MathF.Abs(p.X - airBeforeX) > 0.01f, timeoutMs);
     if (xzAir is null)
@@ -496,9 +478,15 @@ try
         Fail("air strafe timeout — no X change");
         return;
     }
-    if (MathF.Abs(xzAir.X - airBeforeX - airStrafe) > 0.05f)
+    var airDx = xzAir.X - airBeforeX;
+    if (MathF.Abs(airDx - airExpected) > 0.03f)
     {
-        Fail($"air strafe X delta={xzAir.X - airBeforeX} expected ~{airStrafe}");
+        Fail($"air strafe X delta={airDx} expected ~{airExpected} (AirControlScale={Movement.AirControlScale})");
+        return;
+    }
+    if (MathF.Abs(airDx) >= MathF.Abs(airStrafe) * 0.6f)
+    {
+        Fail($"air strafe X delta={airDx} not << grounded wish {airStrafe}");
         return;
     }
     if (xzAir.VelY > airBeforeVelY + 0.01f)

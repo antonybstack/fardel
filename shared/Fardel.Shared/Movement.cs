@@ -17,6 +17,23 @@ public static class Movement
     public const float GroundY = 0f;
     /// <summary>Coyote time: grace period for jump after leaving ground (microseconds).</summary>
     public const long CoyoteTimeMicros = 50_000L;
+    /// <summary>
+    /// Scale applied to XZ wish while <c>Y &gt; GroundY</c> (WoW-like air control).
+    /// Grounded WASD is unchanged. No schema.
+    /// </summary>
+    public const float AirControlScale = 0.25f;
+
+    /// <summary>Damp XZ wish while airborne. Call after <see cref="ClampWishStep"/>.</summary>
+    public static void ApplyAirControl(ref float dx, ref float dz, float y)
+    {
+        if (y <= GroundY)
+        {
+            return;
+        }
+
+        dx *= AirControlScale;
+        dz *= AirControlScale;
+    }
 
     /// <summary>Clamp a wish displacement to MaxStepMeters (XZ). Y ignored for slice 1.</summary>
     public static void ClampWishStep(ref float dx, ref float dz)
