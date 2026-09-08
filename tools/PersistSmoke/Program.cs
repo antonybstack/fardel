@@ -133,6 +133,25 @@ try
             await PumpUntil(() => conn.Db.PlayerPose.Identity.Find(identity2) is not null, timeoutMs, conn, "pose session");
             await PumpUntil(() => conn.Db.PlayerCombat.Identity.Find(identity2) is not null, timeoutMs, conn, "combat session");
             Console.WriteLine("pass2 session rows OK");
+
+            // Assert vertical pose defaults after reconnect (#169)
+            var pose = conn.Db.PlayerPose.Identity.Find(identity2)!;
+            if (MathF.Abs(pose.Y - Movement.SpawnY) > 0.05f)
+            {
+                Fail($"pass2 Y={pose.Y} not ≈ SpawnY={Movement.SpawnY}");
+                return;
+            }
+            if (MathF.Abs(pose.VelY) > 0.05f)
+            {
+                Fail($"pass2 VelY={pose.VelY} not ≈ 0");
+                return;
+            }
+            if (pose.LastGroundedMicros == 0)
+            {
+                Fail("pass2 LastGroundedMicros not set (zero)");
+                return;
+            }
+            Console.WriteLine($"pass2 pose Y={pose.Y} VelY={pose.VelY} LastGroundedMicros={pose.LastGroundedMicros} OK");
         }
         finally
         {
