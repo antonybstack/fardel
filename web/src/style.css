@@ -1209,7 +1209,7 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 
 /* Scrolling combat log — right column under minimap (client-only).
-   #78 readability: dark plate over cyan fog; damage/heal/kill/system distinct, no neon. */
+   #78/#102: opaque dark plate vs #39 cyan fog; hit/heal/kill/system distinct, no neon. */
 #combatLog {
   position: absolute;
   right: 12px;
@@ -1220,24 +1220,26 @@ body[data-rmb-look="armed"] #status[data-conn] {
   max-height: min(300px, 44vh);
   display: flex;
   flex-direction: column;
-  background: rgba(6, 10, 20, 0.88);
-  border: 1px solid rgba(150, 168, 196, 0.34);
+  background: rgba(4, 8, 16, 0.94);
+  border: 1px solid rgba(168, 180, 200, 0.48);
   border-radius: 8px;
   box-shadow:
-    0 2px 14px rgba(0, 0, 0, 0.52),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+    0 3px 16px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 1px rgba(220, 230, 245, 0.07);
   overflow: hidden;
 }
 
 .clHead {
   padding: 5px 9px 3px;
-  color: #d2dae8;
+  color: #e6ecf6;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 750;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(150, 168, 196, 0.22);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  border-bottom: 1px solid rgba(168, 180, 200, 0.32);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
 }
 
 .clLines {
@@ -1250,12 +1252,12 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 
 .clLine {
-  color: #c6ceda;
+  color: #d8e0ec;
   font-size: 12px;
   line-height: 1.38;
   font-variant-numeric: tabular-nums;
   text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 1px 2px rgba(0, 0, 0, 0.95),
     0 0 1px #000;
   white-space: nowrap;
   overflow: hidden;
@@ -1296,13 +1298,13 @@ body[data-rmb-look="armed"] #status[data-conn] {
   color: #c6ceda;
 }
 
-/* Damage — warm orange→red, not neon. */
+/* Hit — warm orange→red, not neon (#102). */
 .clLine.damage {
-  color: #e89048;
-  font-weight: 650;
+  color: #f09a50;
+  font-weight: 700;
 }
 .clLine.damage .clTag {
-  color: #e07038;
+  color: #ff7a38;
 }
 
 /* Heal — bandage HP green; rest stays mint. Tonic is speed-amber, not a heal (#163). */
@@ -1324,13 +1326,13 @@ body[data-rmb-look="armed"] #status[data-conn] {
   color: #d4a05c;
 }
 
-/* Critical / kill — brighter weight, no glow soup. */
+/* Kill — brighter crimson, no glow soup (#102). */
 .clLine.death {
-  color: #f07870;
-  font-weight: 750;
+  color: #ff8a82;
+  font-weight: 800;
 }
 .clLine.death .clTag {
-  color: #ee6860;
+  color: #ff6a60;
 }
 
 .clLine.respawn {

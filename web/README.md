@@ -102,7 +102,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=quaternius-char` | Quaternius CC0 wizard at 8–15m under #39 lights (`ve/babylon-quaternius-char.png`) |
 | `?ve=frame-hp` | Self + party HP bars mid/low contrast over cyan fog (#67) (`ve/babylon-frame-hp.png`) |
 | `?ve=loadout-buff` | Mixed equipped/missing loadout chips + active tonic buff (#91); paste PNG to PR user-attachments |
-| `?ve=combat-log-read` | Combat log strip readability over cyan fog (#78) (`ve/babylon-combat-log-read.png`) |
+| `?ve=combat-log-read` | Combat log strip readability over cyan fog (#78 / #102) |
 | `?ve=toast-read` | System toast stack readability vs #39 fog (#90) — invite/XP/death plates; paste PNG to PR user-attachments |
 | `?ve=toast-combat` | Trade/XP toasts quiet during GCD/cast so combat keeps focus (#141) |
 | `?ve=trade-feel` | Trade offer flow state clarity (#162) — incoming/waiting/accepted/cancelled chrome cycles; HUD `Trade-feel OK · …` |
