@@ -2,7 +2,7 @@
 
 Operational runbook for the multi-agent development loop that lands work on `develop`, cuts `main`, and ships [play.sparkify.dev](https://play.sparkify.dev). Recreatable on Antony's Mac Studio via **Grok CLI** (parent agent + subagents).
 
-Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md](TEAM_SEATS.md) · [DEPLOY.md](DEPLOY.md) · [DEV_BOX.md](DEV_BOX.md) · [LEARNINGS.md](LEARNINGS.md) · [SCOPE.md](SCOPE.md) · [CAMPAIGN.md](CAMPAIGN.md) · [PARITY.md](PARITY.md)
+Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md](TEAM_SEATS.md) · [DEPLOY.md](DEPLOY.md) · [DEV_BOX.md](DEV_BOX.md) · [LEARNINGS.md](LEARNINGS.md) · [agent-log.md](agent-log.md) · [SCOPE.md](SCOPE.md) · [CAMPAIGN.md](CAMPAIGN.md) · [PARITY.md](PARITY.md)
 
 ---
 
@@ -296,7 +296,7 @@ If `develop` moves after the pin, **do not** expand the cut — finish this pin,
 
 ## 10. Hard-won orchestration learnings
 
-Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specific failure modes:
+Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Implementation quirks Devs rediscover across PRs go in [agent-log.md](agent-log.md) (procedure: `.grok/skills/fardel-agent-log/SKILL.md`). Orchestration-specific failure modes:
 
 | Failure | Mitigation |
 |---------|------------|

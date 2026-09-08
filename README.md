@@ -23,6 +23,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/MVP.md](docs/MVP.md) | Slice plan to a playable yard |
 | [docs/ASSETS.md](docs/ASSETS.md) | POC art: forest, mountains, RS-like humanoid |
 | [docs/LEARNINGS.md](docs/LEARNINGS.md) | What we take from prior POCs + hordes/dek |
+| [docs/agent-log.md](docs/agent-log.md) | Farm quirks to reuse across Devs (not keep/leave) |
 
 ### Technical
 
@@ -43,6 +44,7 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/MAC_STUDIO_GROK_CLI.md](docs/MAC_STUDIO_GROK_CLI.md) | **Portable runbook:** Recreate orchestration on Mac Studio with Grok CLI/Build |
 | [docs/TEAM_SEATS.md](docs/TEAM_SEATS.md) | Agent seat worktrees, ports, develop workflow |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Backlog: GitHub Issues as source of truth |
+| [AGENTS.md](AGENTS.md) | Auto-loaded hook: grep the agent log, append quirks |
 
 ## Quick start (local)
 
