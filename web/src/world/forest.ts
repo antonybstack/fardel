@@ -433,16 +433,20 @@ function thinInstancePackRoot(root: TransformNode, matrices: Matrix[]): void {
  * Fog / sky (#270) + lighting (#277, lifts #39). Stylized dusk forest, not photoreal.
  *
  * | Param        | #39                         | now                                       |
- * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 200 (#272)          |
+ * | fog mode     | EXP2 dens 0.015             | LINEAR start 22 / end 260 (#348)          |
  * | fog color    | (0.34, 0.55, 0.7)           | unchanged                                 |
  * | clearColor   | (0.24, 0.36, 0.46)          | matches fogColor                          |
  * | hemi         | 0.78 cool (0.68,0.78,0.86)  | 0.88 cooler canopy fill (#277)            |
  * | sun          | 0.98 warm (1.0,0.82,0.52)   | 0.48 cool-dusk key (#277)                 |
+ *
+ * E9.10: 16/200 on a 480 m place made a cardboard band at fogEnd (trees vanish,
+ * unfogged mountains continue). Longer LINEAR ramp; do not raise end to reach
+ * ridges (those stay applyFog=false). Sky lower band = fogColor. No EXP2.
  */
 const FOG_COLOR = new Color3(0.34, 0.55, 0.7);
-const FOG_START = 16;
-/** #272: 120 m pad is gone — fog must reach the larger forest, not clip at 95. */
-const FOG_END = 200;
+const FOG_START = 22;
+/** #348: dissolve the 480 m forest; mountains stay unfogged baked steps. */
+const FOG_END = 260;
 /** Grass plane extent (m). 120 was the toy disc. */
 const GROUND_EXTENT = 480;
 
@@ -647,7 +651,7 @@ function fogCss(c: Color3): string {
 
 /**
  * Distant mountain silhouettes (#273): farther / taller layered ranges.
- * LINEAR fogEnd 200 would flatten anything past the forest into a cardboard
+ * LINEAR fogEnd would flatten anything past the forest into a cardboard
  * wall, so ridges use applyFog=false and baked dusk-blue value steps.
  * Procedural DIY — no packs.
  */
@@ -816,7 +820,7 @@ function buildMountainBackdrop(scene: Scene): void {
  * 20-seg sphere is what painted the banding/halos. Procedural DIY, no packs.
  */
 function buildSkyDome(scene: Scene): void {
-  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 2000, segments: 32 }, scene);
+  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 2000, segments: 48 }, scene);
   sky.infiniteDistance = true;
   sky.isPickable = false;
   sky.applyFog = false;
@@ -830,10 +834,12 @@ function buildSkyDome(scene: Scene): void {
   const ctx = tex.getContext();
   const grad = ctx.createLinearGradient(0, 0, 0, size);
   const fog = fogCss(FOG_COLOR);
-  // Slightly lighter zenith; wide lower band is exact fogColor (no halo).
+  // Slightly lighter zenith; extra stop into fogColor so the 480 m horizon
+  // has no stacked band / halo (#348). Wide lower band is exact fogColor.
   grad.addColorStop(0.0, 'rgb(112, 152, 192)');
-  grad.addColorStop(0.22, 'rgb(100, 146, 186)');
-  grad.addColorStop(0.48, fog);
+  grad.addColorStop(0.18, 'rgb(104, 148, 188)');
+  grad.addColorStop(0.36, 'rgb(94, 144, 184)');
+  grad.addColorStop(0.52, fog);
   grad.addColorStop(1.0, fog);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 32, size);
