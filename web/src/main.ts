@@ -4585,11 +4585,23 @@ async function main(): Promise<void> {
           latestDamageAtMs = Date.now();
           {
             const label =
-              npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+              npc.kind === NPC_KIND_DUMMY
+                ? 'Dummy'
+                : npc.kind === NPC_KIND_HOSTILE
+                  ? 'Hostile'
+                  : 'NPC';
             pushCombatLog(
               'damage',
               `${label} #${npc.npcId}  −${delta} HP (${npc.hp}/${npc.maxHp})`,
             );
+          }
+          // Non-lethal: RecieveHit on the skinned hostile. Dummy stays scarecrow.
+          if (
+            mesh.humanoid &&
+            npc.kind === NPC_KIND_HOSTILE &&
+            npc.hp > 0
+          ) {
+            playHumanoidFlinch(mesh.humanoid);
           }
         }
         npcLastHp.set(key, npc.hp);
@@ -4614,12 +4626,22 @@ async function main(): Promise<void> {
           disposeLifeBurst(fx);
           npcLifeFx.delete(key);
         }
-        fx = beginNpcDeathFx(scene, mesh);
-        npcLifeFx.set(key, fx);
+        if (mesh.humanoid && npc.kind === NPC_KIND_HOSTILE) {
+          // Death clip on the body — not the dummy sink/fade despawn.
+          setHumanoidDead(mesh.humanoid, true);
+          fx = undefined;
+        } else {
+          fx = beginNpcDeathFx(scene, mesh);
+          npcLifeFx.set(key, fx);
+        }
         latestDeathAtMs = Date.now();
         const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
         const defeated =
-          npc.kind === NPC_KIND_DUMMY ? 'Dummy defeated' : `${label} defeated`;
+          npc.kind === NPC_KIND_DUMMY
+            ? 'Dummy defeated'
+            : npc.kind === NPC_KIND_HOSTILE
+              ? 'Hostile defeated'
+              : `${label} defeated`;
         pushCombatLog('death', `${defeated} (#${npc.npcId})`);
         pushSystemToast('death', defeated, TOAST_VE_TTL_MS);
       } else if (!wasAlive && isAlive && (!fx || fx.phase !== 'spawning')) {
@@ -4627,24 +4649,37 @@ async function main(): Promise<void> {
           disposeLifeBurst(fx);
           npcLifeFx.delete(key);
         }
-        fx = beginNpcRespawnFx(mesh);
-        npcLifeFx.set(key, fx);
+        if (mesh.humanoid && npc.kind === NPC_KIND_HOSTILE) {
+          setHumanoidDead(mesh.humanoid, false);
+          setHumanoidMoving(mesh.humanoid, false);
+          fx = undefined;
+        } else {
+          fx = beginNpcRespawnFx(mesh);
+          npcLifeFx.set(key, fx);
+        }
         latestRespawnAtMs = Date.now();
         const label = npc.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
         const line =
           npc.kind === NPC_KIND_DUMMY
             ? 'Dummy respawned'
-            : `${label} respawned`;
+            : npc.kind === NPC_KIND_HOSTILE
+              ? 'Hostile respawned'
+              : `${label} respawned`;
         pushCombatLog('respawn', `${line} (#${npc.npcId})`);
         pushSystemToast('respawn', line, TOAST_VE_TTL_MS);
       }
 
       mesh.root.position.x = npc.x;
       mesh.root.position.z = npc.z;
+      if (mesh.humanoid && npc.kind === NPC_KIND_HOSTILE) {
+        setHumanoidDead(mesh.humanoid, !isAlive);
+      }
 
       const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
       if (!animating) {
-        mesh.root.setEnabled(isAlive);
+        const corpse =
+          !!mesh.humanoid && npc.kind === NPC_KIND_HOSTILE && !isAlive;
+        mesh.root.setEnabled(isAlive || corpse);
         if (
           mesh.nameplate &&
           (npc.kind === NPC_KIND_DUMMY || npc.kind === NPC_KIND_HOSTILE)
@@ -5815,6 +5850,36 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.05;
         camera.beta = Math.PI / 2.7;
         camera.radius = 18;
+      } else if (veFollow === 'hostile-hit') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = 3;
+        let fy = 1.05;
+        let fz = 7;
+        let best = -1;
+        for (const [, mesh] of npcMeshes) {
+          if (!mesh.humanoid) continue;
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          const hit =
+            pb.skinned > 0 &&
+            !!pb.playing &&
+            /recievehit|death/i.test(pb.playing);
+          const rank = (hit ? 1000 : 0) + mesh.root.position.z;
+          if (rank > best) {
+            best = rank;
+            fx = mesh.root.position.x;
+            fy = mesh.root.position.y + 1.05;
+            fz = mesh.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 8;
       } else if (
         veFollow === 'walk' ||
         veFollow === 'run' ||
@@ -9260,6 +9325,108 @@ async function main(): Promise<void> {
       window.setTimeout(waitH, 250);
     };
     window.setTimeout(waitH, 800);
+  }
+
+  // ?ve=hostile-hit — E8.17 RecieveHit then Death on Kind=2; dummy trainer.
+  if (ve === 'hostile-hit') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'hostile-hit') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-hit: waiting for hostiles…';
+    let ticks = 0;
+    let lastCastAt = 0;
+    let sawFlinch = false;
+    const waitHit = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE hostile-hit: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitHit, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitHit, 250);
+        return;
+      }
+      syncNpcMeshes(net.getNpcs());
+      const npcs = net.getNpcs();
+      const dummyMesh = npcs
+        .filter((n) => n.kind === NPC_KIND_DUMMY)
+        .map((n) => npcMeshes.get(n.npcId.toString()))
+        .find((m) => m);
+      const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const playbackOf = (n: (typeof hostiles)[number]) => {
+        const m = npcMeshes.get(n.npcId.toString());
+        return m?.humanoid
+          ? readHumanoidPlayback(m.humanoid)
+          : { skinned: 0, playing: null, idle: null, height: 0 };
+      };
+      const flinchNpc = hostiles.find((n) => {
+        const pb = playbackOf(n);
+        return pb.skinned > 0 && !!pb.playing && /recievehit/i.test(pb.playing);
+      });
+      const deadNpc = hostiles.find((n) => {
+        const pb = playbackOf(n);
+        return pb.skinned > 0 && !!pb.playing && /death/i.test(pb.playing);
+      });
+      if (flinchNpc) sawFlinch = true;
+      const preferred = deadNpc ?? flinchNpc ?? hostiles.find((n) => n.hp > 0) ?? hostiles[0];
+      const pb = preferred
+        ? playbackOf(preferred)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const deathOk =
+        dummyTrainer &&
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /death/i.test(pb.playing);
+      const hitOk =
+        dummyTrainer &&
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /recievehit/i.test(pb.playing);
+      if (mark) {
+        if (deathOk) {
+          mark.textContent = `Hostile death OK · ${pb.playing} · skinned ${pb.skinned}${sawFlinch ? ' · RecieveHit seen' : ''}`;
+        } else if (hitOk) {
+          mark.textContent = `Hostile hit OK · ${pb.playing} · skinned ${pb.skinned}`;
+        } else if (preferred && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else {
+          mark.textContent = `VE hostile-hit: hostiles ${hostiles.length} · ${pb.playing ?? 'idle'} · skinned ${pb.skinned} · dummy ${dummyTrainer ? 'trainer' : 'n'}…`;
+        }
+      }
+      if (deathOk) return;
+      const live =
+        hostiles.find((n) => n.hp > 0) ??
+        hostiles[0];
+      if (live) {
+        net.setTarget(live.npcId);
+        selectedTargetId = live.npcId;
+        const pose = net.getLocalPose();
+        if (pose) {
+          const dist = Math.hypot(live.x - pose.x, live.z - pose.z);
+          if (dist > 6.5) {
+            net.sendMove((live.x - pose.x) * 0.25, (live.z - pose.z) * 0.25, false);
+          }
+        }
+        const gcd = gcdRemainingMs(net.getCombat());
+        const now = Date.now();
+        if (ch && ch.hp > 0 && gcd <= 0 && now - lastCastAt > 1250) {
+          lastCastSpell = SPELL_SPARK;
+          net.cast(SPELL_SPARK);
+          lastCastAt = now;
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitHit, 180);
+    };
+    window.setTimeout(waitHit, 700);
   }
 
   // ?ve=leash — pull then drop (#355). ?ve=aggro is the #360 session shot.
