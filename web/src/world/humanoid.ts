@@ -84,6 +84,19 @@ export function preloadPlayerHumanoid(scene: Scene): Promise<AssetContainer> {
   return sharedLoad;
 }
 
+function findAnim(
+  groups: AnimationGroup[],
+  ...needles: string[]
+): AnimationGroup | null {
+  for (const n of needles) {
+    const hit = groups.find((g) =>
+      g.name.toLowerCase().includes(n.toLowerCase()),
+    );
+    if (hit) return hit;
+  }
+  return null;
+}
+
 function bareName(name: string, prefix: string): string {
   const p = `${prefix}__`;
   return name.startsWith(p) ? name.slice(p.length) : name;
@@ -176,6 +189,7 @@ export function createPlayerHumanoid(
   const roots = inst.rootNodes;
   const meshes = collectMeshes(roots);
   const animGroups = inst.animationGroups;
+  const drawBodies: AbstractMesh[] = [];
 
   // Wrap under a pivot so we can normalize orientation/scale without breaking bones.
   const pivot = new TransformNode(`${prefix}Pivot`, scene);
@@ -188,6 +202,28 @@ export function createPlayerHumanoid(
     m.setEnabled(true);
     m.isVisible = true;
     m.visibility = 1;
+    if (m.skeleton) {
+      m.alwaysSelectAsActiveMesh = true;
+      m.numBoneInfluencers = 4;
+      m.skeleton.prepare(true);
+      // GPU skin of this Assimp *100 bind is a degenerate sail. Keep
+      // m.skeleton; draw a rigid clone so the 1.8m wizard is visible.
+      if (m.getClassName() === 'Mesh') {
+        const draw = (m as Mesh).clone(`${m.name}__draw`, m.parent, true);
+        if (draw) {
+          draw.skeleton = null;
+          draw.alwaysSelectAsActiveMesh = true;
+          draw.isVisible = true;
+          drawBodies.push(draw);
+          try {
+            draw.refreshBoundingInfo(false, true);
+          } catch {
+            /* optional */
+          }
+        }
+      }
+      m.isVisible = false;
+    }
   }
 
   // Normalize height ~1.8m and plant feet on y=0 (assimp glTF is Y-up).
@@ -278,7 +314,7 @@ export function createPlayerHumanoid(
     }
   };
 
-  for (const m of meshes) {
+  for (const m of [...meshes, ...drawBodies]) {
     const bare = bareName(m.name, prefix);
     if (m === staffMesh || /staff/i.test(bare)) continue;
     const matl = m.material;
@@ -324,25 +360,16 @@ export function createPlayerHumanoid(
     staffMesh.material = staffMat;
   }
 
-  // Anim clips drive bone-parented trim; body uses bind-pose (see detach below).
+  const idle =
+    findAnim(animGroups, 'Idle_Weapon', 'Idle') ??
+    (animGroups.length > 0 ? animGroups[0]! : null);
   for (const g of animGroups) {
     g.stop();
-    g.reset();
   }
-  animByRoot.set(root, { idle: null, walk: null, cast: null });
-
-  // Detach skin: post-instantiate skinning draws zero pixels despite valid AABB.
-  // Bind-pose body under Blender *100 node scale is a complete mid-sat wizard.
-  for (const m of meshes) {
-    if (!m.skeleton) continue;
-    m.skeleton = null;
-    m.alwaysSelectAsActiveMesh = true;
-    try {
-      m.refreshBoundingInfo(false, true);
-    } catch {
-      /* optional */
-    }
+  if (idle) {
+    idle.start(true, 1.0, idle.from, idle.to, false);
   }
+  animByRoot.set(root, { idle, walk: null, cast: null });
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
