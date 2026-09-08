@@ -3152,6 +3152,8 @@ async function main(): Promise<void> {
           latestStatus.state === 'connected'
             ? { ...latestStatus, castFeedback: 'Staff required' }
             : latestStatus;
+        pushSystemToast('equip', 'Staff required · equip staff · U', TOAST_VE_TTL_MS);
+        pushCombatLog('equip', 'Staff required · equip with U');
         return;
       }
       const manaCost =
@@ -6134,6 +6136,76 @@ async function main(): Promise<void> {
       window.setTimeout(waitStaff, 200);
     };
     window.setTimeout(waitStaff, 600);
+  }
+
+
+  // ?ve=staff-block — staff unequipped + cast attempt → toast + combat log (#189).
+  if (ve === 'staff-block') {
+    camera.radius = 9;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'staff-block') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE staff-block: waiting for Connected…';
+    let ticks = 0;
+    let unequipped = false;
+    let castAttempted = false;
+    const waitStaffBlock = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE staff-block: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitStaffBlock, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 8.5;
+      const ch = net.getCharacter();
+      if (!unequipped) {
+        if (ch && !ch.staffEquipped) {
+          net.equipStaff();
+          if (mark) mark.textContent = 'VE staff-block: ensuring staff equipped…';
+          window.setTimeout(waitStaffBlock, 250);
+          return;
+        }
+        net.unequipStaff();
+        unequipped = true;
+        if (mark) mark.textContent = 'VE staff-block: unequipping…';
+        window.setTimeout(waitStaffBlock, 300);
+        return;
+      }
+      const unequippedOk = ch && !ch.staffEquipped;
+      if (unequippedOk && !castAttempted) {
+        net.ensureTrainingDummy();
+        const cycle = net.getTargetCycle();
+        const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+        if (dummy) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+        }
+        net.cast(SPELL_SPARK);
+        castAttempted = true;
+        if (mark) {
+          mark.textContent = 'VE staff-block: cast blocked → toast + combat log visible';
+        }
+        return;
+      }
+      if (unequippedOk && castAttempted) {
+        const fb = st.state === 'connected' ? st.castFeedback ?? '' : '';
+        if (mark) {
+          mark.textContent = `Staff-block OK · cast feedback: ${fb || '?'} · toast + log shown`;
+        }
+        return;
+      }
+      if (ticks > 120) {
+        if (mark) mark.textContent = 'VE staff-block: timed out';
+        return;
+      }
+      window.setTimeout(waitStaffBlock, 200);
+    };
+    window.setTimeout(waitStaffBlock, 600);
   }
 
 
