@@ -3575,6 +3575,7 @@ async function main(): Promise<void> {
   const remoteMeshes = new Map<string, HumanoidParts>();
   /** ?ve=remote-hop: living airborne hex so leftover remotes can be hidden. */
   let remoteHopLatch: { hex: string; y: number } | null = null;
+  void remoteHopLatch;
   const remoteLastHp = new Map<string, number>();
   const remoteNameplates = new Map<string, Nameplate>();
   const remoteFx = new Map<string, RemoteFx>();

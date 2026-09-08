@@ -363,3 +363,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Cycle Tab until Kind=3. Frame pad C. persistMark names `Brigand`. Stay at origin (outside AggroRadius). Dummy trainer. Capsule = fail.
 - **Seen in:** #485 / #422
 
+### 2026-09-08 — tsc,release,hop — npm run build fails TS6133 remoteHopLatch
+- **Cause:** #490 hop cam writes `remoteHopLatch` (airborne remote hex) but never reads it. `tsconfig` `noUnusedLocals` fails Pages `tsc --noEmit`.
+- **Do this:** `void remoteHopLatch;` next to the declaration (same as `_latestXpAtMs`). Do not invent leftover-remote hide from this lane.
+- **Seen in:** #490 / #495 / pin e9382135
+
