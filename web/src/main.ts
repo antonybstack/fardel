@@ -1961,11 +1961,12 @@ async function createScene(engine: Engine): Promise<{
 }> {
   const scene = new Scene(engine);
 
+  // E8.1 #326: default play-cam ~10m / ~72° so Idle staff-grip reads (not 22m bird's-eye T).
   const camera = new ArcRotateCamera(
     'camera',
     Math.PI / 2.6,
-    Math.PI / 3.4,
-    22,
+    Math.PI / 2.5,
+    10,
     new Vector3(0, 1, 0),
     scene,
   );
