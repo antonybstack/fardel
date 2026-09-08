@@ -1001,7 +1001,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange' | 'bandage' | 'gcd' | 'noTarget';
+  | 'outOfRange' | 'bandage' | 'gcd' | 'noTarget' | 'deadTarget';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -1051,7 +1051,7 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                           ? 'BANDAGE'
                                           : kind === 'gcd'
                                             ? 'GCD'
-                                            : kind === 'noTarget'
+                                            : kind === 'noTarget' || kind === 'deadTarget'
                                               ? 'CANCEL ↩'
                                             : 'RESPAWN';
   const time = new Date();
@@ -1117,6 +1117,7 @@ type SystemToastKind =
   | 'outOfRange'
   | 'bandage'
   | 'noTarget'
+  | 'deadTarget'
   | 'canvasFocus'
   | 'bag'
   | 'zoomLimit';
@@ -1192,7 +1193,7 @@ function pushSystemToast(
                                                       ? 'RANGE'
                                                       : kind === 'bandage'
                                                         ? 'BANDAGE'
-                                                        : kind === 'noTarget'
+                                                        : kind === 'noTarget' || kind === 'deadTarget'
                                                           ? 'CANCEL ↩'
                                                           : kind === 'canvasFocus'
                                                             ? 'FOCUS'
@@ -3338,6 +3339,26 @@ async function main(): Promise<void> {
           tid && tid !== 0n
             ? npcs.find((n) => n.npcId === tid) ?? null
             : null;
+        // Dead/invalid existing target (#131) — CANCEL-class; do not retarget or clear.
+        if (tid && tid !== 0n && (!tgt || tgt.hp <= 0)) {
+          const dead = !!tgt && tgt.hp <= 0;
+          const spellName =
+            spellId === SPELL_EMBERBOLT
+              ? 'Emberbolt'
+              : spellId === SPELL_SPARK
+                ? 'Spark'
+                : `Spell${spellId}`;
+          latestStatus =
+            latestStatus.state === 'connected'
+              ? { ...latestStatus, castFeedback: dead ? 'Target dead' : 'Invalid target' }
+              : latestStatus;
+          const bit = dead
+            ? `CANCEL · target dead · ${spellName}`
+            : `CANCEL · invalid target · ${spellName}`;
+          pushSystemToast('deadTarget', bit, TOAST_VE_TTL_MS);
+          pushCombatLog('deadTarget', bit);
+          return;
+        }
         if (tgt && isTargetOutOfCastRange(pose, tgt)) {
           latestStatus =
             latestStatus.state === 'connected'
@@ -14063,6 +14084,189 @@ async function main(): Promise<void> {
       window.setTimeout(waitNoTarget, 180);
     };
     window.setTimeout(waitNoTarget, 700);
+  }
+
+
+  // ?ve=dead-target-cast — kill Dummy, keep it targeted, then key 1 so onCast hits #131.
+  if (ve === 'dead-target-cast' || ve === 'deadtargetcast' || ve === 'dead-target') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'dead-target-cast' || ve === 'deadtargetcast' || ve === 'dead-target')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE dead-target-cast: waiting for Connected…';
+    let ticks = 0;
+    let lastCastAt = 0;
+    let pressed = false;
+    let phase: 'kill' | 'hold' | 'press' | 'done' = 'kill';
+    const waitDeadTarget = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE dead-target-cast: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitDeadTarget, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE dead-target-cast: equipping staff…';
+        window.setTimeout(waitDeadTarget, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+      if ((ch0?.hp ?? 0) <= 0) {
+        if (mark) mark.textContent = 'VE dead-target-cast: waiting respawn…';
+        if (ticks < 220) window.setTimeout(waitDeadTarget, 250);
+        return;
+      }
+
+      if (phase === 'done') return;
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      const combat = net.getCombat();
+      const gcdLeft = gcdRemainingMs(combat);
+
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+
+      if (phase === 'kill') {
+        if (dummy && dummy.hp <= 0) {
+          phase = 'hold';
+          window.setTimeout(waitDeadTarget, 120);
+          return;
+        }
+        if (
+          dummy &&
+          dummy.hp > 0 &&
+          lastCastAt === 0 &&
+          (ch0?.hp ?? 0) < 60
+        ) {
+          void net.rest();
+          if (mark) {
+            mark.textContent = `VE dead-target-cast: Rest · HP ${ch0?.hp ?? 0}`;
+          }
+          window.setTimeout(waitDeadTarget, 500);
+          return;
+        }
+        if (dummy && dummy.hp > 0) {
+          const now = Date.now();
+          if (gcdLeft <= 0 && now - lastCastAt > 1100) {
+            lastCastSpell = SPELL_SPARK;
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            if (mark) {
+              mark.textContent =
+                `VE dead-target-cast: Spark · Dummy HP ${dummy.hp}/${dummy.maxHp}`;
+            }
+          } else if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: Dummy HP ${dummy.hp}/${dummy.maxHp} · GCD ${Math.max(0, gcdLeft)}ms`;
+          }
+        }
+        if (ticks > 180) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: fail · Dummy still has HP (${dummy?.hp ?? '?'})`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitDeadTarget, 140);
+        return;
+      }
+
+      if (phase === 'hold') {
+        if (!dummy || dummy.hp > 0) {
+          phase = 'kill';
+          window.setTimeout(waitDeadTarget, 140);
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        if (gcdLeft > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: holding dead target · gcd ${Math.max(0, gcdLeft)}ms`;
+          }
+          if (ticks > 200) {
+            if (mark) {
+              mark.textContent =
+                'VE dead-target-cast: fail · GCD never cleared on corpse';
+            }
+            phase = 'done';
+            return;
+          }
+          window.setTimeout(waitDeadTarget, 140);
+          return;
+        }
+        phase = 'press';
+      }
+
+      if (phase === 'press' && !pressed) {
+        if (!dummy || dummy.hp > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: fail · Dummy alive at press (hp ${dummy?.hp ?? '?'})`;
+          }
+          phase = 'done';
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        setChatComposing(false);
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '1',
+            code: 'Digit1',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        pressed = true;
+        if (mark) {
+          mark.textContent = 'VE dead-target-cast: pressed 1 · waiting onCast…';
+        }
+        window.setTimeout(waitDeadTarget, 200);
+        return;
+      }
+
+      if (pressed) {
+        const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
+        const hasDead =
+          toastKindsPresent().has('deadTarget') ||
+          combatLogKindsPresent().has('deadTarget');
+        if (hasDead && dummy && dummy.hp <= 0 && tid !== 0n) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'Dead-target-cast OK · CANCEL toast · target dead · #131';
+          }
+          return;
+        }
+        if (ticks > 220) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: fail · deadTarget after 1 · tid=${tid} hp=${dummy?.hp ?? '?'}`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitDeadTarget, 160);
+        return;
+      }
+
+      window.setTimeout(waitDeadTarget, 180);
+    };
+    window.setTimeout(waitDeadTarget, 700);
   }
 
   // ?ve=cast-range — move beyond CastRangeMeters, try Cast, show outOfRange toast + dim hotbar.

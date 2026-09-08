@@ -1686,9 +1686,14 @@ export async function connectToSpacetime(
                   emitStatus(identityHex);
                   return;
                 }
-                if (latestCombat && latestCombat.targetNpcId !== 0n && latestPose) {
+                if (latestCombat && latestCombat.targetNpcId !== 0n) {
                   const tgt = findNpc(latestCombat.targetNpcId);
-                  if (tgt) {
+                  if (!tgt || tgt.hp <= 0) {
+                    castFeedback = !tgt ? 'Invalid target' : 'Target dead';
+                    emitStatus(identityHex);
+                    return;
+                  }
+                  if (latestPose) {
                     const dx = latestPose.x - tgt.x;
                     const dz = latestPose.z - tgt.z;
                     if (dx * dx + dz * dz > CAST_RANGE_METERS * CAST_RANGE_METERS) {
@@ -1706,6 +1711,12 @@ export async function connectToSpacetime(
                     const msg = err instanceof Error ? err.message : String(err);
                     if (/out of range/i.test(msg)) {
                       castFeedback = 'out of range';
+                      emitStatus(identityHex);
+                    } else if (/target dead/i.test(msg)) {
+                      castFeedback = 'Target dead';
+                      emitStatus(identityHex);
+                    } else if (/target npc not found/i.test(msg)) {
+                      castFeedback = 'Invalid target';
                       emitStatus(identityHex);
                     } else if (msg) {
                       castFeedback = msg.slice(0, 96);
