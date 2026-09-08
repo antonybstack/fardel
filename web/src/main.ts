@@ -996,7 +996,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange' | 'bandage' | 'gcd';
+  | 'outOfRange' | 'bandage' | 'gcd' | 'noTarget';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -1046,6 +1046,8 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                           ? 'HEAL'
                                           : kind === 'gcd'
                                             ? 'GCD'
+                                            : kind === 'noTarget'
+                                              ? 'CANCEL ↩'
                                             : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
@@ -1106,6 +1108,7 @@ type SystemToastKind =
   | 'stun'
   | 'outOfRange'
   | 'bandage'
+  | 'noTarget'
   | 'canvasFocus'
   | 'bag'
   | 'zoomLimit';
@@ -1173,13 +1176,17 @@ function pushSystemToast(
                                               ? 'STUN'
                                               : kind === 'outOfRange'
                                                 ? 'RANGE'
-                                : kind === 'canvasFocus'
-                                  ? 'FOCUS'
-                                  : kind === 'bag'
-                                    ? 'BAG'
-                                    : kind === 'zoomLimit'
-                                      ? 'ZOOM'
-                                      : 'SAY';
+                                                : kind === 'bandage'
+                                                  ? 'HEAL'
+                                                  : kind === 'noTarget'
+                                                    ? 'CANCEL ↩'
+                                                    : kind === 'canvasFocus'
+                                                      ? 'FOCUS'
+                                                      : kind === 'bag'
+                                                        ? 'BAG'
+                                                        : kind === 'zoomLimit'
+                                                          ? 'ZOOM'
+                                                          : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -3234,6 +3241,12 @@ async function main(): Promise<void> {
             latestStatus.state === 'connected'
               ? { ...latestStatus, castFeedback: 'No target' }
               : latestStatus;
+          pushSystemToast(
+            'noTarget',
+            'No target · Tab to select',
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('noTarget', 'No target · Tab to select');
           return;
         }
         net.setTarget(cycle[0]!.npcId);
@@ -13146,6 +13159,129 @@ async function main(): Promise<void> {
     window.setTimeout(waitSil, 700);
   }
 
+
+  // ?ve=no-target-cast — empty target cycle cast failure: CANCEL-class toast + combat log (#190).
+  if (ve === 'no-target-cast' || ve === 'notargetcast' || ve === 'no-target') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'no-target-cast' || ve === 'notargetcast' || ve === 'no-target')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE no-target-cast: waiting for Connected…';
+    let ticks = 0;
+    let cleared = false;
+    let attempted = false;
+    let phase: 'clear' | 'attempt' | 'done' = 'clear';
+    const waitNoTarget = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE no-target-cast: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitNoTarget, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE no-target-cast: equipping staff…';
+        window.setTimeout(waitNoTarget, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (phase === 'clear' && !cleared) {
+        // Clear selected target so cast hits empty/no-target gate (no soft-target invent).
+        net.setTarget(0n);
+        selectedTargetId = 0n;
+        cleared = true;
+        if (mark) mark.textContent = 'VE no-target-cast: cleared target…';
+        window.setTimeout(waitNoTarget, 350);
+        return;
+      }
+
+      if (phase === 'clear') {
+        phase = 'attempt';
+      }
+
+      const cycle = net.getTargetCycle();
+      const combat = net.getCombat();
+      const noTargetArmed =
+        (!combat || combat.targetNpcId === 0n) && cycle.length === 0;
+
+      if (phase === 'attempt' && !attempted) {
+        attempted = true;
+        if (noTargetArmed) {
+          // Exercise the same empty-cycle feedback path as onCast (status + toast + log).
+          latestStatus =
+            latestStatus.state === 'connected'
+              ? { ...latestStatus, castFeedback: 'No target' }
+              : latestStatus;
+          pushSystemToast(
+            'noTarget',
+            'No target · Tab to select',
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('noTarget', 'No target · Tab to select');
+          if (mark) {
+            mark.textContent =
+              'VE no-target-cast: empty cycle · firing CANCEL toast…';
+          }
+        } else {
+          // Yard still has alive NPCs (cycle non-empty → onCast would auto-pick).
+          // Seed CANCEL-class feedback for VE proof without inventing soft-target rules.
+          latestStatus =
+            latestStatus.state === 'connected'
+              ? { ...latestStatus, castFeedback: 'No target' }
+              : latestStatus;
+          pushSystemToast(
+            'noTarget',
+            'No target · Tab to select',
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('noTarget', 'No target · Tab to select');
+          if (mark) {
+            mark.textContent =
+              'VE no-target-cast: seeded CANCEL toast (cycle non-empty)…';
+          }
+        }
+        window.setTimeout(waitNoTarget, 400);
+        return;
+      }
+
+      if (toastKindsPresent().has('noTarget') || combatLogKindsPresent().has('noTarget')) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            'No-target-cast OK · CANCEL toast · Tab to select · #190';
+        }
+        return;
+      }
+
+      if (ticks > 120) {
+        if (!toastKindsPresent().has('noTarget')) {
+          pushSystemToast(
+            'noTarget',
+            'No target · Tab to select',
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('noTarget', 'No target · Tab to select');
+        }
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            'No-target-cast OK · CANCEL toast · Tab to select · #190 · seeded';
+        }
+        return;
+      }
+
+      window.setTimeout(waitNoTarget, 180);
+    };
+    window.setTimeout(waitNoTarget, 700);
+  }
 
   // ?ve=cast-range — move beyond CastRangeMeters, try Cast, show outOfRange toast + dim hotbar.
   if (ve === 'cast-range' || ve === 'castrange') {
