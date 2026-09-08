@@ -14,6 +14,11 @@ body {
   display: block;
   outline: none;
   touch-action: none;
+  /* #154 — idle grab cue: hold RMB to look (armed → grabbing). */
+  cursor: grab;
+}
+#renderCanvas[data-rmb-look="armed"] {
+  cursor: grabbing;
 }
 
 #hud {
@@ -1016,6 +1021,28 @@ body {
   min-width: 1.1em;
   text-align: center;
   text-shadow: none;
+}
+
+/* #154 — RMB-look armed: muted cool-silver chip (bag/chat family; ≠ gold select / hotbar amber). */
+#keysLegend .klChip[data-bind="rmb"].armed {
+  color: #d8dde6;
+  background: rgba(180, 190, 210, 0.14);
+  border-radius: 5px;
+  box-shadow:
+    0 0 0 1px rgba(190, 200, 214, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+#keysLegend .klChip[data-bind="rmb"].armed .klRmbLabel {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #eef1f6;
+}
+body[data-rmb-look="armed"] #status[data-conn] {
+  /* Cool-silver edge while looking — distinct from conn green/amber/red + ≠ gold reticule. */
+  border-color: rgba(190, 200, 214, 0.62);
+  box-shadow: 0 0 0 1px rgba(120, 130, 150, 0.28);
 }
 
 #keysLegend .bagFoot {

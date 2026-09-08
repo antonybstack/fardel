@@ -66,6 +66,7 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=gcd` | Thicker GCD sweep + Emberbolt cast fill on hotbar slots (`ve/babylon-gcd.png`) |
 | `?ve=debug-hud` | Force `#status` + `#fpsHud` visible; HUD `Debug HUD OK · status visible · F3/?debug=1` (`ve/babylon-debug-hud.png`) |
 | `?ve=status-read` | Prove Connected · online vs Connecting vs GCD idle are lexically distinct (#129); HUD `Status-read OK · Connected · online · GCD idle · #129` |
+| `?ve=rmb-look` | Prove RMB-look armed clarity (#154): canvas `grabbing` + legend `LOOKING` chip + status `camera: looking`; HUD `RMB-look OK · armed · grabbing · legend LOOKING · status looking · #154` |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
 | `?ve=reticule` | Select Dummy; prove gold ring + overhead marker (`ve/babylon-reticule.png`); HUD `Reticule OK · … · gold ring+marker` |
 | `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |

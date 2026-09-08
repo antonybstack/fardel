@@ -300,6 +300,11 @@ let veCcFeedbackPresent: null | {
   leftMs: number;
 } = null;
 
+/** #154 — RMB-look armed vs idle (cursor / status / legend clarity only). */
+let rmbLookArmed = false;
+/** VE lock: hold RMB-look armed chrome for ?ve=rmb-look. */
+let veRmbLookLock = false;
+
 /** Client-only Rest enter/exit chrome on #selfFrame (not a server channel). */
 let restExitTimer: number | null = null;
 
@@ -836,6 +841,28 @@ function setKeysLegendOpen(open: boolean): void {
   const panel = document.getElementById('keysLegend');
   if (!panel) return;
   panel.classList.toggle('hidden', !open);
+}
+
+/** Clarity cue: RMB-look armed vs idle via canvas cursor + legend chip + status line. */
+function setRmbLookArmed(armed: boolean): void {
+  if (veRmbLookLock && !armed) return;
+  rmbLookArmed = armed;
+  const canvas = document.getElementById('renderCanvas');
+  const mode = armed ? 'armed' : 'idle';
+  document.body.dataset.rmbLook = mode;
+  if (canvas) {
+    canvas.dataset.rmbLook = mode;
+    // grab → grabbing is the always-on cue (legend/status are optional overlays).
+    canvas.style.cursor = armed ? 'grabbing' : 'grab';
+  }
+  const chip = document.querySelector(
+    '#keysLegend .klChip[data-bind="rmb"]',
+  ) as HTMLElement | null;
+  if (chip) {
+    chip.classList.toggle('armed', armed);
+    const label = chip.querySelector('.klRmbLabel');
+    if (label) label.textContent = armed ? 'LOOKING' : 'hold look';
+  }
 }
 
 /** Identity/AOI/keys #status wall + #fpsHud — hidden by default; F3 / ?debug=1. */
@@ -1688,7 +1715,10 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: H legend · WASD · Space jump · RMB · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
+      rmbLookArmed
+      ? 'camera: looking (RMB drag) · LMB selects'
+      : 'camera: idle · hold RMB look · LMB selects',
+      'keys: H legend · WASD · Space jump · RMB hold-look · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
@@ -2652,6 +2682,21 @@ async function main(): Promise<void> {
   const debugParam = (bootParams.get('debug') || '').toLowerCase();
   let debugHudVisible = debugParam === '1' || debugParam === 'true';
   setDebugHudVisible(debugHudVisible);
+  // #154 — RMB-look armed clarity (cursor / legend / status); no new camera system.
+  setRmbLookArmed(false);
+  const onRmbLookDown = (ev: PointerEvent): void => {
+    if (ev.button !== 2) return;
+    setRmbLookArmed(true);
+  };
+  const onRmbLookUp = (ev: PointerEvent): void => {
+    if (ev.button !== 2 && ev.type !== 'pointercancel' && ev.type !== 'blur') return;
+    if (ev.type === 'pointerup' && ev.button !== 2) return;
+    setRmbLookArmed(false);
+  };
+  canvas.addEventListener('pointerdown', onRmbLookDown);
+  window.addEventListener('pointerup', onRmbLookUp);
+  window.addEventListener('pointercancel', onRmbLookUp);
+  window.addEventListener('blur', () => setRmbLookArmed(false));
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
@@ -6711,6 +6756,65 @@ async function main(): Promise<void> {
       window.setTimeout(waitStatusRead, 200);
     };
     window.setTimeout(waitStatusRead, 500);
+  }
+
+  // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
+  if (ve === 'rmb-look') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    keysLegendOpen = true;
+    setKeysLegendOpen(true);
+    debugHudVisible = true;
+    setDebugHudVisible(true);
+    veRmbLookLock = true;
+    setRmbLookArmed(true);
+  }
+  if (ve === 'rmb-look') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rmb-look: waiting for armed chrome…';
+    let ticks = 0;
+    const waitRmb = () => {
+      ticks += 1;
+      const canvasEl = document.getElementById('renderCanvas');
+      const chip = document.querySelector('#keysLegend .klChip[data-bind="rmb"]');
+      const label = chip?.querySelector('.klRmbLabel');
+      const panel = document.getElementById('keysLegend');
+      const statusEl = document.getElementById('status');
+      setKeysLegendOpen(true);
+      setDebugHudVisible(true);
+      setRmbLookArmed(true);
+      setStatus(formatStatus(latestStatus, Date.now()), latestStatus.state);
+      const armedAttr = canvasEl?.dataset.rmbLook === 'armed';
+      const cursorGrabbing = (canvasEl?.style.cursor || '') === 'grabbing';
+      const chipArmed = !!chip?.classList.contains('armed');
+      const labelLooking = (label?.textContent || '').trim() === 'LOOKING';
+      const legendOpen = !!(panel && !panel.classList.contains('hidden'));
+      const statusTxt = (statusEl?.textContent || '').trim();
+      const statusLooking = statusTxt.includes('camera: looking (RMB drag)');
+      if (armedAttr && cursorGrabbing && chipArmed && labelLooking && legendOpen && statusLooking) {
+        if (mark) {
+          mark.textContent =
+            'RMB-look OK · armed · grabbing · legend LOOKING · status looking · #154';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE rmb-look: armed ${armedAttr ? 'y' : 'n'} · cursor ${cursorGrabbing ? 'grabbing' : (canvasEl?.style.cursor || '?')} · ` +
+          `chip ${chipArmed ? 'armed' : 'idle'} · label "${(label?.textContent || '').trim()}" · ` +
+          `legend ${legendOpen ? 'on' : 'off'} · status ${statusLooking ? 'looking' : '…'} (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `RMB-look timeout · armed=${armedAttr} cursor=${canvasEl?.style.cursor || '?'} label="${(label?.textContent || '').trim()}"`;
+        }
+        return;
+      }
+      window.setTimeout(waitRmb, 200);
+    };
+    window.setTimeout(waitRmb, 400);
   }
 
   // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.
