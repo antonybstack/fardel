@@ -4297,10 +4297,10 @@ async function main(): Promise<void> {
     // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
     // radius from current cam position → target; walking forward increases that
     // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
-    // Skip follow for ?ve=vendor-stall / vendor-panel so the shop silhouette stays framed.
+    // Skip follow for ?ve=vendor-stall / vendor-panel / vendor-interact so the shop silhouette stays framed.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
-      if (veFollow !== 'vendor-stall' && veFollow !== 'vendor-panel') {
+      if (veFollow !== 'vendor-stall' && veFollow !== 'vendor-panel' && veFollow !== 'vendor-interact') {
         const follow = player.position.add(new Vector3(0, 1.35, 0));
         const radius = camera.radius;
         camera.setTarget(follow);
@@ -9185,6 +9185,79 @@ async function main(): Promise<void> {
       window.setTimeout(waitVendor, 220);
     };
     window.setTimeout(waitVendor, 700);
+  }
+
+  // ?ve=vendor-interact — approach YardVendor into 4.5m range, toast-only affordance (panel closed), framed stall.
+  if (ve === 'vendor-interact') {
+    camera.radius = 11;
+    camera.alpha = -Math.PI / 2.15;
+    camera.beta = Math.PI / 2.35;
+  }
+  if (net && ve === 'vendor-interact') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE vendor-interact: waiting for Connected…';
+    let ticks = 0;
+    let approached = false;
+    const waitVendorInteract = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE vendor-interact: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitVendorInteract, 200);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const vendors = net.getVendors();
+      const v0 = vendors[0] ?? null;
+      if (!v0) {
+        if (mark) mark.textContent = 'VE vendor-interact: waiting YardVendor…';
+        if (ticks < 240) window.setTimeout(waitVendorInteract, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(v0.x, 1.0, v0.z));
+      camera.radius = 10;
+      if (!approached) {
+        const pose = net.getLocalPose();
+        if (pose) {
+          for (let i = 0; i < 10; i++) {
+            const p = net.getLocalPose() ?? pose;
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z, false);
+          }
+        }
+        approached = true;
+        if (mark) mark.textContent = 'VE vendor-interact: approaching…';
+        window.setTimeout(waitVendorInteract, 450);
+        return;
+      }
+      const near = net.nearestVendor(4.5);
+      if (!near) {
+        const pose = net.getLocalPose();
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z, false);
+        if (mark) mark.textContent = 'VE vendor-interact: out of range, nudging…';
+        if (ticks < 280) window.setTimeout(waitVendorInteract, 220);
+        return;
+      }
+      // In range: ensure toast fires, but do NOT open vendor panel
+      const toastOk = toastKindsPresent().has('vendor');
+      if (toastOk) {
+        if (mark) {
+          mark.textContent = 'Vendor-interact OK · E toast · in range';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE vendor-interact: in range · toast ${toastOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 360) {
+        if (mark) {
+          mark.textContent = `VE vendor-interact: timed out · toast ${toastOk ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitVendorInteract, 220);
+    };
+    window.setTimeout(waitVendorInteract, 700);
   }
 
 

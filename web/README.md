@@ -93,6 +93,7 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=sky-horizon` | Layered mountain silhouette + fog-matched sky (#55) (`ve/babylon-sky-horizon.png`) |
 | `?ve=vendor-panel` | Vendor buy/sell panel chrome vs #39 fog (#106) — bronze buy / mint sell on silver plate; interim capture `/workspace/ve-capture/pr-vendor-panel.png` (no `ve/*.png` commit) |
 | `?ve=vendor-stall` | Shop silhouette posts+counter+awning under #39 fog (#58) (`ve/babylon-vendor-stall.png`) |
+| `?ve=vendor-interact` | Approach YardVendor into 4.5m range; toast-only affordance (panel closed); framed stall |
 | `?ve=forest` / `?ve=quaternius-env` / `?ve=aoi` / `?ve=combat` / `?ve=persist` | Forest / Quaternius Standard env (`ve/babylon-quaternius-env.png`) |
 
 
