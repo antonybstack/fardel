@@ -5394,9 +5394,9 @@ async function main(): Promise<void> {
         }
         // Mutate target in place. setTarget() rebuilds alpha/beta/radius from
         // the camera world position and feels like the view lags WASD (#315).
-        camera.inertialAlphaOffset = 0;
-        camera.inertialBetaOffset = 0;
-        camera.inertialRadiusOffset = 0;
+        // Do NOT zero inertialAlpha/Beta/Radius here — Babylon RMB orbit and
+        // wheel zoom write those offsets (#366). VE shots that lock alpha may
+        // still clear inertia on their own branches.
         const tgt = camera.target;
         tgt.x = player.position.x;
         tgt.y = camFollowY;
@@ -8241,6 +8241,40 @@ async function main(): Promise<void> {
       window.setTimeout(waitStatusRead, 200);
     };
     window.setTimeout(waitStatusRead, 500);
+  }
+
+  // ?ve=rmb-orbit — play follow must NOT eat RMB inertia (#366). Inject offset; alpha must move.
+  if (ve === 'rmb-orbit') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rmb-orbit: waiting for Connected…';
+    let ticks = 0;
+    const waitOrbit = () => {
+      ticks += 1;
+      if (latestStatus.state !== 'connected') {
+        if (mark) mark.textContent = `VE rmb-orbit: ${latestStatus.state}…`;
+        if (ticks < 200) window.setTimeout(waitOrbit, 200);
+        return;
+      }
+      const a0 = camera.alpha;
+      camera.inertialAlphaOffset += 0.45;
+      let frames = 0;
+      const tick = () => {
+        frames += 1;
+        if (frames < 18) {
+          window.requestAnimationFrame(tick);
+          return;
+        }
+        const d = camera.alpha - a0;
+        if (mark) {
+          mark.textContent =
+            Math.abs(d) > 0.04
+              ? `RMB orbit OK · dAlpha ${d.toFixed(3)}`
+              : `RMB orbit FAIL · dAlpha ${d.toFixed(3)}`;
+        }
+      };
+      window.requestAnimationFrame(tick);
+    };
+    window.setTimeout(waitOrbit, 800);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
