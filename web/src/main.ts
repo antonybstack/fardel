@@ -996,7 +996,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange' | 'bandage' | 'gcd';
+  | 'outOfRange' | 'bandage' | 'gcd' | 'noTarget';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -1046,6 +1046,8 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                           ? 'HEAL'
                                           : kind === 'gcd'
                                             ? 'GCD'
+                                            : kind === 'noTarget'
+                                              ? 'CANCEL ↩'
                                             : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
@@ -1106,6 +1108,7 @@ type SystemToastKind =
   | 'stun'
   | 'outOfRange'
   | 'bandage'
+  | 'noTarget'
   | 'canvasFocus'
   | 'bag'
   | 'zoomLimit';
@@ -1173,13 +1176,17 @@ function pushSystemToast(
                                               ? 'STUN'
                                               : kind === 'outOfRange'
                                                 ? 'RANGE'
-                                : kind === 'canvasFocus'
-                                  ? 'FOCUS'
-                                  : kind === 'bag'
-                                    ? 'BAG'
-                                    : kind === 'zoomLimit'
-                                      ? 'ZOOM'
-                                      : 'SAY';
+                                                : kind === 'bandage'
+                                                  ? 'HEAL'
+                                                  : kind === 'noTarget'
+                                                    ? 'CANCEL ↩'
+                                                    : kind === 'canvasFocus'
+                                                      ? 'FOCUS'
+                                                      : kind === 'bag'
+                                                        ? 'BAG'
+                                                        : kind === 'zoomLimit'
+                                                          ? 'ZOOM'
+                                                          : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -3234,6 +3241,12 @@ async function main(): Promise<void> {
             latestStatus.state === 'connected'
               ? { ...latestStatus, castFeedback: 'No target' }
               : latestStatus;
+          pushSystemToast(
+            'noTarget',
+            'No target · Tab to select',
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('noTarget', 'No target · Tab to select');
           return;
         }
         net.setTarget(cycle[0]!.npcId);
@@ -13146,6 +13159,187 @@ async function main(): Promise<void> {
     window.setTimeout(waitSil, 700);
   }
 
+
+  // ?ve=no-target-cast — empty cycle, then key 1 so bindInput runs onCast.
+  if (ve === 'no-target-cast' || ve === 'notargetcast' || ve === 'no-target') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'no-target-cast' || ve === 'notargetcast' || ve === 'no-target')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE no-target-cast: waiting for Connected…';
+    let ticks = 0;
+    let lastCastAt = 0;
+    let pressed = false;
+    let phase: 'kill' | 'clear' | 'press' | 'done' = 'kill';
+    const waitNoTarget = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE no-target-cast: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitNoTarget, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE no-target-cast: equipping staff…';
+        window.setTimeout(waitNoTarget, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+      if ((ch0?.hp ?? 0) <= 0) {
+        if (mark) mark.textContent = 'VE no-target-cast: waiting respawn…';
+        if (ticks < 200) window.setTimeout(waitNoTarget, 250);
+        return;
+      }
+
+      if (phase === 'done') return;
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const cycle = net.getTargetCycle();
+      const living = npcs.filter((n) => n.hp > 0);
+      const dummy =
+        living.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      const combat = net.getCombat();
+      const gcdLeft = gcdRemainingMs(combat);
+
+      if (phase === 'kill') {
+        if (cycle.length === 0 && living.length === 0) {
+          phase = 'clear';
+          window.setTimeout(waitNoTarget, 120);
+          return;
+        }
+        // Living Dummy stays in getTargetCycle (hp>0); onCast would auto-pick.
+        if (
+          dummy &&
+          dummy.hp > 0 &&
+          lastCastAt === 0 &&
+          (ch0?.hp ?? 0) < 60
+        ) {
+          void net.rest();
+          if (mark) {
+            mark.textContent = `VE no-target-cast: Rest · HP ${ch0?.hp ?? 0}`;
+          }
+          window.setTimeout(waitNoTarget, 500);
+          return;
+        }
+        if (dummy && dummy.hp > 0) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+          const now = Date.now();
+          if (gcdLeft <= 0 && now - lastCastAt > 1100) {
+            lastCastSpell = SPELL_SPARK;
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            if (mark) {
+              mark.textContent =
+                `VE no-target-cast: Spark · Dummy HP ${dummy.hp}/${dummy.maxHp}`;
+            }
+          } else if (mark) {
+            mark.textContent =
+              `VE no-target-cast: Dummy HP ${dummy.hp}/${dummy.maxHp} · GCD ${Math.max(0, gcdLeft)}ms`;
+          }
+        }
+        if (ticks > 160) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · Dummy still has HP (cycle ${cycle.length})`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitNoTarget, 140);
+        return;
+      }
+
+      if (phase === 'clear') {
+        if (cycle.length > 0 || living.length > 0) {
+          phase = 'kill';
+          window.setTimeout(waitNoTarget, 140);
+          return;
+        }
+        net.setTarget(0n);
+        selectedTargetId = 0n;
+        if (gcdLeft > 0 || (combat && combat.targetNpcId !== 0n)) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: clearing · gcd ${Math.max(0, gcdLeft)}ms`;
+          }
+          if (ticks > 180) {
+            if (mark) {
+              mark.textContent =
+                'VE no-target-cast: fail · Dummy still has HP (cycle not empty)';
+            }
+            phase = 'done';
+            return;
+          }
+          window.setTimeout(waitNoTarget, 140);
+          return;
+        }
+        phase = 'press';
+      }
+
+      if (phase === 'press' && !pressed) {
+        if (cycle.length !== 0 || living.length > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · Dummy still has HP (cycle ${cycle.length})`;
+          }
+          phase = 'done';
+          return;
+        }
+        setChatComposing(false);
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '1',
+            code: 'Digit1',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        pressed = true;
+        if (mark) {
+          mark.textContent = 'VE no-target-cast: pressed 1 · waiting onCast…';
+        }
+        window.setTimeout(waitNoTarget, 200);
+        return;
+      }
+
+      if (pressed) {
+        const cycleNow = net.getTargetCycle();
+        const hasNoTarget =
+          toastKindsPresent().has('noTarget') ||
+          combatLogKindsPresent().has('noTarget');
+        if (hasNoTarget && cycleNow.length === 0) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'No-target-cast OK · CANCEL toast · Tab to select · #190';
+          }
+          return;
+        }
+        if (ticks > 200) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · noTarget after 1 · cycle=${cycleNow.length}`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitNoTarget, 160);
+        return;
+      }
+
+      window.setTimeout(waitNoTarget, 180);
+    };
+    window.setTimeout(waitNoTarget, 700);
+  }
 
   // ?ve=cast-range — move beyond CastRangeMeters, try Cast, show outOfRange toast + dim hotbar.
   if (ve === 'cast-range' || ve === 'castrange') {
