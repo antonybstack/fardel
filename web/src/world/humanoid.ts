@@ -2,10 +2,12 @@ import {
   AnimationGroup,
   AssetContainer,
   Color3,
+  Matrix,
   Mesh,
   PBRMaterial,
   Scene,
   SceneLoader,
+  Skeleton,
   StandardMaterial,
   Texture,
   TransformNode,
@@ -78,6 +80,12 @@ export function preloadPlayerHumanoid(scene: Scene): Promise<AssetContainer> {
       scene,
     ).then((c) => {
       sharedContainer = c;
+      // Container originals share geometry with clones. Hide them so a GPU
+      // sail on the source cannot overwrite instance vertex buffers.
+      for (const m of c.meshes) {
+        m.setEnabled(false);
+        m.isVisible = false;
+      }
       return c;
     });
   }
@@ -100,6 +108,31 @@ function findAnim(
 function bareName(name: string, prefix: string): string {
   const p = `${prefix}__`;
   return name.startsWith(p) ? name.slice(p.length) : name;
+}
+
+/**
+ * Assimp leaves CharacterArmature *100 / -90X off the joint list, so IBM is
+ * 0.01 and a 90° leftover. CPU apply writes that leftover into mesh-local
+ * verts; mesh.world already has the armature, so the body collapses unless
+ * IBM is multiplied by the armature local matrix.
+ */
+function compensateAssimpIbm(skel: Skeleton, armature: TransformNode): void {
+  const rot = armature.rotationQuaternion;
+  const A = rot
+    ? Matrix.Compose(armature.scaling, rot, Vector3.Zero())
+    : Matrix.Scaling(armature.scaling.x, armature.scaling.y, armature.scaling.z);
+  for (const bone of skel.bones) {
+    const ibm = bone.getAbsoluteInverseBindMatrix().clone();
+    A.multiplyToRef(ibm, ibm);
+    const bind = ibm.clone();
+    bind.invert();
+    const parent = bone.getParent();
+    if (parent) {
+      bind.multiplyToRef(parent.getAbsoluteInverseBindMatrix(), bind);
+    }
+    bone.updateMatrix(bind, false, false);
+    bone._updateAbsoluteBindMatrices(undefined, false);
+  }
 }
 
 function collectMeshes(roots: Node[]): AbstractMesh[] {
@@ -189,7 +222,6 @@ export function createPlayerHumanoid(
   const roots = inst.rootNodes;
   const meshes = collectMeshes(roots);
   const animGroups = inst.animationGroups;
-  const drawBodies: AbstractMesh[] = [];
 
   // Wrap under a pivot so we can normalize orientation/scale without breaking bones.
   const pivot = new TransformNode(`${prefix}Pivot`, scene);
@@ -198,32 +230,61 @@ export function createPlayerHumanoid(
     n.parent = pivot;
   }
 
+  let armature: TransformNode | null = null;
+  for (const n of roots) {
+    if (n.name.includes('CharacterArmature')) armature = n as TransformNode;
+    for (const d of n.getDescendants(false)) {
+      if (d.name.includes('CharacterArmature')) armature = d as TransformNode;
+    }
+  }
+
   for (const m of meshes) {
     m.setEnabled(true);
     m.isVisible = true;
     m.visibility = 1;
-    if (m.skeleton) {
-      m.alwaysSelectAsActiveMesh = true;
-      m.numBoneInfluencers = 4;
-      m.skeleton.prepare(true);
-      // GPU skin of this Assimp *100 bind is a degenerate sail. Keep
-      // m.skeleton; draw a rigid clone so the 1.8m wizard is visible.
-      if (m.getClassName() === 'Mesh') {
-        const draw = (m as Mesh).clone(`${m.name}__draw`, m.parent, true);
-        if (draw) {
-          draw.skeleton = null;
-          draw.alwaysSelectAsActiveMesh = true;
-          draw.isVisible = true;
-          drawBodies.push(draw);
-          try {
-            draw.refreshBoundingInfo(false, true);
-          } catch {
-            /* optional */
-          }
-        }
+    const skel = m.skeleton;
+    if (!skel) continue;
+    // Assimp *100 lives on CharacterArmature (not a joint). GPU skin of that
+    // bind is a degenerate sail. CPU-skin the visible mesh so Idle_Weapon
+    // deforms the 1.8m body. computeBonesUsingShaders=false + dirty defines
+    // so NUM_BONE_INFLUENCERS=0 (useBones ignores the flag; a cached BONES
+    // effect would double-skin). Do not skeleton=null / hide behind a clone.
+    m.alwaysSelectAsActiveMesh = true;
+    m.numBoneInfluencers = 4;
+    skel.useTextureToStoreBoneMatrices = false;
+    if (armature) compensateAssimpIbm(skel, armature);
+    if (m.getClassName() === 'Mesh') {
+      const mesh = m as Mesh;
+      mesh.makeGeometryUnique();
+      mesh.computeBonesUsingShaders = false;
+      mesh._markSubMeshesAsAttributesDirty();
+      skel.prepare(true);
+      const jointIdx = mesh.getVerticesData('matricesIndices');
+      const jointWts = mesh.getVerticesData('matricesWeights');
+      const cpuSkin = () => {
+        if (!jointIdx || !jointWts) return;
+        mesh.setVerticesData('matricesIndices', jointIdx, true);
+        mesh.setVerticesData('matricesWeights', jointWts, true);
+        mesh.applySkeleton(skel);
+        mesh.removeVerticesData('matricesIndices');
+        mesh.removeVerticesData('matricesWeights');
+      };
+      cpuSkin();
+      if (jointIdx && jointWts) {
+        mesh.onBeforeRenderObservable.add(() => {
+          skel.prepare();
+          cpuSkin();
+        });
       }
-      m.isVisible = false;
+      try {
+        mesh.refreshBoundingInfo(false, true);
+      } catch {
+        /* optional */
+      }
+    } else {
+      skel.prepare(true);
     }
+    m.material?.markDirty(true);
   }
 
   // Normalize height ~1.8m and plant feet on y=0 (assimp glTF is Y-up).
@@ -314,14 +375,15 @@ export function createPlayerHumanoid(
     }
   };
 
-  for (const m of [...meshes, ...drawBodies]) {
+  for (const m of meshes) {
     const bare = bareName(m.name, prefix);
     if (m === staffMesh || /staff/i.test(bare)) continue;
     const matl = m.material;
     if (matl instanceof PBRMaterial) {
       liftPbr(matl);
       clothPbrs.push(matl);
-    } else {
+      if (m.skeleton) matl.markDirty(true);
+    } else if (!m.skeleton) {
       m.material = robeMat;
     }
   }

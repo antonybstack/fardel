@@ -60,5 +60,10 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 
 ### 2026-09-08 — humanoid,babylon,skin — GPU skin of Wizard.glb is a sail, not a body
 - **Cause:** Assimp FBX→glTF puts `CharacterArmature` scale 100 (not a joint) and glTF AUTO `__root__` `(1,1,-1)`. Extra parent `pivot.scaling` lands in `mesh.world` but not `boneFinal`, so IBM 0.01 no longer cancels. GPU/CPU skin is a degenerate triangle. Shared `StandardMaterial` compiled without BONES also yields zero fill. Crowd-proxy capsules at origin hide a slim body.
-- **Do this:** Do not `m.skeleton = null`. Do not 1.8m-normalize with an extra scaled ancestor unless IBM is compensated. Rigid `__draw` clone currently carries the 1.8m body; live skeleton stays on the source mesh. Hide `proxy_*` for character VE. `computeBonesUsingShaders=false` still double-skins if the effect has BONES (`useBones` ignores that flag).
+- **Do this:** Do not `m.skeleton = null`. Do not 1.8m-normalize with an extra scaled ancestor unless IBM is compensated. Hide `proxy_*` for character VE. `computeBonesUsingShaders=false` still double-skins if the effect has BONES (`useBones` ignores that flag).
+- **Seen in:** #303 / #260
+
+### 2026-09-08 — humanoid,babylon,skin — CPU skin deforms the visible wizard; rigid `__draw` is still T-pose
+- **Cause:** GPU bone path + Assimp `CharacterArmature` *100 / -90X (not a joint) is a sail. CPU `applySkeleton` writes that leftover into mesh-local verts; `mesh.world` already has the armature, so the body vanishes unless IBM is multiplied by the armature local matrix. `instantiateModelsToScene` clones share geometry with the container source. `useBones` ignores `computeBonesUsingShaders`; a cached BONES effect double-skins. A `__draw` clone with `skeleton=null` is the old T-pose detach.
+- **Do this:** Keep the skeleton on the **visible** mesh. `makeGeometryUnique`, hide container originals, multiply IBM by CharacterArmature local (scale+rot), `computeBonesUsingShaders=false`, strip JOINTS/WEIGHTS after each `applySkeleton` so the effect has no BONES. Do not rigid-clone. Do not assign a shared `StandardMaterial` onto Wizard.001. Hide `proxy_*` for character VE.
 - **Seen in:** #303 / #260
