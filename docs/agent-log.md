@@ -228,6 +228,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Patrol in-range pads, EquipStaff, stand-cast Emberbolt immediately (no Move during CastEndsAt). persistMark via `readHumanoidPlayback`: `Remote cast OK` + Spell named + `skinned` ≥ 1. Mutate `camera.target` for `?ve=remote-cast` (do not `setTarget`). Env `FARDEL_SPACETIME_URI` + `FARDEL_DB` — never `:3000` / db `fardel`.
 - **Seen in:** #403
 
+### 2026-09-08 — humanoid,remote,flinch — remotes stay Idle/Walk on HP drop
+- **Cause:** `playHumanoidFlinch` returned while `a.casting`. SecondClient Emberbolt thorns land on the CastEndsAt tick; `syncRemoteCastFx` runs after `syncRemoteMeshes`, so the HP delta is recorded under last-frame Spell and never retried. `setHumanoidDead` was never called for remotes, so Hp=0 kept Walk.
+- **Do this:** Interrupt Spell for RecieveHit (`playHumanoidFlinch` clears `casting`). `setHumanoidDead` on remote Hp=0. Do not stomp a playing flinch with Spell. `?ve=remote-death` + `FARDEL_SECOND_DIE=1` DummyStrike. persistMark names Death/RecieveHit + `skinned`. Mutate `camera.target` (do not `setTarget`).
+- **Seen in:** #429
+
 ### 2026-09-08 — ve,hostile — ?ve=hostile-body fails 1/2 after a Kind=2 kill
 - **Cause:** Harness required `hp > 0` Idle. Dead Kind=2 still occupy pads and do not respawn; #404 corpse is still a skinned person. Seat VE after RecieveHit/Death then read 1/2 living.
 - **Do this:** Count Kind=2 skinned `Idle|Death`. Require ≥1 living Idle + dummy trainer (no humanoid). persistMark `Hostile body OK` + Idle_Weapon + `skinned` ≥ 1. `capsule` / `T-POSE` = fail. Do not add a respawn reducer from this lane.

@@ -865,8 +865,12 @@ export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
 /** One-shot hit react. Does not touch Move intents; loco resumes after. */
 export function playHumanoidFlinch(parts: HumanoidParts): void {
   const a = animByRoot.get(parts.root);
-  if (!a?.flinch || a.airborne || a.dead || a.casting) return;
-  if (a.cast?.isPlaying) return;
+  if (!a?.flinch || a.airborne || a.dead) return;
+  // HP drop can land on the same tick as CastEndsAt. Do not keep Spell over RecieveHit.
+  a.casting = false;
+  a.turning = false;
+  stopIfPlaying(a.cast);
+  if (a.cast) a.cast.speedRatio = 1;
   stopIfPlaying(a.idle);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
@@ -896,6 +900,8 @@ export function setHumanoidCasting(
     return;
   }
   if (a.dead || !a.cast) return;
+  // RecieveHit owns the body until the one-shot ends (remote DummyStrike / Emberbolt land).
+  if (a.flinch?.isPlaying) return;
   const already = a.casting;
   a.casting = true;
   a.turning = false;
