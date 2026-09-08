@@ -3191,7 +3191,12 @@ async function main(): Promise<void> {
     },
     onPartyLeave: () => {
       if (!net) return;
+      const party = net.getParty();
+      const wasInParty = (party?.size ?? 0) > 0;
       net.leaveParty();
+      if (wasInParty) {
+        pushSystemToast('party', 'Left party', TOAST_VE_TTL_MS);
+      }
     },
     onTradeOfferOrAccept: () => {
       const g = net;
@@ -4288,7 +4293,8 @@ async function main(): Promise<void> {
         if (pending && pending !== prevPendingInvite) {
           pushSystemToast(
             'invite',
-            `Invite from ${pending.slice(0, 8)}…`,
+            `Invite from ${pending.slice(0, 8)}… · P to accept`,
+            TOAST_VE_TTL_MS,
           );
         }
         if (!pending && prevPendingInvite && size > prevPartySize) {
@@ -4297,9 +4303,17 @@ async function main(): Promise<void> {
             pushSystemToast(
               'party',
               `Invite accepted · party ${size}`,
+              TOAST_VE_TTL_MS,
             );
             toastedInviteAcceptKey = acceptKey;
           }
+        } else if (!pending && prevPendingInvite && size <= prevPartySize) {
+          // Invite expired or declined (pending cleared without party size increase)
+          pushSystemToast(
+            'invite',
+            `Invite from ${prevPendingInvite.slice(0, 8)}… expired`,
+            TOAST_VE_TTL_MS,
+          );
         }
         prevPendingInvite = pending;
         // Inbound trade offer toast + bag refresh when transfer lands.
@@ -4337,12 +4351,11 @@ async function main(): Promise<void> {
         lastTradePendingFrom = tradePending;
         if (size > prevPartySize && size >= 1) {
           if (prevPartySize === 0) {
-            pushCombatLog(
-              'party',
-              size === 1
-                ? 'Party formed (you)'
-                : `Joined party · size ${size}`,
-            );
+            const msg = size === 1
+              ? 'Party formed (you)'
+              : `Joined party · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
           } else {
             const newcomers = party!.members
               .map((m) => m.identityHex)
@@ -4353,10 +4366,9 @@ async function main(): Promise<void> {
                     .map((h) => `${h.slice(0, 8)}…`)
                     .join(', ')
                 : 'member';
-            pushCombatLog(
-              'party',
-              `Party join · ${label} · size ${size}`,
-            );
+            const msg = `Party join · ${label} · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
           }
         } else if (
           size > 0 &&
@@ -4372,12 +4384,32 @@ async function main(): Promise<void> {
             .map((m) => m.identityHex)
             .filter((h) => !prevSet.has(h));
           if (joined.length > 0) {
-            pushCombatLog(
-              'party',
-              `Party join · ${joined
-                .map((h) => `${h.slice(0, 8)}…`)
-                .join(', ')} · size ${size}`,
-            );
+            const msg = `Party join · ${joined
+              .map((h) => `${h.slice(0, 8)}…`)
+              .join(', ')} · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
+          }
+        } else if (size < prevPartySize && prevPartySize > 0) {
+          // Party size decreased - someone left
+          const prevSet = new Set(
+            prevPartyMemberKey.split(',').filter(Boolean),
+          );
+          const currentSet = new Set(
+            party!.members.map((m) => m.identityHex),
+          );
+          const left = Array.from(prevSet).filter((h) => !currentSet.has(h));
+          if (left.length > 0) {
+            const msg = size === 0
+              ? 'Party disbanded'
+              : `Party leave · ${left
+                  .map((h) => `${h.slice(0, 8)}…`)
+                  .join(', ')} · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
+          } else if (size === 0) {
+            pushCombatLog('party', 'Party disbanded');
+            pushSystemToast('party', 'Party disbanded', TOAST_VE_TTL_MS);
           }
         }
         prevPartySize = size;
