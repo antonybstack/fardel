@@ -45,6 +45,7 @@ import {
   type RemotePose,
   type GroundItemView,
   type VendorView,
+  type CombatView,
 } from './net/connection';
 import { buildForestClearing } from './world/forest';
 import {
@@ -293,6 +294,12 @@ let veCastFeedbackPresent: null | {
   spellName: string;
 } = null;
 
+/** VE seed: sticky CC chip on self-frame (?ve=cc-feedback) — presentation only. */
+let veCcFeedbackPresent: null | {
+  kind: 'stun' | 'silence';
+  leftMs: number;
+} = null;
+
 /** Client-only Rest enter/exit chrome on #selfFrame (not a server channel). */
 let restExitTimer: number | null = null;
 
@@ -515,6 +522,56 @@ function updateSelfFrame(character: {
       buffEl.textContent = 'Tonic —';
     }
   }
+}
+
+/**
+ * Sticky stun/silence chip on #selfFrame while StunnedUntilMicros / CastLockedUntil
+ * are active (#153). Presentation only — no new CC rules. Stun wins over silence.
+ * Kick / hard-interrupt share CastLockedUntil → shown as SILENCE.
+ */
+function updateSelfCcChrome(
+  combat: CombatView | null | undefined,
+): void {
+  const frame = document.getElementById('selfFrame');
+  const chip = document.getElementById('sfCc');
+  if (!frame || !chip) return;
+
+  let kind: 'stun' | 'silence' | null = null;
+  let leftMs = 0;
+
+  if (veCcFeedbackPresent) {
+    kind = veCcFeedbackPresent.kind;
+    leftMs = Math.max(0, veCcFeedbackPresent.leftMs);
+  } else {
+    const stunLeft = stunRemainingMs(combat);
+    const silLeft = castSilenceRemainingMs(combat);
+    if (stunLeft > 0) {
+      kind = 'stun';
+      leftMs = stunLeft;
+    } else if (silLeft > 0) {
+      kind = 'silence';
+      leftMs = silLeft;
+    }
+  }
+
+  frame.classList.toggle('ccStun', kind === 'stun');
+  frame.classList.toggle('ccSilence', kind === 'silence');
+
+  if (!kind || leftMs <= 0) {
+    chip.classList.add('hidden');
+    chip.classList.remove('stun', 'silence');
+    chip.textContent = 'CC —';
+    return;
+  }
+
+  chip.classList.remove('hidden');
+  chip.classList.toggle('stun', kind === 'stun');
+  chip.classList.toggle('silence', kind === 'silence');
+  const sec = (leftMs / 1000).toFixed(1);
+  chip.textContent =
+    kind === 'stun'
+      ? `Stun ${sec}s · cannot move/cast`
+      : `Silence ${sec}s · cannot cast`;
 }
 
 /** Mirror Combat.RespawnDelayMs — client display only, do not import shared C#. */
@@ -3897,10 +3954,13 @@ async function main(): Promise<void> {
       setHumanoidMoving(humanoid, false);
     }
 
-    // Refresh tonic buff timer on self-frame each frame.
+    // Refresh tonic buff timer + sticky CC chip on self-frame each frame.
     if (net) {
       const chTick = net.getCharacter();
       if (chTick) updateSelfFrame(chTick);
+      updateSelfCcChrome(net.getCombat());
+    } else if (veCcFeedbackPresent) {
+      updateSelfCcChrome(null);
     }
 
     // Keep highlight in sync with server combat target.
@@ -12859,10 +12919,90 @@ async function main(): Promise<void> {
     window.setTimeout(waitZoom, 700);
   }
 
+  // ?ve=cc-feedback — sticky stun/silence chip on self-frame (not toast-only) (#153).
+  if (ve === 'cc-feedback' || ve === 'ccfeedback') {
+    camera.radius = 10.5;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && (ve === 'cc-feedback' || ve === 'ccfeedback')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cc-feedback: waiting for Connected…';
+    let ticks = 0;
+    const waitCc = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cc-feedback: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitCc, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cc-feedback: equipping staff…';
+        window.setTimeout(waitCc, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      // Seed sticky STUN chip (CastLockedUntil / silence use same chrome row).
+      // Keep a brief combat toast so pacing vs sticky ownership is visible (#141).
+      veCcFeedbackPresent = {
+        kind: 'stun',
+        leftMs: Math.round(STUN_DURATION_MS * 0.72),
+      };
+      updateSelfCcChrome(null);
+
+      const frame = document.getElementById('selfFrame');
+      if (frame) {
+        frame.classList.remove('hidden');
+        frame.classList.add('ccStun');
+        frame.classList.remove('ccSilence');
+      }
+      const chip = document.getElementById('sfCc');
+      if (chip) {
+        chip.classList.remove('hidden', 'silence');
+        chip.classList.add('stun');
+        const sec = ((veCcFeedbackPresent?.leftMs ?? STUN_DURATION_MS) / 1000).toFixed(1);
+        chip.textContent = `Stun ${sec}s · cannot move/cast`;
+      }
+
+      const stack = document.getElementById('toastStack');
+      if (stack && ticks <= 2) {
+        stack.replaceChildren();
+        pushSystemToast(
+          'stun',
+          `Stun · Bash · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s · sticky on self-frame`,
+          TOAST_VE_TTL_MS,
+        );
+        // Quiet non-combat noise — prove sticky owns the state vs toast alone.
+        pushSystemToast('xp', 'XP +5 (background)', 1600);
+      }
+
+      const chipOk =
+        !!chip &&
+        !chip.classList.contains('hidden') &&
+        chip.classList.contains('stun') &&
+        (chip.textContent ?? '').toUpperCase().includes('STUN');
+      const frameOk =
+        !!frame &&
+        !frame.classList.contains('hidden') &&
+        frame.classList.contains('ccStun');
+      if (mark) {
+        mark.textContent = chipOk && frameOk
+          ? `CC feedback OK · sticky STUN on self-frame · toast≠only · silence shares chip`
+          : `VE cc-feedback: chip ${chipOk ? 'on' : 'off'} · frame ${frameOk ? 'on' : 'off'} (retry…)`;
+      }
+      if (ticks < 50) window.setTimeout(waitCc, 350);
+    };
+    window.setTimeout(waitCc, 600);
+  }
+
   void STUN_MANA_COST;
   void STUN_RANGE_METERS;
   void STUN_DURATION_MS;
-  void stunRemainingMs;
 }
 
 main().catch((err: unknown) => {
