@@ -166,6 +166,8 @@ type Nameplate = {
   label: string;
   /** <0 = no HP pip; else 0..1 fill. */
   hpFrac: number;
+  /** Local Tab-target gold chrome (#142). */
+  selected: boolean;
 };
 
 function setStatus(text: string, connState?: ConnectionStatus['state']): void {
@@ -2356,7 +2358,7 @@ function createNameplate(scene: Scene, key: string): Nameplate {
   mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
   mesh.isPickable = false;
   mesh.position.y = 2.05;
-  return { mesh, mat, tex, label: '', hpFrac: -2 };
+  return { mesh, mat, tex, label: '', hpFrac: -2, selected: false };
 }
 
 function paintNameplate(
@@ -2364,10 +2366,20 @@ function paintNameplate(
   label: string,
   fillCss: string,
   hpFrac: number,
+  selected = false,
 ): void {
-  if (np.label === label && Math.abs(np.hpFrac - hpFrac) < 0.02) return;
+  if (
+    np.label === label &&
+    Math.abs(np.hpFrac - hpFrac) < 0.02 &&
+    np.selected === selected
+  ) {
+    return;
+  }
   np.label = label;
   np.hpFrac = hpFrac;
+  np.selected = selected;
+  np.mat.fogEnabled = !selected;
+  np.mesh.scaling.set(selected ? 1.1 : 1, selected ? 1.1 : 1, 1);
   const ctx = np.tex.getContext() as unknown as CanvasRenderingContext2D;
   const w = 256;
   const h = 96;
@@ -2375,11 +2387,11 @@ function paintNameplate(
   const showPip = hpFrac >= 0;
   const textY = showPip ? 34 : 48;
   // Opaque dark pill for legibility over cyan fog / lush grass.
-  const pillW = Math.min(236, 40 + label.length * 20);
+  const pillW = Math.min(selected ? 228 : 236, 40 + label.length * 20);
   const pillH = showPip ? 78 : 56;
   const pillX = (w - pillW) / 2;
   const pillY = showPip ? 8 : 20;
-  ctx.fillStyle = 'rgba(6,8,14,0.88)';
+  ctx.fillStyle = selected ? 'rgba(16,12,4,0.94)' : 'rgba(6,8,14,0.88)';
   ctx.beginPath();
   const r = 14;
   ctx.moveTo(pillX + r, pillY);
@@ -2389,6 +2401,15 @@ function paintNameplate(
   ctx.arcTo(pillX, pillY, pillX + pillW, pillY, r);
   ctx.closePath();
   ctx.fill();
+  if (selected) {
+    // Gold select stroke — same family as HUD #targetFrame (#142).
+    ctx.strokeStyle = 'rgba(232,186,48,0.98)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(10,8,4,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
   ctx.shadowColor = 'rgba(0,0,0,0.85)';
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 2;
@@ -2412,8 +2433,10 @@ function paintNameplate(
     if (isDummy) {
       ctx.fillStyle = 'rgba(8,10,12,0.92)';
       ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = 'rgba(0,0,0,0.95)';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = selected
+        ? 'rgba(232,186,48,0.95)'
+        : 'rgba(0,0,0,0.95)';
+      ctx.lineWidth = selected ? 4 : 3;
       ctx.strokeRect(bx, by, bw, bh);
       ctx.fillStyle =
         fill > 0.35
@@ -2674,6 +2697,29 @@ function spawnDeathBurst(scene: Scene, at: Vector3): NpcLifeFx['burst'] {
 /** Fade / restore all npc presentation mats (dummy cloth+wood+head). */
 function npcPresentationMats(mesh: NpcMesh): StandardMaterial[] {
   return [mesh.mat, ...mesh.extraMats];
+}
+
+/** Gold-warm extra-mat tint so Tab-selected dummy reads past cloth-only (#142). */
+function tintNpcExtraMats(
+  mesh: NpcMesh,
+  addR: number,
+  addG: number,
+  addB: number,
+  scale = 0.1,
+): void {
+  for (const m of mesh.extraMats) {
+    m.emissiveColor.set(
+      m.diffuseColor.r * scale + addR,
+      m.diffuseColor.g * scale + addG,
+      m.diffuseColor.b * scale + addB,
+    );
+  }
+}
+
+function restoreNpcExtraMats(mesh: NpcMesh): void {
+  for (const m of mesh.extraMats) {
+    m.emissiveColor = m.diffuseColor.scale(0.035);
+  }
 }
 
 function beginNpcDeathFx(
@@ -3949,19 +3995,21 @@ async function main(): Promise<void> {
         }
       }
 
-      if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
-        paintNameplate(
-          mesh.nameplate,
-          'Dummy',
-          '#e8c89a',
-          npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
-        );
-      }
-
       const selected = selectedTargetId === npc.npcId && isAlive;
       const remoteSelected =
         isAlive &&
         latestRemoteCombats.some((rc) => rc.targetNpcId === npc.npcId);
+
+      if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+        paintNameplate(
+          mesh.nameplate,
+          'Dummy',
+          selected ? '#f4e4a8' : '#e8c89a',
+          npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
+          selected,
+        );
+      }
+
       // Suppress rings/marker while dying; keep corpse non-targetable visually.
       if (fx?.phase === 'dying') {
         mesh.ring.setEnabled(false);
@@ -3987,6 +4035,7 @@ async function main(): Promise<void> {
           mesh.markerMat.emissiveColor = new Color3(1.05, 0.35, 0.12);
           mesh.markerMat.diffuseColor = new Color3(0.98, 0.4, 0.18);
           mesh.mat.emissiveColor = new Color3(0.32, 0.08, 0.04);
+          tintNpcExtraMats(mesh, 0.16, 0.04, 0.02);
         } else {
           mesh.ringMat.emissiveColor = new Color3(1.28, 0.95, 0.2);
           mesh.ringMat.diffuseColor = new Color3(1.0, 0.86, 0.24);
@@ -3994,6 +4043,7 @@ async function main(): Promise<void> {
           mesh.markerMat.diffuseColor = new Color3(1.0, 0.84, 0.22);
           // Stronger body tint so tab-target reads even at glancing angles.
           mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
+          tintNpcExtraMats(mesh, 0.14, 0.1, 0.02);
         }
         // Local gold wins; still hint remote interest with outer cyan.
         mesh.remoteRing.setEnabled(remoteSelected);
@@ -4005,10 +4055,12 @@ async function main(): Promise<void> {
         mesh.remoteRingMat.diffuseColor = new Color3(0.2, 0.85, 0.95);
         mesh.mat.emissiveColor = new Color3(0.02, 0.08, 0.12);
         mesh.marker.setEnabled(false);
+        restoreNpcExtraMats(mesh);
       } else if (fx?.phase !== 'dying') {
         mesh.ringMat.emissiveColor = new Color3(0, 0, 0);
         mesh.mat.emissiveColor = new Color3(0, 0, 0);
         mesh.marker.setEnabled(false);
+        restoreNpcExtraMats(mesh);
       }
     }
     for (const [key, mesh] of npcMeshes) {
@@ -4856,7 +4908,8 @@ async function main(): Promise<void> {
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
         veFollow !== 'vendor-interact' &&
-        veFollow !== 'dummy-hp'
+        veFollow !== 'dummy-hp' &&
+        veFollow !== 'tab-target'
       ) {
         const follow = player.position.add(new Vector3(0, 1.35, 0));
         const radius = camera.radius;
@@ -7190,6 +7243,90 @@ async function main(): Promise<void> {
       window.setTimeout(waitContrast, 200);
     };
     window.setTimeout(waitContrast, 700);
+  }
+
+  // ?ve=tab-target — Tab-select Dummy; world gold nameplate + ring + marker (#142).
+  if (ve === 'tab-target') {
+    camera.radius = 10.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'tab-target') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-target: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitTabTarget = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 7.5) {
+          const step = Math.min(MAX_STEP_METERS, dist - 6);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        } else if (dist > 0.05 && dist < 5) {
+          const step = Math.min(MAX_STEP_METERS, 6 - dist);
+          net.sendMove((-dx / dist) * step, (-dz / dist) * step, false);
+        }
+        camera.setTarget(new Vector3(dummy.x, 1.4, dummy.z));
+        camera.radius = 10.5;
+        camera.beta = Math.PI / 3.2;
+        if (dist > 0.05) {
+          camera.alpha = Math.atan2(dx, dz) + Math.PI;
+        }
+      }
+      updateTargetFrame(
+        dummy
+          ? (net.getNpcs().find((n) => n.npcId === dummy.npcId) ?? dummy)
+          : null,
+      );
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const markerOn = !!(mesh && mesh.marker.isEnabled());
+      const plateSelected = !!(mesh && mesh.nameplate && mesh.nameplate.selected);
+      const frame = document.getElementById('targetFrame');
+      const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        ringOn &&
+        markerOn &&
+        plateSelected &&
+        frameVisible &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent =
+            `Tab-target OK · world gold plate+ring · Dummy #${dummy.npcId} · HUD frame · #142`;
+        }
+        if (okTicks < 10 && ticks < 140) {
+          window.setTimeout(waitTabTarget, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent =
+          `VE tab-target: Connected · dummy ${dummy ? 'yes' : 'no'} · plate ${plateSelected ? 'gold' : 'off'} · ring ${ringOn ? 'on' : 'off'} · marker ${markerOn ? 'on' : 'off'} · frame ${frameVisible ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE tab-target: timed out waiting for world gold plate + ring';
+        return;
+      }
+      window.setTimeout(waitTabTarget, 200);
+    };
+    window.setTimeout(waitTabTarget, 700);
   }
 
     // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
