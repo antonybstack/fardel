@@ -91,7 +91,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=reticule` | Select Dummy; prove gold ring + overhead marker (`ve/babylon-reticule.png`); HUD `Reticule OK · … · gold ring+marker` |
 | `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |
 | `?ve=tab-target` | Tab-select Dummy; world gold nameplate + HP pip + ring + marker (#142); HUD `Tab-target OK · world gold plate+ring · … · #142` |
-| `?ve=character-wow` | Player idle/walk/run/hop/Spell plus a Kind=2 person (not capsule); Dummy trainer (#433); HUD `Character wow OK · … · Hostile Idle_Weapon · skinned 1 · dummy trainer` |
+| `?ve=character-wow` | Idle_Weapon / sheathed Idle / Walk (face dummy) / Run / hop / Spell plus a Kind=2 person (not capsule); Dummy trainer (#433 / #451); HUD `Character wow OK · … · sheathed · Hostile Idle_Weapon · skinned 1 · dummy trainer` |
 | `?ve=face-target-walk` | Walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432); HUD `Walk OK · Walk · skinned 1 · face target` |
 | `?ve=tab-hostile` | Tab visits Kind=2 and Kind=3; dummy still in cycle (#453); HUD `Tab-hostile OK · Brigand #… · dummy selectable · #453`. |
 | `?ve=hostile-read` | Hostile coral plate vs Dummy parchment vs Vendor mint at play cam (#359); HUD `Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359`. |

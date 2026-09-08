@@ -7855,7 +7855,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitPose, 700);
   }
 
-  // ?ve=character-wow — E8.12 reel + E8.24 hostile person (not capsule). Dummy trainer.
+  // ?ve=character-wow — E8.12 reel + E8.24 hostile person + E8.29 sheathed/face-target. Dummy trainer.
   if (ve === 'character-wow') {
     camera.radius = 12;
     camera.alpha = -Math.PI / 2;
@@ -7882,43 +7882,79 @@ async function main(): Promise<void> {
         return;
       }
       const ch = net.getCharacter();
-      if (ch && !ch.staffEquipped) {
-        net.equipStaff();
-        window.setTimeout(waitWow, 250);
-        return;
-      }
       if (ch && !ch.robesEquipped) {
         net.equipRobes();
         window.setTimeout(waitWow, 250);
         return;
       }
       if (!t0) t0 = Date.now();
-      setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
       const elapsed = (Date.now() - t0) / 1000;
-      if (elapsed < 1.2) {
+      const npcsEarly = net.getNpcs();
+      syncNpcMeshes(npcsEarly);
+      const dummyEarly = npcsEarly.find((n) => n.kind === NPC_KIND_DUMMY);
+      if (dummyEarly && selectedTargetId !== dummyEarly.npcId) {
+        net.setTarget(dummyEarly.npcId);
+        selectedTargetId = dummyEarly.npcId;
+      }
+      // Idle_Weapon → sheathed Idle → Walk (face dummy) → Run → hop → Spell.
+      if (elapsed < 1.0) {
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        setHumanoidStaffEquipped(humanoid, true);
+        setStaffMeshVisible(humanoid.staff, true);
         setHumanoidCasting(humanoid, false);
         setHumanoidAirborne(humanoid, false);
         setHumanoidMoving(humanoid, false);
-      } else if (elapsed < 2.6) {
+      } else if (elapsed < 2.2) {
+        if (ch && ch.staffEquipped) net.unequipStaff();
+        setHumanoidStaffEquipped(humanoid, false);
+        setStaffMeshVisible(humanoid.staff, false);
+        setHumanoidCasting(humanoid, false);
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidMoving(humanoid, false);
+      } else if (elapsed < 3.6) {
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        setHumanoidStaffEquipped(humanoid, true);
+        setStaffMeshVisible(humanoid.staff, true);
         setHumanoidCasting(humanoid, false);
         setHumanoidAirborne(humanoid, false);
         setHumanoidMoving(humanoid, true, false, MOVE_SPEED);
-      } else if (elapsed < 4.0) {
+      } else if (elapsed < 5.0) {
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        setHumanoidStaffEquipped(humanoid, true);
+        setStaffMeshVisible(humanoid.staff, true);
         setHumanoidCasting(humanoid, false);
         setHumanoidAirborne(humanoid, false);
         setHumanoidMoving(humanoid, true, true, MOVE_SPEED);
-      } else if (elapsed < 5.4) {
+      } else if (elapsed < 6.4) {
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        setHumanoidStaffEquipped(humanoid, true);
+        setStaffMeshVisible(humanoid.staff, true);
         setHumanoidCasting(humanoid, false);
         setHumanoidMoving(humanoid, false);
         setHumanoidAirborne(humanoid, true);
       } else {
+        if (ch && !ch.staffEquipped) net.equipStaff();
+        setHumanoidStaffEquipped(humanoid, true);
+        setStaffMeshVisible(humanoid.staff, true);
         setHumanoidAirborne(humanoid, false);
         setHumanoidCasting(humanoid, true);
       }
       const pb = readHumanoidPlayback(humanoid);
       if (pb.playing && !seen.includes(pb.playing)) seen.push(pb.playing);
-      if (elapsed >= 4.0 && elapsed < 5.4 && !seen.includes('hop-pose')) {
+      {
+        const clip = clipBare(pb.playing);
+        if (
+          elapsed >= 1.0 &&
+          elapsed < 2.2 &&
+          /^idle$/i.test(clip) &&
+          !/weapon/i.test(clip) &&
+          !seen.includes('sheathed')
+        ) {
+          seen.push('sheathed');
+        }
+      }
+      if (elapsed >= 5.0 && elapsed < 6.4 && !seen.includes('hop-pose')) {
         seen.push('hop-pose');
       }
       const npcs = net.getNpcs();
@@ -7952,7 +7988,8 @@ async function main(): Promise<void> {
       }
       const playerOk =
         pb.skinned > 0 &&
-        seen.some((n) => /idle/i.test(n)) &&
+        seen.some((n) => /idle_weapon/i.test(n)) &&
+        seen.includes('sheathed') &&
         seen.some((n) => /walk/i.test(n)) &&
         seen.some((n) => /run/i.test(n)) &&
         seen.includes('hop-pose') &&
@@ -7971,7 +8008,7 @@ async function main(): Promise<void> {
         }
         return;
       }
-      if (ticks > 120) {
+      if (ticks > 160) {
         if (mark) {
           if (capsuleLeft) {
             mark.textContent = 'capsule · hostile not a person';
