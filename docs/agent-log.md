@@ -358,3 +358,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Seed `YardVendor.VendorId = Vendor.SeedId` (9001). Missing Npc + `YardVendor.Find` → `Invalid target`. `Hp <= 0` is `Target dead` before range (Kind=3 corpse). Dummy stays `NpcId` lookup.
 - **Seen in:** #486
 
+### 2026-09-08 — ve,hunt — hunt-loop camera sits on pad A so Kind=3 never reads
+- **Cause:** `?ve=hunt-loop` Tabbed the first in-range hostile (id-sort Kind=2) and framed `(2.2, 3.4)` / loot `(3.1, 5.4)` — pad A. Pad C Brigand is `(7, -3)`.
+- **Do this:** Cycle Tab until Kind=3. Frame pad C. persistMark names `Brigand`. Stay at origin (outside AggroRadius). Dummy trainer. Capsule = fail.
+- **Seen in:** #485 / #422
+
