@@ -43,6 +43,17 @@ public static class Combat
     public const float HostileSpawnBy = 0f;
     public const float HostileSpawnBz = 3f;
 
+    /// <summary>
+    /// Proximity pull (#355). Must stay under CastRangeSmoke far-pose vs pad B
+    /// (~3.6m at x=-5,z=0). Origin is ~7.6m from both pads — no pull on connect.
+    /// </summary>
+    public const float HostileAggroRadius = 3.0f;
+    /// <summary>Drop chase and walk home when the hostile is this far from spawn.</summary>
+    public const float HostileLeashRadius = 12f;
+    public const int HostileTickMs = 100;
+    /// <summary>~4 m/s. Players outrun this (MaxStep 0.75 at ~20Hz).</summary>
+    public const float HostileStepMeters = 0.4f;
+
     /// <summary>Player Character.MaxHp seed (durable).</summary>
     public const int PlayerMaxHp = 100;
 

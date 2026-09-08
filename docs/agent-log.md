@@ -162,3 +162,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** #154 VE asserts `canvas.style.cursor === 'grabbing'`. WoW RMB-hold hides the pointer. One `setRmbLookArmed` drives both.
 - **Do this:** Play / `?ve=rmb-orbit` → `cursor: none`. Keep grabbing only when `veRmbLookLock` (`?ve=rmb-look`). Do not fail RmbOrbitSmoke: persistMark still `/^RMB orbit OK/` + `dAlpha`.
 - **Seen in:** #353 / #154 / #366
+
+### 2026-09-08 — npc,aggro — CastRangeSmoke far-pose sits 3.6m from hostile pad B
+- **Cause:** Pad B is (−7, 3). CastRangeSmoke walks to x=DummySpawnX−(range+2) ≈ −5, z=0. Dist to B is ~3.6m.
+- **Do this:** Keep `Combat.HostileAggroRadius` under 3.6 so dummy-range smokes do not pull B. Origin is ~7.6m from both pads.
+- **Seen in:** #355

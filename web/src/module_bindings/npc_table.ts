@@ -18,4 +18,8 @@ export default __t.row({
   z: __t.f32(),
   hp: __t.i32(),
   maxHp: __t.i32().name("max_hp"),
+  spawnX: __t.f32().name("spawn_x"),
+  spawnY: __t.f32().name("spawn_y"),
+  spawnZ: __t.f32().name("spawn_z"),
+  aggroed: __t.bool(),
 });
