@@ -74,6 +74,7 @@ import {
   setHumanoidCasting,
   setHumanoidDead,
   setHumanoidMoving,
+  setHumanoidTurning,
   type HumanoidParts,
 } from './world/humanoid';
 import { createTrainingDummy } from './world/dummy';
@@ -3289,7 +3290,10 @@ async function main(): Promise<void> {
   });
   /** E2.4 visual facing from camera-relative wish. Server pose.yaw stays 0. */
   const YAW_FACE_HZ = 12;
+  /** Stationary look / A-D start — slower than loco so 90° is a blend, not a pop. */
+  const YAW_TURN_HZ = 4;
   let localFacingYaw = 0;
+  let localTurningInPlace = false;
   const bootParams = new URLSearchParams(window.location.search);
   const ve = bootParams.get('ve') || '';
   const firstSessionVe = ve === 'first-session';
@@ -4777,8 +4781,19 @@ async function main(): Promise<void> {
         if (fx * fx + fz * fz > 1e-8) faceYaw = Math.atan2(fx, fz);
       }
       if (faceYaw != null) {
-        const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
+        let d = faceYaw - localFacingYaw;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        const wishMoving = Math.hypot(wish.dx, wish.dz) > 1e-4;
+        // Planted turn while standing (look) or a large A-D facing change.
+        // Aligned loco keeps 12 Hz + Walk/Run (#334 foot lock).
+        localTurningInPlace =
+          Math.abs(d) > 0.28 && (!wishMoving || Math.abs(d) > 0.7);
+        const yawHz = localTurningInPlace ? YAW_TURN_HZ : YAW_FACE_HZ;
+        const a = 1 - Math.exp(-Math.max(0, dt) * yawHz);
         localFacingYaw = lerpYaw(localFacingYaw, faceYaw, a);
+      } else {
+        localTurningInPlace = false;
       }
       player.rotation.y = localFacingYaw;
     }
@@ -5072,34 +5087,40 @@ async function main(): Promise<void> {
         }
         if (isAirborne) {
           setHumanoidAirborne(humanoid, true);
+          setHumanoidTurning(humanoid, false);
         } else {
           setHumanoidAirborne(humanoid, false);
-          const moving = keys.size > 0;
+          const moving = keys.size > 0 && !localTurningInPlace;
           const running =
             moving &&
             (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
           setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
+          setHumanoidTurning(humanoid, localTurningInPlace);
         }
       } else {
         moveAccumulator = 0;
         if (isAirborne) {
           setHumanoidAirborne(humanoid, true);
+          setHumanoidTurning(humanoid, false);
         } else {
           setHumanoidAirborne(humanoid, false);
           setHumanoidMoving(humanoid, false);
+          setHumanoidTurning(humanoid, localTurningInPlace);
         }
       }
     } else {
       moveAccumulator = 0;
       if (isAirborne) {
         setHumanoidAirborne(humanoid, true);
+        setHumanoidTurning(humanoid, false);
       } else {
         setHumanoidAirborne(humanoid, false);
-        const moving = keys.size > 0;
+        const moving = keys.size > 0 && !localTurningInPlace;
         const running =
           moving &&
           (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
         setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
+        setHumanoidTurning(humanoid, localTurningInPlace);
       }
     }
     humanoid.root.scaling.set(1, 1, 1);
@@ -6942,10 +6963,33 @@ async function main(): Promise<void> {
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
       keys.add('w');
-      if (mark) {
-        mark.textContent = `Yaw OK · facing wish · y=${localFacingYaw.toFixed(2)} · Connected`;
+      const pb = readHumanoidPlayback(humanoid);
+      const turned = Math.abs(localFacingYaw) > 0.2;
+      const yawOk =
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        turned;
+      if (yawOk) {
+        if (mark) {
+          mark.textContent =
+            `Yaw OK · ${pb.playing} · skinned ${pb.skinned} · facing wish · y=${localFacingYaw.toFixed(2)}`;
+        }
+        return;
       }
-      if (ticks < 240) window.setTimeout(waitYaw, 200);
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent =
+            pb.skinned < 1
+              ? `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · y=${localFacingYaw.toFixed(2)}`
+              : `Yaw FAIL · clip=${pb.playing ?? 'none'} · skinned ${pb.skinned} · y=${localFacingYaw.toFixed(2)}`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE yaw: y=${localFacingYaw.toFixed(2)} · clip=${pb.playing ?? 'none'} · skinned ${pb.skinned}…`;
+      }
+      window.setTimeout(waitYaw, 200);
     };
     window.setTimeout(waitYaw, 600);
   }
