@@ -8180,6 +8180,84 @@ async function main(): Promise<void> {
     window.setTimeout(waitApex, 600);
   }
 
+  // ?ve=hop-wow — rigid hop, no squash, no camera slam. Does not replace ?ve=jump (#257).
+  if (ve === 'hop-wow') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'hop-wow') {
+    const mark = document.getElementById('persistMark');
+    let ticks = 0;
+    let jumpAttempted = false;
+    let peakY = 0;
+    let hopOk = false;
+    let okScaleY = 1;
+    let okPeak = 0;
+    const GROUND_THRESHOLD = 0.08;
+    const waitHop = () => {
+      if (!net) return;
+      ticks += 1;
+      camera.radius = 18;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE hop-wow: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitHop, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE hop-wow: waiting for pose…';
+        if (ticks < 100) window.setTimeout(waitHop, 100);
+        return;
+      }
+      if (!jumpAttempted && ticks > 5) {
+        jumpAttempted = true;
+        net.sendMove(0, 0, true);
+        if (mark) mark.textContent = 'VE hop-wow: Space tapped · play-cam r=18…';
+        window.setTimeout(waitHop, 120);
+        return;
+      }
+      peakY = Math.max(peakY, pose.y);
+      if (pose.y > GROUND_THRESHOLD) {
+        net.sendMove(0, 0, false);
+      } else if (jumpAttempted && peakY > 0.15) {
+        net.sendMove(0, 0, true);
+      }
+      const scaleY = humanoid.root.scaling.y;
+      const rigidOk = Math.abs(scaleY - 1) < 0.05;
+      const radiusOk = camera.radius >= 14 && camera.radius <= 22;
+      const airNow = pose.y > 0.35;
+      if (!hopOk && peakY > 0.5 && rigidOk && radiusOk && airNow) {
+        hopOk = true;
+        okScaleY = scaleY;
+        okPeak = peakY;
+      }
+      if (hopOk) {
+        okPeak = Math.max(okPeak, peakY);
+        if (mark) {
+          mark.textContent =
+            `Hop-wow OK · rigid y=${okScaleY.toFixed(2)} · no slam · r=18 · peak=${okPeak.toFixed(2)}m · #257`;
+        }
+        window.setTimeout(waitHop, 200);
+        return;
+      }
+      if (ticks > 100) {
+        if (mark) {
+          mark.textContent =
+            `Hop-wow FAIL · peak=${peakY.toFixed(2)}m · rigid ${rigidOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
+        }
+        return;
+      }
+      if (mark && jumpAttempted) {
+        mark.textContent =
+          `VE hop-wow: peak=${peakY.toFixed(2)}m · scaleY ${scaleY.toFixed(2)} · y=${pose.y.toFixed(2)}`;
+      }
+      window.setTimeout(waitHop, 80);
+    };
+    window.setTimeout(waitHop, 600);
+  }
+
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
   // ?ve=bag-chrome — prove bag/loadout chrome readability over cyan fog (#75).
   if (ve === 'bag' || ve === 'bag-chrome') {
