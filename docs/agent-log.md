@@ -67,3 +67,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** GPU bone path + Assimp `CharacterArmature` *100 / -90X (not a joint) is a sail. CPU `applySkeleton` writes that leftover into mesh-local verts; `mesh.world` already has the armature, so the body vanishes unless IBM is multiplied by the armature local matrix. `instantiateModelsToScene` clones share geometry with the container source. `useBones` ignores `computeBonesUsingShaders`; a cached BONES effect double-skins. A `__draw` clone with `skeleton=null` is the old T-pose detach.
 - **Do this:** Keep the skeleton on the **visible** mesh. `makeGeometryUnique`, hide container originals, multiply IBM by CharacterArmature local (scale+rot), `computeBonesUsingShaders=false`, strip JOINTS/WEIGHTS after each `applySkeleton` so the effect has no BONES. Do not rigid-clone. Do not assign a shared `StandardMaterial` onto Wizard.001. Hide `proxy_*` for character VE.
 - **Seen in:** #303 / #260
+
+### 2026-09-08 — humanoid,yaw — local wizard never turns; pose.yaw is always 0
+- **Cause:** `Move` does not write `PlayerPose.Yaw` (spawn 0). Copying `samp.yaw` onto the root each frame fights any client facing.
+- **Do this:** Visual yaw from camera-relative wish (shortest-path slerp). Do not send client positions. Do not copy `pose.yaw` onto the local mesh.
+- **Seen in:** #263

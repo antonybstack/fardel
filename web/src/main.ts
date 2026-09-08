@@ -2990,6 +2990,9 @@ async function main(): Promise<void> {
   const CAM_FOLLOW_SNAP_METERS = 2.5;
   let camFollowY = CAM_FOLLOW_Y_OFFSET;
   let camFollowYSeeded = false;
+  /** E2.4 visual facing from camera-relative wish. Server pose.yaw stays 0. */
+  const YAW_FACE_HZ = 12;
+  let localFacingYaw = 0;
   const bootParams = new URLSearchParams(window.location.search);
   const ve = bootParams.get('ve') || '';
   const firstSessionVe = ve === 'first-session';
@@ -4377,7 +4380,15 @@ async function main(): Promise<void> {
       player.position.x = samp.x;
       player.position.y = samp.y;
       player.position.z = samp.z;
-      player.rotation.y = samp.yaw;
+    }
+    {
+      const wish = wishFromKeys(keys, camera);
+      if (wish.dx !== 0 || wish.dz !== 0) {
+        const targetYaw = Math.atan2(wish.dx, wish.dz);
+        const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
+        localFacingYaw = lerpYaw(localFacingYaw, targetYaw, a);
+      }
+      player.rotation.y = localFacingYaw;
     }
     for (const [key, parts] of remoteMeshes) {
       const ri = remoteInterps.get(key);
@@ -5253,8 +5264,8 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2 + 0.45;
         camera.beta = Math.PI / 2.38;
         camera.radius = 34;
-      } else if (veFollow === 'walk') {
-        // Side play-cam so the Walk stride reads; lock each frame (#262).
+      } else if (veFollow === 'walk' || veFollow === 'yaw') {
+        // Side play-cam so Walk stride / wish facing reads; lock each frame.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -5519,7 +5530,7 @@ async function main(): Promise<void> {
       player.position.x = samp.x;
       player.position.y = samp.y;
       player.position.z = samp.z;
-      player.rotation.y = samp.yaw;
+      player.rotation.y = localFacingYaw;
     },
     (npcs) => {
       syncNpcMeshes(npcs);
@@ -6062,6 +6073,52 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitWalk, 200);
     };
     window.setTimeout(waitWalk, 600);
+  }
+
+  // ?ve=yaw — E2.4 face camera-relative wish (slerp, no client positions).
+  if (ve === 'yaw') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'yaw') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE yaw: waiting for Connected…';
+    let ticks = 0;
+    const waitYaw = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE yaw: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitYaw, 200);
+        return;
+      }
+      if (!net.getLocalPose()) {
+        if (mark) mark.textContent = 'VE yaw: waiting for pose…';
+        if (ticks < 180) window.setTimeout(waitYaw, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitYaw, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitYaw, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      if (mark) {
+        mark.textContent = `Yaw OK · facing wish · y=${localFacingYaw.toFixed(2)} · Connected`;
+      }
+      if (ticks < 240) window.setTimeout(waitYaw, 200);
+    };
+    window.setTimeout(waitYaw, 600);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
