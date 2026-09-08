@@ -802,6 +802,30 @@ export function setHumanoidTurning(
   if (a.idle) a.idle.speedRatio = turning ? 0 : 1;
 }
 
+/**
+ * Equip: show staff + restart Idle_Weapon (grip, not bind-T).
+ * Unequip: hide the GLB stick so it does not float. Idle keeps playing.
+ */
+export function setHumanoidStaffEquipped(
+  parts: HumanoidParts,
+  equipped: boolean,
+): void {
+  parts.staff.setEnabled(equipped);
+  const a = animByRoot.get(parts.root);
+  if (!a || a.dead || a.airborne || a.casting) return;
+  if (a.walk?.isPlaying || a.run?.isPlaying || a.flinch?.isPlaying || a.cast?.isPlaying) {
+    return;
+  }
+  if (!equipped) return;
+  if (a.idle) a.idle.speedRatio = 1;
+  stopIfPlaying(a.walk);
+  stopIfPlaying(a.run);
+  if (a.idle) {
+    if (a.idle.isPlaying) a.idle.stop();
+    a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
+  }
+}
+
 /** Play Death once and hold the fallen pose. Respawn restores Idle_Weapon. */
 export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
   const a = animByRoot.get(parts.root);
