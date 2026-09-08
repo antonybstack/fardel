@@ -5675,6 +5675,17 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.55;
         // E8.7: far-cam Idle must still read staff-grip (not 8m close-up).
         camera.radius = 16;
+      } else if (veFollow === 'humanoid-polish') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.05;
+        tgt.z = player.position.z;
+        camera.alpha = Math.PI / 2.35;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 6;
       } else if (veFollow === 'hostile-spawn' || veFollow === 'leash') {
         // North of pad: dummy (5,0) + hostiles (3,7)/(-7,3) in one shot.
         camera.inertialAlphaOffset = 0;
@@ -6475,24 +6486,22 @@ async function main(): Promise<void> {
       }
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
-      camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
-      camera.radius = 11;
-      camera.alpha = Math.PI / 2.55;
-      camera.beta = Math.PI / 2.65;
+      setHumanoidMoving(humanoid, false);
       const staffOn = humanoid.staff.isEnabled();
       const robesOn = humanoid.robes.isEnabled();
-      if (staffOn && robesOn) {
-        if (mark) {
-          mark.textContent =
-            'Humanoid polish OK · silhouette · robes/staff · canonical forest lights';
-        }
-        return;
+      const pb = readHumanoidPlayback(humanoid);
+      const polishOk =
+        staffOn &&
+        robesOn &&
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /idle/i.test(pb.playing);
+      if (mark) {
+        mark.textContent = polishOk
+          ? `Humanoid polish OK · ${pb.playing} · skinned ${pb.skinned} · cloth/skin/wood`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
       }
-      if (ticks > 120) {
-        if (mark) mark.textContent = 'VE humanoid-polish: timed out';
-        return;
-      }
-      window.setTimeout(waitPolish, 200);
+      if (ticks < 240) window.setTimeout(waitPolish, 200);
     };
     window.setTimeout(waitPolish, 600);
   }
