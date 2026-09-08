@@ -10475,14 +10475,47 @@ async function main(): Promise<void> {
         // Hide chat panel (no .hidden CSS rule — use style.display).
         const chatPanel = document.getElementById('chatPanel');
         if (chatPanel) chatPanel.style.display = 'none';
-        // Force selfFrame into safe viewport (normal bottom:22px clips under OS shelf).
+        
+        // Force selfFrame into TOP-LEFT safe zone (bottom keeps clipping).
         const selfFrame = document.getElementById('selfFrame');
         if (selfFrame) {
-          selfFrame.style.bottom = '140px';
-          selfFrame.style.zIndex = '15';
+          selfFrame.classList.remove('hidden');
+          selfFrame.style.cssText = 'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
         }
+        
         // Seed resting state for screenshot (frozen — no auto-exit via veRestChromeLock).
         setRestingState('enter');
+        
+        // Force sfRest badge visible.
+        const sfRest = document.getElementById('sfRest');
+        if (sfRest) {
+          sfRest.classList.remove('hidden');
+          sfRest.textContent = 'Resting…';
+        }
+        
+        // Lock HP frame updates so updateSelfFrame doesn't fight demo.
+        veFrameHpLock = true;
+        
+        // Re-apply forced visibility every 500ms for 10s (prevent re-hide).
+        let reapplyCount = 0;
+        const reapplyInterval = window.setInterval(() => {
+          const sf = document.getElementById('selfFrame');
+          if (sf) {
+            sf.classList.remove('hidden');
+            sf.style.cssText = 'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
+          }
+          const badge = document.getElementById('sfRest');
+          if (badge) {
+            badge.classList.remove('hidden', 'exiting');
+            badge.textContent = 'Resting…';
+          }
+          const chat = document.getElementById('chatPanel');
+          if (chat) chat.style.display = 'none';
+          
+          reapplyCount += 1;
+          if (reapplyCount >= 20) window.clearInterval(reapplyInterval);
+        }, 500);
+        
         seeded = true;
         if (mark) {
           mark.textContent = 'Rest-chrome OK · selfFrame + Resting badge visible';
