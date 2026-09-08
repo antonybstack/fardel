@@ -68,7 +68,7 @@ classify() {
   local result=FAIL
   if [[ "$ec" -eq 0 ]]; then result=PASS; fi
   if rg -q "RESULT: *FAIL|\bFAIL:" "$logf" 2>/dev/null; then result=FAIL; fi
-  if rg -q "OK: .* passed|RESULT: *PASS" "$logf" 2>/dev/null; then result=PASS; fi
+  if [[ "$result" != "FAIL" ]] && rg -q "OK: .* passed|RESULT: *PASS" "$logf" 2>/dev/null; then result=PASS; fi
   if [[ "$ec" -ne 0 ]]; then result=FAIL; fi
   echo "$result"
 }
