@@ -257,3 +257,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `findAnim(..., 'Idle')` is `includes`, so it returns Idle_Weapon. `setHumanoidStaffEquipped(false)` hid the stick then returned without swapping the clip.
 - **Do this:** Exact bare clip names (`Idle` ≠ `Idle_Weapon`, `Run` ≠ `Run_Weapon`). Unequip selects unarmed Idle/Run. `?ve=idle` still Idle_Weapon + skinned. `?ve=sheathed` persistMark `Sheathed OK` + `Idle` (no Weapon) + skinned, staff mesh off.
 - **Seen in:** #430
+
+### 2026-09-08 — humanoid,npc — Kind=3 violet robe washed to the same pink as Kind=2
+- **Cause:** `createPlayerHumanoid` lifts cloth as `0.72 + robe*0.55`, so brigand violet and hostile crimson both land near white-lavender under #39 fog. Same wizard staff silhouette.
+- **Do this:** `variant: 'brigand'` skips the wash, hides staff/pads, starts unarmed Idle. persistMark names both clips + `skinned`. Dummy stays scarecrow. Do not flip pad Kind (pads A/B stay Kind=2).
+- **Seen in:** #428

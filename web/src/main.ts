@@ -63,6 +63,7 @@ import {
   slideAgainstTrunks,
 } from './world/forest';
 import {
+  brigandRobeColor,
   createPlayerHumanoid,
   hostileRobeColor,
   partyRobeColor,
@@ -144,11 +145,6 @@ function npcPlateColor(kind: number, selected: boolean): string {
   if (kind === NPC_KIND_BRIGAND) return selected ? '#e0c4ff' : '#c9a0ff';
   if (kind === NPC_KIND_HOSTILE) return selected ? '#ffb08a' : '#ff7a62';
   return '#ffffff';
-}
-
-/** Kind=3 robe — same wizard mesh as Kind=2, distinct tint (body swap is Dev3). */
-function brigandRobeColor(): Color3 {
-  return new Color3(0.48, 0.24, 0.72);
 }
 
 /** Nearest WorldLoot within pickup range (XZ), or null. */
@@ -2397,18 +2393,20 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     extraMats = dummy.extraMats;
   } else if (isHostileKind(npc.kind)) {
     // Same wizard clone as remotes (IBM once on the container). Idle_Weapon,
-    // not bind-T, not a red capsule. Dummy stays the scarecrow. Kind=3 uses
-    // a violet robe so the nameplate type reads before Dev3 swaps the body.
+    // not bind-T, not a red capsule. Dummy stays the scarecrow. Kind=3 is a
+    // mesh variant: unarmed Idle, no staff/pads, saturated violet vs crimson.
     const brigand = npc.kind === NPC_KIND_BRIGAND;
     const parts = createPlayerHumanoid(scene, {
       name: brigand ? `brigand_${npc.npcId}` : `hostile_${npc.npcId}`,
       robeColor: brigand ? brigandRobeColor() : hostileRobeColor(),
+      variant: brigand ? 'brigand' : 'hostile',
     });
     parts.root.parent = root;
     body = parts.root;
     mat = parts.mat;
     humanoid = parts;
     setHumanoidMoving(parts, false);
+    if (brigand) setHumanoidStaffEquipped(parts, false);
     const yaw = Math.atan2(-npc.x, -npc.z);
     if (Number.isFinite(yaw)) parts.root.rotation.y = yaw;
   } else {
@@ -5913,6 +5911,7 @@ async function main(): Promise<void> {
         veFollow === 'aggro' ||
         veFollow === 'hostile-read' ||
         veFollow === 'hostile-types' ||
+        veFollow === 'brigand-body' ||
         veFollow === 'kick'
       ) {
         // Dummy (5,0) + Kind=2 (3,7)/(-7,3) + Kind=3 (7,-3) in one shot.
@@ -6131,6 +6130,7 @@ async function main(): Promise<void> {
         veFollow !== 'tab-hostile' &&
         veFollow !== 'hostile-read' &&
         veFollow !== 'hostile-types' &&
+        veFollow !== 'brigand-body' &&
         veFollow !== 'kick' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
@@ -10112,6 +10112,97 @@ async function main(): Promise<void> {
       window.setTimeout(waitTypes, 200);
     };
     window.setTimeout(waitTypes, 500);
+  }
+
+  // ?ve=brigand-body — Kind=2 crimson staff Idle_Weapon vs Kind=3 unarmed Idle (#428).
+  if (ve === 'brigand-body') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'brigand-body') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE brigand-body: waiting for both kinds…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const waitB = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummyRow = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyMesh = dummyRow
+        ? npcMeshes.get(dummyRow.npcId.toString())
+        : undefined;
+      const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
+      let capsuleLeft = false;
+      let hPb: HumanoidPlayback | null = null;
+      let bPb: HumanoidPlayback | null = null;
+      let hSkinned = -1;
+      let bSkinned = -1;
+      for (const n of hostiles) {
+        const mesh = npcMeshes.get(n.npcId.toString());
+        if (mesh?.humanoid) {
+          setHumanoidMoving(mesh.humanoid, false);
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          if (hSkinned < 0) hSkinned = pb.skinned;
+          if (pb.skinned > 0 && /idle_weapon/i.test(pb.playing ?? '')) hPb = pb;
+        } else if (mesh) {
+          capsuleLeft = true;
+        }
+      }
+      for (const n of brigands) {
+        const mesh = npcMeshes.get(n.npcId.toString());
+        if (mesh?.humanoid) {
+          setHumanoidMoving(mesh.humanoid, false);
+          setHumanoidStaffEquipped(mesh.humanoid, false);
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          if (bSkinned < 0) bSkinned = pb.skinned;
+          const clip = clipBare(pb.playing);
+          if (pb.skinned > 0 && /^idle$/i.test(clip)) bPb = pb;
+        } else if (mesh) {
+          capsuleLeft = true;
+        }
+      }
+      if (
+        latestStatus.state === 'connected' &&
+        dummyTrainer &&
+        hPb &&
+        bPb &&
+        !capsuleLeft
+      ) {
+        if (mark) {
+          mark.textContent =
+            `Brigand body OK · Hostile ${clipBare(hPb.playing)} · Brigand ${clipBare(bPb.playing)} · skinned ${Math.min(hPb.skinned, bPb.skinned)}`;
+        }
+        return;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          if (capsuleLeft) {
+            mark.textContent = 'Brigand body FAIL · capsule';
+          } else if (hSkinned === 0 || bSkinned === 0) {
+            mark.textContent = `T-POSE · H ${clipBare(hPb?.playing ?? null)} · B ${clipBare(bPb?.playing ?? null)} · skeleton=${Math.min(hSkinned, bSkinned)}`;
+          } else {
+            mark.textContent =
+              `Brigand body FAIL · H ${clipBare(hPb?.playing ?? null)} · B ${clipBare(bPb?.playing ?? null)} · dummy ${dummyTrainer ? 'y' : 'n'}`;
+          }
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE brigand-body: H ${clipBare(hPb?.playing ?? null)} · B ${clipBare(bPb?.playing ?? null)} · dummy ${dummyTrainer ? 'y' : 'n'}…`;
+      }
+      window.setTimeout(waitB, 250);
+    };
+    window.setTimeout(waitB, 800);
   }
 
   // ?ve=encounter — fight a hostile among trees, cam out of trunks, nameplate on (#361).

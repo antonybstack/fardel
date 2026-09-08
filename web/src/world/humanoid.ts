@@ -43,6 +43,11 @@ export type HumanoidOptions = {
   name?: string;
   /** Robe / cloth diffuse (local blue, remotes teal/green/magenta). */
   robeColor?: Color3;
+  /**
+   * Kind=3: unarmed Idle, hide staff/pads, saturated robe (no 0.72 wash).
+   * Kind=2 / player keep wizard staff + Idle_Weapon.
+   */
+  variant?: 'player' | 'hostile' | 'brigand';
 };
 
 type HumanoidAnim = {
@@ -324,6 +329,7 @@ export function createPlayerHumanoid(
   opts: HumanoidOptions = {},
 ): HumanoidParts {
   const prefix = opts.name ?? 'player';
+  const brigand = opts.variant === 'brigand';
   // Mid-sat indigo cloth vs final #32/#39 lock (cool hemi + warm sun + cyan fog).
   const robeDiffuse = opts.robeColor ?? new Color3(0.34, 0.45, 0.78);
   const root = new Mesh(prefix, scene);
@@ -467,7 +473,7 @@ export function createPlayerHumanoid(
 
   // Staff: parent to Weapon.R (Idle_Weapon grip). Equip API still toggles the GLB mesh.
   const skinnedBody = meshes.find((m) => !!m.skeleton) ?? null;
-  if (staffMesh) {
+  if (staffMesh && !brigand) {
     attachStaffToWeaponBone(staffMesh, skinnedBody?.skeleton ?? null, skinnedBody);
   }
   retargetAnimGroupsToClones(
@@ -509,32 +515,49 @@ export function createPlayerHumanoid(
 
   // Atlas already has cloth/skin/hair. A strong albedo multiply tints Face
   // indigo and collapses material separation. Do not StandardMaterial Wizard.001.
-  robeMat.diffuseColor = new Color3(
-    0.72 + robeDiffuse.r * 0.55,
-    0.70 + robeDiffuse.g * 0.50,
-    0.78 + robeDiffuse.b * 0.45,
-  );
-  robeMat.emissiveColor = new Color3(
-    Math.min(0.1, robeDiffuse.r * ROBE_EMISSIVE_SCALE),
-    Math.min(0.11, robeDiffuse.g * ROBE_EMISSIVE_SCALE),
-    Math.min(0.16, robeDiffuse.b * ROBE_EMISSIVE_SCALE + 0.02),
-  );
+  // Kind=3 skips the 0.72 wash so violet actually reads vs Kind=2 crimson.
+  if (brigand) {
+    robeMat.diffuseColor = new Color3(
+      Math.min(1, robeDiffuse.r * 1.08),
+      Math.min(1, robeDiffuse.g * 0.95),
+      Math.min(1, robeDiffuse.b * 1.05),
+    );
+    robeMat.emissiveColor = new Color3(
+      Math.min(0.16, robeDiffuse.r * 0.22),
+      Math.min(0.08, robeDiffuse.g * 0.16),
+      Math.min(0.22, robeDiffuse.b * 0.28),
+    );
+  } else {
+    robeMat.diffuseColor = new Color3(
+      0.72 + robeDiffuse.r * 0.55,
+      0.70 + robeDiffuse.g * 0.50,
+      0.78 + robeDiffuse.b * 0.45,
+    );
+    robeMat.emissiveColor = new Color3(
+      Math.min(0.1, robeDiffuse.r * ROBE_EMISSIVE_SCALE),
+      Math.min(0.11, robeDiffuse.g * ROBE_EMISSIVE_SCALE),
+      Math.min(0.16, robeDiffuse.b * ROBE_EMISSIVE_SCALE + 0.02),
+    );
+  }
   robeMat.specularColor = new Color3(0.05, 0.06, 0.08);
-  robeMat.ambientColor = new Color3(0.38, 0.42, 0.52);
+  robeMat.ambientColor = brigand
+    ? new Color3(0.28, 0.18, 0.42)
+    : new Color3(0.38, 0.42, 0.52);
   robeMat.backFaceCulling = false;
 
   const clothPbrs: PBRMaterial[] = [];
   const tuneCloth = (pbr: PBRMaterial) => {
     pbr.albedoColor.copyFrom(robeMat.diffuseColor);
     pbr.emissiveColor.copyFrom(robeMat.emissiveColor);
-    pbr.emissiveIntensity = 0.28;
+    pbr.emissiveIntensity = brigand ? 0.42 : 0.28;
     pbr.metallic = 0;
     pbr.roughness = 0.9;
     pbr.backFaceCulling = false;
     pbr.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
     if (pbr.albedoTexture) {
       const tex = pbr.albedoTexture as Texture;
-      tex.level = 1.65;
+      // Lower atlas lift so Kind=3 violet albedo actually reads vs Kind=2.
+      tex.level = brigand ? 0.85 : 1.65;
       tex.hasAlpha = false;
     }
   };
@@ -601,7 +624,7 @@ export function createPlayerHumanoid(
     for (const pbr of clothPbrs) tuneCloth(pbr);
   });
 
-  if (staffMesh) {
+  if (staffMesh && !brigand) {
     const sm = staffMesh.material;
     if (sm instanceof PBRMaterial) {
       tuneWood(sm);
@@ -642,15 +665,10 @@ export function createPlayerHumanoid(
 
   const idleWeapon = findAnimExact(animGroups, 'Idle_Weapon');
   const idleUnarmed = findAnimExact(animGroups, 'Idle');
-  const idle =
-    idleWeapon ??
-    idleUnarmed ??
-    (animGroups.length > 0 ? animGroups[0]! : null);
   // E8.2: Run_Weapon for fast/forward; Walk for slow/strafe. Do not alias Run as Walk.
   const runWeapon = findAnimExact(animGroups, 'Run_Weapon');
   const runUnarmed = findAnimExact(animGroups, 'Run');
-  const run = runWeapon ?? runUnarmed;
-  const walk = findAnimExact(animGroups, 'Walk') ?? run;
+  const walk = findAnimExact(animGroups, 'Walk') ?? runWeapon ?? runUnarmed;
   const air = findAnim(animGroups, 'Jump', 'Falling', 'Fall');
   const death = findAnim(animGroups, 'Death');
   // Pack spelling is RecieveHit (not Receive). Prefer the non-Attacking clip.
@@ -661,20 +679,12 @@ export function createPlayerHumanoid(
   for (const g of animGroups) {
     g.stop();
   }
-  if (idle) {
-    idle.start(true, 1.0, idle.from, idle.to, false);
-  }
-  // Idle deforms vs bind; re-plant after the first CPU skin so feet sit on y=0
-  // at ~1.8 m. Do not introduce another scaled ancestor (breaks Assimp IBM).
-  scene.onBeforeRenderObservable.addOnce(() => {
-    plantToTargetHeight();
-  });
-  animByRoot.set(root, {
-    idle,
+  const anim: HumanoidAnim = {
+    idle: idleWeapon ?? idleUnarmed ?? (animGroups.length > 0 ? animGroups[0]! : null),
     idleWeapon,
     idleUnarmed,
     walk,
-    run,
+    run: runWeapon ?? runUnarmed,
     runWeapon,
     runUnarmed,
     air,
@@ -685,8 +695,25 @@ export function createPlayerHumanoid(
     dead: false,
     casting: false,
     turning: false,
-    staffEquipped: true,
+    staffEquipped: !brigand,
+  };
+  applyStaffClips(anim);
+  if (anim.idle) {
+    anim.idle.start(true, 1.0, anim.idle.from, anim.idle.to, false);
+  }
+  if (brigand) {
+    staff.setEnabled(false);
+    for (const m of robeMeshes) {
+      m.setEnabled(false);
+      m.isVisible = false;
+    }
+  }
+  // Idle deforms vs bind; re-plant after the first CPU skin so feet sit on y=0
+  // at ~1.8 m. Do not introduce another scaled ancestor (breaks Assimp IBM).
+  scene.onBeforeRenderObservable.addOnce(() => {
+    plantToTargetHeight();
   });
+  animByRoot.set(root, anim);
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -1021,4 +1048,9 @@ export function partyRobeColor(): Color3 {
 /** Crimson robe for Kind=2 yard hostiles — distinct from local indigo / remotes. */
 export function hostileRobeColor(): Color3 {
   return new Color3(0.78, 0.22, 0.18);
+}
+
+/** Saturated violet for Kind=3 — skip the 0.72 cloth wash so it reads vs crimson. */
+export function brigandRobeColor(): Color3 {
+  return new Color3(0.42, 0.16, 0.68);
 }
