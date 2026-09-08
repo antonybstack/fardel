@@ -6517,6 +6517,28 @@ async function main(): Promise<void> {
     }
   }
 
+  // ?ve=keys-read — legend chrome readability under #39 cyan fog (#115).
+  if (ve === 'keys-read') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    keysLegendOpen = true;
+    setKeysLegendOpen(true);
+    const mark = document.getElementById('persistMark');
+    const panel = document.getElementById('keysLegend');
+    const chips = panel ? panel.querySelectorAll('.klChip').length : 0;
+    const groups = panel
+      ? Array.from(panel.querySelectorAll('.klRow'))
+          .map((row) => (row as HTMLElement).dataset.group || '')
+          .filter(Boolean)
+          .join('/')
+      : '';
+    if (mark) {
+      mark.textContent =
+        `Keys-read OK · H toggles · ${chips} binds · ${groups || 'Move/Combat/Social'} · dark plate · #115 fog`;
+    }
+  }
+
   // ?ve=jump — prove spacebar jump (server-authoritative Y with gravity).
   if (net && ve === 'jump') {
     camera.radius = 9;
