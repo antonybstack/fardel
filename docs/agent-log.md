@@ -157,3 +157,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `Wizard_Staff` is a rigid child of joint `Weapon.R`, not skinned. `Skeleton.clone` / IBM `updateMatrix` after Assimp *100 can leave bones on the container source, so the staff stays bind-T while CPU-skin Idle deforms the body. A StandardMaterial stick also vanishes into #39 fog at 12–20 m.
 - **Do this:** After IBM compensate, `linkTransformNode` onto the cloned `Weapon.R`. Keep staff parented to that node (`alwaysSelectAsActiveMesh`). Keep loader PBR on the staff. Do not rigid-clone. Do not `skeleton=null`.
 - **Seen in:** #332
+
+### 2026-09-08 — camera,rmb — play RMB hides the cursor; ?ve=rmb-look is grabbing chrome
+- **Cause:** #154 VE asserts `canvas.style.cursor === 'grabbing'`. WoW RMB-hold hides the pointer. One `setRmbLookArmed` drives both.
+- **Do this:** Play / `?ve=rmb-orbit` → `cursor: none`. Keep grabbing only when `veRmbLookLock` (`?ve=rmb-look`). Do not fail RmbOrbitSmoke: persistMark still `/^RMB orbit OK/` + `dAlpha`.
+- **Seen in:** #353 / #154 / #366

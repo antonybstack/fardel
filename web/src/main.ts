@@ -949,8 +949,8 @@ function setRmbLookArmed(armed: boolean): void {
   document.body.dataset.rmbLook = mode;
   if (canvas) {
     canvas.dataset.rmbLook = mode;
-    // grab → grabbing is the always-on cue (legend/status are optional overlays).
-    canvas.style.cursor = armed ? 'grabbing' : 'grab';
+    // Play/RMB orbit: hide cursor (WoW). ?ve=rmb-look keeps grabbing chrome (#154).
+    canvas.style.cursor = armed ? (veRmbLookLock ? 'grabbing' : 'none') : 'grab';
   }
   const chip = document.querySelector(
     '#keysLegend .klChip[data-bind="rmb"]',
@@ -2174,6 +2174,9 @@ async function createScene(engine: Engine): Promise<{
     | undefined;
   if (pointers) {
     pointers.buttons = [2];
+    camera.invertRotation = false;
+    pointers.angularSensibilityX = Math.abs(pointers.angularSensibilityX || 1000);
+    pointers.angularSensibilityY = Math.abs(pointers.angularSensibilityY || 1000);
   }
 
   // Toast only on overscroll so the #30 soft clamp stays (#192).
@@ -8829,6 +8832,7 @@ async function main(): Promise<void> {
         return;
       }
       const a0 = camera.alpha;
+      setRmbLookArmed(true);
       camera.inertialAlphaOffset += 0.45;
       let frames = 0;
       const tick = () => {
@@ -8838,11 +8842,16 @@ async function main(): Promise<void> {
           return;
         }
         const d = camera.alpha - a0;
+        const canvasEl = document.getElementById('renderCanvas');
+        const cur = canvasEl?.style.cursor || '';
+        const cursorOk = cur === 'none';
         if (mark) {
           mark.textContent =
-            Math.abs(d) > 0.04
-              ? `RMB orbit OK · dAlpha ${d.toFixed(3)}`
-              : `RMB orbit FAIL · dAlpha ${d.toFixed(3)}`;
+            Math.abs(d) > 0.04 && cursorOk
+              ? `RMB orbit OK · dAlpha ${d.toFixed(3)} · cursor none`
+              : Math.abs(d) > 0.04
+                ? `RMB orbit OK · dAlpha ${d.toFixed(3)}`
+                : `RMB orbit FAIL · dAlpha ${d.toFixed(3)}`;
         }
       };
       window.requestAnimationFrame(tick);
