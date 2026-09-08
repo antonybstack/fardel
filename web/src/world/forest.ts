@@ -575,8 +575,14 @@ function registerTrunk(x: number, z: number, radius: number, kind: TrunkCapsule[
  * Do not use the full bark AABB — branches inflate it, then a 3.4 clamp sinks
  * the player into the visual bole.
  */
-function boleRadiusWorld(xzScale: number, kind: TrunkCapsule['kind']): number {
-  const author = kind === 'hero' ? 1.18 : 0.52;
+function boleRadiusWorld(
+  xzScale: number,
+  kind: TrunkCapsule['kind'],
+  /** Pack bark author radius. TwistedTree ~1.18, CommonTree ~0.52 — do not
+   *  use Twisted author on a CommonTree hero (#344). */
+  authorBole?: number,
+): number {
+  const author = authorBole ?? (kind === 'hero' ? 1.18 : 0.52);
   return Math.max(kind === 'hero' ? 1.6 : 0.55, author * xzScale);
 }
 
@@ -978,14 +984,22 @@ function placeClone(
 }
 
 async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
-  // Heroes: few unique large TwistedTree trunks/canopies.
-  const heroFiles = ['TwistedTree_1.gltf', 'TwistedTree_2.gltf', 'TwistedTree_3.gltf'] as const;
+  // Heroes: few unique large trunks. Twisted (gnarled) + unused CommonTree
+  // (straight classic) so play-cam reads ≥3 silhouettes (#344). Not 80 clones.
+  const twistedFiles = ['TwistedTree_1.gltf', 'TwistedTree_2.gltf', 'TwistedTree_3.gltf'] as const;
   const heroTemplates: TransformNode[] = [];
-  for (let i = 0; i < heroFiles.length; i++) {
-    const t = await loadPackRoot(scene, heroFiles[i]!, `heroTemplate_${i}`, true);
+  for (let i = 0; i < twistedFiles.length; i++) {
+    const t = await loadPackRoot(scene, twistedFiles[i]!, `heroTemplate_${i}`, true);
     if (t) heroTemplates.push(t);
   }
   if (heroTemplates.length === 0) return false;
+
+  const classicFiles = ['CommonTree_3.gltf', 'CommonTree_5.gltf'] as const;
+  const classicTemplates: TransformNode[] = [];
+  for (let i = 0; i < classicFiles.length; i++) {
+    const t = await loadPackRoot(scene, classicFiles[i]!, `heroClassic_${i}`, true);
+    if (t) classicTemplates.push(t);
+  }
 
   // Mid: 2–4 variants for ring (classic / tall / stubby). ThinInstances — not unique clones (#340).
   const midFiles = ['CommonTree_1.gltf', 'CommonTree_3.gltf', 'CommonTree_5.gltf'] as const;
@@ -998,17 +1012,31 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
 
   // #272: Quaternius author-scale is toy-yard; WoW/hordes read is player-tiny vs trunks.
   // Heroes sit on the clearing rim so play-cam is not inside a canopy.
+  // All three Twisted variants on the north rim (NW was a T2 duplicate).
   const heroSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
     { name: 'heroTreeN', x: COLLISION_VE_HERO.x, z: COLLISION_VE_HERO.z, scale: 5.2, yaw: 0.18, ti: 1 },
     { name: 'heroTreeNE', x: 34, z: -28, scale: 4.6, yaw: 0.45, ti: 0 },
-    { name: 'heroTreeNW', x: -36, z: -24, scale: 4.8, yaw: -0.55, ti: 1 },
+    { name: 'heroTreeNW', x: -36, z: -24, scale: 4.8, yaw: -0.55, ti: 2 },
     { name: 'heroTreeSW', x: -32, z: 34, scale: 4.4, yaw: 2.15, ti: 0 },
-    { name: 'heroTreeSE', x: 30, z: 38, scale: 4.2, yaw: 1.05, ti: 2 },
+    { name: 'heroTreeSE', x: 30, z: 38, scale: 4.2, yaw: 1.05, ti: 1 },
   ];
   for (const h of heroSpots) {
     const tmpl = heroTemplates[h.ti % heroTemplates.length]!;
     placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
-    registerTrunk(h.x, h.z, boleRadiusWorld(h.scale, 'hero'), 'hero');
+    registerTrunk(h.x, h.z, boleRadiusWorld(h.scale, 'hero', 1.18), 'hero');
+  }
+
+  // Unused pack CommonTrees as unique classic heroes (ALPHATEST canopies).
+  // East/west of the north bole — in the place-wow / play-cam frame, off the path.
+  const classicSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
+    { name: 'heroTreeClassicE', x: 20, z: -36, scale: 5.8, yaw: 0.72, ti: 0 },
+    { name: 'heroTreeClassicW', x: -24, z: -38, scale: 6.4, yaw: -0.88, ti: 1 },
+  ];
+  for (const h of classicSpots) {
+    if (classicTemplates.length === 0) break;
+    const tmpl = classicTemplates[h.ti % classicTemplates.length]!;
+    placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
+    registerTrunk(h.x, h.z, boleRadiusWorld(h.scale, 'hero', 0.52), 'hero');
   }
 
   const midMats: Matrix[][] = midTemplates.map(() => []);
@@ -1178,6 +1206,10 @@ function placeProceduralForest(scene: Scene): void {
   registerProcHero(30, 38, 2.4, 'standard');
   placeHeroTree(scene, 'heroSentW', -28, 6, 2.5, -1.2, trunkMatB, foliageC, 'sentinel');
   registerProcHero(-28, 6, 2.5, 'sentinel');
+  placeHeroTree(scene, 'heroClassicE', 20, -36, 2.6, 0.72, trunkMatA, foliageC, 'standard');
+  registerProcHero(20, -36, 2.6, 'standard');
+  placeHeroTree(scene, 'heroClassicW', -24, -38, 2.9, -0.88, trunkMatB, foliageA, 'sentinel');
+  registerProcHero(-24, -38, 2.9, 'sentinel');
 
   const midClassic = buildMergedMidTree(scene, 'midClassic', trunkMatB, foliageB, {
     trunkHeight: 7.5,

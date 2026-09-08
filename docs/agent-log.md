@@ -192,3 +192,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Scale+plant used T-pose bounds before Idle_Weapon CPU-skin. Idle is shorter; feet float. A second scaled ancestor breaks Assimp IBM.
 - **Do this:** Scale the existing pivot only. Re-plant after the first Idle CPU-skin (`onBeforeRender` once). persistMark height 1.5–2.15 m. Do not scale forest.
 - **Seen in:** #336
+
+### 2026-09-08 — place,hero — CommonTree hero still uses 0.52 author bole
+- **Cause:** `boleRadiusWorld` used kind==='hero' → TwistedTree 1.18. A unique CommonTree at 5.8× then got a ~6.8 m keep-out (visual bole is ~3 m).
+- **Do this:** Pass pack author (TwistedTree 1.18 / CommonTree 0.52). Kind stays `hero` for camera collision. Do not import extra megakit files.
+- **Seen in:** #344
