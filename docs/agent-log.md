@@ -172,3 +172,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Per-clone Assimp IBM compensate multiplies `A` again on later `instantiateModelsToScene` copies (clone bind already has `A`). Local Idle reads; remotes collapse into a seated bind-T while clips `isPlaying`. `animationGroup.clone` can also keep container targets. After #327, full-step remotes select `Run_Weapon` so persistMark `/walk/` never matches.
 - **Do this:** Compensate IBM once on the container in preload; relink + retarget cloned groups onto the instance pivot/bones. Drive remotes with Walk (not Run) from PoseInterp `vx,vz` hold. persistMark via `readHumanoidPlayback`: `Remote walk OK` + Walk named + `skinned` ≥ 1. `T-POSE` if skeleton=0. `?ve=remote-walk` needs `tools/SecondClient` (local `sendMove` is not a remote XZ delta). Mutate `camera.target` in place for the remote close-up — do not `setTarget`.
 - **Seen in:** #333 / #313
+
+### 2026-09-08 — camera,smoke — inertial inject is not RMB orbit
+- **Cause:** `?ve=rmb-orbit` did `inertialAlphaOffset += 0.45`. RmbOrbitSmoke passed persistMark while a dead pointer path (or a new follow-loop zero) could still leave live RMB look dead. `?ve=rmb-look` is grabbing chrome.
+- **Do this:** Observe `camera.alpha` after a Playwright `mouse.down({ button: 'right' })` drag on the play follow. persistMark OK only if `|dAlpha| > 0.15` after the drag. Fail if persistMark is OK before the drag. Seat Vite `window.__qa.getState().camera`. Do not `__qa.lookDelta`. Do not inject inertia.
+- **Seen in:** #389 / #366

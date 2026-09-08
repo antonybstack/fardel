@@ -8839,7 +8839,8 @@ async function main(): Promise<void> {
     window.setTimeout(waitStatusRead, 500);
   }
 
-  // ?ve=rmb-orbit — play follow must NOT eat RMB inertia (#366). Inject offset; alpha must move.
+  // ?ve=rmb-orbit — play follow must NOT eat RMB. Observe alpha after a real
+  // pointer drag (#389). Do not inject inertialAlphaOffset (#366 inject is not look).
   if (ve === 'rmb-orbit') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE rmb-orbit: waiting for Connected…';
@@ -8852,31 +8853,43 @@ async function main(): Promise<void> {
         return;
       }
       const a0 = camera.alpha;
-      setRmbLookArmed(true);
-      camera.inertialAlphaOffset += 0.45;
-      let frames = 0;
+      if (mark) mark.textContent = 'VE rmb-orbit: waiting for RMB drag';
+      const t0 = performance.now();
+      let peak = 0;
+      let extra = 0;
+      let latched = false;
       const tick = () => {
-        frames += 1;
-        if (frames < 18) {
-          window.requestAnimationFrame(tick);
+        const d = camera.alpha - a0;
+        if (Math.abs(d) > Math.abs(peak)) peak = d;
+        if (!latched && Math.abs(peak) > 0.15) {
+          latched = true;
+          extra = 24;
+        }
+        if (latched) {
+          extra -= 1;
+          if (extra <= 0) {
+            const canvasEl = document.getElementById('renderCanvas');
+            const cur = canvasEl?.style.cursor || '';
+            if (mark) {
+              mark.textContent =
+                cur === 'none'
+                  ? `RMB orbit OK · dAlpha ${peak.toFixed(3)} · cursor none`
+                  : `RMB orbit OK · dAlpha ${peak.toFixed(3)}`;
+            }
+            return;
+          }
+        }
+        if (performance.now() - t0 > 12000) {
+          if (mark) {
+            mark.textContent = `RMB orbit FAIL · dAlpha ${peak.toFixed(3)}`;
+          }
           return;
         }
-        const d = camera.alpha - a0;
-        const canvasEl = document.getElementById('renderCanvas');
-        const cur = canvasEl?.style.cursor || '';
-        const cursorOk = cur === 'none';
-        if (mark) {
-          mark.textContent =
-            Math.abs(d) > 0.04 && cursorOk
-              ? `RMB orbit OK · dAlpha ${d.toFixed(3)} · cursor none`
-              : Math.abs(d) > 0.04
-                ? `RMB orbit OK · dAlpha ${d.toFixed(3)}`
-                : `RMB orbit FAIL · dAlpha ${d.toFixed(3)}`;
-        }
+        window.requestAnimationFrame(tick);
       };
       window.requestAnimationFrame(tick);
     };
-    window.setTimeout(waitOrbit, 800);
+    window.setTimeout(waitOrbit, 200);
   }
 
   // ?ve=hostile-spawn — two yard hostiles as capsules; dummy stays trainer (#354).
