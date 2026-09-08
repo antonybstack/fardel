@@ -278,3 +278,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Never plant Idle while wish-moving. Face living Tab-target only when `|yawDelta(wish, target)| < 0.85`; else face wish. `#334` speedRatio still owns stride. `?ve=face-target-walk` persistMark `Walk OK` + Walk + `skinned`.
 - **Seen in:** #432
 
+### 2026-09-08 — ve,kick — ?ve=kick / ?ve=stun persistMark required label Hostile
+- **Cause:** Harness `npcs.find(kind === NPC_KIND_HOSTILE)` + `hLabel === 'Hostile'`. KickNpc/StunNpc already `IsHostileKind` (Kind=2+3) and keybinds already send Brigand, but VE never named it.
+- **Do this:** Pick `NPC_KIND_BRIGAND` and persistMark `Brigand`. Dummy stays trainer. Do not add a Kind==2 check in Lib.cs. FindHostileNear in Kick/StunSmoke still pins Kind==2 on pads A/B.
+- **Seen in:** #452
+

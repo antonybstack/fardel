@@ -93,8 +93,8 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=tab-hostile` | Tab prefers in-range hostiles; dummy still in cycle (#358); HUD `Tab-hostile OK · Hostile #… · dummy selectable · #358`. |
 | `?ve=hostile-read` | Hostile coral plate vs Dummy parchment vs Vendor mint at play cam (#359); HUD `Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359`. |
 | `?ve=hostile-types` | Kind=2 Hostile coral vs Kind=3 Brigand violet vs Dummy parchment vs Vendor mint (#418); HUD `Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418`. |
-| `?ve=kick` | KickNpc Kind=2 interrupt + dummy still kickable (#419); HUD `Kick OK · Hostile #… · interrupt · dummy kickable · #419`. |
-| `?ve=stun` | StunNpc Kind=2 lock + dummy still stunnable (#420); HUD `Stun OK · Hostile #… · lock · dummy stunnable · #420`. Walk to ~4m (StunRange 5, AggroRadius 3). |
+| `?ve=kick` | KickNpc Kind=3 Brigand interrupt + dummy still kickable (#452); HUD `Kick OK · Brigand #… · interrupt · dummy kickable · #452`. |
+| `?ve=stun` | StunNpc Kind=3 Brigand lock + dummy still stunnable (#452); HUD `Stun OK · Brigand #… · lock · dummy stunnable · #452`. Walk to ~4m (StunRange 5, AggroRadius 3). |
 | `?ve=respawn` | Kill pad A from origin (outside aggro), linger revive at home pad (#421); HUD `Respawn OK · pad A · dummy trainer · #421`. Do not walk into AggroRadius. Dummy stays trainer. |
 | `?ve=encounter` | Pull pad A, Tab, take a swing among trees with nameplate on and cam out of trunks (#361); HUD `Encounter OK · fighting · plate · cam clear · #361`. |
 | `?ve=hunt-loop` | Tab a hostile, Spark hit, kill, corpse loot at play cam (#422); HUD `Hunt-loop OK · Tab · hit · death · loot · dummy trainer · #422`. Stay outside AggroRadius. Dummy stays trainer. |
