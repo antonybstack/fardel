@@ -5709,7 +5709,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitForest, 600);
   }
 
-  // ?ve=atmosphere — yard mood shot: fog depth, warm sun, lush ground clearing.
+  // ?ve=atmosphere — yard mood shot: fog depth, cool-dusk canopy fill, lush ground.
   if (ve === 'atmosphere') {
     camera.radius = 42;
     camera.alpha = Math.PI / 2.65;
@@ -5725,7 +5725,7 @@ async function main(): Promise<void> {
       if (st.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Atmosphere OK · fog+warm sun+ground · Connected · yard mood';
+            'Atmosphere OK · fog+cool dusk+canopy fill · Connected · yard mood';
         }
         return;
       }
