@@ -2154,11 +2154,16 @@ function collectTrunkColliders(scene: Scene): TrunkCollider[] {
   return trunks;
 }
 
-function nearestHeroTrunk(x: number, z: number, trunks: TrunkCollider[]): TrunkCollider | null {
+function nearestTrunkOfKind(
+  x: number,
+  z: number,
+  trunks: TrunkCollider[],
+  kind: TrunkCollider['kind'],
+): TrunkCollider | null {
   let best: TrunkCollider | null = null;
   let bestD = Infinity;
   for (const t of trunks) {
-    if (t.kind !== 'hero') continue;
+    if (t.kind !== kind) continue;
     const d = (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z);
     if (d < bestD) {
       bestD = d;
@@ -2166,6 +2171,53 @@ function nearestHeroTrunk(x: number, z: number, trunks: TrunkCollider[]): TrunkC
     }
   }
   return best;
+}
+
+function nearestHeroTrunk(x: number, z: number, trunks: TrunkCollider[]): TrunkCollider | null {
+  return nearestTrunkOfKind(x, z, trunks, 'hero');
+}
+
+/** Graze the bole so the trunk reads in-frame. Hero +0.16 misses thin mid cylinders. */
+function trunkAimAlpha(px: number, pz: number, t: TrunkCollider): number {
+  const dist = Math.hypot(t.x - px, t.z - pz);
+  const r = t.r + CAM_TRUNK_PAD;
+  const graze =
+    t.kind === 'hero'
+      ? 0.16
+      : Math.min(0.12, (r * 0.45) / Math.max(8, dist));
+  return Math.atan2(t.z - pz, t.x - px) + graze;
+}
+
+function trunkAimRadius(px: number, pz: number, t: TrunkCollider): number {
+  const dist = Math.hypot(t.x - px, t.z - pz);
+  return Math.max(CAM_COLLISION_VE_RADIUS, dist + t.r + CAM_TRUNK_PAD + 10);
+}
+
+/** First bole of `kind` whose cam-to-player ray is not a different kind. */
+function pickClearTrunk(
+  px: number,
+  pz: number,
+  trunks: TrunkCollider[],
+  kind: TrunkCollider['kind'],
+): TrunkCollider | null {
+  const ranked = trunks
+    .filter((t) => t.kind === kind)
+    .sort((a, b) => {
+      const da = (a.x - px) * (a.x - px) + (a.z - pz) * (a.z - pz);
+      const db = (b.x - px) * (b.x - px) + (b.z - pz) * (b.z - pz);
+      return da - db;
+    });
+  const tgt = new Vector3(px, 1.35, pz);
+  const beta = Math.PI / 2.18;
+  for (const t of ranked) {
+    const alpha = trunkAimAlpha(px, pz, t);
+    const desired = trunkAimRadius(px, pz, t);
+    const { hit } = clampRadiusVsTrunks(tgt, alpha, beta, desired, CAM_ZOOM_MIN, trunks);
+    if (!hit) continue;
+    if (kind === 'mid' && /^midTree_/.test(hit)) return t;
+    if (kind === 'hero' && !/^midTree_/.test(hit)) return t;
+  }
+  return ranked[0] ?? null;
 }
 
 /** Pull ArcRotate radius in so the cam-to-target segment stops at a trunk bole. */
@@ -3296,12 +3348,18 @@ async function main(): Promise<void> {
   let camAppliedRadius = camera.radius;
   let camCollideHit: string | null = null;
   let camCollideThisFrame = false;
+  /** Frozen mid bole for `?ve=cam-collision-mid` so walk-in does not retarget. */
+  let camCollisionMidAimed: TrunkCollider | null = null;
   scene.onBeforeRenderObservable.add(() => {
     if (!camCollideThisFrame) return;
     const minR = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
     const maxR = camera.upperRadiusLimit ?? CAM_ZOOM_MAX;
     const veCam = new URLSearchParams(window.location.search).get('ve');
-    if (veCam !== 'cam-collision' && Math.abs(camera.radius - camAppliedRadius) > 0.08) {
+    if (
+      veCam !== 'cam-collision' &&
+      veCam !== 'cam-collision-mid' &&
+      Math.abs(camera.radius - camAppliedRadius) > 0.08
+    ) {
       camZoomRadius = camera.radius;
     }
     camZoomRadius = Math.min(maxR, Math.max(minR, camZoomRadius));
@@ -6255,8 +6313,8 @@ async function main(): Promise<void> {
         camera.alpha = 0.55;
         camera.beta = Math.PI / 2.7;
         camera.radius = 7;
-      } else if (veFollow === 'cam-collision') {
-        // Orbit into the nearest hero bole; collision keeps the camera in the clearing.
+      } else if (veFollow === 'cam-collision' || veFollow === 'cam-collision-mid') {
+        // Orbit into a bole; collision keeps the camera in the open (hero E10.1, mid E10.24).
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
           camFollowY = targetY;
@@ -6274,14 +6332,40 @@ async function main(): Promise<void> {
         tgt.x = player.position.x;
         tgt.y = camFollowY;
         tgt.z = player.position.z;
-        const hero = nearestHeroTrunk(player.position.x, player.position.z, trunks);
-        if (hero) {
-          // Graze the bole so the trunk reads in-frame; look-at stays the player in the clearing.
-          camera.alpha =
-            Math.atan2(hero.z - player.position.z, hero.x - player.position.x) + 0.16;
+        const wantMid = veFollow === 'cam-collision-mid';
+        if (wantMid && !camCollisionMidAimed) {
+          camCollisionMidAimed = pickClearTrunk(
+            player.position.x,
+            player.position.z,
+            trunks,
+            'mid',
+          );
+        }
+        const aimed = wantMid
+          ? camCollisionMidAimed
+          : nearestHeroTrunk(player.position.x, player.position.z, trunks);
+        if (aimed) {
+          camera.alpha = trunkAimAlpha(player.position.x, player.position.z, aimed);
+          if (wantMid) {
+            // Zoom max 42 cannot reach the mid ring (~48m) from origin (#465).
+            const dist = Math.hypot(
+              aimed.x - player.position.x,
+              aimed.z - player.position.z,
+            );
+            camZoomRadius =
+              dist > 14
+                ? 12
+                : Math.min(
+                    CAM_ZOOM_MAX,
+                    Math.max(16, dist + aimed.r + CAM_TRUNK_PAD + 8),
+                  );
+          } else {
+            camZoomRadius = CAM_COLLISION_VE_RADIUS;
+          }
+        } else {
+          camZoomRadius = CAM_COLLISION_VE_RADIUS;
         }
         camera.beta = Math.PI / 2.18;
-        camZoomRadius = CAM_COLLISION_VE_RADIUS;
         camCollideThisFrame = true;
       } else if (veFollow === 'encounter') {
         // Kind=2 (3,7) + Kind=3 (7,-3) + Dummy (5,0) as people while pad A is pulled (#456).
@@ -11505,8 +11589,7 @@ async function main(): Promise<void> {
     camZoomRadius = CAM_COLLISION_VE_RADIUS;
     const hero0 = nearestHeroTrunk(player.position.x, player.position.z, trunks);
     if (hero0) {
-      camera.alpha =
-        Math.atan2(hero0.z - player.position.z, hero0.x - player.position.x) + 0.16;
+      camera.alpha = trunkAimAlpha(player.position.x, player.position.z, hero0);
     }
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE cam-collision: orbiting into trunk…';
@@ -11526,6 +11609,75 @@ async function main(): Promise<void> {
       if (ticks < 80) window.setTimeout(waitCol, 200);
     };
     window.setTimeout(waitCol, 400);
+  }
+
+  // ?ve=cam-collision-mid — walk to a midTree_* bole then orbit into it (#465).
+  // Zoom max 42 cannot reach the mid ring (~48m) from origin; hero-only hit = fail.
+  if (net && ve === 'cam-collision-mid') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = 12;
+    camZoomRadius = 12;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision-mid: walking to mid trunk…';
+    let ticks = 0;
+    const standOff = 13;
+    const waitMid = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cam-collision-mid: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitMid, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE cam-collision-mid: waiting for pose…';
+        if (ticks < 240) window.setTimeout(waitMid, 200);
+        return;
+      }
+      if (!camCollisionMidAimed) {
+        camCollisionMidAimed = pickClearTrunk(pose.x, pose.z, trunks, 'mid');
+      }
+      const aimed = camCollisionMidAimed;
+      if (!aimed) {
+        if (mark) mark.textContent = 'VE cam-collision-mid FAIL · no midTree_*';
+        return;
+      }
+      const dx = aimed.x - pose.x;
+      const dz = aimed.z - pose.z;
+      const d = Math.hypot(dx, dz);
+      if (d > standOff) {
+        const step = Math.min(MAX_STEP_METERS, d - standOff);
+        const slid = slideAgainstTrunks(pose.x, pose.z, (dx / d) * step, (dz / d) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+        if (mark) {
+          mark.textContent = `VE cam-collision-mid: walk d=${d.toFixed(1)} → ${aimed.name}`;
+        }
+        if (ticks < 240) window.setTimeout(waitMid, 200);
+        return;
+      }
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const midHit = !!hit && /^midTree_/.test(hit);
+      const ok = midHit && got + 0.5 < want;
+      if (ok) {
+        if (mark) {
+          mark.textContent =
+            `Cam-collision OK · r=${got.toFixed(1)} < want=${want.toFixed(0)} · ${hit} · mid`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE cam-collision-mid: r=${got.toFixed(1)} want=${want.toFixed(0)} hit=${hit ?? 'none'} · n=${trunks.length} d=${d.toFixed(1)}`;
+      }
+      if (ticks < 280) window.setTimeout(waitMid, 200);
+    };
+    window.setTimeout(waitMid, 400);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
