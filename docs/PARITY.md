@@ -33,12 +33,15 @@ Hunt NPCs and toast chrome do not fix these. This document is the replacement no
 | **E1 Hop** | Rubber-band + camera slam + full air-strafe | Revert squash/dip; damp air XZ; retune jump; camera spring | Slopes, fall distance, collision, jump-queue |
 | **E2 Body** | T-pose, no look, no walk/cast | Skinned draw + Idle/Walk/yaw + cast clip | Jump/fall poses, remotes, death, look-at |
 | **E3 Place** | Toy pad, fog artifacts, capsules | Match [hordes place ref](https://ve.sparkify.dev/parity/hordes-place-ref.jpg): scale, receding path, dusk-blue depth, no capsules | Pack pass, understory, second clearing |
-| **E4 Camera** | Orbit exists; slam/collision do not | Covered under E1 camera spring | Camera collision vs trees, zoom stops, RMB feel |
-| **E5 Combat body** | Spells work; body does not sell them | Cast clip in E2 | 4-skill book, telegraphs that match anim |
-| **E6 Hunt** | Dummy is the game | **Parked** until E1–E3 on Pages | Hostiles, aggro, corpse loot |
-| **E7 Others** | Party exists | Parked | PvP, second place |
+| **E4 Camera** | Orbit clips trunks; zoom has no stops | Folded into **E10** | — |
+| **E5 Combat body** | Two spells work; body must sell them | Cast hold + flinch in **E8** | 4-skill book **parked** |
+| **E6 Hunt** | Dummy is the game | Folded into **E10** | Extra hostile types later |
+| **E7 Others** | Party exists | Parked | PvP, second zone |
+| **E8 Character** | Idle OK up close; far cam / remotes / run / death still weak | 12h Dev3 queue #326–#338 | Pack swap (Wave 5) |
+| **E9 Environment** | Kitbash clearing, ghost through trees, fillrate risk | 12h Dev4 queue #339–#350 | Second zone |
+| **E10 Encounter** | No hostiles, camera clips | 12h Dev2 queue #321 + #351–#362 | PvP |
 
-**24-hour active work = E1 + E2 + E3 first milestones only.** E6 hunt stays in CAMPAIGN as later.
+**24h E1–E3 first slice is on Pages** (`2d869151`, Idle OK). **Active work = E8 + E9 + E10** (~12h, three non-overlapping file lanes).
 
 ## 24-hour operating rules (Antony away)
 
@@ -54,19 +57,19 @@ Hunt NPCs and toast chrome do not fix these. This document is the replacement no
 
 | Seat | Epic | May touch | Must not touch |
 |------|------|-----------|----------------|
-| **dev-2** | E1 Hop | `shared/Fardel.Shared/Movement.cs`, `server/spacetimedb/Lib.cs` (Move only), `web/src/main.ts` **jump/camera follow only**, `tools/JumpSmoke` | `humanoid.ts`, `forest.ts` |
-| **dev-3** | E2 Body | `web/src/world/humanoid.ts`, call sites in `main.ts` **only** `setHumanoidMoving` / yaw / cast clip | Jump squash, fog, forest |
-| **dev-4** | E3 Place | `web/src/world/forest.ts`, sky/fog/ground/tree placement, hide debug capsules | Movement.cs, skeleton detach |
+| **dev-2** | E10 Encounter | `Lib.cs` / `shared/` NPC-aggro-loot, `main.ts` camera/Tab/nameplates, `tools/IdleSmoke` `HostileSmoke` | `humanoid.ts`, `forest.ts` |
+| **dev-3** | E8 Character | `humanoid.ts`, `main.ts` **only** `setHumanoid*` / playback / death-pose | `forest.ts`, `Movement.cs`, NPC schema |
+| **dev-4** | E9 Environment | `forest.ts`, `vendorStall.ts`, dummy placement | `humanoid.ts`, `Movement.cs` |
 
-## Session Done-whens (24h)
+## Session Done-whens (24h) — **met on Pages**
 
-Play [play.sparkify.dev](https://play.sparkify.dev) after a frozen cut:
+Pin `2d869151` / #320. VE https://ve.sparkify.dev/release/2d869151/idle.png persistMark `Idle OK · Idle_Weapon · skinned 1`.
 
 1. **Hop:** Space is a rigid hop. Character does **not** stretch. Camera does **not** slam. Holding A/D in air does **not** equal ground strafe.
-2. **Body:** Wizard is not T-pose. Walk cycle on WASD. Yaw follows move. Cast plays a clip (or a clear one-shot pose).
-3. **Place:** No orange capsules in the beauty shot. Fog has no banding/halos. Trees/mountains read **large**. Establishing VE at play cam.
+2. **Body:** Wizard is not T-pose at `?ve=idle`. Walk cycle on WASD. Yaw follows move. Cast plays a clip.
+3. **Place:** No orange capsules in the beauty shot. Fog has no banding/halos. Trees/mountains read **large**.
 
-If any of the three fail, do not start hunt/PvP.
+Hunt is no longer parked — it is **E10**. Default `/` far-cam Idle still needs E8.1 so it does not *read* T.
 
 ## Milestone lists (file as Issues; keep this table in sync)
 
@@ -124,12 +127,40 @@ Judge `?ve=place-wow` against that shot. Free/OSS or our kitbash only — do not
 | 8 | Lighting: lift `#39` with a **new** documented lock + VE | art | User asked for gorgeous; lock was the leash. |
 | 9 | Optional: understory density with FPS floor | art | After 3. |
 
-## After 24h (do not file until hop+body+place are on Pages)
+## 12h session Done-whens (active)
 
-- **E4** camera collision vs trees; zoom stops that feel like WoW.
+Play [play.sparkify.dev](https://play.sparkify.dev) after a frozen cut:
+
+1. **Character (E8):** default play cam is a person — staff gripped Idle (not T from far), Walk and Run, jump/fall pose with no squash, death pose not a grey T, remotes Idle/Walk, Emberbolt holds Spell. VE `?ve=character-wow`.
+2. **Environment (E9):** cannot walk through hero trunks; mid-forest instanced (not unique ALPHATEST clones); ≥30 FPS on Pages; path recedes to a second silhouette. VE `?ve=place-wow` vs [hordes place ref](https://ve.sparkify.dev/parity/hordes-place-ref.jpg).
+3. **Encounter (E10):** RMB orbit does not clip trunks; mousewheel zoom has min/max stops; Tab a hostile; it hits back; kill; loot the corpse. Dummy stays a trainer. VE `?ve=encounter`.
+
+If Character or Environment fail, do not start PvP or a 4-spell book.
+
+## 12h milestone lists (filed)
+
+GitHub milestone **12h: character / place / encounter**.
+
+### E8 Character — Dev3 (`humanoid.ts`)
+
+#323 parent. Queue: #326 play-cam Idle → #327 Run → #328 jump/fall pose → #329 death pose → #330 flinch → #331 Emberbolt Spell hold → #332 staff grip/IBM → #333 remotes Idle/Walk → #334 foot lock → #336 scale vs trunks → #337 materials → #338 `?ve=character-wow`.
+
+### E9 Environment — Dev4 (`forest.ts`)
+
+#324 parent. Queue: #339 trunk collision → #340 instanced mid → #341 Pages FPS 30 → #342 receding path → #343 ground relief → #344 hero variety → #345 understory instances → #346 blob shadows → #347 dummy/vendor on dirt → #348 fog → #349 far impostors → #350 `?ve=place-wow`.
+
+If GroundY / server obstacles are required, **stop** and file `lane:server` for Dev2.
+
+### E10 Encounter — Dev2 (camera + hunt)
+
+#325 parent. Queue: #321 IdleSmoke (PR #335) → #351 cam collision → #352 zoom stops → #353 RMB orbit → #354 hostile spawn (schema) → #355 aggro → #356 auto-attack → #357 corpse loot → #358 Tab hostiles → #359 nameplates → #360 `?ve=aggro` → #361 `?ve=encounter` → #362 HostileSmoke.
+
+Serialize #354–#357 and #362 (one open schema PR). Camera tickets do not wait on hunt.
+
+## After 12h (do not file until E8–E10 are on Pages)
+
 - **E5** four-skill book only after the body sells the two we have.
-- **E6** hunt (hostiles, aggro, corpse loot) — previous CAMPAIGN Wave 1.
-- **E7** other players / PvP / second clearing.
+- **E7** other players / PvP / a second *zone* (E9.4 is only a silhouette).
 
 ## Play-test gate (Lead)
 
