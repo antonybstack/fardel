@@ -41,18 +41,15 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 
 ### Seat map (shared computer)
 
-Canonical file: [`tools/scripts/fardel-seats.env`](../tools/scripts/fardel-seats.env). Narrative: [TEAM_SEATS.md](TEAM_SEATS.md).
+Canonical file: [`tools/scripts/seats.conf`](../tools/scripts/seats.conf). Narrative: [TEAM_SEATS.md](TEAM_SEATS.md). `fardel-seats.env` is a pointer only (3001–3005 retired — too close to prod `:3000`).
 
-| Seat | Spacetime | Vite | DB name | Worktree (box) | Worktree (Mac) |
-|------|-----------|------|---------|----------------|----------------|
-| `dev1` | 3001 | 5174 | `fardel-dev1` | `/workspace/wt/dev1` | `/Users/antbly/dev/fardel-wt/dev1` |
-| `dev2` | 3002 | 5175 | `fardel-dev2` | `/workspace/wt/dev2` | `/Users/antbly/dev/fardel-wt/dev2` |
-| `dev3` | 3003 | 5176 | `fardel-dev3` | `/workspace/wt/dev3` | `/Users/antbly/dev/fardel-wt/dev3` |
-| `dev4` | 3004 | 5177 | `fardel-dev4` | `/workspace/wt/dev4` | `/Users/antbly/dev/fardel-wt/dev4` |
-| `dev5` | 3005 | 5178 | `fardel-dev5` | `/workspace/wt/dev5` | `/Users/antbly/dev/fardel-wt/dev5` |
-| `qa-bugs` | 3011 | 5184 | `fardel-qa-bugs` | `/workspace/wt/qa-bugs` | `/Users/antbly/dev/fardel-wt/qa-bugs` |
-| `qa-feel` | 3012 | 5185 | `fardel-qa-feel` | `/workspace/wt/qa-feel` | `/Users/antbly/dev/fardel-wt/qa-feel` |
-| `lead` | 3000 | 5173 | `fardel` | `/workspace/fardel` | `/Users/antbly/dev/fardel` |
+| Seat | Spacetime | Vite | DB name | Worktree |
+|------|-----------|------|---------|----------|
+| `lead` | 3000 | 5173 | `fardel` | `/Users/antbly/dev/fardel` (box: `/workspace/fardel`) |
+| `dev-1` … `dev-12` | 3201–3212 | 5201–5212 | `fardel-dev-N` | `$HOME/dev/wt/dev-N` (box: `/workspace/wt/dev-N`) |
+| `qa-1` … `qa-8` | 3241–3248 | 5241–5248 | `fardel-qa-N` | `$HOME/dev/wt/qa-N` (box: `/workspace/wt/qa-N`) |
+
+Aliases: `dev1` → `dev-1`, `qa-bugs` → `qa-1`, `qa-feel` → `qa-2`. Claim with `./tools/scripts/seat-claim.sh --role dev`. Never bind `:3000` / db `fardel`.
 
 Per-seat Spacetime data: `$HOME/.local/share/fardel-wt/<slug>`.
 

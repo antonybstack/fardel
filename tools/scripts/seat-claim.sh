@@ -59,17 +59,22 @@ if [[ -f "$FARDEL_CLAIM_FILE" ]]; then
   exit 1
 fi
 
-if [[ "$MAKE_WT" -eq 1 ]]; then
-  fardel_ensure_worktree
-  fardel_link_node_modules
-else
+if [[ "$MAKE_WT" -ne 1 ]]; then
   FARDEL_WT="$FARDEL_REPO_ROOT"
-  echo "note: --no-worktree uses $FARDEL_WT (do not edit the lead/release clone from two seats)"
+  echo "note: --no-worktree uses $FARDEL_WT (no .env.local; use ?db=&module=)"
 fi
 
 fardel_write_claim
-fardel_write_env_files
 fardel_unlock
+
+if [[ "$MAKE_WT" -eq 1 ]]; then
+  if ! fardel_ensure_worktree; then
+    rm -f "$FARDEL_CLAIM_FILE"
+    exit 1
+  fi
+  fardel_link_node_modules
+  fardel_write_env_files
+fi
 
 echo "CLAIMED $FARDEL_SEAT"
 fardel_print_env

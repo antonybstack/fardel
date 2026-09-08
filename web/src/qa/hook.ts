@@ -1,6 +1,5 @@
 /**
- * Dev/QA harness for agent Playwright. Installed only in Vite dev or when
- * VITE_FARDEL_QA=1 — never in the Pages production build.
+ * Dev/QA harness for agent Playwright. Vite `import.meta.env.DEV` only.
  */
 import type { ArcRotateCamera, Engine, Mesh, Scene } from '@babylonjs/core';
 import { CreateScreenshotAsync } from '@babylonjs/core';
@@ -43,7 +42,6 @@ declare global {
 }
 
 export function qaEnabled(): boolean {
-  if (import.meta.env.VITE_FARDEL_QA === '1') return true;
   return import.meta.env.DEV === true;
 }
 

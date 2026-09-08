@@ -7,6 +7,18 @@ source "${_script_dir}/seat-lib.sh"
 
 fail() { echo "SELFTEST FAIL: $*" >&2; exit 1; }
 
+DEV_SLUG=""
+QA_SLUG=""
+cleanup() {
+  if [[ -n "${DEV_SLUG:-}" ]]; then
+    "${_script_dir}/seat-release.sh" "$DEV_SLUG" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${QA_SLUG:-}" ]]; then
+    "${_script_dir}/seat-release.sh" "$QA_SLUG" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
 fardel_assert_layout || fail "layout"
 
 if ! fardel_prod_ping; then
@@ -65,8 +77,5 @@ fi
 if curl -sf --max-time 1 "http://127.0.0.1:${QA_PORT}/v1/ping" >/dev/null; then
   fail "qa stdb still up after down"
 fi
-
-"${_script_dir}/seat-release.sh" "$DEV_SLUG"
-"${_script_dir}/seat-release.sh" "$QA_SLUG"
 
 echo "SELFTEST OK  prod pid=$PROD_PID still up  claimed/released $DEV_SLUG + $QA_SLUG"

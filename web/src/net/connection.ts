@@ -298,20 +298,25 @@ const DEFAULT_URI_LOCAL = 'http://127.0.0.1:3000';
 /** Pages / non-localhost default — Mac cloudflared → local SpacetimeDB. */
 const DEFAULT_URI_REMOTE = 'https://dev-db.sparkify.dev';
 const DEFAULT_DATABASE = 'fardel';
+const LEAD_VITE_PORT = '5173';
 
 function isLocalHost(): boolean {
   const h = window.location.hostname;
   return h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h === '::1';
 }
 
+function isLeadVite(): boolean {
+  return isLocalHost() && window.location.port === LEAD_VITE_PORT;
+}
+
 /**
  * URI resolution (first match wins):
  * 1. ?db= / ?database= — always, including agent seats
  * 2. VITE_FARDEL_URI — seat Vite (.env.local / process env); never used on Pages
- * 3. localhost → 127.0.0.1:3000 (lead / prod-preview)
+ * 3. lead Vite :5173 on localhost → 127.0.0.1:3000
  * 4. production Pages host → https://dev-db.sparkify.dev
  *
- * Agent seats MUST pass (1) or (2) so they never share :3000 / db fardel.
+ * Other localhost ports (agent 52xx) must use (1) or (2) — never default to prod.
  */
 function resolveUri(): string {
   const params = new URLSearchParams(window.location.search);
@@ -319,6 +324,11 @@ function resolveUri(): string {
   if (override) return override;
   const fromEnv = import.meta.env.VITE_FARDEL_URI;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
+  if (isLocalHost() && !isLeadVite()) {
+    throw new Error(
+      'Seat client requires ?db= or VITE_FARDEL_URI (refusing default :3000 / db fardel)',
+    );
+  }
   return isLocalHost() ? DEFAULT_URI_LOCAL : DEFAULT_URI_REMOTE;
 }
 
@@ -328,6 +338,11 @@ function resolveDatabaseName(): string {
   if (override) return override;
   const fromEnv = import.meta.env.VITE_FARDEL_DB;
   if (fromEnv && fromEnv.length > 0) return fromEnv;
+  if (isLocalHost() && !isLeadVite()) {
+    throw new Error(
+      'Seat client requires ?module= or VITE_FARDEL_DB (refusing default db fardel)',
+    );
+  }
   return DEFAULT_DATABASE;
 }
 

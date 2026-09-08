@@ -32,6 +32,12 @@ if curl -sf "$PING_URL" >/dev/null; then
   exit 0
 fi
 
+if [[ "${FARDEL_ALLOW_PROD:-}" != "1" ]]; then
+  echo "REFUSE: starting :3000 requires FARDEL_ALLOW_PROD=1 (prod/preview shard for play.sparkify.dev)." >&2
+  echo "Agents: use tools/scripts/seat-up.sh. Humans: FARDEL_ALLOW_PROD=1 $0" >&2
+  exit 2
+fi
+
 mkdir -p "$(dirname "$LOG")"
 # New session so agent shell teardown cannot kill the DB.
 # --non-interactive: fail fast if port busy instead of prompting.

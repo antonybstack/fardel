@@ -237,12 +237,18 @@ fardel_assert_layout() {
 }
 
 fardel_with_lock() {
-  local i
+  local i now mtime
   mkdir -p "$(dirname "$FARDEL_LOCK_DIR")"
   i=0
   while ! mkdir "$FARDEL_LOCK_DIR" 2>/dev/null; do
+    now="$(date +%s)"
+    mtime="$(stat -f %m "$FARDEL_LOCK_DIR" 2>/dev/null || stat -c %Y "$FARDEL_LOCK_DIR" 2>/dev/null || echo 0)"
+    if [[ "$mtime" -gt 0 && $((now - mtime)) -gt 120 ]]; then
+      rmdir "$FARDEL_LOCK_DIR" 2>/dev/null || true
+      continue
+    fi
     i=$((i + 1))
-    if [[ "$i" -gt 80 ]]; then
+    if [[ "$i" -gt 300 ]]; then
       echo "FAIL: timed out waiting for $FARDEL_LOCK_DIR" >&2
       return 1
     fi
@@ -297,15 +303,18 @@ vite_pid=${FARDEL_VITE_PID:-}
 EOF
 }
 
+# True only for $FARDEL_WT_ROOT/<slug> — never the lead clone or --no-worktree cwd.
+fardel_is_dedicated_worktree() {
+  [[ -n "${FARDEL_SEAT:-}" && -n "${FARDEL_WT_ROOT:-}" && -n "${FARDEL_WT:-}" && "$FARDEL_WT" == "${FARDEL_WT_ROOT}/${FARDEL_SEAT}" ]]
+}
+
 fardel_write_env_files() {
   mkdir -p "$FARDEL_DATA_DIR" "$FARDEL_ARTIFACT_DIR" "$FARDEL_PLAYWRIGHT_PROFILE"
   if [[ -z "${FARDEL_WT:-}" || ! -d "${FARDEL_WT}" ]]; then
     return 0
   fi
-  # Never write seat env into the lead/prod checkout — that would retarget
-  # the human Vite on :5173 (or a Pages-adjacent local build) at an agent DB.
-  if [[ "$FARDEL_WT" == "$FARDEL_LEAD_ROOT" ]]; then
-    echo "note: skipping .env.local in lead checkout $FARDEL_WT (use ?db=&module= URL)"
+  if ! fardel_is_dedicated_worktree; then
+    echo "note: skipping .env.local (not dedicated worktree $FARDEL_WT_ROOT/$FARDEL_SEAT; use ?db=&module=)"
     return 0
   fi
   cat >"${FARDEL_WT}/.env.seat" <<EOF
@@ -345,8 +354,11 @@ fardel_ensure_worktree() {
   if [[ ! -d "$git_base/.git" && ! -f "$git_base/.git" ]]; then
     git_base="$FARDEL_REPO_ROOT"
   fi
+  git -C "$git_base" fetch origin develop 2>/dev/null || true
   if git -C "$git_base" show-ref --verify --quiet "refs/heads/${branch}"; then
     git -C "$git_base" worktree add "$FARDEL_WT" "$branch"
+  elif git -C "$git_base" rev-parse --verify --quiet origin/develop >/dev/null; then
+    git -C "$git_base" worktree add -b "$branch" "$FARDEL_WT" origin/develop
   else
     git -C "$git_base" worktree add -b "$branch" "$FARDEL_WT"
   fi

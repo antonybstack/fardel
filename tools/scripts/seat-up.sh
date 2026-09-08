@@ -76,7 +76,8 @@ if [[ "$START_VITE" -eq 1 ]]; then
       export VITE_FARDEL_URI="$FARDEL_SPACETIME_URI"
       export VITE_FARDEL_DB="$FARDEL_DB"
       export VITE_FARDEL_QA=1
-      nohup ./node_modules/.bin/vite --host 127.0.0.1 --port "$FARDEL_VITE_PORT" \
+      export FARDEL_VITE_PORT
+      nohup ./node_modules/.bin/vite --host 127.0.0.1 --port "$FARDEL_VITE_PORT" --strictPort \
         >>"${FARDEL_DATA_DIR}/vite.log" 2>&1 &
       echo $! >"${FARDEL_DATA_DIR}/vite.pid"
       disown || true
@@ -95,7 +96,14 @@ if [[ "$START_VITE" -eq 1 ]]; then
       exit 1
     fi
   else
-    echo "vite already up on $FARDEL_VITE_PORT"
+    local_cmd="$(ps -p "$(fardel_listener_pid "$FARDEL_VITE_PORT")" -o command= 2>/dev/null || true)"
+    case "$local_cmd" in
+      *vite*) echo "vite already up on $FARDEL_VITE_PORT" ;;
+      *)
+        echo "FAIL: port $FARDEL_VITE_PORT is in use but is not vite ($local_cmd)" >&2
+        exit 1
+        ;;
+    esac
   fi
 fi
 

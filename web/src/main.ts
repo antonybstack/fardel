@@ -94,7 +94,6 @@ import {
   type GroundSparkle,
 } from './world/sparkles';
 import { createVendorStall } from './world/vendorStall';
-import { installQaHook, qaEnabled } from './qa/hook';
 
 /** Match shared/Fardel.Shared Movement.MaxStepMeters. */
 const MAX_STEP_METERS = 0.75;
@@ -3559,15 +3558,17 @@ async function main(): Promise<void> {
     },
   });
 
-  if (qaEnabled()) {
-    installQaHook({
-      getEngine: () => engine,
-      getScene: () => scene,
-      getCamera: () => camera,
-      getPlayer: () => player,
-      getKeys: () => keys,
-      getNet: () => net,
-      getStatus: () => latestStatus,
+  if (import.meta.env.DEV) {
+    void import('./qa/hook').then(({ installQaHook }) => {
+      installQaHook({
+        getEngine: () => engine,
+        getScene: () => scene,
+        getCamera: () => camera,
+        getPlayer: () => player,
+        getKeys: () => keys,
+        getNet: () => net,
+        getStatus: () => latestStatus,
+      });
     });
   }
 

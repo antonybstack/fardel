@@ -61,8 +61,28 @@ function assertNotProd(claim, url) {
   if (uri.includes(`:${PROD_STDB_PORT}`) || uri.includes("dev-db.sparkify.dev")) {
     die(`refusing prod URI ${uri}`, 2);
   }
-  if (url.includes("play.sparkify.dev") || url.includes(`:${PROD_VITE_PORT}`)) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    die(`invalid client URL ${url}`, 2);
+  }
+  const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
+  const dbParam = parsed.searchParams.get("db") || parsed.searchParams.get("database") || "";
+  const moduleParam = parsed.searchParams.get("module") || parsed.searchParams.get("name") || "";
+  if (
+    parsed.hostname === "play.sparkify.dev" ||
+    parsed.hostname === "dev-db.sparkify.dev" ||
+    port === PROD_STDB_PORT ||
+    port === PROD_VITE_PORT
+  ) {
     die(`refusing prod/lead URL ${url}`, 2);
+  }
+  if (!dbParam || dbParam.includes(`:${PROD_STDB_PORT}`) || dbParam.includes("dev-db.sparkify.dev")) {
+    die(`refusing URL missing/prod ?db= ${url}`, 2);
+  }
+  if (!moduleParam || moduleParam === PROD_DB) {
+    die(`refusing URL missing/prod ?module= ${url}`, 2);
   }
 }
 
@@ -123,9 +143,12 @@ async function main() {
       );
     }
 
-    // Give Babylon a couple of frames; headless WebGL canvas can be empty
-    // on the first tick even when the HUD already says Connected.
-    await page.waitForTimeout(2000);
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(undefined)));
+        }),
+    );
 
     const state = await page.evaluate(() => window.__qa.getState());
     fs.writeFileSync(

@@ -32,11 +32,11 @@ fardel_assert_agent
 
 fardel_with_lock
 rm -f "$FARDEL_CLAIM_FILE"
-if [[ -f "${FARDEL_WT}/.env.seat" ]]; then
+if fardel_is_dedicated_worktree; then
   rm -f "${FARDEL_WT}/.env.seat"
-fi
-if [[ -f "${FARDEL_WT}/web/.env.local" ]]; then
-  rm -f "${FARDEL_WT}/web/.env.local"
+  if [[ -f "${FARDEL_WT}/web/.env.local" ]] && grep -q "VITE_FARDEL_DB=${FARDEL_DB}" "${FARDEL_WT}/web/.env.local" 2>/dev/null; then
+    rm -f "${FARDEL_WT}/web/.env.local"
+  fi
 fi
 fardel_unlock
 
