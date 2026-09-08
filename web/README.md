@@ -100,6 +100,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=loadout-buff` | Mixed equipped/missing loadout chips + active tonic buff (#91); paste PNG to PR user-attachments |
 | `?ve=combat-log-read` | Combat log strip readability over cyan fog (#78) (`ve/babylon-combat-log-read.png`) |
 | `?ve=toast-read` | System toast stack readability vs #39 fog (#90) — invite/XP/death plates; paste PNG to PR user-attachments |
+| `?ve=trade-feel` | Trade offer flow state clarity (#162) — incoming/waiting/accepted/cancelled chrome cycles; HUD `Trade-feel OK · …` |
 | `?ve=chat-read` | Chat/say plate readability over cyan fog — say/party/whisper distinct (#88); HUD `Chat-read OK · …` |
 | `?ve=atmosphere` | Yard mood: blue/cyan fog + warm sun/cool hemi + lush ground (`ve/babylon-atmosphere.png`) |
 | `?ve=spell-vfx` | Spark cyan flash+bolt+impact + Emberbolt staff charge→projectile→impact (`ve/babylon-spell-vfx.png`) |

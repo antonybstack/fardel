@@ -1094,7 +1094,10 @@ type SystemToastKind =
   | 'whisper'
   | 'rate'
   | 'loot'
-  | 'trade'
+  | 'tradeIncoming'
+  | 'tradeWaiting'
+  | 'tradeAccepted'
+  | 'tradeCancelled'
   | 'vendor'
   | 'tonic'
   | 'rest'
@@ -1150,43 +1153,49 @@ function pushSystemToast(
                         ? 'WHISPER'
                         : kind === 'loot'
                           ? 'LOOT'
-                          : kind === 'trade'
-                            ? 'TRADE'
-                            : kind === 'vendor'
-                              ? 'VENDOR'
-                              : kind === 'tonic'
-                                ? 'TONIC'
-                                : kind === 'rest'
-                                  ? 'REST'
-                                  : kind === 'mana'
-                                    ? 'MANA'
-                                    : kind === 'gcd'
-                                      ? 'GCD'
-                                      : kind === 'castCancel'
-                                        ? 'CANCEL ↩'
-                                        : kind === 'castPushback'
-                                          ? 'PUSH'
-                                          : kind === 'castHardInterrupt'
-                                            ? 'LOCKOUT ⊘'
-                                            : kind === 'silenced'
-                                              ? 'SILENCE'
-                                              : kind === 'kick'
-                                              ? 'KICK'
-                                              : kind === 'stun'
-                                              ? 'STUN'
-                                              : kind === 'outOfRange'
-                                                ? 'RANGE'
-                                                : kind === 'bandage'
-                                                  ? 'HEAL'
-                                                  : kind === 'noTarget'
-                                                    ? 'CANCEL ↩'
-                                                    : kind === 'canvasFocus'
-                                                      ? 'FOCUS'
-                                                      : kind === 'bag'
-                                                        ? 'BAG'
-                                                        : kind === 'zoomLimit'
-                                                          ? 'ZOOM'
-                                                          : 'SAY';
+                          : kind === 'tradeIncoming'
+                            ? 'TRADE ▼'
+                            : kind === 'tradeWaiting'
+                              ? 'TRADE ▲'
+                              : kind === 'tradeAccepted'
+                                ? 'TRADE ✓'
+                                : kind === 'tradeCancelled'
+                                  ? 'TRADE ✕'
+                                  : kind === 'vendor'
+                                    ? 'VENDOR'
+                                    : kind === 'tonic'
+                                      ? 'TONIC'
+                                      : kind === 'rest'
+                                        ? 'REST'
+                                        : kind === 'mana'
+                                          ? 'MANA'
+                                          : kind === 'gcd'
+                                            ? 'GCD'
+                                            : kind === 'castCancel'
+                                              ? 'CANCEL ↩'
+                                              : kind === 'castPushback'
+                                                ? 'PUSH'
+                                                : kind === 'castHardInterrupt'
+                                                  ? 'LOCKOUT ⊘'
+                                                  : kind === 'silenced'
+                                                    ? 'SILENCE'
+                                                    : kind === 'kick'
+                                                    ? 'KICK'
+                                                    : kind === 'stun'
+                                                    ? 'STUN'
+                                                    : kind === 'outOfRange'
+                                                      ? 'RANGE'
+                                                      : kind === 'bandage'
+                                                        ? 'HEAL'
+                                                        : kind === 'noTarget'
+                                                          ? 'CANCEL ↩'
+                                                          : kind === 'canvasFocus'
+                                                            ? 'FOCUS'
+                                                            : kind === 'bag'
+                                                              ? 'BAG'
+                                                              : kind === 'zoomLimit'
+                                                                ? 'ZOOM'
+                                                                : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -3362,7 +3371,7 @@ async function main(): Promise<void> {
           if (trade.offeredHasEmberShard) bits.push('ember_shard');
           if (trade.offeredXp > 0) bits.push(`+${trade.offeredXp} XP`);
           pushCombatLog('trade', `Accepted trade (${bits.join(' · ') || 'ok'})`);
-          pushSystemToast('trade', `Trade accepted · ${bits.join(' · ') || 'done'}`, TOAST_VE_TTL_MS);
+          pushSystemToast('tradeAccepted', `Trade accepted · received ${bits.join(' · ') || 'items'}`, TOAST_VE_TTL_MS);
           bagOpen = true;
           setBagPanelOpen(true);
           const ch = g.getCharacter();
@@ -3382,7 +3391,7 @@ async function main(): Promise<void> {
         const ch = g.getCharacter();
         const what = ch?.hasEmberShard ? 'ember_shard' : '+5 XP';
         pushCombatLog('trade', `Offered ${what} → ${hex.slice(0, 8)}…`);
-        pushSystemToast('trade', `Trade offered · ${what} · T waits accept`, TOAST_VE_TTL_MS);
+        pushSystemToast('tradeWaiting', `Offering ${what} to ${hex.slice(0, 8)}… · awaiting accept · Y cancel`, TOAST_VE_TTL_MS);
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/out of range/i.test(msg)) {
@@ -3396,7 +3405,7 @@ async function main(): Promise<void> {
       if (!net) return;
       void net.cancelTrade().then(() => {
         pushCombatLog('trade', 'Trade cancelled');
-        pushSystemToast('trade', 'Trade cancelled');
+        pushSystemToast('tradeCancelled', 'Trade cancelled');
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         pushSystemToast('rate', msg.slice(0, 96) || 'Cancel trade failed');
@@ -4521,8 +4530,8 @@ async function main(): Promise<void> {
           if (tr?.offeredHasEmberShard) bits.push('ember_shard');
           if ((tr?.offeredXp ?? 0) > 0) bits.push(`+${tr!.offeredXp} XP`);
           pushSystemToast(
-            'trade',
-            `Trade from ${tradePending.slice(0, 8)}… · ${bits.join(' · ') || 'offer'} · T accept`,
+            'tradeIncoming',
+            `Trade offer from ${tradePending.slice(0, 8)}… · ${bits.join(' · ') || 'items'} · T accept · Y decline`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
@@ -4542,7 +4551,7 @@ async function main(): Promise<void> {
             setBagPanelOpen(true);
             const chNow = net?.getCharacter();
             if (chNow) updateBagPanel(chNow);
-            pushSystemToast('trade', 'Trade complete · bag updated', TOAST_VE_TTL_MS);
+            pushSystemToast('tradeAccepted', 'Trade complete · bag updated', TOAST_VE_TTL_MS);
           }
         }
         lastTradePendingFrom = tradePending;
@@ -9029,7 +9038,41 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 400);
   }
 
-
+  // ?ve=trade-feel — showcase all trade offer flow states (#162).
+  if (ve === 'trade-feel') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'trade-feel') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE trade-feel: seeding trade state stack…';
+    let phase = 0;
+    const seedTradeFeel = () => {
+      const root = document.getElementById('toastStack');
+      if (root) root.innerHTML = '';
+      // Cycle through all trade states to show distinct chrome (#162).
+      if (phase === 0) {
+        pushSystemToast('tradeIncoming', 'Trade offer from a1b2c3d4… · ember_shard · T accept · Y decline', TOAST_VE_TTL_MS);
+      } else if (phase === 1) {
+        pushSystemToast('tradeWaiting', 'Offering +5 XP to e5f6g7h8… · awaiting accept · Y cancel', TOAST_VE_TTL_MS);
+      } else if (phase === 2) {
+        pushSystemToast('tradeAccepted', 'Trade accepted · received ember_shard', TOAST_VE_TTL_MS);
+      } else {
+        pushSystemToast('tradeCancelled', 'Trade cancelled', TOAST_VE_TTL_MS);
+      }
+    };
+    const cyclePhase = () => {
+      phase = (phase + 1) % 4;
+      seedTradeFeel();
+      window.setTimeout(cyclePhase, 3500);
+    };
+    seedTradeFeel();
+    window.setTimeout(cyclePhase, 3500);
+    if (mark) {
+      mark.textContent = 'Trade-feel OK · incoming/waiting/accepted/cancelled · distinct chrome · #162';
+    }
+  }
 
 
 
