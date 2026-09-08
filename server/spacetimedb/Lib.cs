@@ -328,6 +328,7 @@ public static partial class Module
             maxStep *= Tonic.MoveSpeedMult;
         }
         Movement.ClampWishStep(ref dx, ref dz, maxStep);
+        Movement.ApplyAirControl(ref dx, ref dz, pose.Y);
         var x = pose.X + dx;
         var z = pose.Z + dz;
 
