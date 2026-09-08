@@ -1778,7 +1778,7 @@ async function createScene(engine: Engine): Promise<{
     pointers.buttons = [2];
   }
 
-  // Zoom limit feel (#192): brief muted toast when wheel hits min/max radius.
+  // Toast only on overscroll so the #30 soft clamp stays (#192).
   let lastZoomLimitToastMs = 0;
   const ZOOM_LIMIT_TOAST_DEBOUNCE_MS = 800;
   if (canvas) {
@@ -1788,11 +1788,8 @@ async function createScene(engine: Engine): Promise<{
       const currentRadius = camera.radius;
       const lowerLimit = camera.lowerRadiusLimit;
       const upperLimit = camera.upperRadiusLimit;
-      
-      // Detect if wheel would push beyond limits (soft clamp stays active).
       const isAtMin = currentRadius <= lowerLimit && delta < 0;
       const isAtMax = currentRadius >= upperLimit && delta > 0;
-      
       if ((isAtMin || isAtMax) && now - lastZoomLimitToastMs > ZOOM_LIMIT_TOAST_DEBOUNCE_MS) {
         lastZoomLimitToastMs = now;
         pushSystemToast('zoomLimit', isAtMin ? 'Zoom min' : 'Zoom max', 1200);
