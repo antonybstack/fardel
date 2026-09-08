@@ -447,6 +447,134 @@ const FOG_END = 200;
 /** Grass plane extent (m). 120 was the toy disc. */
 const GROUND_EXTENT = 480;
 
+/** Dummy / vendor XZ — keep these reachable (matches Combat/Vendor spawn). */
+const YARD_DUMMY_X = 5;
+const YARD_DUMMY_Z = 0;
+const YARD_VENDOR_X = -2.5;
+const YARD_VENDOR_Z = 2;
+
+/** North landmark hero — `?ve=collision` walks into this bole. */
+export const COLLISION_VE_HERO = { x: 6, z: -40 } as const;
+
+export type TrunkCapsule = {
+  x: number;
+  z: number;
+  radius: number;
+  kind: 'hero' | 'mid';
+};
+
+/** Player XZ radius vs bole capsules. Intent slide only — not client positions. */
+export const PLAYER_TRUNK_RADIUS = 0.42;
+
+const trunkCapsules: TrunkCapsule[] = [];
+
+export function getTrunkCapsules(): readonly TrunkCapsule[] {
+  return trunkCapsules;
+}
+
+export function nearestTrunk(
+  px: number,
+  pz: number,
+  kind?: TrunkCapsule['kind'],
+): TrunkCapsule | null {
+  let best: TrunkCapsule | null = null;
+  let bestD = Infinity;
+  for (const c of trunkCapsules) {
+    if (kind && c.kind !== kind) continue;
+    const d = (c.x - px) * (c.x - px) + (c.z - pz) * (c.z - pz);
+    if (d < bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return best;
+}
+
+function yardPropBlocked(x: number, z: number, radius: number): boolean {
+  const pad = PLAYER_TRUNK_RADIUS + 3.2;
+  const dummyR = radius + pad;
+  const dxD = x - YARD_DUMMY_X;
+  const dzD = z - YARD_DUMMY_Z;
+  if (dxD * dxD + dzD * dzD < dummyR * dummyR) return true;
+  const vendorR = radius + pad + 1.2;
+  const dxV = x - YARD_VENDOR_X;
+  const dzV = z - YARD_VENDOR_Z;
+  return dxV * dxV + dzV * dzV < vendorR * vendorR;
+}
+
+function registerTrunk(x: number, z: number, radius: number, kind: TrunkCapsule['kind']): void {
+  if (!(radius > 0) || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(radius)) {
+    return;
+  }
+  if (yardPropBlocked(x, z, radius)) return;
+  trunkCapsules.push({ x, z, radius, kind });
+}
+
+/**
+ * Pack bark radius at chest height (p90 of y∈[0,1.2] verts) × instance XZ scale.
+ * Do not use the full bark AABB — branches inflate it, then a 3.4 clamp sinks
+ * the player into the visual bole.
+ */
+function boleRadiusWorld(xzScale: number, kind: TrunkCapsule['kind']): number {
+  const author = kind === 'hero' ? 1.18 : 0.52;
+  return Math.max(kind === 'hero' ? 1.6 : 0.55, author * xzScale);
+}
+
+/**
+ * Slide an XZ wish against hero/mid bole capsules. Still an intent (dx/dz);
+ * server Move is unchanged. Far trees / mountains are not solids.
+ */
+export function slideAgainstTrunks(
+  px: number,
+  pz: number,
+  dx: number,
+  dz: number,
+  playerR = PLAYER_TRUNK_RADIUS,
+): { dx: number; dz: number; blocked: boolean } {
+  if (trunkCapsules.length === 0) return { dx, dz, blocked: false };
+  const inLen = Math.hypot(dx, dz);
+  let nx = px + dx;
+  let nz = pz + dz;
+  let blocked = false;
+  for (let iter = 0; iter < 6; iter++) {
+    let hit = false;
+    for (const c of trunkCapsules) {
+      const minD = c.radius + playerR;
+      let ox = nx - c.x;
+      let oz = nz - c.z;
+      let d2 = ox * ox + oz * oz;
+      if (d2 >= minD * minD) continue;
+      hit = true;
+      blocked = true;
+      if (d2 < 1e-10) {
+        ox = px - c.x;
+        oz = pz - c.z;
+        d2 = ox * ox + oz * oz;
+        if (d2 < 1e-10) {
+          ox = 1;
+          oz = 0;
+          d2 = 1;
+        }
+      }
+      const d = Math.sqrt(d2);
+      const k = minD / d;
+      nx = c.x + ox * k;
+      nz = c.z + oz * k;
+    }
+    if (!hit) break;
+  }
+  let odx = nx - px;
+  let odz = nz - pz;
+  if (inLen < 1e-8) return { dx: 0, dz: 0, blocked };
+  const outLen = Math.hypot(odx, odz);
+  if (outLen > inLen && outLen > 1e-8) {
+    const s = inLen / outLen;
+    odx *= s;
+    odz *= s;
+  }
+  return { dx: odx, dz: odz, blocked };
+}
+
 function fogCss(c: Color3): string {
   return `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
 }
@@ -811,7 +939,7 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   // #272: Quaternius author-scale is toy-yard; WoW/hordes read is player-tiny vs trunks.
   // Heroes sit on the clearing rim so play-cam is not inside a canopy.
   const heroSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
-    { name: 'heroTreeN', x: 6, z: -40, scale: 5.2, yaw: 0.18, ti: 1 },
+    { name: 'heroTreeN', x: COLLISION_VE_HERO.x, z: COLLISION_VE_HERO.z, scale: 5.2, yaw: 0.18, ti: 1 },
     { name: 'heroTreeNE', x: 34, z: -28, scale: 4.6, yaw: 0.45, ti: 0 },
     { name: 'heroTreeNW', x: -36, z: -24, scale: 4.8, yaw: -0.55, ti: 1 },
     { name: 'heroTreeSW', x: -32, z: 34, scale: 4.4, yaw: 2.15, ti: 0 },
@@ -820,6 +948,7 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   for (const h of heroSpots) {
     const tmpl = heroTemplates[h.ti % heroTemplates.length]!;
     placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
+    registerTrunk(h.x, h.z, boleRadiusWorld(h.scale, 'hero'), 'hero');
   }
 
   const midMats: Matrix[][] = midTemplates.map(() => []);
@@ -850,6 +979,7 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     const mark = new TransformNode(`midTree_${i}`, scene);
     mark.position.set(mx, 0, mz);
     mark.scaling.setAll(s);
+    registerTrunk(mx, mz, boleRadiusWorld(s, 'mid'), 'mid');
   }
 
   for (let i = 0; i < 12; i++) {
@@ -941,12 +1071,27 @@ function placeProceduralForest(scene: Scene): void {
   const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.16, 0.34, 0.16));
   const underMat = makeUnderstoryMat(scene, 'understoryMat', new Color3(0.2, 0.42, 0.16));
 
+  const registerProcHero = (
+    x: number,
+    z: number,
+    scale: number,
+    silhouette: 'landmark' | 'sentinel' | 'standard',
+  ): void => {
+    const tr = (silhouette === 'landmark' ? 1.7 : silhouette === 'sentinel' ? 1.25 : 1.05) * scale;
+    registerTrunk(x, z, Math.min(3.4, Math.max(1.35, tr * 1.05)), 'hero');
+  };
   placeHeroTree(scene, 'heroElderN', 6, -40, 3.4, 0.18, trunkMatA, foliageB, 'landmark');
+  registerProcHero(6, -40, 3.4, 'landmark');
   placeHeroTree(scene, 'heroElderSW', -32, 34, 3.0, 2.15, trunkMatB, foliageA, 'landmark');
+  registerProcHero(-32, 34, 3.0, 'landmark');
   placeHeroTree(scene, 'heroSentNE', 34, -28, 2.7, 0.45, trunkMatA, foliageA, 'sentinel');
+  registerProcHero(34, -28, 2.7, 'sentinel');
   placeHeroTree(scene, 'heroSentNW', -36, -24, 2.8, -0.55, trunkMatB, foliageB, 'sentinel');
+  registerProcHero(-36, -24, 2.8, 'sentinel');
   placeHeroTree(scene, 'heroSentSE', 30, 38, 2.4, 1.05, trunkMatA, foliageC, 'standard');
+  registerProcHero(30, 38, 2.4, 'standard');
   placeHeroTree(scene, 'heroSentW', -28, 6, 2.5, -1.2, trunkMatB, foliageC, 'sentinel');
+  registerProcHero(-28, 6, 2.5, 'sentinel');
 
   const midClassic = buildMergedMidTree(scene, 'midClassic', trunkMatB, foliageB, {
     trunkHeight: 7.5,
@@ -1006,6 +1151,14 @@ function placeProceduralForest(scene: Scene): void {
     if (pick < 0.38) matsClassic.push(m);
     else if (pick < 0.72) matsTall.push(m);
     else matsStubby.push(m);
+    const bole =
+      pick < 0.38 ? 1.1 : pick < 0.72 ? 0.95 : 1.35;
+    registerTrunk(
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      Math.min(1.55, Math.max(0.55, (bole * 0.5) * s * 0.95)),
+      'mid',
+    );
   }
 
   const midCount = 40;
@@ -1025,6 +1178,13 @@ function placeProceduralForest(scene: Scene): void {
     if (pick < 0.45) matsClassic.push(m);
     else if (pick < 0.78) matsTall.push(m);
     else matsStubby.push(m);
+    const bole = pick < 0.45 ? 1.1 : pick < 0.78 ? 0.95 : 1.35;
+    registerTrunk(
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      Math.min(1.55, Math.max(0.55, (bole * 0.5) * s * 0.95)),
+      'mid',
+    );
   }
 
   const farCount = 48;
@@ -1221,6 +1381,8 @@ export async function buildForestClearing(scene: Scene): Promise<{
   hemi: HemisphericLight;
   sun: DirectionalLight;
 }> {
+  trunkCapsules.length = 0;
+
   // Atmosphere: #270 fog/sky + #277 cool forest interior (lifts #39 midday key).
   scene.clearColor = new Color4(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b, 1);
   scene.fogMode = Scene.FOGMODE_LINEAR;
