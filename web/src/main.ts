@@ -5938,8 +5938,6 @@ async function main(): Promise<void> {
       } else if (
         veFollow === 'hostile-spawn' ||
         veFollow === 'hostile-body' ||
-        veFollow === 'leash' ||
-        veFollow === 'aggro' ||
         veFollow === 'hostile-read' ||
         veFollow === 'hostile-types' ||
         veFollow === 'brigand-body'
@@ -5955,8 +5953,13 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.05;
         camera.beta = Math.PI / 2.7;
         camera.radius = 18;
-      } else if (veFollow === 'kick' || veFollow === 'stun') {
-        // Dummy (5,0) + Kind=3 pad C (7,-3). Origin KickRange 8; Stun walks in.
+      } else if (
+        veFollow === 'kick' ||
+        veFollow === 'stun' ||
+        veFollow === 'leash' ||
+        veFollow === 'aggro'
+      ) {
+        // Dummy (5,0) + Kind=3 pad C (7,-3). Origin KickRange 8; Stun/leash walks in.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -9952,52 +9955,79 @@ async function main(): Promise<void> {
     window.setTimeout(waitHit, 700);
   }
 
-  // ?ve=leash — pull then drop (#355). ?ve=aggro is the #360 session shot.
+  // ?ve=leash — pull pad C Brigand then drop (#455). ?ve=aggro is the session shot.
   if (ve === 'leash' || ve === 'aggro') {
-    camera.radius = 18;
-    camera.alpha = Math.PI / 2.05;
-    camera.beta = Math.PI / 2.7;
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 2.65;
   }
   if (net && (ve === 'leash' || ve === 'aggro')) {
     const aggroVe = ve === 'aggro';
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = aggroVe ? 'VE aggro: waiting for hostiles…' : 'VE leash: waiting for hostiles…';
+    if (mark) {
+      mark.textContent = aggroVe
+        ? 'VE aggro: waiting for brigand…'
+        : 'VE leash: waiting for brigand…';
+    }
     let ticks = 0;
     let phase: 'pull' | 'drop' | 'done' = 'pull';
     let pulledId: bigint | null = null;
-    const padAx = 3;
-    const padAz = 7;
+    const padCx = 7;
+    const padCz = -3;
     const waitL = () => {
       if (!net) return;
       ticks += 1;
       const npcs = net.getNpcs();
-      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
-      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY);
-      const padA =
-        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
-        hostiles[0];
-      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+      syncNpcMeshes(npcs);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyOk = !!dummy;
+      const dummyAggro = dummy?.aggroed === true;
+      const padC =
+        brigands.find(
+          (n) => Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? brigands[0];
+      if (latestStatus.state !== 'connected' || !padC || !dummyOk) {
         if (mark) {
-          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+          mark.textContent =
+            `VE ${aggroVe ? 'aggro' : 'leash'}: ${latestStatus.state} · B ${brigands.length}…`;
         }
         if (ticks < 240) window.setTimeout(waitL, 200);
         return;
       }
-      const home = Math.hypot(padA.x - (padA.spawnX || padAx), padA.z - (padA.spawnZ || padAz));
+      if (dummyAggro) {
+        if (mark) {
+          mark.textContent = `${aggroVe ? 'Aggro' : 'Leash'} FAIL · dummy aggroed · #455`;
+        }
+        return;
+      }
+      const mesh = npcMeshes.get(padC.npcId.toString());
+      const bLabel = mesh?.nameplate?.label ?? '';
+      const home = Math.hypot(
+        padC.x - (padC.spawnX || padCx),
+        padC.z - (padC.spawnZ || padCz),
+      );
       if (phase === 'pull') {
-        const dx = padA.x - player.position.x;
-        const dz = padA.z - player.position.z;
+        const dx = padC.x - player.position.x;
+        const dz = padC.z - player.position.z;
         const dist = Math.hypot(dx, dz);
         if (dist > HOSTILE_AGGRO_RADIUS - 0.4 && dist > 0.2) {
           const step = Math.min(MAX_STEP_METERS, dist);
           net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         }
-        if (padA.aggroed || home > 0.7) {
-          pulledId = padA.npcId;
+        if (padC.aggroed || home > 0.7) {
+          pulledId = padC.npcId;
+          selectedTargetId = padC.npcId;
+          net.setTarget(padC.npcId);
           phase = 'drop';
-          if (mark) mark.textContent = aggroVe ? 'VE aggro: pulled — dropping leash…' : 'VE leash: pulled — running out…';
+          if (mark) {
+            mark.textContent = aggroVe
+              ? 'VE aggro: pulled Brigand — dropping leash…'
+              : 'VE leash: pulled Brigand — running out…';
+          }
         } else if (mark) {
-          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: walking in · d=${dist.toFixed(1)} · home=${home.toFixed(2)}`;
+          mark.textContent =
+            `VE ${aggroVe ? 'aggro' : 'leash'}: walking in · d=${dist.toFixed(1)} · home=${home.toFixed(2)}`;
         }
       } else if (phase === 'drop') {
         const tx = -12;
@@ -10009,29 +10039,30 @@ async function main(): Promise<void> {
           const step = Math.min(MAX_STEP_METERS, dist);
           net.sendMove((dx / dist) * step, (dz / dist) * step, false);
         }
-        const victim = hostiles.find((n) => n.npcId === pulledId) ?? padA;
+        const victim = brigands.find((n) => n.npcId === pulledId) ?? padC;
         const vHome = Math.hypot(
-          victim.x - (victim.spawnX || padAx),
-          victim.z - (victim.spawnZ || padAz),
+          victim.x - (victim.spawnX || padCx),
+          victim.z - (victim.spawnZ || padCz),
         );
-        if (!victim.aggroed && vHome < 0.45) {
+        if (!victim.aggroed && vHome < 0.45 && bLabel === 'Brigand') {
           phase = 'done';
           if (mark) {
             mark.textContent = aggroVe
-              ? 'Aggro OK · pulled · leashed · #360'
-              : 'Leash OK · pulled · returned · #355';
+              ? `Aggro OK · Brigand #${victim.npcId} · pulled · leashed · dummy trainer · #455`
+              : `Leash OK · Brigand #${victim.npcId} · pulled · returned · dummy trainer · #455`;
           }
           return;
         }
         if (mark) {
-          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: drop · aggro=${victim.aggroed ? 'y' : 'n'} · home=${vHome.toFixed(1)}`;
+          mark.textContent =
+            `VE ${aggroVe ? 'aggro' : 'leash'}: drop · aggro=${victim.aggroed ? 'y' : 'n'} · home=${vHome.toFixed(1)} · ${bLabel || 'no'}`;
         }
       }
       if (ticks > 240) {
         if (mark) {
           mark.textContent = aggroVe
-            ? `Aggro FAIL · phase ${phase} · #360`
-            : `Leash FAIL · phase ${phase} · #355`;
+            ? `Aggro FAIL · phase ${phase} · #455`
+            : `Leash FAIL · phase ${phase} · #455`;
         }
         return;
       }
