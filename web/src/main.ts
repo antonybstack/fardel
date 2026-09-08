@@ -57,6 +57,7 @@ import {
   getTrunkCapsules,
   nearestTrunk,
   PLAYER_TRUNK_RADIUS,
+  setPlayerBlobShadow,
   slideAgainstTrunks,
 } from './world/forest';
 import {
@@ -4664,6 +4665,7 @@ async function main(): Promise<void> {
       player.position.y = samp.y;
       player.position.z = samp.z;
     }
+    setPlayerBlobShadow(player.position.x, player.position.z);
     {
       const wish = wishFromKeys(keys, camera);
       let faceYaw: number | null = null;
@@ -6293,7 +6295,7 @@ async function main(): Promise<void> {
       if (latestStatus.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Place-wow OK · huge trees · receding path · hero variety · fog · no capsules · Connected';
+            'Place-wow OK · huge trees · receding path · blob shadows · fog · no capsules · Connected';
         }
         return;
       }

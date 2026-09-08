@@ -1591,6 +1591,138 @@ function buildClearingPath(scene: Scene): void {
 }
 
 /**
+ * Cheap contact blobs (#346) — not cascade ShadowGenerator (fillrate).
+ * Disc + radial DynamicTexture, ALPHABLEND, no depth write. Sit above path
+ * discs (y≈0.04) so they do not z-fight the dirt.
+ */
+const BLOB_Y = 0.058;
+const PLAYER_BLOB_R = 1.05;
+/** Sun dir XZ (#277) so blobs fall slightly off-center, not a stamp. */
+const BLOB_FALL_X = -0.72;
+const BLOB_FALL_Z = -0.28;
+let playerBlobShadow: Mesh | null = null;
+
+function makeBlobShadowMat(
+  scene: Scene,
+  name: string,
+  /** Center opacity. Player sits on dirt hollows — needs more than grass. */
+  centerAlpha: number,
+): StandardMaterial {
+  const size = 64;
+  const tex = new DynamicTexture(`${name}Tex`, size, scene, false);
+  tex.hasAlpha = true;
+  tex.wrapU = Texture.CLAMP_ADDRESSMODE;
+  tex.wrapV = Texture.CLAMP_ADDRESSMODE;
+  const ctx = tex.getContext();
+  const g = ctx.createRadialGradient(
+    size * 0.5,
+    size * 0.5,
+    1,
+    size * 0.5,
+    size * 0.5,
+    size * 0.48,
+  );
+  g.addColorStop(0, `rgba(4,6,10,${centerAlpha})`);
+  g.addColorStop(0.38, `rgba(4,6,10,${centerAlpha * 0.5})`);
+  g.addColorStop(0.78, `rgba(4,6,10,${centerAlpha * 0.1})`);
+  g.addColorStop(1, 'rgba(4,6,10,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  tex.update();
+
+  const m = new StandardMaterial(name, scene);
+  m.diffuseTexture = tex;
+  m.opacityTexture = tex;
+  m.diffuseColor = new Color3(0.04, 0.045, 0.05);
+  m.emissiveColor = new Color3(0, 0, 0);
+  m.specularColor = new Color3(0, 0, 0);
+  m.useAlphaFromDiffuseTexture = true;
+  m.transparencyMode = Material.MATERIAL_ALPHABLEND;
+  m.backFaceCulling = false;
+  m.disableLighting = true;
+  m.disableDepthWrite = true;
+  m.needDepthPrePass = false;
+  m.zOffset = -2;
+  m.fogEnabled = true;
+  return m;
+}
+
+function placeBlobDisc(
+  scene: Scene,
+  name: string,
+  x: number,
+  z: number,
+  radius: number,
+  mat: StandardMaterial,
+): Mesh {
+  const d = MeshBuilder.CreateDisc(name, { radius, tessellation: 18 }, scene);
+  d.rotation.x = Math.PI / 2;
+  d.position.set(x, BLOB_Y, z);
+  // After rot.x=π/2, scaling.y is world-Z ellipse (#299).
+  d.scaling.x = 1.18;
+  d.scaling.y = 0.8;
+  d.material = mat;
+  d.isPickable = false;
+  d.receiveShadows = false;
+  d.applyFog = true;
+  d.checkCollisions = false;
+  return d;
+}
+
+function placeContactShadows(scene: Scene): void {
+  playerBlobShadow = null;
+  const heroMat = makeBlobShadowMat(scene, 'heroBlobShadowMat', 0.62);
+  const playerMat = makeBlobShadowMat(scene, 'playerBlobShadowMat', 0.88);
+  const fl = Math.hypot(BLOB_FALL_X, BLOB_FALL_Z) || 1;
+  const ux = BLOB_FALL_X / fl;
+  const uz = BLOB_FALL_Z / fl;
+  playerBlobShadow = placeBlobDisc(
+    scene,
+    'playerBlobShadow',
+    ux * 0.1,
+    uz * 0.1,
+    PLAYER_BLOB_R,
+    playerMat,
+  );
+
+  let n = 0;
+  for (const c of trunkCapsules) {
+    if (c.kind !== 'hero') continue;
+    const r = Math.max(2.2, Math.min(3.8, c.radius * 0.45));
+    const d = placeBlobDisc(
+      scene,
+      `heroBlobShadow_${n}`,
+      c.x + ux * r * 0.28,
+      c.z + uz * r * 0.28,
+      r,
+      heroMat,
+    );
+    d.freezeWorldMatrix();
+    n += 1;
+  }
+  if (n === 0) {
+    const r = 2.8;
+    const d = placeBlobDisc(
+      scene,
+      'heroBlobShadow_0',
+      COLLISION_VE_HERO.x + ux * r * 0.28,
+      COLLISION_VE_HERO.z + uz * r * 0.28,
+      r,
+      heroMat,
+    );
+    d.freezeWorldMatrix();
+  }
+}
+
+/** Presentation follow for the player contact blob. Not a client position. */
+export function setPlayerBlobShadow(x: number, z: number): void {
+  if (!playerBlobShadow) return;
+  const fl = Math.hypot(BLOB_FALL_X, BLOB_FALL_Z) || 1;
+  playerBlobShadow.position.x = x + (BLOB_FALL_X / fl) * 0.1;
+  playerBlobShadow.position.z = z + (BLOB_FALL_Z / fl) * 0.1;
+}
+
+/**
  * Forest clearing: Quaternius Standard heroes + mid + understory (CC0),
  * procedural mountain silhouettes (#273), #39 sun/hemi + #270 LINEAR fog/sky lock.
  * Path/ground polish #44 via buildClearingPath; sky/horizon silhouette #55.
@@ -1674,6 +1806,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
     placeProceduralForest(scene);
   }
   placeThinUnderstory(scene);
+  placeContactShadows(scene);
 
   // Hybrid: mountains stay procedural (pack mountains optional / heavy).
   buildMountainBackdrop(scene);
