@@ -66,7 +66,7 @@ try
     Console.WriteLine($"move-interrupt: casting mana {manaBeforeMove}->{manaMid}");
 
     // Break windup with a real step.
-    conn.Reducers.Move(0.4f, 0f);
+    conn.Reducers.Move(0.4f, 0f, false);
     await PumpUntil(() =>
         conn.Db.PlayerCombat.Identity.Find(id) is { } pc && pc.CastingSpellId == 0,
         timeoutMs, conn, "cast cleared by move");

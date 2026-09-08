@@ -12,12 +12,12 @@ namespace SpacetimeDB.Types
 {
     public sealed partial class RemoteReducers : RemoteBase
     {
-        public delegate void MoveHandler(ReducerEventContext ctx, float dx, float dz);
+        public delegate void MoveHandler(ReducerEventContext ctx, float dx, float dz, bool jump);
         public event MoveHandler? OnMove;
 
-        public void Move(float dx, float dz)
+        public void Move(float dx, float dz, bool jump)
         {
-            conn.InternalCallReducer(new Reducer.Move(dx, dz));
+            conn.InternalCallReducer(new Reducer.Move(dx, dz, jump));
         }
 
         public bool InvokeMove(ReducerEventContext ctx, Reducer.Move args)
@@ -37,7 +37,8 @@ namespace SpacetimeDB.Types
             OnMove(
                 ctx,
                 args.Dx,
-                args.Dz
+                args.Dz,
+                args.Jump
             );
             return true;
         }
@@ -53,14 +54,18 @@ namespace SpacetimeDB.Types
             public float Dx;
             [DataMember(Name = "dz")]
             public float Dz;
+            [DataMember(Name = "jump")]
+            public bool Jump;
 
             public Move(
                 float Dx,
-                float Dz
+                float Dz,
+                bool Jump
             )
             {
                 this.Dx = Dx;
                 this.Dz = Dz;
+                this.Jump = Jump;
             }
 
             public Move()

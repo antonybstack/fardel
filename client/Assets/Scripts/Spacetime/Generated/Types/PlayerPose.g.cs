@@ -31,6 +31,10 @@ namespace SpacetimeDB.Types
         public int InterestChunkX;
         [DataMember(Name = "interest_chunk_z")]
         public int InterestChunkZ;
+        [DataMember(Name = "vel_y")]
+        public float VelY;
+        [DataMember(Name = "last_grounded_micros")]
+        public long LastGroundedMicros;
 
         public PlayerPose(
             SpacetimeDB.Identity Identity,
@@ -41,7 +45,9 @@ namespace SpacetimeDB.Types
             int ChunkX,
             int ChunkZ,
             int InterestChunkX,
-            int InterestChunkZ
+            int InterestChunkZ,
+            float VelY,
+            long LastGroundedMicros
         )
         {
             this.Identity = Identity;
@@ -53,6 +59,8 @@ namespace SpacetimeDB.Types
             this.ChunkZ = ChunkZ;
             this.InterestChunkX = InterestChunkX;
             this.InterestChunkZ = InterestChunkZ;
+            this.VelY = VelY;
+            this.LastGroundedMicros = LastGroundedMicros;
         }
 
         public PlayerPose()

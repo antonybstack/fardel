@@ -65,16 +65,20 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=hotbar-afford` | Affordance polish proof: empty vs STAFF vs OOM at play cam (`ve/babylon-hotbar-afford.png`) |
 | `?ve=gcd` | Thicker GCD sweep + Emberbolt cast fill on hotbar slots (`ve/babylon-gcd.png`) |
 | `?ve=debug-hud` | Force `#status` + `#fpsHud` visible; HUD `Debug HUD OK · status visible · F3/?debug=1` (`ve/babylon-debug-hud.png`) |
+| `?ve=status-read` | Prove Connected · online vs Connecting vs GCD idle are lexically distinct (#129); HUD `Status-read OK · Connected · online · GCD idle · #129` |
+| `?ve=rmb-look` | Prove RMB-look armed clarity (#154): canvas `grabbing` + legend `LOOKING` chip + status `camera: looking`; HUD `RMB-look OK · armed · grabbing · legend LOOKING · status looking · #154` |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
 | `?ve=reticule` | Select Dummy; prove gold ring + overhead marker (`ve/babylon-reticule.png`); HUD `Reticule OK · … · gold ring+marker` |
 | `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |
 | `?ve=keys` | Open keybind legend overlay (H); HUD `Keys legend OK · …` (`ve/babylon-keys.png`) |
+| `?ve=keys-read` | Keybind legend chrome readability under #39 cyan fog (#115); HUD `Keys-read OK · …` |
 | `?ve=death-ux` | Kill self via Dummy; prove stronger greyout + live respawn countdown + death toast (`ve/babylon-death-ux.png`); HUD `Death UX OK · …` |
 | `?ve=cast-range` | Move beyond CastRangeMeters; outOfRange toast + dim hotbar (`ve/babylon-cast-range.png`) |
 | `?ve=cast-range-ring` | Selected Dummy beyond cast range; Babylon ground reach ring (`ve/babylon-cast-range-ring.png`); HUD `Cast-range ring OK · …` |
 | `?ve=cast-cancel` | Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast (`ve/babylon-cast-cancel.png`) |
 | `?ve=cast-feedback` | Prominent Emberbolt cast bar + CANCEL ≠ LOCKOUT toasts + Rest enter chrome (`ve/babylon-cast-feedback.png`) |
 | `?ve=castbar-read` | Cast / CANCEL / LOCKOUT chrome readable over #39 cyan fog (`ve/babylon-castbar-read.png`); HUD `Castbar-read OK · … · fog chrome` |
+| `?ve=gcd-read` | Cool blue/silver `#gcdBar` mid-sweep (+ cast amber contrast) under #39 fog (#117); HUD `GCD-read OK · … · cool≠amber · fog chrome` |
 | `?ve=bandage` | BuyYardBandage + UseBandage HP heal; toast/bag (`ve/babylon-bandage.png`) |
 | `?ve=humanoid` | Frame local procedural humanoid + staff |
 | `?ve=dummy` | Frame scarecrow/practice dummy (wood+canvas) under #39 lights (`ve/babylon-dummy.png`) |
@@ -84,11 +88,14 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=loadout-buff` | Mixed equipped/missing loadout chips + active tonic buff (#91); paste PNG to PR user-attachments |
 | `?ve=combat-log-read` | Combat log strip readability over cyan fog (#78) (`ve/babylon-combat-log-read.png`) |
 | `?ve=toast-read` | System toast stack readability vs #39 fog (#90) — invite/XP/death plates; paste PNG to PR user-attachments |
+| `?ve=chat-read` | Chat/say plate readability over cyan fog — say/party/whisper distinct (#88); HUD `Chat-read OK · …` |
 | `?ve=atmosphere` | Yard mood: blue/cyan fog + warm sun/cool hemi + lush ground (`ve/babylon-atmosphere.png`) |
 | `?ve=spell-vfx` | Spark cyan flash+bolt+impact + Emberbolt staff charge→projectile→impact (`ve/babylon-spell-vfx.png`) |
 | `?ve=path-ground` | Dirt/stone trail vs lush grass (#44) (`ve/babylon-path-ground.png`) |
 | `?ve=sky-horizon` | Layered mountain silhouette + fog-matched sky (#55) (`ve/babylon-sky-horizon.png`) |
+| `?ve=vendor-panel` | Vendor buy/sell panel chrome vs #39 fog (#106) — bronze buy / mint sell on silver plate; interim capture `/workspace/ve-capture/pr-vendor-panel.png` (no `ve/*.png` commit) |
 | `?ve=vendor-stall` | Shop silhouette posts+counter+awning under #39 fog (#58) (`ve/babylon-vendor-stall.png`) |
+| `?ve=vendor-interact` | Approach YardVendor into 4.5m range; toast-only affordance (panel closed); framed stall |
 | `?ve=forest` / `?ve=quaternius-env` / `?ve=aoi` / `?ve=combat` / `?ve=persist` | Forest / Quaternius Standard env (`ve/babylon-quaternius-env.png`) |
 
 

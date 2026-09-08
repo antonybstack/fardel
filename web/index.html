@@ -41,62 +41,76 @@
         <span class="slotEmptyMark" aria-hidden="true">+</span>
       </div>
     </div>
-    <div id="selfFrame" class="hidden" aria-label="Player self frame">
-      <div class="sfNameRow">
-        <span id="sfName">You</span>
-        <span id="sfLevel" class="sfLevel">Lv —</span>
-        <span id="sfXp" class="sfXp">XP —</span>
+    <div id="hudBottomLeft" aria-label="Bottom-left HUD cluster">
+      <div id="chatPanel" aria-label="Chat say">
+        <div class="chatHead">
+          <span class="chatTitle">Chat</span>
+          <span class="chatHint">Enter · say · /p party · /w hex</span>
+        </div>
+        <div id="chatLines" class="chatLines"></div>
+        <form id="chatForm" class="chatForm" autocomplete="off">
+          <span class="chatPrompt">Say</span>
+          <input id="chatInput" type="text" maxlength="120" spellcheck="false" placeholder="say… /p party… /w hex whisper…" />
+        </form>
       </div>
-      <div class="sfHpBar" aria-label="Player HP">
-        <div class="sfHpFill" id="sfHpFill"></div>
-        <span class="sfHpLabel" id="sfHpLabel">—</span>
+      <div id="loadoutStrip" class="hidden" aria-label="Loadout strip">
+        <div class="loChip" id="loStaff" data-kind="staff">
+          <span class="loIcon staff" aria-hidden="true">┃</span>
+          <span class="loLabel">Staff</span>
+          <span class="loState" id="loStaffState">—</span>
+        </div>
+        <div class="loChip" id="loRobes" data-kind="robes">
+          <span class="loIcon robes" aria-hidden="true">▣</span>
+          <span class="loLabel">Robes</span>
+          <span class="loState" id="loRobesState">—</span>
+        </div>
+        <div class="loChip" id="loSpark" data-kind="spark">
+          <span class="loIcon spark" aria-hidden="true">✦</span>
+          <span class="loLabel">Spark</span>
+          <span class="loState" id="loSparkState">—</span>
+        </div>
+        <div class="loChip" id="loEmber" data-kind="emberbolt">
+          <span class="loIcon ember" aria-hidden="true">✸</span>
+          <span class="loLabel">Emberbolt</span>
+          <span class="loState" id="loEmberState">—</span>
+        </div>
+        <div class="loChip" id="loShard" data-kind="shard">
+          <span class="loIcon shard" aria-hidden="true">◆</span>
+          <span class="loLabel">Shard</span>
+          <span class="loState" id="loShardState">—</span>
+        </div>
+        <div class="loChip" id="loTonic" data-kind="tonic">
+          <span class="loIcon tonic" aria-hidden="true">⚗</span>
+          <span class="loLabel">Tonic</span>
+          <span class="loState" id="loTonicState">—</span>
+        </div>
+        <div class="loChip" id="loBandage" data-kind="bandage">
+          <span class="loIcon bandage" aria-hidden="true">🩹</span>
+          <span class="loLabel">Bandage</span>
+          <span class="loState" id="loBandageState">—</span>
+        </div>
       </div>
-      <div class="sfManaBar" aria-label="Player mana">
-        <div class="sfManaFill" id="sfManaFill"></div>
-        <span class="sfManaLabel" id="sfManaLabel">—</span>
+      <div id="selfFrame" class="hidden" aria-label="Player self frame">
+        <div class="sfNameRow">
+          <span id="sfName">You</span>
+          <span id="sfLevel" class="sfLevel">Lv —</span>
+          <span id="sfXp" class="sfXp">XP —</span>
+        </div>
+        <div class="sfHpBar" aria-label="Player HP">
+          <div class="sfHpFill" id="sfHpFill"></div>
+          <span class="sfHpLabel" id="sfHpLabel">—</span>
+        </div>
+        <div class="sfManaBar" aria-label="Player mana">
+          <div class="sfManaFill" id="sfManaFill"></div>
+          <span class="sfManaLabel" id="sfManaLabel">—</span>
+        </div>
+        <div id="sfBuff" class="sfBuff hidden">Tonic —</div>
+        <div id="sfCc" class="sfCc hidden" aria-live="polite">CC —</div>
+        <div id="sfRest" class="sfRest hidden" aria-live="polite">Resting…</div>
+        <div class="sfHint">GCD on hotbar · B bag · V tonic · N bandage · R rest · mana pool</div>
       </div>
-      <div id="sfBuff" class="sfBuff hidden">Tonic —</div>
-      <div id="sfRest" class="sfRest hidden" aria-live="polite">Resting…</div>
-      <div class="sfHint">GCD on hotbar · B bag · V tonic · N bandage · R rest · mana pool</div>
     </div>
-    <div id="loadoutStrip" class="hidden" aria-label="Loadout strip">
-      <div class="loChip" id="loStaff" data-kind="staff">
-        <span class="loIcon staff" aria-hidden="true">┃</span>
-        <span class="loLabel">Staff</span>
-        <span class="loState" id="loStaffState">—</span>
-      </div>
-      <div class="loChip" id="loRobes" data-kind="robes">
-        <span class="loIcon robes" aria-hidden="true">▣</span>
-        <span class="loLabel">Robes</span>
-        <span class="loState" id="loRobesState">—</span>
-      </div>
-      <div class="loChip" id="loSpark" data-kind="spark">
-        <span class="loIcon spark" aria-hidden="true">✦</span>
-        <span class="loLabel">Spark</span>
-        <span class="loState" id="loSparkState">—</span>
-      </div>
-      <div class="loChip" id="loEmber" data-kind="emberbolt">
-        <span class="loIcon ember" aria-hidden="true">✸</span>
-        <span class="loLabel">Emberbolt</span>
-        <span class="loState" id="loEmberState">—</span>
-      </div>
-      <div class="loChip" id="loShard" data-kind="shard">
-        <span class="loIcon shard" aria-hidden="true">◆</span>
-        <span class="loLabel">Shard</span>
-        <span class="loState" id="loShardState">—</span>
-      </div>
-      <div class="loChip" id="loTonic" data-kind="tonic">
-        <span class="loIcon tonic" aria-hidden="true">⚗</span>
-        <span class="loLabel">Tonic</span>
-        <span class="loState" id="loTonicState">—</span>
-      </div>
-          <div class="loChip" id="loBandage" data-kind="bandage">
-        <span class="loIcon bandage" aria-hidden="true">🩹</span>
-        <span class="loLabel">Bandage</span>
-        <span class="loState" id="loBandageState">—</span>
-      </div>
-</div>
-    <div id="bagPanel" class="hidden" aria-label="Bag / loadout">
+<div id="bagPanel" class="hidden" aria-label="Bag / loadout">
       <div class="bagHead">
         <span class="bagTitle">Bag / loadout</span>
         <span class="bagKey">B</span>
@@ -119,26 +133,26 @@
         <span class="bagKey">H</span>
       </div>
       <div class="klRows">
-        <div class="klRow">
+        <div class="klRow" data-group="Move">
           <span class="klChip"><kbd>WASD</kbd> move</span>
           <span class="klChip"><kbd>Space</kbd> jump</span>
-          <span class="klChip"><kbd>RMB</kbd> look</span>
+          <span class="klChip" data-bind="rmb"><kbd>RMB</kbd> <span class="klRmbLabel">hold look</span></span>
           <span class="klChip"><kbd>Tab</kbd> target</span>
+        </div>
+        <div class="klRow" data-group="Combat">
           <span class="klChip"><kbd>1</kbd> Spark</span>
           <span class="klChip"><kbd>2</kbd> Emberbolt</span>
           <span class="klChip"><kbd>Esc</kbd> cancel cast</span>
+          <span class="klChip"><kbd>R</kbd> rest</span>
+          <span class="klChip"><kbd>V</kbd> tonic</span>
+          <span class="klChip"><kbd>N</kbd> bandage</span>
+          <span class="klChip"><kbd>F</kbd> pickup</span>
         </div>
-        <div class="klRow">
+        <div class="klRow" data-group="Social">
           <span class="klChip"><kbd>B</kbd> bag</span>
           <span class="klChip"><kbd>U</kbd>/<kbd>I</kbd> staff</span>
           <span class="klChip"><kbd>J</kbd>/<kbd>K</kbd> robes</span>
           <span class="klChip"><kbd>E</kbd> vendor</span>
-          <span class="klChip"><kbd>F</kbd> pickup</span>
-          <span class="klChip"><kbd>V</kbd> tonic</span>
-          <span class="klChip"><kbd>N</kbd> bandage</span>
-          <span class="klChip"><kbd>R</kbd> rest</span>
-        </div>
-        <div class="klRow">
           <span class="klChip"><kbd>P</kbd> invite/accept</span>
           <span class="klChip"><kbd>O</kbd> leave party</span>
           <span class="klChip"><kbd>T</kbd> trade</span>
@@ -148,16 +162,16 @@
           <span class="klChip"><kbd>F3</kbd> debug HUD</span>
         </div>
       </div>
-      <div class="bagFoot">/p party · /w hex whisper · combat log right · F3 debug HUD · system toasts top</div>
+      <div class="bagFoot">Hold RMB look (drag) · LMB select/UI · /p party · /w hex whisper · F3 debug HUD</div>
     </div>
     <div id="vendorPanel" class="hidden" aria-label="Vendor">
       <div class="bagHead">
         <span class="bagTitle">Vendor</span>
         <span class="bagKey">E</span>
       </div>
-      <div class="bagRow"><span>Buy shard</span><span id="vendorBuyXp">5 XP</span></div>
-      <div class="bagRow"><span>Sell shard</span><span id="vendorSellXp">+5 XP</span></div>
-      <div class="bagRow"><span>Buy bandage</span><span id="vendorBuyBandageXp">5 XP</span></div>
+      <div class="bagRow vendorBuy"><span>Buy shard</span><span id="vendorBuyXp">5 XP</span></div>
+      <div class="bagRow vendorSell"><span>Sell shard</span><span id="vendorSellXp">+5 XP</span></div>
+      <div class="bagRow vendorBuy"><span>Buy bandage</span><span id="vendorBuyBandageXp">5 XP</span></div>
       <div class="bagFoot">E nearby: no shard → buy · has shard → sell · N use bandage</div>
     </div>
     <div id="combatLog" aria-label="Combat log">
@@ -176,17 +190,6 @@
         · remotes <span id="fpsRemotes">0</span>
         · npcs <span id="fpsNpcs">0</span>
       </div>
-    </div>
-    <div id="chatPanel" aria-label="Chat say">
-      <div class="chatHead">
-        <span class="chatTitle">Chat</span>
-        <span class="chatHint">Enter · say · /p party · /w hex</span>
-      </div>
-      <div id="chatLines" class="chatLines"></div>
-      <form id="chatForm" class="chatForm" autocomplete="off">
-        <span class="chatPrompt">Say</span>
-        <input id="chatInput" type="text" maxlength="120" spellcheck="false" placeholder="say… /p party… /w hex whisper…" />
-      </form>
     </div>
     <div id="deathGreyout" class="hidden" aria-hidden="true">
       <div class="deathGreyInner">

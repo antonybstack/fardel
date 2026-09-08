@@ -14,6 +14,11 @@ body {
   display: block;
   outline: none;
   touch-action: none;
+  /* #154 — idle grab cue: hold RMB to look (armed → grabbing). */
+  cursor: grab;
+}
+#renderCanvas[data-rmb-look="armed"] {
+  cursor: grabbing;
 }
 
 #hud {
@@ -41,6 +46,21 @@ body {
   line-height: 1.35;
   max-width: min(520px, 90vw);
   white-space: pre-wrap;
+}
+
+/* #129 — connection chrome on #status: Connected vs Connecting vs offline. */
+#status[data-conn="connected"] {
+  border-color: rgba(94, 214, 138, 0.55);
+  box-shadow: 0 0 0 1px rgba(40, 120, 70, 0.35);
+}
+#status[data-conn="connecting"] {
+  border-color: rgba(255, 196, 86, 0.6);
+  box-shadow: 0 0 0 1px rgba(140, 100, 20, 0.35);
+}
+#status[data-conn="disconnected"],
+#status[data-conn="error"] {
+  border-color: rgba(255, 120, 100, 0.55);
+  box-shadow: 0 0 0 1px rgba(120, 40, 30, 0.35);
 }
 
 #combatBars {
@@ -87,23 +107,59 @@ body {
     0 0 12px rgba(255, 160, 50, 0.55);
 }
 
-/* GCD bar — cool blue secondary chrome; distinct from warm cast / crimson lockout. */
+/* GCD bar — cool blue/silver secondary chrome under #39 fog; ≠ warm cast / crimson lockout / XP amber.
+   No neon bloom — matte plate + crisp fill so ready vs sweeping read at a glance. */
 #gcdBar {
   height: 18px;
   border-radius: 6px;
-  border: 1px solid rgba(120, 170, 255, 0.72);
-  background: rgba(6, 10, 22, 0.94);
+  border: 2px solid rgba(158, 188, 228, 0.94);
+  background: rgba(4, 9, 18, 0.97);
   box-shadow:
-    0 0 0 1px rgba(4, 6, 14, 0.92),
-    0 2px 10px rgba(0, 0, 0, 0.4),
-    inset 0 0 0 1px rgba(140, 190, 255, 0.18);
+    0 0 0 1px rgba(2, 4, 10, 0.96),
+    0 2px 12px rgba(0, 0, 0, 0.52),
+    inset 0 0 0 1px rgba(190, 210, 235, 0.28);
 }
 
 #gcdBar .barLabel {
   font-size: 11px;
-  font-weight: 650;
-  color: #dce8ff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  font-weight: 750;
+  letter-spacing: 0.025em;
+  line-height: 16px;
+  color: #f0f5ff;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 1px rgba(0, 0, 0, 0.85);
+}
+
+/* Sweeping fill: cool blue → silver edge (not cast amber, not toast XP). */
+#gcdBar .barFill {
+  background: linear-gradient(
+    90deg,
+    #243f6e 0%,
+    #3f6eae 52%,
+    #9bb6d8 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(220, 235, 255, 0.4);
+}
+
+/* Ready: cool mint-silver idle plate — distinct from sweep, never amber. */
+#gcdBar .barFill.ready {
+  background: linear-gradient(90deg, #2f5a64 0%, #6a9a9e 100%);
+  width: 100% !important;
+  opacity: 0.58;
+  box-shadow: inset 0 1px 0 rgba(200, 230, 232, 0.32);
+}
+
+/* #129 — offline/connecting: dim GCD plate (never reads as ready/connected). */
+#gcdBar[data-gcd="offline"] {
+  opacity: 0.55;
+  border-color: rgba(120, 140, 170, 0.45);
+}
+#gcdBar[data-gcd="idle"] .barLabel {
+  color: #d8ecf0;
+}
+#gcdBar[data-gcd="sweep"] .barLabel {
+  color: #f0f5ff;
 }
 
 .barFill {
@@ -486,16 +542,38 @@ body {
 }
 
 
-/* Player self-frame — You + XP + Character.Hp bar. */
-#selfFrame {
+/* Bottom-left HUD column — chat / loadout chips / self+keybind hint (#104).
+   Flex stack replaces absolute bottom offsets that overlapped at 1280×720. */
+#hudBottomLeft {
   position: absolute;
   left: 12px;
   bottom: 22px;
-  z-index: 12;
+  z-index: 14;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  width: min(320px, 48vw);
+  max-width: min(320px, 48vw);
+  pointer-events: none;
+}
+
+#hudBottomLeft #chatPanel,
+#hudBottomLeft #loadoutStrip,
+#hudBottomLeft #selfFrame {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  z-index: auto;
+}
+
+/* Player self-frame — You + XP + Character.Hp bar (+ keybind hint footer). */
+#selfFrame {
   pointer-events: none;
   display: flex;
   flex-direction: column;
-  width: min(220px, 42vw);
+  width: 100%;
+  max-width: min(220px, 42vw);
   padding: 8px 11px 7px;
   background: rgba(8, 12, 24, 0.82);
   border: 1px solid rgba(106, 162, 255, 0.42);
@@ -562,43 +640,99 @@ body {
   50% { opacity: 1; }
 }
 
-/* Rest enter/exit — brief resting chrome on self-frame (client-only). */
+/* Rest enter/exit — brief resting chrome on self-frame (client-only).
+   Cool soft cyan-mint (fog-safe) — distinct from tonic amber + cast-bar amber (#116). */
 #selfFrame.resting {
-  border-color: rgba(90, 220, 140, 0.78);
+  border-color: rgba(80, 180, 160, 0.65);
   box-shadow:
-    0 0 16px rgba(80, 220, 140, 0.38),
+    0 0 10px rgba(60, 160, 145, 0.22),
     0 2px 12px rgba(0, 0, 0, 0.35),
-    inset 0 0 0 1px rgba(125, 255, 181, 0.28);
+    inset 0 0 0 1px rgba(100, 200, 185, 0.24);
 }
 
 .sfRest {
   margin-top: 4px;
-  color: #7dffb5;
+  color: #88d4c4;
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  text-shadow: 0 0 8px rgba(80, 255, 160, 0.5);
+  text-shadow: 0 0 6px rgba(70, 180, 160, 0.35);
 }
 .sfRest.hidden { display: none; }
 .sfRest.exiting {
-  color: #b8d0c4;
+  color: #b0cec8;
   text-shadow: none;
   opacity: 0.85;
+}
+
+/* Sticky CC chrome on self-frame — CastLockedUntil / StunnedUntilMicros (#153). */
+#selfFrame.ccStun {
+  border-color: rgba(100, 190, 255, 0.88);
+  box-shadow:
+    0 0 16px rgba(80, 170, 255, 0.42),
+    0 2px 12px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(140, 210, 255, 0.32);
+}
+#selfFrame.ccSilence {
+  border-color: rgba(180, 120, 255, 0.82);
+  box-shadow:
+    0 0 16px rgba(150, 90, 255, 0.38),
+    0 2px 12px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(200, 150, 255, 0.28);
+}
+
+.sfCc {
+  margin-top: 5px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  border: 1px solid transparent;
+}
+.sfCc.hidden { display: none; }
+.sfCc.stun {
+  color: #b6e2ff;
+  background: rgba(8, 28, 48, 0.94);
+  border-color: rgba(100, 190, 255, 0.72);
+  box-shadow:
+    0 0 10px rgba(70, 160, 255, 0.35),
+    inset 0 0 0 1px rgba(140, 210, 255, 0.18);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(80, 170, 255, 0.55);
+  animation: sfCcPulse 1.1s ease-in-out infinite;
+}
+.sfCc.silence {
+  color: #e0c6ff;
+  background: rgba(28, 12, 44, 0.94);
+  border-color: rgba(180, 120, 255, 0.7);
+  box-shadow:
+    0 0 10px rgba(150, 90, 255, 0.32),
+    inset 0 0 0 1px rgba(200, 150, 255, 0.16);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 8px rgba(160, 100, 255, 0.5);
+  animation: sfCcPulse 1.25s ease-in-out infinite;
+}
+@keyframes sfCcPulse {
+  0%, 100% { opacity: 0.88; }
+  50% { opacity: 1; }
 }
 
 
 /* Compact loadout strip — staff + known spells (Character gates). */
 #loadoutStrip {
-  position: absolute;
-  left: 12px;
-  bottom: 78px;
-  z-index: 12;
   pointer-events: none;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  max-width: min(360px, 70vw);
+  width: 100%;
+  max-width: 100%;
 }
 
 #loadoutStrip.hidden {
@@ -720,10 +854,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 150ms ease, transform 150ms ease;
 }
 
 #bagPanel.hidden {
-  display: none;
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
 }
 
 .bagHead {
@@ -783,7 +922,9 @@ body {
 
 
 
-/* Keybind legend overlay — toggle H / ?ve=keys (client-only). */
+/* Keybind legend overlay — toggle H / ?ve=keys / ?ve=keys-read (client-only).
+   Classic MMO help plate: dark translucent + cool silver border (chat/bag family).
+   Readable under locked #39 cyan fog — no fog/sun/hemi edits. */
 #keysLegend {
   position: absolute;
   left: 50%;
@@ -793,53 +934,129 @@ body {
   pointer-events: none;
   width: min(580px, 94vw);
   padding: 10px 12px 9px;
-  background: rgba(8, 12, 24, 0.88);
-  border: 1px solid rgba(196, 160, 106, 0.4);
-  border-radius: 10px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  background: rgba(6, 10, 20, 0.92);
+  border: 1px solid rgba(168, 178, 196, 0.42);
+  border-radius: 8px;
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.58),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 #keysLegend.hidden {
   display: none;
 }
 
+/* Cool silver head (override warm bag gold while legend is open). */
+#keysLegend .bagTitle {
+  color: #d8dde6;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+#keysLegend .bagKey {
+  color: #1a2030;
+  background: linear-gradient(180deg, #eef1f6 0%, #cfd6e2 100%);
+  border: 1px solid rgba(190, 200, 214, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
 #keysLegend .klRows {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
 }
 
 #keysLegend .klRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 8px;
+  align-items: center;
+  gap: 5px 8px;
+  padding: 6px 2px 7px;
+  border-top: 1px solid rgba(168, 178, 196, 0.18);
+}
+
+#keysLegend .klRow:first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+
+/* Group labels — presentation only; existing binds unchanged. */
+#keysLegend .klRow::before {
+  content: attr(data-group);
+  flex: 0 0 auto;
+  min-width: 3.6em;
+  margin-right: 4px;
+  color: #9aa3b2;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 #keysLegend .klChip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #c8d6f0;
+  color: #d6dce8;
   font-size: 12px;
   line-height: 1.3;
   padding: 2px 4px 2px 2px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 
+/* Light keycap on dark plate — crisp under cyan fog. */
 #keysLegend .klChip kbd {
   display: inline-block;
-  color: #9ec0ff;
+  color: #1a2030;
   font-family: inherit;
   font-size: 11px;
   font-weight: 700;
-  border: 1px solid rgba(106, 162, 255, 0.35);
+  border: 1px solid rgba(190, 200, 214, 0.88);
   border-radius: 4px;
   padding: 1px 6px;
-  background: rgba(20, 32, 56, 0.65);
+  background: linear-gradient(180deg, #eef1f6 0%, #c8d0de 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.42);
   min-width: 1.1em;
   text-align: center;
+  text-shadow: none;
+}
+
+/* #154 — RMB-look armed: muted cool-silver chip (bag/chat family; ≠ gold select / hotbar amber). */
+#keysLegend .klChip[data-bind="rmb"].armed {
+  color: #d8dde6;
+  background: rgba(180, 190, 210, 0.14);
+  border-radius: 5px;
+  box-shadow:
+    0 0 0 1px rgba(190, 200, 214, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+#keysLegend .klChip[data-bind="rmb"].armed .klRmbLabel {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #eef1f6;
+}
+body[data-rmb-look="armed"] #status[data-conn] {
+  /* Cool-silver edge while looking — distinct from conn green/amber/red + ≠ gold reticule. */
+  border-color: rgba(190, 200, 214, 0.62);
+  box-shadow: 0 0 0 1px rgba(120, 130, 150, 0.28);
+}
+
+#keysLegend .bagFoot {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(168, 178, 196, 0.16);
+  color: #7e8a9c;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 /* Party member frames — compact roster under status (name/hex + HP + dist/pose). */
@@ -1292,28 +1509,30 @@ body {
 }
 
 
-/* Compact chat / say strip — bottom-left above loadout (server ChatMessage). */
+/* Compact chat / say strip — top of bottom-left #hudBottomLeft column (server ChatMessage).
+   #88 readability: classic MMO plate over cyan fog; say/party/whisper distinct, no neon. */
 #chatPanel {
-  position: absolute;
-  left: 12px;
-  bottom: 118px;
-  z-index: 14;
   display: flex;
   flex-direction: column;
-  width: min(320px, 48vw);
-  max-height: min(168px, 28vh);
-  background: rgba(8, 12, 24, 0.82);
-  border: 1px solid rgba(140, 180, 255, 0.28);
+  width: 100%;
+  max-height: min(176px, 30vh);
+  background: rgba(6, 10, 20, 0.90);
+  border: 1px solid rgba(168, 178, 196, 0.38);
   border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.045);
   overflow: hidden;
   pointer-events: none;
 }
 
 #chatPanel.composing {
   pointer-events: auto;
-  border-color: rgba(140, 180, 255, 0.55);
-  box-shadow: 0 0 16px rgba(80, 130, 255, 0.22);
+  border-color: rgba(198, 208, 224, 0.62);
+  box-shadow:
+    0 2px 16px rgba(0, 0, 0, 0.58),
+    0 0 0 1px rgba(210, 218, 230, 0.18),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 .chatHead {
@@ -1322,75 +1541,82 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 5px 9px 3px;
-  color: #9ec0ff;
+  color: #d0d6e0;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(140, 180, 255, 0.16);
+  border-bottom: 1px solid rgba(168, 178, 196, 0.22);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   pointer-events: none;
 }
 
 .chatHint {
-  opacity: 0.7;
+  opacity: 0.78;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: none;
   font-size: 10px;
-  color: #a8b8d8;
+  color: #9aa3b2;
 }
 
 .chatLines {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 5px 9px 6px;
+  gap: 3px;
+  padding: 6px 9px 7px;
   overflow: hidden;
-  max-height: min(110px, 18vh);
+  max-height: min(118px, 19vh);
   pointer-events: none;
 }
 
 .chatLine {
-  color: #c8d6f0;
-  font-size: 11px;
-  line-height: 1.35;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  color: #c6ceda;
+  font-size: 12px;
+  line-height: 1.38;
+  font-variant-numeric: tabular-nums;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+/* Say — warm off-white body; who slightly warmer silver (not neon blue). */
 .chatLine.say {
-  color: #d4e4ff;
+  color: #e6e2d8;
+}
+.chatLine.say .chatWho {
+  color: #d8d0c4;
+}
+.chatLine.say.remote .chatWho {
+  color: #cfc6b8;
+}
+.chatLine.say.local .chatWho {
+  color: #e0d8cc;
+}
+
+/* Timestamps / system — cool grey. */
+.chatLine .chatTag {
+  color: #7a8799;
+  opacity: 0.90;
+  margin-right: 5px;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .chatLine .chatWho {
-  color: #9ec0ff;
   font-weight: 700;
   margin-right: 4px;
-}
-
-.chatLine.say.remote .chatWho {
-  color: #c9a0ff;
-}
-
-.chatLine.say.local .chatWho {
-  color: #9ec0ff;
-}
-
-.chatLine .chatTag {
-  opacity: 0.7;
-  margin-right: 4px;
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .chatForm {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px 6px;
-  border-top: 1px solid rgba(140, 180, 255, 0.14);
+  padding: 4px 8px 7px;
+  border-top: 1px solid rgba(168, 178, 196, 0.20);
   opacity: 0.55;
   pointer-events: none;
 }
@@ -1401,110 +1627,117 @@ body {
 }
 
 .chatPrompt {
-  color: #9ec0ff;
+  color: #c8d0dc;
   font-size: 10px;
   font-weight: 750;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   flex-shrink: 0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 #chatInput {
   flex: 1;
   min-width: 0;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(140, 180, 255, 0.28);
+  background: rgba(0, 0, 0, 0.48);
+  border: 1px solid rgba(168, 178, 196, 0.42);
   border-radius: 5px;
-  color: #e8eefc;
+  color: #f0eee8;
   font: inherit;
   font-size: 12px;
   padding: 4px 7px;
   outline: none;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 #chatInput:focus {
-  border-color: rgba(140, 180, 255, 0.65);
+  border-color: rgba(210, 218, 230, 0.72);
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .sysToast.say {
-  border-color: rgba(158, 192, 255, 0.45);
+  border-color: rgba(210, 200, 180, 0.48);
 }
-.sysToast.say .toastTag { color: #9ec0ff; }
+.sysToast.say .toastTag { color: #d8d0c4; }
 
 .sysToast.rate {
-  border-color: rgba(255, 160, 110, 0.5);
+  border-color: rgba(220, 150, 100, 0.5);
 }
-.sysToast.rate .toastTag { color: #ffb07a; }
+.sysToast.rate .toastTag { color: #e0a078; }
 
+/* Party — soft green, muted (not neon). */
 .chatLine.party {
-  color: #c8f0d4;
+  color: #b8dcc4;
 }
-
 .chatLine.party .chatWho {
-  color: #5ed68a;
+  color: #6fb888;
 }
-
 .chatLine.party.remote .chatWho {
-  color: #7ee0a4;
+  color: #7ec498;
+}
+.chatLine.party.local .chatWho {
+  color: #78be90;
 }
 
 .chatLine .chatChannel {
-  color: #5ed68a;
+  color: #6fb888;
   font-weight: 800;
   margin-right: 4px;
   font-size: 10px;
 }
 
 #chatPanel.partyMode .chatPrompt {
-  color: #5ed68a;
+  color: #78be90;
 }
 
 #chatPanel.partyMode #chatInput {
-  border-color: rgba(94, 214, 138, 0.45);
+  border-color: rgba(111, 184, 136, 0.48);
 }
 
 #chatPanel.partyMode #chatInput:focus {
-  border-color: rgba(94, 214, 138, 0.75);
+  border-color: rgba(126, 196, 152, 0.72);
 }
 
 .sysToast.partySay {
-  border-color: rgba(94, 214, 138, 0.5);
+  border-color: rgba(111, 184, 136, 0.48);
 }
-.sysToast.partySay .toastTag { color: #5ed68a; }
+.sysToast.partySay .toastTag { color: #6fb888; }
 
 
+/* Whisper — soft violet/cyan, muted. */
 .chatLine.whisper {
-  color: #e0d0ff;
+  color: #c4c8e0;
 }
-
 .chatLine.whisper .chatWho {
-  color: #c9a6ff;
+  color: #a898c8;
 }
-
 .chatLine.whisper.remote .chatWho {
-  color: #d4b8ff;
+  color: #b4a4d0;
+}
+.chatLine.whisper.local .chatWho {
+  color: #aea0c8;
 }
 
 .chatLine .chatChannel.whisperTag {
-  color: #c9a6ff;
+  color: #9aa8c8;
 }
 
 #chatPanel.whisperMode .chatPrompt {
-  color: #c9a6ff;
+  color: #a8a0c8;
 }
 
 #chatPanel.whisperMode #chatInput {
-  border-color: rgba(201, 166, 255, 0.45);
+  border-color: rgba(168, 160, 200, 0.48);
 }
 
 #chatPanel.whisperMode #chatInput:focus {
-  border-color: rgba(201, 166, 255, 0.75);
+  border-color: rgba(180, 172, 208, 0.72);
 }
 
 .sysToast.whisper {
-  border-color: rgba(201, 166, 255, 0.5);
+  border-color: rgba(168, 160, 200, 0.48);
 }
-.sysToast.whisper .toastTag { color: #c9a6ff; }
+.sysToast.whisper .toastTag { color: #a898c8; }
 
 .sysToast.trade,
 .sysToast.loot {
@@ -1520,17 +1753,86 @@ body {
 .clLine.loot .clTag { color: #c9a878; }
 
 
+/* Vendor panel — dark plate + cool silver chrome under #39 fog (#106).
+   Distinct from bag (warm gold) and world stall prop; buy bronze vs sell mint. */
 #vendorPanel {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  transform: translate(-50%, -50%);
+  z-index: 15;
   pointer-events: auto;
-  min-width: 220px;
-  max-width: min(280px, 90vw);
-  background: rgba(8, 18, 14, 0.86);
-  border: 1px solid rgba(80, 220, 160, 0.35);
-  border-radius: 8px;
-  padding: 8px 10px 10px;
-  color: #e8fcf4;
+  min-width: 240px;
+  max-width: min(300px, 90vw);
+  padding: 10px 12px 10px;
+  background: rgba(6, 10, 20, 0.94);
+  border: 1px solid rgba(168, 184, 208, 0.48);
+  border-radius: 10px;
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(220, 230, 245, 0.06);
+  color: #e4eaf4;
   font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
+
+#vendorPanel.hidden {
+  display: none;
+}
+
+#vendorPanel .bagTitle {
+  color: #d8e2f0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+
+#vendorPanel .bagKey {
+  color: #e8f0fc;
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid rgba(180, 198, 224, 0.58);
+  border-radius: 4px;
+  padding: 1px 7px;
+  background: rgba(14, 22, 38, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.95);
+}
+
+#vendorPanel .bagFoot {
+  margin-top: 5px;
+  color: #8a9bb4;
+  font-size: 10px;
+  line-height: 1.35;
+  opacity: 0.88;
+}
+
+#vendorPanel .bagRow.vendorBuy {
+  color: #dcc4a4;
+  background: rgba(42, 28, 14, 0.42);
+  border: 1px solid rgba(168, 118, 62, 0.38);
+  border-radius: 5px;
+  padding: 4px 8px;
+}
+
+#vendorPanel .bagRow.vendorBuy span:last-child {
+  color: #c9a070;
+  font-weight: 700;
+}
+
+#vendorPanel .bagRow.vendorSell {
+  color: #b4c4c0;
+  background: rgba(12, 28, 26, 0.4);
+  border: 1px solid rgba(120, 160, 148, 0.36);
+  border-radius: 5px;
+  padding: 4px 8px;
+}
+
+#vendorPanel .bagRow.vendorSell span:last-child {
+  color: #9eb4ac;
+  font-weight: 700;
+}
+
 .vendorActions {
   display: flex;
   gap: 6px;
@@ -1542,15 +1844,15 @@ body {
   min-width: 64px;
   cursor: pointer;
   border-radius: 6px;
-  border: 1px solid rgba(80, 220, 160, 0.45);
-  background: rgba(20, 48, 36, 0.9);
-  color: #d8ffe8;
+  border: 1px solid rgba(168, 184, 208, 0.4);
+  background: rgba(16, 24, 40, 0.9);
+  color: #d4deee;
   padding: 6px 8px;
   font-size: 11px;
 }
 .vendorActions button:hover {
-  border-color: rgba(120, 255, 190, 0.7);
-  background: rgba(28, 70, 50, 0.95);
+  border-color: rgba(196, 210, 230, 0.65);
+  background: rgba(24, 34, 52, 0.95);
 }
 .sysToast.tonic {
   border-color: rgba(125, 255, 181, 0.55);
@@ -1576,6 +1878,12 @@ body {
   border-color: rgba(120, 230, 170, 0.55);
 }
 .sysToast.bandage .toastTag { color: #7dffc0; }
+
+/* Bag open/close — muted cool silver tag (bag/chat family); not neon. */
+.sysToast.bag {
+  border-color: rgba(168, 180, 200, 0.42);
+}
+.sysToast.bag .toastTag { color: #a8b4d0; }
 
 .clLine.vendor {
   color: #c6ceda;
@@ -1634,6 +1942,7 @@ body {
 }
 
 /* Player death greyout overlay — strong desaturation + dark vignette. */
+/* Death greyout — #107: soft dark vignette + muted warm chrome, legible vs #39 cyan fog. */
 #deathGreyout {
   position: absolute;
   inset: 0;
@@ -1643,46 +1952,46 @@ body {
   align-items: center;
   justify-content: center;
   background:
-    radial-gradient(ellipse at center, rgba(8, 6, 10, 0.42) 0%, rgba(2, 2, 6, 0.88) 72%, rgba(0, 0, 0, 0.94) 100%),
-    rgba(4, 5, 10, 0.72);
-  backdrop-filter: grayscale(1) brightness(0.32) contrast(1.05);
-  -webkit-backdrop-filter: grayscale(1) brightness(0.32) contrast(1.05);
+    radial-gradient(ellipse at center, rgba(18, 12, 14, 0.48) 0%, rgba(12, 8, 10, 0.82) 68%, rgba(6, 4, 6, 0.92) 100%),
+    rgba(14, 10, 12, 0.76);
+  backdrop-filter: grayscale(0.95) brightness(0.38) contrast(1.08) saturate(0.7);
+  -webkit-backdrop-filter: grayscale(0.95) brightness(0.38) contrast(1.08) saturate(0.7);
 }
 #deathGreyout.hidden {
   display: none;
 }
 .deathGreyInner {
   text-align: center;
-  padding: 22px 34px;
-  border-radius: 12px;
-  background: rgba(8, 8, 14, 0.88);
-  border: 1px solid rgba(255, 110, 110, 0.55);
-  box-shadow: 0 6px 36px rgba(0, 0, 0, 0.7), inset 0 0 24px rgba(80, 0, 0, 0.18);
+  padding: 26px 38px;
+  border-radius: 14px;
+  background: rgba(16, 12, 14, 0.92);
+  border: 1px solid rgba(180, 72, 72, 0.62);
+  box-shadow: 0 8px 42px rgba(0, 0, 0, 0.8), inset 0 0 28px rgba(60, 18, 18, 0.22);
 }
 .deathTitle {
-  color: #ffc2ba;
-  font-size: 28px;
+  color: #f0d8d2;
+  font-size: 30px;
   font-weight: 800;
-  letter-spacing: 0.06em;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85), 0 0 18px rgba(255, 60, 60, 0.35);
+  letter-spacing: 0.08em;
+  text-shadow: 0 3px 16px rgba(0, 0, 0, 0.95), 0 0 22px rgba(160, 50, 50, 0.28);
 }
 .deathSub {
-  margin-top: 10px;
-  color: #e4eaf8;
-  font-size: 16px;
+  margin-top: 12px;
+  color: #a2acb8;
+  font-size: 17px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
-  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  letter-spacing: 0.03em;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
 }
 .deathCountdown {
-  margin-top: 8px;
-  color: #fff6f0;
-  font-size: 42px;
-  font-weight: 800;
+  margin-top: 10px;
+  color: #ffffff;
+  font-size: 52px;
+  font-weight: 900;
   line-height: 1;
   font-variant-numeric: tabular-nums;
-  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9), 0 0 20px rgba(255, 90, 70, 0.4);
+  text-shadow: 0 3px 18px rgba(0, 0, 0, 1), 0 0 28px rgba(180, 60, 60, 0.35);
 }
 
 
@@ -1800,10 +2109,23 @@ body {
   border-width: 2px;
 }
 
+/* OOM = cool cyan mana-block. Fog-safe clarity bar; ≠ CANCEL amber / LOCKOUT crimson / STAFF bronze. */
 .sysToast.mana {
-  border-color: rgba(91, 124, 255, 0.55);
+  border: 2px solid rgba(90, 190, 255, 0.96);
+  background: linear-gradient(180deg, rgba(8, 32, 68, 0.97), rgba(4, 12, 28, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(2, 6, 16, 0.92),
+    0 4px 18px rgba(0, 0, 0, 0.5),
+    0 0 18px rgba(60, 150, 255, 0.42);
 }
-.sysToast.mana .toastTag { color: #9ab4ff; }
+.sysToast.mana .toastTag {
+  color: #d0e8ff;
+  background: rgba(70, 160, 255, 0.32);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(100, 180, 255, 0.75);
+  font-weight: 750;
+}
 
 /* CANCEL = soft amber refund. LOCKOUT = harsh crimson hard-interrupt. Fog-immune fills. */
 .sysToast.castCancel {
@@ -1880,3 +2202,6 @@ body {
 .sysToast.stun { border-color: rgba(120, 200, 255, 0.75); }
 .sysToast.stun .toastTag { color: #7ec8ff; }
 .clLine.stun .clTag { color: #b8c0cc; }
+
+.sysToast.canvasFocus { border-color: rgba(100, 180, 255, 0.8); }
+.sysToast.canvasFocus .toastTag { color: #64b4ff; }

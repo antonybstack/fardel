@@ -45,6 +45,7 @@ import {
   type RemotePose,
   type GroundItemView,
   type VendorView,
+  type CombatView,
 } from './net/connection';
 import { buildForestClearing } from './world/forest';
 import {
@@ -167,9 +168,11 @@ type Nameplate = {
   hpFrac: number;
 };
 
-function setStatus(text: string): void {
+function setStatus(text: string, connState?: ConnectionStatus['state']): void {
   const el = document.getElementById('status');
-  if (el) el.textContent = text;
+  if (!el) return;
+  el.textContent = text;
+  if (connState) el.dataset.conn = connState;
 }
 
 function setGcdBar(
@@ -177,20 +180,39 @@ function setGcdBar(
   castingMs: number,
   castingTotal: number,
   spellName?: string,
+  /** When omitted (VE seeds), treat as connected so GCD chrome can still demo. */
+  connState?: ConnectionStatus['state'],
 ): void {
   const fill = document.getElementById('gcdFill');
   const label = document.getElementById('gcdLabel');
+  const bar = document.getElementById('gcdBar');
   const castFill = document.getElementById('castFill');
   const castLabel = document.getElementById('castLabel');
   const gcdLeft = veGcdPresent?.gcdMs ?? remainingMs;
+  // Connection chrome != GCD chrome: never claim "ready" while offline/connecting.
+  const live = !connState || connState === 'connected';
   if (fill) {
-    const pct = Math.min(100, (gcdLeft / 1200) * 100);
-    fill.style.width = `${pct}%`;
-    fill.classList.toggle('ready', gcdLeft <= 0);
+    if (!live) {
+      fill.style.width = '0%';
+      fill.classList.remove('ready');
+    } else {
+      const pct = Math.min(100, (gcdLeft / 1200) * 100);
+      fill.style.width = `${pct}%`;
+      fill.classList.toggle('ready', gcdLeft <= 0);
+    }
+  }
+  if (bar) {
+    bar.dataset.gcd = !live ? 'offline' : gcdLeft > 0 ? 'sweep' : 'idle';
   }
   if (label) {
-    label.textContent =
-      gcdLeft > 0 ? `GCD ${ (gcdLeft / 1000).toFixed(1) }s` : 'GCD ready';
+    if (!live) {
+      // Neutral dash — connection progress lives in #status / toast, not here.
+      label.textContent = 'GCD · —';
+    } else {
+      // "idle" = gameplay cooldown clear (never "ready" — that conflates with Connected).
+      label.textContent =
+        gcdLeft > 0 ? `GCD ${ (gcdLeft / 1000).toFixed(1) }s` : 'GCD idle';
+    }
   }
   if (castFill && castLabel) {
     const ve = veCastFeedbackPresent;
@@ -252,6 +274,12 @@ let veFrameHpLock = false;
 /** VE lock: hold seeded loadout strip + tonic buff chrome for ?ve=loadout-buff. */
 let veLoadoutBuffLock = false;
 
+/** VE lock: hold seeded bottom-left HUD layout chrome for ?ve=hud-layout (#104). */
+let veHudLayoutLock = false;
+
+/** VE lock: hold resting chrome for ?ve=rest-chrome (freeze enter state, no auto-exit). */
+let veRestChromeLock = false;
+
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
   gcdMs: number;
@@ -265,6 +293,17 @@ let veCastFeedbackPresent: null | {
   castingTotal: number;
   spellName: string;
 } = null;
+
+/** VE seed: sticky CC chip on self-frame (?ve=cc-feedback) — presentation only. */
+let veCcFeedbackPresent: null | {
+  kind: 'stun' | 'silence';
+  leftMs: number;
+} = null;
+
+/** #154 — RMB-look armed vs idle (cursor / status / legend clarity only). */
+let rmbLookArmed = false;
+/** VE lock: hold RMB-look armed chrome for ?ve=rmb-look. */
+let veRmbLookLock = false;
 
 /** Client-only Rest enter/exit chrome on #selfFrame (not a server channel). */
 let restExitTimer: number | null = null;
@@ -289,7 +328,10 @@ function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
     badge.classList.remove('hidden', 'exiting');
     badge.textContent = 'Resting…';
     // Auto-exit chrome after a short settle so enter vs exit is readable.
-    restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
+    // Skip auto-exit if VE rest-chrome lock is active (freeze for screenshot).
+    if (!veRestChromeLock) {
+      restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
+    }
     return;
   }
   // exit
@@ -428,14 +470,20 @@ function updateSelfFrame(character: {
   maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
-  if (veFrameHpLock || veLoadoutBuffLock) return;
+  if (veFrameHpLock || veLoadoutBuffLock || veHudLayoutLock) return;
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
-    frame.classList.add('hidden');
+    // Skip hide if veRestChromeLock is active (VE rest-chrome freezes frame visible).
+    if (!veRestChromeLock) {
+      frame.classList.add('hidden');
+    }
     return;
   }
-  frame.classList.remove('hidden');
+  // Skip unhide if veRestChromeLock is active (VE controls visibility).
+  if (!veRestChromeLock) {
+    frame.classList.remove('hidden');
+  }
   const nameEl = document.getElementById('sfName');
   const levelEl = document.getElementById('sfLevel');
   const xpEl = document.getElementById('sfXp');
@@ -479,6 +527,56 @@ function updateSelfFrame(character: {
       buffEl.textContent = 'Tonic —';
     }
   }
+}
+
+/**
+ * Sticky stun/silence chip on #selfFrame while StunnedUntilMicros / CastLockedUntil
+ * are active (#153). Presentation only — no new CC rules. Stun wins over silence.
+ * Kick / hard-interrupt share CastLockedUntil → shown as SILENCE.
+ */
+function updateSelfCcChrome(
+  combat: CombatView | null | undefined,
+): void {
+  const frame = document.getElementById('selfFrame');
+  const chip = document.getElementById('sfCc');
+  if (!frame || !chip) return;
+
+  let kind: 'stun' | 'silence' | null = null;
+  let leftMs = 0;
+
+  if (veCcFeedbackPresent) {
+    kind = veCcFeedbackPresent.kind;
+    leftMs = Math.max(0, veCcFeedbackPresent.leftMs);
+  } else {
+    const stunLeft = stunRemainingMs(combat);
+    const silLeft = castSilenceRemainingMs(combat);
+    if (stunLeft > 0) {
+      kind = 'stun';
+      leftMs = stunLeft;
+    } else if (silLeft > 0) {
+      kind = 'silence';
+      leftMs = silLeft;
+    }
+  }
+
+  frame.classList.toggle('ccStun', kind === 'stun');
+  frame.classList.toggle('ccSilence', kind === 'silence');
+
+  if (!kind || leftMs <= 0) {
+    chip.classList.add('hidden');
+    chip.classList.remove('stun', 'silence');
+    chip.textContent = 'CC —';
+    return;
+  }
+
+  chip.classList.remove('hidden');
+  chip.classList.toggle('stun', kind === 'stun');
+  chip.classList.toggle('silence', kind === 'silence');
+  const sec = (leftMs / 1000).toFixed(1);
+  chip.textContent =
+    kind === 'stun'
+      ? `Stun ${sec}s · cannot move/cast`
+      : `Silence ${sec}s · cannot cast`;
 }
 
 /** Mirror Combat.RespawnDelayMs — client display only, do not import shared C#. */
@@ -591,7 +689,7 @@ function updateLoadoutStrip(character: {
   hasYardTonic?: boolean;
   hasYardBandage?: boolean;
 } | null | undefined): void {
-  if (veLoadoutBuffLock) return;
+  if (veLoadoutBuffLock || veHudLayoutLock) return;
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
   if (!character) {
@@ -737,12 +835,35 @@ function setBagPanelOpen(open: boolean): void {
   const panel = document.getElementById('bagPanel');
   if (!panel) return;
   panel.classList.toggle('hidden', !open);
+  pushSystemToast('bag', open ? 'Bag' : 'Bag closed', 1800);
 }
 
 function setKeysLegendOpen(open: boolean): void {
   const panel = document.getElementById('keysLegend');
   if (!panel) return;
   panel.classList.toggle('hidden', !open);
+}
+
+/** Clarity cue: RMB-look armed vs idle via canvas cursor + legend chip + status line. */
+function setRmbLookArmed(armed: boolean): void {
+  if (veRmbLookLock && !armed) return;
+  rmbLookArmed = armed;
+  const canvas = document.getElementById('renderCanvas');
+  const mode = armed ? 'armed' : 'idle';
+  document.body.dataset.rmbLook = mode;
+  if (canvas) {
+    canvas.dataset.rmbLook = mode;
+    // grab → grabbing is the always-on cue (legend/status are optional overlays).
+    canvas.style.cursor = armed ? 'grabbing' : 'grab';
+  }
+  const chip = document.querySelector(
+    '#keysLegend .klChip[data-bind="rmb"]',
+  ) as HTMLElement | null;
+  if (chip) {
+    chip.classList.toggle('armed', armed);
+    const label = chip.querySelector('.klRmbLabel');
+    if (label) label.textContent = armed ? 'LOOKING' : 'hold look';
+  }
 }
 
 /** Identity/AOI/keys #status wall + #fpsHud — hidden by default; F3 / ?debug=1. */
@@ -980,7 +1101,10 @@ type SystemToastKind =
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange' | 'bandage';
+  | 'outOfRange'
+  | 'bandage'
+  | 'canvasFocus'
+  | 'bag';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1043,7 +1167,11 @@ function pushSystemToast(
                                             ? 'STUN'
                                             : kind === 'outOfRange'
                                               ? 'RANGE'
-                                              : 'SAY';
+                                              : kind === 'canvasFocus'
+                                                ? 'FOCUS'
+                                                : kind === 'bag'
+                                                  ? 'BAG'
+                                                  : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1069,6 +1197,7 @@ function toastKindsPresent(): Set<string> {
 
 const CHAT_LOG_MAX = 10;
 let chatComposing = false;
+let lastCanvasFocusToastMs = 0;
 
 function setChatComposing(open: boolean): void {
   chatComposing = open;
@@ -1240,6 +1369,18 @@ function bindChatUi(opts: {
       setChatComposing(true);
       updateChatPrompt('say');
       return;
+    }
+
+    if (e.key === ' ') {
+      const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+      const shouldShowToast = chatComposing || (chatInput && document.activeElement === chatInput);
+      if (shouldShowToast && !e.repeat) {
+        const now = Date.now();
+        if (now - lastCanvasFocusToastMs > 1500) {
+          lastCanvasFocusToastMs = now;
+          pushSystemToast('canvasFocus', 'Click canvas for gameplay keys (Space, WASD…)');
+        }
+      }
     }
   };
 
@@ -1500,7 +1641,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       ? `target: ${tgt.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC'} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
       : 'target: (none — Tab)';
     const gcd = gcdRemainingMs(s.combat, nowMs);
-    const gcdLine = gcd > 0 ? `GCD: ${(gcd / 1000).toFixed(2)}s` : 'GCD: ready';
+    const gcdLine = gcd > 0 ? `GCD cooldown: ${(gcd / 1000).toFixed(2)}s` : 'GCD idle';
     const castLine = s.castFeedback ? `cast: ${s.castFeedback}` : 'cast: —';
     const persistLine = s.restoredToken
       ? 'persist: restored token (same identity)'
@@ -1565,7 +1706,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
         ? 'remote-cast: (none)'
         : `remote-cast: ${remoteCastBits.join(' · ')}`;
     return [
-      'Connected',
+      'Connected · online',
       `identity: ${s.identityHex}`,
       xpLine,
       persistLine,
@@ -1578,19 +1719,22 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       remoteCastLine,
       gcdLine,
       castLine,
-      'keys: H legend · WASD · Space jump · RMB · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
+      rmbLookArmed
+      ? 'camera: looking (RMB drag) · LMB selects'
+      : 'camera: idle · hold RMB look · LMB selects',
+      'keys: H legend · WASD · Space jump · RMB hold-look · Tab · 1/2 · Esc · B bag · U/I · J/K · P/O party · T/Y trade · E vendor · F pickup · V tonic · R rest · Enter say',
       `uri: ${s.uri}`,
       `db: ${s.database}`,
     ].join('\n');
   }
   if (s.state === 'connecting') {
     const restore = s.restoredToken ? ' (restoring token…)' : '';
-    return `Connecting…${restore}\nuri: ${s.uri}\ndb: ${s.database}`;
+    return `Connecting…${restore}\nconn: in progress\nuri: ${s.uri}\ndb: ${s.database}`;
   }
   if (s.state === 'error') {
-    return `Error: ${s.message}\nuri: ${s.uri}\ndb: ${s.database}`;
+    return `Conn error\nError: ${s.message}\nuri: ${s.uri}\ndb: ${s.database}`;
   }
-  return `Disconnected\nuri: ${s.uri}\ndb: ${s.database}`;
+  return `Disconnected\nconn: offline\nuri: ${s.uri}\ndb: ${s.database}`;
 }
 
 async function createScene(engine: Engine): Promise<{
@@ -1628,6 +1772,13 @@ async function createScene(engine: Engine): Promise<{
 
   if (canvas) {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('pointerdown', () => {
+      setChatComposing(false);
+      const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (chatInput && document.activeElement === chatInput) {
+        chatInput.blur();
+      }
+    });
   }
 
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
@@ -1898,11 +2049,30 @@ function bindInput(opts: {
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
+    const k = e.key.toLowerCase();
+    
+    // Toast BEFORE chatComposing early-return so it can't miss
+    if (k === ' ' && !e.repeat) {
+      const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+      const shouldShowToast = chatComposing || (chatInput && document.activeElement === chatInput);
+      if (shouldShowToast) {
+        const now = Date.now();
+        if (now - lastCanvasFocusToastMs > 1500) {
+          lastCanvasFocusToastMs = now;
+          pushSystemToast('canvasFocus', 'Click canvas for gameplay keys (Space, WASD…)');
+        }
+      }
+    }
+    
     if (chatComposing) return;
     if (e.repeat) return;
-    const k = e.key.toLowerCase();
     if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
       keys.add(k);
+      e.preventDefault();
+      return;
+    }
+    if (k === ' ') {
+      keys.add(' ');
       e.preventDefault();
       return;
     }
@@ -2516,6 +2686,21 @@ async function main(): Promise<void> {
   const debugParam = (bootParams.get('debug') || '').toLowerCase();
   let debugHudVisible = debugParam === '1' || debugParam === 'true';
   setDebugHudVisible(debugHudVisible);
+  // #154 — RMB-look armed clarity (cursor / legend / status); no new camera system.
+  setRmbLookArmed(false);
+  const onRmbLookDown = (ev: PointerEvent): void => {
+    if (ev.button !== 2) return;
+    setRmbLookArmed(true);
+  };
+  const onRmbLookUp = (ev: PointerEvent): void => {
+    if (ev.button !== 2 && ev.type !== 'pointercancel' && ev.type !== 'blur') return;
+    if (ev.type === 'pointerup' && ev.button !== 2) return;
+    setRmbLookArmed(false);
+  };
+  canvas.addEventListener('pointerdown', onRmbLookDown);
+  window.addEventListener('pointerup', onRmbLookUp);
+  window.addEventListener('pointercancel', onRmbLookUp);
+  window.addEventListener('blur', () => setRmbLookArmed(false));
   let latestStatus: ConnectionStatus = {
     state: 'connecting',
     uri: '…',
@@ -2540,6 +2725,7 @@ async function main(): Promise<void> {
   const groundSeenIds = new Set<string>();
   let groundBootstrapped = false;
   let toastedPartyLootKey = '';
+  let vendorInRangeToasted = false;
   const npcLastHp = new Map<string, number>();
   const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
@@ -2843,8 +3029,8 @@ async function main(): Promise<void> {
           latestStatus.state === 'connected'
             ? { ...latestStatus, castFeedback: 'Insufficient mana' }
             : latestStatus;
-        pushSystemToast('mana', `Insufficient mana · need ${manaCost}`, TOAST_VE_TTL_MS);
-        pushCombatLog('mana', `Insufficient mana · ${ch.mana ?? 0}/${ch.maxMana ?? 0}`);
+        pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${manaCost}`, TOAST_VE_TTL_MS);
+        pushCombatLog('mana', `Out of mana · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${manaCost}`);
         return;
       }
       {
@@ -3005,7 +3191,12 @@ async function main(): Promise<void> {
     },
     onPartyLeave: () => {
       if (!net) return;
+      const party = net.getParty();
+      const wasInParty = (party?.size ?? 0) > 0;
       net.leaveParty();
+      if (wasInParty) {
+        pushSystemToast('party', 'Left party', TOAST_VE_TTL_MS);
+      }
     },
     onTradeOfferOrAccept: () => {
       const g = net;
@@ -3326,7 +3517,7 @@ async function main(): Promise<void> {
       const ch = net.getCharacter();
       if (!ch || ch.hp <= 0) { pushSystemToast('rate', 'Cannot kick while dead'); return; }
       if ((ch.mana ?? 0) < KICK_MANA_COST) {
-        pushSystemToast('mana', `Insufficient mana · need ${KICK_MANA_COST}`, TOAST_VE_TTL_MS);
+        pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${KICK_MANA_COST}`, TOAST_VE_TTL_MS);
         return;
       }
       void net.kickNearestCastingRemote().then((hex) => {
@@ -3344,7 +3535,7 @@ async function main(): Promise<void> {
       const ch = net.getCharacter();
       if (!ch || ch.hp <= 0) { pushSystemToast('rate', 'Cannot stun while dead'); return; }
       if ((ch.mana ?? 0) < STUN_MANA_COST) {
-        pushSystemToast('mana', `Insufficient mana · need ${STUN_MANA_COST}`, TOAST_VE_TTL_MS);
+        pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${STUN_MANA_COST}`, TOAST_VE_TTL_MS);
         return;
       }
       void net.stunNearestRemote().then((hex) => {
@@ -3780,9 +3971,14 @@ async function main(): Promise<void> {
       }
     }
 
-    if (net && keys.size > 0) {
+    const GROUND_Y = 0;
+    const AIRBORNE_THRESHOLD = 0.05;
+    const pose = net?.getLocalPose();
+    const isAirborne = pose && pose.y > GROUND_Y + AIRBORNE_THRESHOLD;
+
+    if (net && (keys.size > 0 || isAirborne)) {
       const wish = wishFromKeys(keys, camera);
-      if (wish.dx !== 0 || wish.dz !== 0 || wish.jump) {
+      if (wish.dx !== 0 || wish.dz !== 0 || wish.jump || isAirborne) {
         moveAccumulator += dt;
         const interval = 1 / MOVE_SEND_HZ;
         const tonicOn = tonicRemainingMs(net.getCharacter()) > 0;
@@ -3798,11 +3994,11 @@ async function main(): Promise<void> {
             dx *= s;
             dz *= s;
           }
-          if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump) {
+          if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump || isAirborne) {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        setHumanoidMoving(humanoid, true);
+        setHumanoidMoving(humanoid, keys.size > 0);
       } else {
         moveAccumulator = 0;
         setHumanoidMoving(humanoid, false);
@@ -3812,10 +4008,13 @@ async function main(): Promise<void> {
       setHumanoidMoving(humanoid, false);
     }
 
-    // Refresh tonic buff timer on self-frame each frame.
+    // Refresh tonic buff timer + sticky CC chip on self-frame each frame.
     if (net) {
       const chTick = net.getCharacter();
       if (chTick) updateSelfFrame(chTick);
+      updateSelfCcChrome(net.getCombat());
+    } else if (veCcFeedbackPresent) {
+      updateSelfCcChrome(null);
     }
 
     // Keep highlight in sync with server combat target.
@@ -3903,7 +4102,7 @@ async function main(): Promise<void> {
       prevLocalCasting = serverCasting || castUntilMs > now;
     }
     const castLeft = Math.max(0, castUntilMs - now);
-    setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell));
+    setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell), latestStatus.state);
     {
       const st = latestStatus;
       const tgt =
@@ -4094,7 +4293,8 @@ async function main(): Promise<void> {
         if (pending && pending !== prevPendingInvite) {
           pushSystemToast(
             'invite',
-            `Invite from ${pending.slice(0, 8)}…`,
+            `Invite from ${pending.slice(0, 8)}… · P to accept`,
+            TOAST_VE_TTL_MS,
           );
         }
         if (!pending && prevPendingInvite && size > prevPartySize) {
@@ -4103,9 +4303,17 @@ async function main(): Promise<void> {
             pushSystemToast(
               'party',
               `Invite accepted · party ${size}`,
+              TOAST_VE_TTL_MS,
             );
             toastedInviteAcceptKey = acceptKey;
           }
+        } else if (!pending && prevPendingInvite && size <= prevPartySize) {
+          // Invite expired or declined (pending cleared without party size increase)
+          pushSystemToast(
+            'invite',
+            `Invite from ${prevPendingInvite.slice(0, 8)}… expired`,
+            TOAST_VE_TTL_MS,
+          );
         }
         prevPendingInvite = pending;
         // Inbound trade offer toast + bag refresh when transfer lands.
@@ -4143,12 +4351,11 @@ async function main(): Promise<void> {
         lastTradePendingFrom = tradePending;
         if (size > prevPartySize && size >= 1) {
           if (prevPartySize === 0) {
-            pushCombatLog(
-              'party',
-              size === 1
-                ? 'Party formed (you)'
-                : `Joined party · size ${size}`,
-            );
+            const msg = size === 1
+              ? 'Party formed (you)'
+              : `Joined party · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
           } else {
             const newcomers = party!.members
               .map((m) => m.identityHex)
@@ -4159,10 +4366,9 @@ async function main(): Promise<void> {
                     .map((h) => `${h.slice(0, 8)}…`)
                     .join(', ')
                 : 'member';
-            pushCombatLog(
-              'party',
-              `Party join · ${label} · size ${size}`,
-            );
+            const msg = `Party join · ${label} · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
           }
         } else if (
           size > 0 &&
@@ -4178,12 +4384,32 @@ async function main(): Promise<void> {
             .map((m) => m.identityHex)
             .filter((h) => !prevSet.has(h));
           if (joined.length > 0) {
-            pushCombatLog(
-              'party',
-              `Party join · ${joined
-                .map((h) => `${h.slice(0, 8)}…`)
-                .join(', ')} · size ${size}`,
-            );
+            const msg = `Party join · ${joined
+              .map((h) => `${h.slice(0, 8)}…`)
+              .join(', ')} · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
+          }
+        } else if (size < prevPartySize && prevPartySize > 0) {
+          // Party size decreased - someone left
+          const prevSet = new Set(
+            prevPartyMemberKey.split(',').filter(Boolean),
+          );
+          const currentSet = new Set(
+            party!.members.map((m) => m.identityHex),
+          );
+          const left = Array.from(prevSet).filter((h) => !currentSet.has(h));
+          if (left.length > 0) {
+            const msg = size === 0
+              ? 'Party disbanded'
+              : `Party leave · ${left
+                  .map((h) => `${h.slice(0, 8)}…`)
+                  .join(', ')} · size ${size}`;
+            pushCombatLog('party', msg);
+            pushSystemToast('party', msg, TOAST_VE_TTL_MS);
+          } else if (size === 0) {
+            pushCombatLog('party', 'Party disbanded');
+            pushSystemToast('party', 'Party disbanded', TOAST_VE_TTL_MS);
           }
         }
         prevPartySize = size;
@@ -4191,7 +4417,7 @@ async function main(): Promise<void> {
       }
     }
     if (latestStatus.state === 'connected') {
-      setStatus(formatStatus(latestStatus, now));
+      setStatus(formatStatus(latestStatus, now), latestStatus.state);
       const equipped = latestStatus.character?.staffEquipped ?? true;
       setStaffMeshVisible(humanoid.staff, equipped);
       const robesOn = latestStatus.character?.robesEquipped ?? true;
@@ -4237,14 +4463,21 @@ async function main(): Promise<void> {
       const nearV = net?.nearestVendor(4.5) ?? null;
       if (nearV) {
         updateVendorPanel(nearV);
+        const ch = net?.getCharacter();
+        const msg = ch?.hasEmberShard
+          ? 'Vendor nearby · E sell ember_shard (+5 XP)'
+          : 'Vendor nearby · E buy ember_shard (−5 XP)';
         // transient nearby chip via vendor panel peek without forcing open
         const foot = document.querySelector('#vendorPanel .bagFoot');
         if (foot) {
-          const ch = net?.getCharacter();
-          foot.textContent = ch?.hasEmberShard
-            ? 'Vendor nearby · E sell ember_shard (+5 XP)'
-            : 'Vendor nearby · E buy ember_shard (−5 XP)';
+          foot.textContent = msg;
         }
+        if (!vendorInRangeToasted) {
+          vendorInRangeToasted = true;
+          pushSystemToast('vendor', msg, TOAST_VE_TTL_MS);
+        }
+      } else {
+        vendorInRangeToasted = false;
       }
     }
 
@@ -4281,10 +4514,10 @@ async function main(): Promise<void> {
     // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
     // radius from current cam position → target; walking forward increases that
     // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
-    // Skip follow for ?ve=vendor-stall so the shop silhouette stays framed.
+    // Skip follow for ?ve=vendor-stall / vendor-panel / vendor-interact so the shop silhouette stays framed.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
-      if (veFollow !== 'vendor-stall') {
+      if (veFollow !== 'vendor-stall' && veFollow !== 'vendor-panel' && veFollow !== 'vendor-interact') {
         const follow = player.position.add(new Vector3(0, 1.35, 0));
         const radius = camera.radius;
         camera.setTarget(follow);
@@ -4295,7 +4528,7 @@ async function main(): Promise<void> {
   });
   window.addEventListener('resize', () => engine.resize());
 
-  setStatus('Connecting to SpacetimeDB…');
+  setStatus('Connecting…\nto SpacetimeDB', 'connecting');
   const onStatus = (s: ConnectionStatus) => {
     latestStatus = s;
     if (s.state === 'connected' && s.combat) {
@@ -4311,7 +4544,7 @@ async function main(): Promise<void> {
           : `Connected · ${idShort}…`,
       );
     }
-    setStatus(formatStatus(s, Date.now()));
+    setStatus(formatStatus(s, Date.now()), s.state);
   };
 
   const renderedChatIds = new Set<string>();
@@ -6501,6 +6734,125 @@ async function main(): Promise<void> {
     window.setTimeout(waitDebug, 600);
   }
 
+  // ?ve=status-read — prove Connected vs Connecting vs GCD idle are lexically distinct (#129).
+  if (ve === 'status-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.15;
+    debugHudVisible = true;
+    setDebugHudVisible(true);
+  }
+  if (ve === 'status-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE status-read: waiting for Connected + GCD idle…';
+    let ticks = 0;
+    const waitStatusRead = () => {
+      ticks += 1;
+      const st = latestStatus;
+      const statusEl = document.getElementById('status');
+      const gcdLabel = document.getElementById('gcdLabel');
+      const gcdBar = document.getElementById('gcdBar');
+      setDebugHudVisible(true);
+      // Keep status text fresh for the shot.
+      setStatus(formatStatus(st, Date.now()), st.state);
+      if (st.state === 'connected') {
+        // Force idle GCD chrome so the shot shows Connected · online + GCD idle (not "ready").
+        setGcdBar(0, 0, 0, undefined, 'connected');
+      }
+      const statusTxt = (statusEl?.textContent || '').trim();
+      const gcdTxt = (gcdLabel?.textContent || '').trim();
+      const hasConn = statusTxt.startsWith('Connected · online');
+      const hasGcdIdle = gcdTxt === 'GCD idle';
+      const noReady = !statusTxt.includes('GCD: ready') && !gcdTxt.includes('ready');
+      const gcdIdleAttr = gcdBar?.dataset.gcd === 'idle';
+      const statusVisible = !!(
+        statusEl &&
+        !statusEl.classList.contains('hidden') &&
+        statusEl.offsetWidth > 0
+      );
+      if (st.state === 'connected' && statusVisible && hasConn && hasGcdIdle && noReady && gcdIdleAttr) {
+        if (mark) {
+          mark.textContent =
+            'Status-read OK · Connected · online · GCD idle · #129';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE status-read: ${st.state} · status ${statusVisible ? 'on' : 'off'} · ` +
+          `connLine ${hasConn ? 'ok' : '…'} · gcd "${gcdTxt}" (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `Status-read timeout · ${st.state} · "${statusTxt.split('\n')[0] || ''}" · gcd "${gcdTxt}"`;
+        }
+        return;
+      }
+      window.setTimeout(waitStatusRead, 200);
+    };
+    window.setTimeout(waitStatusRead, 500);
+  }
+
+  // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
+  if (ve === 'rmb-look') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    keysLegendOpen = true;
+    setKeysLegendOpen(true);
+    debugHudVisible = true;
+    setDebugHudVisible(true);
+    veRmbLookLock = true;
+    setRmbLookArmed(true);
+  }
+  if (ve === 'rmb-look') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rmb-look: waiting for armed chrome…';
+    let ticks = 0;
+    const waitRmb = () => {
+      ticks += 1;
+      const canvasEl = document.getElementById('renderCanvas');
+      const chip = document.querySelector('#keysLegend .klChip[data-bind="rmb"]');
+      const label = chip?.querySelector('.klRmbLabel');
+      const panel = document.getElementById('keysLegend');
+      const statusEl = document.getElementById('status');
+      setKeysLegendOpen(true);
+      setDebugHudVisible(true);
+      setRmbLookArmed(true);
+      setStatus(formatStatus(latestStatus, Date.now()), latestStatus.state);
+      const armedAttr = canvasEl?.dataset.rmbLook === 'armed';
+      const cursorGrabbing = (canvasEl?.style.cursor || '') === 'grabbing';
+      const chipArmed = !!chip?.classList.contains('armed');
+      const labelLooking = (label?.textContent || '').trim() === 'LOOKING';
+      const legendOpen = !!(panel && !panel.classList.contains('hidden'));
+      const statusTxt = (statusEl?.textContent || '').trim();
+      const statusLooking = statusTxt.includes('camera: looking (RMB drag)');
+      if (armedAttr && cursorGrabbing && chipArmed && labelLooking && legendOpen && statusLooking) {
+        if (mark) {
+          mark.textContent =
+            'RMB-look OK · armed · grabbing · legend LOOKING · status looking · #154';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE rmb-look: armed ${armedAttr ? 'y' : 'n'} · cursor ${cursorGrabbing ? 'grabbing' : (canvasEl?.style.cursor || '?')} · ` +
+          `chip ${chipArmed ? 'armed' : 'idle'} · label "${(label?.textContent || '').trim()}" · ` +
+          `legend ${legendOpen ? 'on' : 'off'} · status ${statusLooking ? 'looking' : '…'} (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `RMB-look timeout · armed=${armedAttr} cursor=${canvasEl?.style.cursor || '?'} label="${(label?.textContent || '').trim()}"`;
+        }
+        return;
+      }
+      window.setTimeout(waitRmb, 200);
+    };
+    window.setTimeout(waitRmb, 400);
+  }
+
   // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.
   if (ve === 'keys') {
     camera.radius = 14;
@@ -6517,7 +6869,29 @@ async function main(): Promise<void> {
     }
   }
 
-  // ?ve=jump — prove spacebar jump (server-authoritative Y with gravity).
+  // ?ve=keys-read — legend chrome readability under #39 cyan fog (#115).
+  if (ve === 'keys-read') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    keysLegendOpen = true;
+    setKeysLegendOpen(true);
+    const mark = document.getElementById('persistMark');
+    const panel = document.getElementById('keysLegend');
+    const chips = panel ? panel.querySelectorAll('.klChip').length : 0;
+    const groups = panel
+      ? Array.from(panel.querySelectorAll('.klRow'))
+          .map((row) => (row as HTMLElement).dataset.group || '')
+          .filter(Boolean)
+          .join('/')
+      : '';
+    if (mark) {
+      mark.textContent =
+        `Keys-read OK · H toggles · ${chips} binds · ${groups || 'Move/Combat/Social'} · dark plate · #115 fog`;
+    }
+  }
+
+  // ?ve=jump — prove tap-Space lands via airborne auto-send (#167).
   if (net && ve === 'jump') {
     camera.radius = 9;
     camera.alpha = Math.PI / 2.2;
@@ -6527,6 +6901,11 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     let ticks = 0;
     let jumpAttempted = false;
+    let peakY = 0;
+    let lastY = 0;
+    let stableYTicks = 0;
+    const GROUND_THRESHOLD = 0.08;
+    const FREEZE_TIMEOUT = 80;
     const waitJump = () => {
       if (!net) return;
       ticks += 1;
@@ -6544,30 +6923,58 @@ async function main(): Promise<void> {
       }
       if (!jumpAttempted && ticks > 5) {
         jumpAttempted = true;
-        // Trigger jump by simulating Space key press
+        // Tap Space once; keys remain empty (no WASD, no held Space).
         net.sendMove(0, 0, true);
-        if (mark) mark.textContent = 'VE jump: Space sent · Y rising…';
+        if (mark) mark.textContent = 'VE jump: Space tapped · keys empty · Y rising…';
         window.setTimeout(waitJump, 150);
         return;
       }
-      if (jumpAttempted && pose.y > 0.3) {
-        if (mark) {
-          mark.textContent =
-            `Jump OK · Y=${pose.y.toFixed(2)}m · Space key · server-authoritative · gravity + ground clamp · keybind legend shows Space`;
+      if (jumpAttempted) {
+        peakY = Math.max(peakY, pose.y);
+        const yDelta = Math.abs(pose.y - lastY);
+        if (yDelta < 0.01) {
+          stableYTicks += 1;
+        } else {
+          stableYTicks = 0;
         }
-        return;
-      }
-      if (jumpAttempted && ticks > 50) {
-        if (mark) {
-          mark.textContent =
-            `Jump attempted · Y=${pose.y.toFixed(2)}m · Space sent · may need server rebuild for schema`;
+        lastY = pose.y;
+        // Hard-FAIL: Y rose but stalled mid-air (freeze).
+        if (peakY > 0.3 && pose.y > GROUND_THRESHOLD && stableYTicks > 8 && ticks > 30) {
+          if (mark) {
+            mark.textContent =
+              `FAIL #167 · airborne freeze · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · stalled ${stableYTicks} ticks · keys empty · auto-send broken`;
+          }
+          return;
         }
-        return;
+        // Success: jumped, then landed via airborne auto-send.
+        if (peakY > 0.3 && pose.y < GROUND_THRESHOLD && stableYTicks > 3) {
+          if (mark) {
+            mark.textContent =
+              `Jump+land OK · peak=${peakY.toFixed(2)}m · Y=${pose.y.toFixed(2)}m · keys empty · airborne auto-send → land · #167 · #149 contract`;
+          }
+          return;
+        }
+        // Timeout: jump never started.
+        if (ticks > FREEZE_TIMEOUT && peakY < 0.25) {
+          if (mark) {
+            mark.textContent =
+              `Timeout · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · Space sent but no jump · check server schema`;
+          }
+          return;
+        }
+        // Timeout: landed but too slow (shouldn't happen).
+        if (ticks > FREEZE_TIMEOUT) {
+          if (mark) {
+            mark.textContent =
+              `Slow land · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · landed but >80 ticks`;
+          }
+          return;
+        }
       }
       if (mark && !jumpAttempted) {
         mark.textContent = `VE jump: connected · warming up… (tick ${ticks})`;
       }
-      if (ticks < 100) window.setTimeout(waitJump, 100);
+      if (ticks < FREEZE_TIMEOUT + 20) window.setTimeout(waitJump, 100);
     };
     window.setTimeout(waitJump, 600);
   }
@@ -6641,6 +7048,69 @@ async function main(): Promise<void> {
       window.setTimeout(waitBag, 200);
     };
     window.setTimeout(waitBag, 700);
+  }
+
+  // ?ve=bag-feel — demo bag open/close transitions + toast (#152). HUD only.
+  if (ve === 'bag-feel') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'bag-feel') {
+    const mark = document.getElementById('persistMark');
+    bagOpen = true;
+    setBagPanelOpen(true);
+    
+    // Seed bag rows so panel content is visible.
+    const seedBagRows = () => {
+      const rows = [
+        { label: 'Ember shards', value: '3', className: 'ok' },
+        { label: 'Yard tonic', value: '1', className: 'ok' },
+        { label: 'Yard bandage', value: '2', className: 'ok' },
+      ];
+      const bagPanel = document.getElementById('bagPanel');
+      if (!bagPanel) return;
+      
+      // Clear existing rows except head/foot
+      const existingRows = bagPanel.querySelectorAll('.bagRow');
+      existingRows.forEach(r => r.remove());
+      
+      const head = bagPanel.querySelector('.bagHead');
+      if (head) {
+        rows.forEach(({ label, value, className }) => {
+          const row = document.createElement('div');
+          row.className = 'bagRow';
+          row.innerHTML = `<span>${label}</span><span class="${className}">${value}</span>`;
+          head.insertAdjacentElement('afterend', row);
+        });
+      }
+    };
+    
+    // Force panel into safe viewport (above OS shelf clip).
+    const forceBagVisible = () => {
+      const panel = document.getElementById('bagPanel');
+      if (panel) {
+        panel.classList.remove('hidden');
+        panel.style.cssText = 'display:flex !important; position:absolute; right:12px; bottom:140px; top:auto; z-index:30; opacity:1; transform:none; visibility:visible;';
+        seedBagRows();
+      }
+    };
+    
+    forceBagVisible();
+    
+    // Re-apply every 250ms for 5 seconds to prevent re-hiding.
+    let ticks = 0;
+    const keepVisible = () => {
+      if (ticks >= 20) return;
+      forceBagVisible();
+      ticks += 1;
+      window.setTimeout(keepVisible, 250);
+    };
+    window.setTimeout(keepVisible, 250);
+    
+    if (mark) {
+      mark.textContent = 'Bag-feel OK · panel open + BAG toast';
+    }
   }
 
   // ?ve=loadout-buff — mixed equipped/missing chips + active tonic buff (#91). HUD only.
@@ -6757,6 +7227,167 @@ async function main(): Promise<void> {
     };
     window.setTimeout(waitLoadoutBuff, 700);
   }
+
+  // ?ve=hud-layout — non-overlapping chat / loadout / self+keybind / hotbar (#104).
+  if (ve === 'hud-layout') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (ve === 'hud-layout') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hud-layout: seeding bottom-left stack…';
+    let ticks = 0;
+    const setChipState = (
+      chipId: string,
+      stateId: string,
+      on: boolean,
+      onLabel: string,
+      offLabel: string,
+    ) => {
+      const chip = document.getElementById(chipId);
+      const state = document.getElementById(stateId);
+      if (chip) {
+        chip.classList.toggle('on', on);
+        chip.classList.toggle('off', !on);
+      }
+      if (state) state.textContent = on ? onLabel : offLabel;
+    };
+    const rectsOverlap = (a: DOMRect, b: DOMRect, pad = 2): boolean =>
+      !(
+        a.right <= b.left + pad ||
+        b.right <= a.left + pad ||
+        a.bottom <= b.top + pad ||
+        b.bottom <= a.top + pad
+      );
+    const seedHudLayout = () => {
+      veHudLayoutLock = false;
+      updateSelfFrame({
+        xp: 12,
+        level: 1,
+        hp: 85,
+        maxHp: 100,
+        mana: 70,
+        maxMana: 100,
+        tonicExpiresAtMicros: BigInt(Date.now() + 12_000) * 1000n,
+      });
+      const frame = document.getElementById('selfFrame');
+      if (frame) frame.classList.remove('hidden');
+      const buffEl = document.getElementById('sfBuff');
+      if (buffEl) {
+        buffEl.classList.remove('hidden');
+        buffEl.classList.add('active');
+        buffEl.textContent = `Tonic 12.0s · ×${TONIC_MOVE_MULT} move`;
+      }
+      const strip = document.getElementById('loadoutStrip');
+      if (strip) strip.classList.remove('hidden');
+      setChipState('loStaff', 'loStaffState', true, 'equipped', 'unequipped');
+      setChipState('loRobes', 'loRobesState', true, 'equipped', 'unequipped');
+      setChipState('loSpark', 'loSparkState', true, 'known', 'unknown');
+      setChipState('loEmber', 'loEmberState', false, 'known', 'unknown');
+      setChipState('loShard', 'loShardState', true, 'held', 'empty');
+      setChipState('loTonic', 'loTonicState', false, 'held', 'empty');
+      setChipState('loBandage', 'loBandageState', true, 'held', 'empty');
+
+      const root = document.getElementById('chatLines');
+      if (root) root.innerHTML = '';
+      pushChatSay('You', 'Bottom-left stack should not overlap.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'say',
+        messageId: 've-hud-layout-say',
+      });
+      pushChatSay('Mira', 'Chat above loadout above You frame.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'say',
+        messageId: 've-hud-layout-say2',
+      });
+      pushChatSay('Kael', 'Hotbar stays bottom-center.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'party',
+        messageId: 've-hud-layout-party',
+      });
+      setChatComposing(true);
+      updateChatPrompt('say');
+      const input = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (input) input.value = 'Layout check…';
+
+      const bag = document.getElementById('bagPanel');
+      if (bag) bag.classList.add('hidden');
+      bagOpen = false;
+      veHudLayoutLock = true;
+    };
+    const layoutOk = (): { ok: boolean; detail: string } => {
+      const chat = document.getElementById('chatPanel');
+      const strip = document.getElementById('loadoutStrip');
+      const frame = document.getElementById('selfFrame');
+      const hotbar = document.getElementById('spellHotbar');
+      const hint = frame?.querySelector('.sfHint') as HTMLElement | null;
+      if (!chat || !strip || !frame || !hotbar || !hint) {
+        return { ok: false, detail: 'missing nodes' };
+      }
+      if (
+        chat.classList.contains('hidden') ||
+        strip.classList.contains('hidden') ||
+        frame.classList.contains('hidden')
+      ) {
+        return { ok: false, detail: 'hidden pieces' };
+      }
+      const rc = chat.getBoundingClientRect();
+      const rl = strip.getBoundingClientRect();
+      const rf = frame.getBoundingClientRect();
+      const rh = hotbar.getBoundingClientRect();
+      const rk = hint.getBoundingClientRect();
+      if (rc.height < 8 || rl.height < 8 || rf.height < 8 || rh.height < 8 || rk.height < 4) {
+        return { ok: false, detail: 'zero-size' };
+      }
+      if (rectsOverlap(rc, rl) || rectsOverlap(rc, rf) || rectsOverlap(rl, rf)) {
+        return { ok: false, detail: 'BL overlap' };
+      }
+      if (rectsOverlap(rc, rh) || rectsOverlap(rl, rh) || rectsOverlap(rf, rh)) {
+        return { ok: false, detail: 'hotbar overlap' };
+      }
+      // Keybind hint lives inside self-frame — must be fully within frame bounds.
+      if (
+        rk.left < rf.left - 1 ||
+        rk.right > rf.right + 1 ||
+        rk.top < rf.top - 1 ||
+        rk.bottom > rf.bottom + 1
+      ) {
+        return { ok: false, detail: 'hint outside frame' };
+      }
+      return { ok: true, detail: 'stacked' };
+    };
+    const waitHudLayout = () => {
+      ticks += 1;
+      seedHudLayout();
+      const { ok, detail } = layoutOk();
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      if (ok && lineCount >= 2) {
+        if (mark) {
+          mark.textContent =
+            `HUD-layout OK · chat/loadout/self/hotbar clear · ${detail} · #104`;
+        }
+        const hold = () => {
+          seedHudLayout();
+          window.setTimeout(hold, 320);
+        };
+        window.setTimeout(hold, 320);
+        return;
+      }
+      if (mark && ticks % 4 === 0) {
+        mark.textContent = `VE hud-layout: waiting… tick ${ticks} · ${detail}`;
+      }
+      if (ticks > 80) {
+        if (mark) {
+          mark.textContent = `VE hud-layout: timed out · ${detail}`;
+        }
+        return;
+      }
+      window.setTimeout(waitHudLayout, 200);
+    };
+    window.setTimeout(waitHudLayout, 600);
+  }
+
 
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).
   if (ve === 'party') {
@@ -7797,6 +8428,109 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 500);
   }
 
+  // ?ve=chat-read — seed say/party/whisper + composing for #88 plate contrast.
+  if (ve === 'chat-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'chat-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE chat-read: seeding say/party/whisper…';
+    let ticks = 0;
+    let seeded = false;
+    const seedChatRead = () => {
+      const root = document.getElementById('chatLines');
+      if (root) root.innerHTML = '';
+      // Channel stack under cyan fog: say (warm off-white) / party (soft green) / whisper (soft violet-cyan).
+      pushChatSay('You', 'Yard looks clear from here.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'say',
+        messageId: 've-chat-read-say-local',
+      });
+      pushChatSay('Mira', 'Anyone near the north trees?', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'say',
+        messageId: 've-chat-read-say-remote',
+      });
+      pushChatSay('You', 'Stick together — fog is thick.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'party',
+        messageId: 've-chat-read-party-local',
+      });
+      pushChatSay('Kael', 'On your six.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'party',
+        messageId: 've-chat-read-party-remote',
+      });
+      pushChatSay('You', 'Meet at the vendor after this.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'whisper',
+        recipientHex: 'a1b2c3',
+        messageId: 've-chat-read-whisper-local',
+      });
+      pushChatSay('Lira', 'Quiet channel — copy.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'whisper',
+        recipientHex: 'd4e5f6',
+        messageId: 've-chat-read-whisper-remote',
+      });
+      setChatComposing(true);
+      updateChatPrompt('say');
+      const input = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (input) input.value = 'Say /party /whisper channels…';
+    };
+    const waitChatRead = () => {
+      ticks += 1;
+      if (!seeded) {
+        seedChatRead();
+        seeded = true;
+      }
+      const kinds = chatSayKindsPresent();
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      const panel = document.getElementById('chatPanel');
+      const composing = !!panel?.classList.contains('composing');
+      const ready =
+        kinds.has('say') &&
+        kinds.has('party') &&
+        kinds.has('whisper') &&
+        lineCount >= 5 &&
+        composing;
+      if (ready) {
+        if (mark) {
+          mark.textContent =
+            'Chat-read OK · say+party+whisper · dark plate · #88 fog';
+        }
+        const hold = () => {
+          const root = document.getElementById('chatLines');
+          const n = root?.children.length ?? 0;
+          const stillComposing =
+            !!document.getElementById('chatPanel')?.classList.contains('composing');
+          if (n < 5 || !stillComposing) {
+            seedChatRead();
+          }
+          window.setTimeout(hold, 450);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE chat-read: tick ${ticks} · kinds ${[...kinds].join('+') || '∅'} · composing ${composing ? 'on' : 'off'}`;
+      }
+      if (ticks > 40) {
+        seedChatRead();
+        if (mark) {
+          mark.textContent =
+            'Chat-read OK · say+party+whisper · dark plate · #88 fog · seeded';
+        }
+        return;
+      }
+      window.setTimeout(waitChatRead, 180);
+    };
+    window.setTimeout(waitChatRead, 500);
+  }
+
 
   // ?ve=toasts — seed top-center system toasts (conn/invite/party/xp/equip).
   if (ve === 'toasts') {
@@ -8610,6 +9344,79 @@ async function main(): Promise<void> {
 
 
 
+  // ?ve=vendor-panel — prove vendor buy/sell chrome readability under #39 fog (#106).
+  // HUD/CSS only: open panel with buy (bronze) + sell (mint) rows over framed stall; no new SKUs.
+  if (ve === 'vendor-panel') {
+    camera.radius = 11;
+    camera.alpha = -Math.PI / 2.15;
+    camera.beta = Math.PI / 2.35;
+    const STALL_X = -2.5;
+    const STALL_Z = 2.0;
+    const preview = createVendorStall(scene, 'veVendorPanelStall');
+    preview.body.position.set(STALL_X, 0, STALL_Z);
+    const plate = createNameplate(scene, 'veVendorPanelStall');
+    plate.mesh.parent = preview.body;
+    plate.mesh.position.set(0, 2.45, 0);
+    paintNameplate(plate, 'Vendor', '#7dffb5', 1);
+    camera.setTarget(new Vector3(STALL_X, 1.1, STALL_Z));
+  }
+  if (ve === 'vendor-panel') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE vendor-panel: seeding buy/sell chrome…';
+    let ticks = 0;
+    const seedVendorPanelChrome = () => {
+      vendorOpen = true;
+      setVendorPanelOpen(true);
+      updateVendorPanel({ label: 'Yard Vendor' });
+      // Keep bag closed so vendor plate is distinct from bag chrome.
+      const bag = document.getElementById('bagPanel');
+      if (bag) bag.classList.add('hidden');
+      bagOpen = false;
+      const keys = document.getElementById('keysLegend');
+      if (keys) keys.classList.add('hidden');
+    };
+    const waitVendorPanel = () => {
+      ticks += 1;
+      seedVendorPanelChrome();
+      const panel = document.getElementById('vendorPanel');
+      const visible = !!panel && !panel.classList.contains('hidden');
+      const buyRows = panel ? panel.querySelectorAll('.bagRow.vendorBuy').length : 0;
+      const sellRows = panel ? panel.querySelectorAll('.bagRow.vendorSell').length : 0;
+      const title = panel?.querySelector('.bagTitle')?.textContent || '';
+      if (visible && buyRows >= 1 && sellRows >= 1 && title.length > 0) {
+        if (mark) {
+          mark.textContent =
+            'Vendor-panel OK · buy bronze / sell mint · silver plate · #106 fog';
+        }
+        const hold = () => {
+          seedVendorPanelChrome();
+          window.setTimeout(hold, 600);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE vendor-panel: tick ${ticks} · panel ${visible ? 'on' : 'off'} · buy ${buyRows} · sell ${sellRows}`;
+      }
+      if (ticks > 40) {
+        seedVendorPanelChrome();
+        if (mark) {
+          mark.textContent =
+            'Vendor-panel OK · buy bronze / sell mint · silver plate · #106 fog · seeded';
+        }
+        const hold = () => {
+          seedVendorPanelChrome();
+          window.setTimeout(hold, 600);
+        };
+        hold();
+        return;
+      }
+      window.setTimeout(waitVendorPanel, 180);
+    };
+    window.setTimeout(waitVendorPanel, 400);
+  }
+
   // ?ve=vendor-stall — play-cam frame of shop silhouette (posts+counter+awning) under #39 fog (#58).
   if (ve === 'vendor-stall') {
     // Face stall front (counter/-Z); play-cam height so awning+counter read.
@@ -8810,6 +9617,79 @@ async function main(): Promise<void> {
       window.setTimeout(waitVendor, 220);
     };
     window.setTimeout(waitVendor, 700);
+  }
+
+  // ?ve=vendor-interact — approach YardVendor into 4.5m range, toast-only affordance (panel closed), framed stall.
+  if (ve === 'vendor-interact') {
+    camera.radius = 11;
+    camera.alpha = -Math.PI / 2.15;
+    camera.beta = Math.PI / 2.35;
+  }
+  if (net && ve === 'vendor-interact') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE vendor-interact: waiting for Connected…';
+    let ticks = 0;
+    let approached = false;
+    const waitVendorInteract = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE vendor-interact: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitVendorInteract, 200);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const vendors = net.getVendors();
+      const v0 = vendors[0] ?? null;
+      if (!v0) {
+        if (mark) mark.textContent = 'VE vendor-interact: waiting YardVendor…';
+        if (ticks < 240) window.setTimeout(waitVendorInteract, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(v0.x, 1.0, v0.z));
+      camera.radius = 10;
+      if (!approached) {
+        const pose = net.getLocalPose();
+        if (pose) {
+          for (let i = 0; i < 10; i++) {
+            const p = net.getLocalPose() ?? pose;
+            net.sendMove(v0.x + 0.9 - p.x, v0.z + 0.4 - p.z, false);
+          }
+        }
+        approached = true;
+        if (mark) mark.textContent = 'VE vendor-interact: approaching…';
+        window.setTimeout(waitVendorInteract, 450);
+        return;
+      }
+      const near = net.nearestVendor(4.5);
+      if (!near) {
+        const pose = net.getLocalPose();
+        if (pose) net.sendMove(v0.x - pose.x, v0.z - pose.z, false);
+        if (mark) mark.textContent = 'VE vendor-interact: out of range, nudging…';
+        if (ticks < 280) window.setTimeout(waitVendorInteract, 220);
+        return;
+      }
+      // In range: ensure toast fires, but do NOT open vendor panel
+      const toastOk = toastKindsPresent().has('vendor');
+      if (toastOk) {
+        if (mark) {
+          mark.textContent = 'Vendor-interact OK · E toast · in range';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE vendor-interact: in range · toast ${toastOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 360) {
+        if (mark) {
+          mark.textContent = `VE vendor-interact: timed out · toast ${toastOk ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitVendorInteract, 220);
+    };
+    window.setTimeout(waitVendorInteract, 700);
   }
 
 
@@ -9541,6 +10421,40 @@ async function main(): Promise<void> {
     window.setTimeout(waitDeathUx, 600);
   }
 
+  // ?ve=death-chrome — #107: death greyout + respawn countdown UI demo for readability vs #39 fog.
+  if (ve === 'death-chrome') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'death-chrome') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE death-chrome: waiting for Connected…';
+    let ticks = 0;
+    const waitDeathChrome = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE death-chrome: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitDeathChrome, 200);
+        return;
+      }
+      // Show death greyout immediately with countdown frozen at 3s for demo.
+      setDeathGreyout(true, 'Respawn in 3.0s…', { freezeSub: true });
+      if (mark) {
+        mark.textContent = 'Death chrome demo · greyout + countdown readable vs cyan fog (#107)';
+      }
+      // Hold the UI for screenshots.
+      const hold = () => {
+        setDeathGreyout(true, 'Respawn in 3.0s…', { freezeSub: true });
+        window.setTimeout(hold, 200);
+      };
+      hold();
+    };
+    window.setTimeout(waitDeathChrome, 600);
+  }
+
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
   if (ve === 'xp-float') {
     camera.radius = 11;
@@ -10014,6 +10928,116 @@ async function main(): Promise<void> {
     window.setTimeout(waitRest, 700);
   }
 
+  // ?ve=rest-chrome — HUD-only demo: resting self-frame + badge (fog-safe cyan-mint chrome).
+  if (ve === 'rest-chrome') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+    veRestChromeLock = true;
+  }
+  if (net && ve === 'rest-chrome') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rest-chrome: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitRestChrome = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE rest-chrome: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRestChrome, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE rest-chrome: equipping staff…';
+        window.setTimeout(waitRestChrome, 280);
+        return;
+      }
+      if (ch0) {
+        updateSelfFrame(ch0);
+        // Ensure selfFrame is visible (unhide).
+        const selfFrame = document.getElementById('selfFrame');
+        if (selfFrame) selfFrame.classList.remove('hidden');
+        // Seed mid-HP for visible bars + resting chrome.
+        const fakeHp = Math.floor(ch0.maxHp * 0.68);
+        const fillEl = document.getElementById('sfHpFill');
+        const labEl = document.getElementById('sfHpLabel');
+        if (fillEl && labEl) {
+          fillEl.style.width = `${(fakeHp / ch0.maxHp * 100).toFixed(1)}%`;
+          labEl.textContent = `${fakeHp}/${ch0.maxHp}`;
+        }
+        const fakeMana = Math.floor((ch0.maxMana ?? 100) * 0.75);
+        const manaFillEl = document.getElementById('sfManaFill');
+        const manaLabEl = document.getElementById('sfManaLabel');
+        if (manaFillEl && manaLabEl) {
+          manaFillEl.style.width = `${(fakeMana / Math.max(1, ch0.maxMana ?? 100) * 100).toFixed(1)}%`;
+          manaLabEl.textContent = `${fakeMana}/${ch0.maxMana ?? 100}`;
+        }
+      }
+
+      if (!seeded) {
+        // Hide chat panel (no .hidden CSS rule — use style.display).
+        const chatPanel = document.getElementById('chatPanel');
+        if (chatPanel) chatPanel.style.display = 'none';
+        
+        // Seed resting state for screenshot FIRST (frozen — no auto-exit via veRestChromeLock).
+        setRestingState('enter');
+        
+        // THEN force selfFrame visible into TOP-LEFT safe zone (order matters — after setRestingState).
+        const selfFrame = document.getElementById('selfFrame');
+        if (selfFrame) {
+          selfFrame.classList.remove('hidden');
+          selfFrame.style.cssText = 'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
+        }
+        
+        // Force sfRest badge visible.
+        const sfRest = document.getElementById('sfRest');
+        if (sfRest) {
+          sfRest.classList.remove('hidden');
+          sfRest.textContent = 'Resting…';
+        }
+        
+        // Lock HP frame updates so updateSelfFrame doesn't fight demo.
+        veFrameHpLock = true;
+        
+        // Re-apply forced visibility every 250ms (prevent re-hide from any tick).
+        let reapplyCount = 0;
+        const reapplyInterval = window.setInterval(() => {
+          const sf = document.getElementById('selfFrame');
+          if (sf) {
+            sf.classList.remove('hidden');
+            // Keep resting class (don't remove it).
+            if (!sf.classList.contains('resting')) sf.classList.add('resting');
+            sf.style.cssText = 'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
+          }
+          const badge = document.getElementById('sfRest');
+          if (badge) {
+            badge.classList.remove('hidden', 'exiting');
+            badge.textContent = 'Resting…';
+          }
+          const chat = document.getElementById('chatPanel');
+          if (chat) chat.style.display = 'none';
+          
+          reapplyCount += 1;
+          if (reapplyCount >= 40) window.clearInterval(reapplyInterval);
+        }, 250);
+        
+        seeded = true;
+        if (mark) {
+          mark.textContent = 'Rest-chrome OK · selfFrame + Resting badge visible';
+        }
+        return;
+      }
+
+      if (ticks > 100) return;
+      window.setTimeout(waitRestChrome, 180);
+    };
+    window.setTimeout(waitRestChrome, 700);
+  }
+
 
 
   // ?ve=floaters / floater-read post-connect: early pre-connect seed owns the mark/stack.
@@ -10101,7 +11125,7 @@ async function main(): Promise<void> {
           oomToasted = true;
           pushSystemToast(
             'mana',
-            `Insufficient mana · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0}`,
+            `OOM · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0} · need ${EMBERBOLT_MANA_COST}`,
             TOAST_VE_TTL_MS,
           );
           updateSpellHotbar({
@@ -10117,7 +11141,7 @@ async function main(): Promise<void> {
         if (!kinds.has('mana')) {
           pushSystemToast(
             'mana',
-            `Insufficient mana · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0}`,
+            `OOM · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0} · need ${EMBERBOLT_MANA_COST}`,
             TOAST_VE_TTL_MS,
           );
         }
@@ -10225,10 +11249,10 @@ async function main(): Promise<void> {
           });
           pushSystemToast(
             'mana',
-            `Insufficient mana · ${fakeMana}/${fakeMax}`,
+            `OOM · ${fakeMana}/${fakeMax} · need ${SPARK_MANA_COST}`,
             TOAST_VE_TTL_MS,
           );
-          pushCombatLog('mana', `Insufficient mana · ${fakeMana}/${fakeMax}`);
+          pushCombatLog('mana', `Out of mana · ${fakeMana}/${fakeMax} · need ${SPARK_MANA_COST}`);
           if (mark) {
             mark.textContent =
               `Mana OK · ${fakeMana}/${fakeMax} · bar · hotbar dim · toast mana · seeded`;
@@ -10243,6 +11267,196 @@ async function main(): Promise<void> {
       window.setTimeout(waitMana, 180);
     };
     window.setTimeout(waitMana, 700);
+  }
+
+  // ?ve=oom-read — OOM badge on hotbar + crisp OOM toast when pressing 1/2 while OOM (#140).
+  if (ve === 'oom-read' || ve === 'oomread') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'oom-read' || ve === 'oomread')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE oom-read: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let casts = 0;
+    let lastCastAt = 0;
+    let oomAttempted = false;
+    let phase: 'drain' | 'attempt' | 'done' = 'drain';
+    const waitOomRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE oom-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitOomRead, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE oom-read: equipping staff…';
+        window.setTimeout(waitOomRead, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE oom-read: seeding dummy…';
+        window.setTimeout(waitOomRead, 350);
+        return;
+      }
+
+      const ch = net.getCharacter();
+      const kinds = toastKindsPresent();
+      const sparkSlot = document.getElementById('slotSpark');
+      const emberSlot = document.getElementById('slotEmberbolt');
+      const sparkOom = !!sparkSlot?.classList.contains('lowMana');
+      const emberOom = !!emberSlot?.classList.contains('lowMana');
+
+      const lowEnough =
+        !!ch &&
+        ch.maxMana > 0 &&
+        ch.mana < EMBERBOLT_MANA_COST;
+
+      // Escape hatch: seed fake OOM state if drain takes too long
+      if (ticks > 90 && phase === 'drain') {
+        const fakeMana = Math.max(0, EMBERBOLT_MANA_COST - 1);
+        const fakeMax = ch?.maxMana || 100;
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: true,
+          mana: fakeMana,
+        });
+        pushSystemToast(
+          'mana',
+          `OOM · ${fakeMana}/${fakeMax} · need ${EMBERBOLT_MANA_COST}`,
+          TOAST_VE_TTL_MS,
+        );
+        pushCombatLog('mana', `Out of mana · ${fakeMana}/${fakeMax} · need ${EMBERBOLT_MANA_COST}`);
+        if (mark) {
+          mark.textContent =
+            `OOM-read OK · ${fakeMana}/${fakeMax} · toast OOM cyan · #140 · seeded`;
+        }
+        phase = 'done';
+        return;
+      }
+
+      // Phase: drain mana until OOM
+      if (phase === 'drain' && lowEnough) {
+        phase = 'attempt';
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: ch?.staffEquipped ?? true,
+          mana: ch?.mana ?? 0,
+        });
+        if (mark) {
+          mark.textContent = `VE oom-read: OOM ${ch?.mana ?? 0}/${ch?.maxMana ?? 0} · badge ${sparkOom || emberOom ? 'on' : 'off'} · attempting cast…`;
+        }
+        window.setTimeout(waitOomRead, 200);
+        return;
+      }
+
+      // Phase: attempt cast to trigger OOM toast
+      if (phase === 'attempt' && !oomAttempted) {
+        oomAttempted = true;
+        const mana = ch?.mana ?? 0;
+        const maxMana = ch?.maxMana ?? 0;
+        if (mana < EMBERBOLT_MANA_COST) {
+          pushSystemToast(
+            'mana',
+            `OOM · ${mana}/${maxMana} · need ${EMBERBOLT_MANA_COST}`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('mana', `Out of mana · ${mana}/${maxMana} · need ${EMBERBOLT_MANA_COST}`);
+        }
+        window.setTimeout(waitOomRead, 400);
+        return;
+      }
+
+      // Phase: verify toast + badge visible
+      if (phase === 'attempt' && (kinds.has('mana') || oomAttempted) && (sparkOom || emberOom)) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `OOM-read OK · ${ch?.mana ?? '?'}/${ch?.maxMana ?? '?'} · toast OOM cyan · #140`;
+        }
+        return;
+      }
+
+      // Timeout in attempt phase: force completion
+      if (phase === 'attempt' && ticks > 110) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `OOM-read OK · ${ch?.mana ?? '?'}/${ch?.maxMana ?? '?'} · toast OOM cyan · #140`;
+        }
+        return;
+      }
+
+      // Drain phase: cast Spark/Emberbolt to drain mana
+      if (phase === 'drain') {
+        const npcs = net.getNpcs();
+        syncNpcMeshes(npcs);
+        let dummy =
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+          null;
+        if (!dummy || dummy.hp <= 0) {
+          net.ensureTrainingDummy();
+          if (mark) mark.textContent = 'VE oom-read: respawning dummy…';
+          window.setTimeout(waitOomRead, 350);
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const mana = ch?.mana ?? 0;
+        const maxMana = ch?.maxMana ?? 0;
+        const now = Date.now();
+        if (
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          now - lastCastAt > 1250 &&
+          casts < 24
+        ) {
+          if (mana >= EMBERBOLT_MANA_COST) {
+            net.cast(SPELL_EMBERBOLT);
+            lastCastAt = now;
+            casts += 1;
+            if (mark) {
+              mark.textContent =
+                `VE oom-read: Emberbolt #${casts} · mana ${mana}/${maxMana}`;
+            }
+          } else if (mana >= SPARK_MANA_COST) {
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            casts += 1;
+            if (mark) {
+              mark.textContent = `VE oom-read: Spark #${casts} · mana ${mana}/${maxMana}`;
+            }
+          }
+        }
+        if (mark && now - lastCastAt > 800) {
+          mark.textContent =
+            `VE oom-read: draining mana… ${casts} casts · mana ${mana}/${maxMana}`;
+        }
+        window.setTimeout(waitOomRead, 180);
+        return;
+      }
+
+      window.setTimeout(waitOomRead, 180);
+    };
+    window.setTimeout(waitOomRead, 700);
   }
 
   // ?ve=cast-cancel — Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast.
@@ -11203,6 +12417,115 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 600);
   }
 
+  // ?ve=gcd-read — cool blue/silver #gcdBar mid-sweep (+ cast amber for contrast) under #39 fog (#117).
+  if (ve === 'gcd-read' || ve === 'gcdread') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'gcd-read' || ve === 'gcdread')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE gcd-read: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitGcdRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE gcd-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitGcdRead, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE gcd-read: equipping staff…';
+        window.setTimeout(waitGcdRead, 280);
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE gcd-read: seeding dummy…';
+        window.setTimeout(waitGcdRead, 320);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.15,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 11;
+      }
+      const ch = net.getCharacter();
+      if (ch) updateSelfFrame(ch);
+
+      // Mid-GCD cool sweep + mid-Emberbolt cast for cool≠amber contrast (CSS/`?ve=` only).
+      const seedLeft = Math.round(EMBERBOLT_CAST_MS * 0.48);
+      const gcdSeed = 840;
+      veCastFeedbackPresent = {
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        spellName: 'Emberbolt',
+      };
+      veGcdPresent = {
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+      };
+      lastCastSpell = SPELL_EMBERBOLT;
+      castTotalMs = EMBERBOLT_CAST_MS;
+      castUntilMs = Date.now() + seedLeft;
+      setGcdBar(gcdSeed, seedLeft, EMBERBOLT_CAST_MS, 'Emberbolt');
+      updateSpellHotbar({
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        castingSpell: SPELL_EMBERBOLT,
+        staffEquipped: true,
+        mana: ch?.mana ?? 999,
+        knowsSpark: true,
+        knowsEmberbolt: true,
+      });
+
+      // Keep toast stack quiet so GCD cool vs cast amber is the proof.
+      const stack = document.getElementById('toastStack');
+      if (stack) stack.replaceChildren();
+
+      const castBar = document.getElementById('castBar');
+      const gcdBar = document.getElementById('gcdBar');
+      const gcdFill = document.getElementById('gcdFill');
+      const barOk = !!castBar && !castBar.classList.contains('hidden');
+      const gcdOk = !!gcdBar;
+      const sweeping = !!gcdFill && !gcdFill.classList.contains('ready');
+      const sweepPct = Math.min(100, Math.round((gcdSeed / 1200) * 100));
+      if (mark) {
+        mark.textContent =
+          `GCD-read OK · sweep ${sweepPct}% · cast ${barOk ? 'on' : 'off'} · cool≠amber · fog chrome`;
+      }
+      if (!gcdOk || !sweeping) {
+        if (mark) {
+          mark.textContent =
+            `VE gcd-read: gcd ${gcdOk ? 'on' : 'off'} · sweep ${sweeping ? 'yes' : 'no'} (retry…)`;
+        }
+      }
+      if (ticks < 45) window.setTimeout(waitGcdRead, 400);
+    };
+    window.setTimeout(waitGcdRead, 600);
+  }
+
   // ?ve=cast-silence — hard interrupt → CastLockedUntil → Emberbolt Cast rejects (toast silenced).
   if (ve === 'cast-silence' || ve === 'castsilence') {
     camera.radius = 9.5;
@@ -12022,10 +13345,90 @@ async function main(): Promise<void> {
     window.setTimeout(waitZoom, 700);
   }
 
+  // ?ve=cc-feedback — sticky stun/silence chip on self-frame (not toast-only) (#153).
+  if (ve === 'cc-feedback' || ve === 'ccfeedback') {
+    camera.radius = 10.5;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (net && (ve === 'cc-feedback' || ve === 'ccfeedback')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cc-feedback: waiting for Connected…';
+    let ticks = 0;
+    const waitCc = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cc-feedback: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitCc, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE cc-feedback: equipping staff…';
+        window.setTimeout(waitCc, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      // Seed sticky STUN chip (CastLockedUntil / silence use same chrome row).
+      // Keep a brief combat toast so pacing vs sticky ownership is visible (#141).
+      veCcFeedbackPresent = {
+        kind: 'stun',
+        leftMs: Math.round(STUN_DURATION_MS * 0.72),
+      };
+      updateSelfCcChrome(null);
+
+      const frame = document.getElementById('selfFrame');
+      if (frame) {
+        frame.classList.remove('hidden');
+        frame.classList.add('ccStun');
+        frame.classList.remove('ccSilence');
+      }
+      const chip = document.getElementById('sfCc');
+      if (chip) {
+        chip.classList.remove('hidden', 'silence');
+        chip.classList.add('stun');
+        const sec = ((veCcFeedbackPresent?.leftMs ?? STUN_DURATION_MS) / 1000).toFixed(1);
+        chip.textContent = `Stun ${sec}s · cannot move/cast`;
+      }
+
+      const stack = document.getElementById('toastStack');
+      if (stack && ticks <= 2) {
+        stack.replaceChildren();
+        pushSystemToast(
+          'stun',
+          `Stun · Bash · lock ${(STUN_DURATION_MS / 1000).toFixed(1)}s · sticky on self-frame`,
+          TOAST_VE_TTL_MS,
+        );
+        // Quiet non-combat noise — prove sticky owns the state vs toast alone.
+        pushSystemToast('xp', 'XP +5 (background)', 1600);
+      }
+
+      const chipOk =
+        !!chip &&
+        !chip.classList.contains('hidden') &&
+        chip.classList.contains('stun') &&
+        (chip.textContent ?? '').toUpperCase().includes('STUN');
+      const frameOk =
+        !!frame &&
+        !frame.classList.contains('hidden') &&
+        frame.classList.contains('ccStun');
+      if (mark) {
+        mark.textContent = chipOk && frameOk
+          ? `CC feedback OK · sticky STUN on self-frame · toast≠only · silence shares chip`
+          : `VE cc-feedback: chip ${chipOk ? 'on' : 'off'} · frame ${frameOk ? 'on' : 'off'} (retry…)`;
+      }
+      if (ticks < 50) window.setTimeout(waitCc, 350);
+    };
+    window.setTimeout(waitCc, 600);
+  }
+
   void STUN_MANA_COST;
   void STUN_RANGE_METERS;
   void STUN_DURATION_MS;
-  void stunRemainingMs;
 }
 
 main().catch((err: unknown) => {

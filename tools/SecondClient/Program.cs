@@ -76,7 +76,7 @@ try
         }
 
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        conn.Reducers.Move(dx * scale, dz * scale);
+        conn.Reducers.Move(dx * scale, dz * scale, false);
         await Frame(conn, 60);
     }
 

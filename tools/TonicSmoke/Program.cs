@@ -153,7 +153,7 @@ try
 
     var poseA = conn.Db.PlayerPose.Identity.Find(id)!;
     var wish = Movement.MaxStepMeters * 1.5f;
-    conn.Reducers.Move(wish, 0f);
+    conn.Reducers.Move(wish, 0f, false);
     await DelayPump(conn, 80);
     var poseB = conn.Db.PlayerPose.Identity.Find(id)!;
     var baseDelta = poseB.X - poseA.X;
@@ -164,6 +164,19 @@ try
         // without clock; re-baseline after we measure boosted instead.
         Console.WriteLine("note: baseline already boosted (prior buff); will compare after Use");
     }
+
+    // Optional baseline vertical asserts (#170)
+    if (MathF.Abs(poseB.Y - Movement.GroundY) > 0.05f)
+    {
+        Fail($"baseline Y={poseB.Y} not ≈ GroundY={Movement.GroundY}");
+        return;
+    }
+    if (MathF.Abs(poseB.VelY) > 0.5f)
+    {
+        Fail($"baseline VelY={poseB.VelY} not ≈ 0");
+        return;
+    }
+    Console.WriteLine($"baseline pose Y={poseB.Y} VelY={poseB.VelY} OK");
 
     conn.Reducers.UseYardTonic();
     await PumpUntil(() =>
@@ -180,7 +193,7 @@ try
     Console.WriteLine($"UseYardTonic OK expires micros={afterUse.TonicExpiresAt.MicrosecondsSinceUnixEpoch}");
 
     var poseC = conn.Db.PlayerPose.Identity.Find(id)!;
-    conn.Reducers.Move(wish, 0f);
+    conn.Reducers.Move(wish, 0f, false);
     await DelayPump(conn, 80);
     var poseD = conn.Db.PlayerPose.Identity.Find(id)!;
     var buffDelta = poseD.X - poseC.X;
@@ -195,6 +208,24 @@ try
         Fail($"buffed delta {buffDelta} not greater than baseline {baseDelta}");
         return;
     }
+
+    // Assert vertical after buffed grounded Move (#170)
+    if (MathF.Abs(poseD.Y - Movement.GroundY) > 0.05f)
+    {
+        Fail($"buffed Y={poseD.Y} not ≈ GroundY={Movement.GroundY}");
+        return;
+    }
+    if (MathF.Abs(poseD.VelY) > 0.5f)
+    {
+        Fail($"buffed VelY={poseD.VelY} not ≈ 0");
+        return;
+    }
+    if (poseD.LastGroundedMicros == 0 || poseD.LastGroundedMicros < poseC.LastGroundedMicros)
+    {
+        Fail($"buffed LastGroundedMicros={poseD.LastGroundedMicros} not updated (was {poseC.LastGroundedMicros})");
+        return;
+    }
+    Console.WriteLine($"buffed pose Y={poseD.Y} VelY={poseD.VelY} LastGroundedMicros={poseD.LastGroundedMicros} OK");
 
     Console.WriteLine("OK: TonicSmoke passed");
     Environment.ExitCode = 0;
@@ -264,7 +295,7 @@ static async Task MoveTo(DbConnection conn, Identity id, float x, float z)
         var dx = x - p.X;
         var dz = z - p.Z;
         if (dx * dx + dz * dz < 0.05f) break;
-        conn.Reducers.Move(dx, dz);
+        conn.Reducers.Move(dx, dz, false);
         await DelayPump(conn, 40);
     }
     await PumpUntil(() =>

@@ -81,7 +81,7 @@ try
     // Dead Move rejects.
     string? moveFail = null;
     var moveFailed = new TaskCompletionSource();
-    void OnMove(ReducerEventContext ctx, float dx, float dz)
+    void OnMove(ReducerEventContext ctx, float dx, float dz, bool jump)
     {
         _ = dx; _ = dz;
         switch (ctx.Event.Status)
@@ -101,7 +101,7 @@ try
     conn.Reducers.OnMove += OnMove;
     try
     {
-        conn.Reducers.Move(0.2f, 0f);
+        conn.Reducers.Move(0.2f, 0f, false);
         await Pump(moveFailed.Task, timeoutMs, conn, "move while dead");
     }
     finally
