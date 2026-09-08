@@ -964,7 +964,7 @@ function setDebugHudVisible(open: boolean): void {
 
 /**
  * CrowdProxy amber capsules are AOI/perf debug — hidden in default play (#271).
- * Visible only with F3/?debug=1 or AOI/minimap/fps VE hooks.
+ * Visible only with F3/?debug=1 or AOI/minimap VE hooks. `?ve=fps` is forest fill, not capsules.
  */
 function showCrowdDebugCapsules(ve: string | null, debugHud: boolean): boolean {
   if (debugHud) return true;
@@ -973,7 +973,6 @@ function showCrowdDebugCapsules(ve: string | null, debugHud: boolean): boolean {
     case 'minimap':
     case 'minimap-read':
     case 'minimap-pip':
-    case 'fps':
       return true;
     default:
       return false;
@@ -5579,6 +5578,15 @@ async function main(): Promise<void> {
         tgt.z = player.position.z * 0.4 + hz * 0.6;
         camera.alpha = 0.42;
         camera.beta = Math.PI / 2.38;
+        camera.radius = 16;
+      } else if (veFollow === 'fps') {
+        // Play-cam into the north hero/mid ring (dense view, not the spawn pad).
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = 2.2;
+        tgt.z = player.position.z - 8;
+        camera.alpha = Math.PI / 2 + 0.12;
+        camera.beta = Math.PI / 2.48;
         camera.radius = 16;
       } else if (veFollow === 'idle') {
         camera.inertialAlphaOffset = 0;
@@ -10587,13 +10595,13 @@ async function main(): Promise<void> {
     window.setTimeout(waitIdle, 800);
   }
 
-  // ?ve=fps — seed crowd proxies; prove FPS HUD visible + near proxies > 0.
+  // ?ve=fps — E9.3 dense play-cam floor. Forest fill, not amber crowd capsules.
   if (ve === 'fps') {
-    camera.radius = 22;
-    camera.alpha = Math.PI / 2.5;
-    camera.beta = Math.PI / 3.55;
-    debugHudVisible = true;
-    setDebugHudVisible(true);
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2 + 0.12;
+    camera.beta = Math.PI / 2.48;
+    const fpsHud = document.getElementById('fpsHud');
+    if (fpsHud) fpsHud.classList.remove('hidden');
   }
   if (net && ve === 'fps') {
     const mark = document.getElementById('persistMark');
@@ -10608,31 +10616,27 @@ async function main(): Promise<void> {
         if (ticks < 200) window.setTimeout(waitFps, 200);
         return;
       }
-      net.seedCrowdProxies();
-      syncProxyMeshes(net.getProxies());
-      const proxies = net.getProxies();
-      const near = proxies.filter((p) => !p.far);
-      const far = proxies.filter((p) => p.far);
       const hud = document.getElementById('fpsHud');
+      if (hud) hud.classList.remove('hidden');
       const fpsVal = document.getElementById('fpsValue')?.textContent ?? '—';
       const hudVisible = !!hud && hud.offsetWidth > 0;
       const fpsNum = Number.parseInt(fpsVal, 10);
       const fpsOk = Number.isFinite(fpsNum) && fpsNum >= FPS_FLOOR;
-      if (hudVisible && near.length > 0 && fpsOk) {
+      if (hudVisible && fpsOk && ticks > 10) {
         if (mark) {
           mark.textContent =
-            `FPS OK · ${fpsNum} fps (floor ${FPS_FLOOR} / target ${FPS_TARGET}) · near ${near.length} · far ${far.length} · remotes ${(net.getRemotes() ?? []).length} · box ref`;
+            `FPS OK · ${fpsNum} fps (floor ${FPS_FLOOR} / target ${FPS_TARGET}) · dense play-cam`;
         }
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE fps: Connected · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} · near ${near.length} (waiting…)`;
+          `VE fps: Connected · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} (waiting dense ≥${FPS_FLOOR}…)`;
       }
       if (ticks > 220) {
         if (mark) {
           mark.textContent =
-            `VE fps: timed out · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal} · near ${near.length}`;
+            `VE fps: timed out · HUD ${hudVisible ? 'on' : 'off'} · fps ${fpsVal}`;
         }
         return;
       }
