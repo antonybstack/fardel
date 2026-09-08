@@ -528,6 +528,35 @@ try
         return;
     }
 
+    // E1.3 #254: same wish grounded vs airborne — air displacement clearly smaller.
+    var groundBeforeX = xzLand.X;
+    conn.Reducers.Move(airStrafe, 0f, jump: false);
+    var groundStep = await WaitPose(conn, identity, p => MathF.Abs(p.X - groundBeforeX) > 0.01f, timeoutMs);
+    if (groundStep is null)
+    {
+        Fail("grounded XZ timeout — no X change");
+        return;
+    }
+    if (MathF.Abs(groundStep.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(groundStep.VelY) > 0.1f)
+    {
+        Fail($"grounded XZ left ground Y={groundStep.Y} VelY={groundStep.VelY}");
+        return;
+    }
+    var groundDx = groundStep.X - groundBeforeX;
+    if (MathF.Abs(groundDx - airStrafe) > 0.05f)
+    {
+        Fail($"grounded XZ delta={groundDx} expected ~{airStrafe}");
+        return;
+    }
+    if (MathF.Abs(airDx) >= MathF.Abs(groundDx) * 0.5f)
+    {
+        Fail($"airborne XZ {airDx} not << grounded {groundDx}");
+        return;
+    }
+    Console.WriteLine(
+        $"air vs ground XZ: air={airDx:F3} ground={groundDx:F3} scale={Movement.AirControlScale}");
+
     // Grounded second jump after land is still allowed (#120).
     if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseBeforeSecond)
     {
