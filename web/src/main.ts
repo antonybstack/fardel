@@ -6913,7 +6913,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // ?ve=jump — prove tap-Space lands via airborne auto-send (#167).
+  // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
   if (net && ve === 'jump') {
     camera.radius = 9;
     camera.alpha = Math.PI / 2.2;
@@ -6945,9 +6945,8 @@ async function main(): Promise<void> {
       }
       if (!jumpAttempted && ticks > 5) {
         jumpAttempted = true;
-        // Tap Space once; keys remain empty (no WASD, no held Space).
         net.sendMove(0, 0, true);
-        if (mark) mark.textContent = 'VE jump: Space tapped · keys empty · Y rising…';
+        if (mark) mark.textContent = 'VE jump: Space tapped · pumping air Move…';
         window.setTimeout(waitJump, 150);
         return;
       }
@@ -6960,35 +6959,38 @@ async function main(): Promise<void> {
           stableYTicks = 0;
         }
         lastY = pose.y;
-        // Hard-FAIL: Y rose but stalled mid-air (freeze).
-        if (peakY > 0.3 && pose.y > GROUND_THRESHOLD && stableYTicks > 8 && ticks > 30) {
+        // Gravity only runs inside Move — keep pumping while airborne (#147).
+        if (pose.y > GROUND_THRESHOLD) {
+          net.sendMove(0, 0, false);
+        }
+        // Hard-FAIL: Y rose but stalled mid-air even with pumps.
+        if (peakY > 0.3 && pose.y > GROUND_THRESHOLD && stableYTicks > 12 && ticks > 40) {
           if (mark) {
             mark.textContent =
-              `FAIL #167 · airborne freeze · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · stalled ${stableYTicks} ticks · keys empty · auto-send broken`;
+              `Jump FAIL · airborne freeze · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · stalled ${stableYTicks} ticks`;
           }
           return;
         }
-        // Success: jumped, then landed via airborne auto-send.
+        // Success: rose, then landed (Y≈GroundY).
         if (peakY > 0.3 && pose.y < GROUND_THRESHOLD && stableYTicks > 3) {
           if (mark) {
             mark.textContent =
-              `Jump+land OK · peak=${peakY.toFixed(2)}m · Y=${pose.y.toFixed(2)}m · keys empty · airborne auto-send → land · #167 · #149 contract`;
+              `Jump OK · peak=${peakY.toFixed(2)}m · Y=${pose.y.toFixed(2)}m · land after air pump · #147`;
           }
           return;
         }
-        // Timeout: jump never started.
+        // Hard-FAIL: Y never rose (#128).
         if (ticks > FREEZE_TIMEOUT && peakY < 0.25) {
           if (mark) {
             mark.textContent =
-              `Timeout · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · Space sent but no jump · check server schema`;
+              `Jump FAIL · Y never rose · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · Space sent · #128`;
           }
           return;
         }
-        // Timeout: landed but too slow (shouldn't happen).
         if (ticks > FREEZE_TIMEOUT) {
           if (mark) {
             mark.textContent =
-              `Slow land · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · landed but >80 ticks`;
+              `Jump FAIL · no land · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · #147`;
           }
           return;
         }
