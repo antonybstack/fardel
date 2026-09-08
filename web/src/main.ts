@@ -146,6 +146,43 @@ function nearestLootInPickupRange(
   return best;
 }
 
+/** Tab cycle: in-range hostiles first, then dummy (still selectable), then the rest (#358). */
+function tabTargetCycle(net: GameNet): NpcView[] {
+  const alive = net.getNpcs().filter((n) => n.hp > 0);
+  const pose = net.getLocalPose();
+  const r2 = CAST_RANGE_METERS * CAST_RANGE_METERS;
+  const inRange = (n: NpcView) => {
+    if (!pose) return true;
+    const dx = n.x - pose.x;
+    const dz = n.z - pose.z;
+    return dx * dx + dz * dz <= r2;
+  };
+  const byId = (a: NpcView, b: NpcView) =>
+    a.npcId < b.npcId ? -1 : a.npcId > b.npcId ? 1 : 0;
+  const hostilesNear = alive
+    .filter((n) => n.kind === NPC_KIND_HOSTILE && inRange(n))
+    .sort(byId);
+  const dummy = alive.filter((n) => n.kind === NPC_KIND_DUMMY);
+  const hostilesFar = alive
+    .filter((n) => n.kind === NPC_KIND_HOSTILE && !inRange(n))
+    .sort(byId);
+  const rest = alive.filter(
+    (n) => n.kind !== NPC_KIND_HOSTILE && n.kind !== NPC_KIND_DUMMY,
+  );
+  return [...hostilesNear, ...dummy, ...hostilesFar, ...rest];
+}
+
+function cyclePreferHostiles(net: GameNet): bigint | null {
+  const cycle = tabTargetCycle(net);
+  if (cycle.length === 0) return null;
+  const cur = net.getCombat()?.targetNpcId ?? 0n;
+  let idx = cycle.findIndex((n) => n.npcId === cur);
+  idx = (idx + 1) % cycle.length;
+  const next = cycle[idx]!.npcId;
+  net.setTarget(next);
+  return next;
+}
+
 type NpcMesh = {
   root: Mesh;
   body: Mesh;
@@ -3789,7 +3826,7 @@ async function main(): Promise<void> {
   const { keys } = bindInput({
     onCycleTarget: () => {
       if (!net) return;
-      const id = net.cycleTarget();
+      const id = cyclePreferHostiles(net);
       if (id != null) selectedTargetId = id;
     },
     onCast: (spellId) => {
@@ -5785,6 +5822,7 @@ async function main(): Promise<void> {
         veFollow !== 'vendor-interact' &&
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
+        veFollow !== 'tab-hostile' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
@@ -9322,6 +9360,78 @@ async function main(): Promise<void> {
       window.setTimeout(waitH, 200);
     };
     window.setTimeout(waitH, 500);
+  }
+
+  // ?ve=tab-hostile — Tab prefers in-range hostiles; dummy stays selectable (#358).
+  if (ve === 'tab-hostile') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'tab-hostile') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-hostile: waiting for hostiles…';
+    let ticks = 0;
+    let tabbed = false;
+    let okTicks = 0;
+    const waitT = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      if (latestStatus.state !== 'connected' || hostiles.length < 2 || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE tab-hostile: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 200) window.setTimeout(waitT, 200);
+        return;
+      }
+      if (!tabbed) {
+        const id = cyclePreferHostiles(net);
+        if (id != null) selectedTargetId = id;
+        tabbed = true;
+      }
+      syncNpcMeshes(net.getNpcs());
+      const cycle = tabTargetCycle(net);
+      const tgt = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
+      const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY);
+      updateTargetFrame(tgt);
+      if (tgt && tgt.kind === NPC_KIND_HOSTILE) {
+        camera.setTarget(new Vector3(tgt.x, 1.2, tgt.z));
+        camera.radius = 14;
+        camera.beta = Math.PI / 3.1;
+      }
+      const mesh = tgt ? npcMeshes.get(tgt.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const frame = document.getElementById('targetFrame');
+      const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+      const frameName = document.getElementById('tfName')?.textContent ?? '';
+      if (
+        tgt &&
+        tgt.kind === NPC_KIND_HOSTILE &&
+        dummyInCycle &&
+        ringOn &&
+        frameVisible &&
+        /hostile/i.test(frameName)
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent = `Tab-hostile OK · Hostile #${tgt.npcId} · dummy selectable · #358`;
+        }
+        if (okTicks < 8 && ticks < 180) window.setTimeout(waitT, 180);
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE tab-hostile: tgt ${tgt ? tgt.kind : 'none'} · dummyCycle ${dummyInCycle ? 'y' : 'n'} · ring ${ringOn ? 'on' : 'off'} · frame ${frameName}`;
+      }
+      if (ticks > 180) {
+        if (mark) mark.textContent = `Tab-hostile FAIL · tgt ${tgt?.kind ?? 'none'} · #358`;
+        return;
+      }
+      window.setTimeout(waitT, 200);
+    };
+    window.setTimeout(waitT, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
