@@ -3356,32 +3356,15 @@ function finishNpcLifeFx(mesh: NpcMesh, fx: NpcLifeFx): void {
   }
 }
 
-/** Look-at for ?ve=remote-hop. Root is at the feet; do not use stale AABB minY. */
-function hopBodyLook(parts: HumanoidParts): {
-  x: number;
-  y: number;
-  z: number;
-  minY: number;
-  height: number;
-} {
+/** Ground-level look-at so an airborne remote reads as hop, not a centered stand. */
+function hopBodyLook(parts: HumanoidParts): { x: number; y: number; z: number } {
   const p = parts.root.position;
-  const pb = readHumanoidPlayback(parts);
-  return {
-    x: p.x,
-    y: p.y + 0.85,
-    z: p.z,
-    minY: p.y,
-    height: pb.height,
-  };
+  return { x: p.x, y: 0.35, z: p.z };
 }
 
 function hideLocalForRemoteHop(player: Mesh, plate: { mesh: Mesh }): void {
   player.setEnabled(false);
   plate.mesh.setEnabled(false);
-  for (const m of player.getChildMeshes(false)) {
-    m.setEnabled(false);
-    m.isVisible = false;
-  }
 }
 
 async function main(): Promise<void> {
@@ -4026,13 +4009,7 @@ async function main(): Promise<void> {
         st.dx = stepX * MOVE_SEND_HZ;
         st.dz = stepZ * MOVE_SEND_HZ;
       }
-      parts.root.setEnabled(
-        !(
-          ve === 'remote-hop' &&
-          remoteHopLatch &&
-          remoteHopLatch.hex !== key
-        ),
-      );
+      parts.root.setEnabled(true);
       const rChNow = net?.getCharacterFor(key);
       const rHp = rChNow?.hp;
       if (typeof rHp === 'number') {
@@ -6456,12 +6433,12 @@ async function main(): Promise<void> {
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
         const tgt = camera.target;
-        // SecondClient hop-pad (0, −6). Never aim at the local walker.
+        // SecondClient hop-pad (0, −6). Hold the look-at on the grass so
+        // airborne feet read against the ground, not a centered stand.
         let fx = 0;
-        let fy = 1.4;
+        let fy = 0.35;
         let fz = -6;
         let best = -1;
-        let bestHex: string | null = null;
         for (const [hex, parts] of remoteMeshes) {
           const ch = net?.getCharacterFor(hex);
           if (!ch || ch.hp <= 0) continue;
@@ -6470,7 +6447,7 @@ async function main(): Promise<void> {
           if (/death/i.test(clip)) continue;
           const y = parts.root.position.y;
           const air =
-            y > 1.2 &&
+            y > 0.8 &&
             pb.skinned > 0 &&
             pb.height >= 1.0 &&
             /idle_weapon/i.test(clip) &&
@@ -6480,26 +6457,19 @@ async function main(): Promise<void> {
           const rank = (air ? 2000 : 100) + (nearPad ? 500 : 0) + y * 10;
           if (rank > best) {
             best = rank;
-            bestHex = hex;
             const look = hopBodyLook(parts);
             fx = look.x;
             fy = look.y;
             fz = look.z;
-          }
-        }
-        if (bestHex && best >= 2000) {
-          remoteHopLatch = { hex: bestHex, y: fy };
-          for (const [hex, parts] of remoteMeshes) {
-            parts.root.setEnabled(hex === bestHex);
+            if (air) remoteHopLatch = { hex, y };
           }
         }
         tgt.x = fx;
         tgt.y = fy;
         tgt.z = fz;
-        camera.alpha = 0;
-        // Slight look-up so the feet-to-ground gap reads at apex.
-        camera.beta = Math.PI / 1.95;
-        camera.radius = 7;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.02;
+        camera.radius = 8;
       } else if (
         veFollow === 'cam-collision' ||
         veFollow === 'cam-collision-mid' ||
@@ -8604,9 +8574,9 @@ async function main(): Promise<void> {
 
   // ?ve=remote-hop — E8.27 airborne Idle_Weapon, no Walk, no squash.
   if (ve === 'remote-hop') {
-    camera.radius = 7;
-    camera.alpha = 0;
-    camera.beta = Math.PI / 1.95;
+    camera.radius = 8;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.02;
     hideLocalForRemoteHop(player, localNameplate);
   }
   if (net && ve === 'remote-hop') {
@@ -8638,7 +8608,7 @@ async function main(): Promise<void> {
         const pb = readHumanoidPlayback(p);
         const clip = clipBare(pb.playing);
         return (
-          p.root.position.y > 1.2 &&
+          p.root.position.y > 0.8 &&
           pb.skinned > 0 &&
           pb.height >= 1.0 &&
           /idle_weapon/i.test(clip) &&
@@ -8668,7 +8638,7 @@ async function main(): Promise<void> {
       const hopOk =
         !!parts &&
         !!preferred &&
-        y > 1.2 &&
+        y > 0.8 &&
         pb.skinned > 0 &&
         pb.height >= 1.0 &&
         /idle_weapon/i.test(clip) &&
@@ -8680,8 +8650,6 @@ async function main(): Promise<void> {
         remoteHopLatch = { hex: preferred.identityHex, y };
         setHumanoidAirborne(parts, true);
         parts.root.scaling.set(1, 1, 1);
-      } else if (!hopOk) {
-        remoteHopLatch = null;
       }
       const sampleParts = parts ?? [...remoteMeshes.values()][0];
       const samplePb = sampleParts
