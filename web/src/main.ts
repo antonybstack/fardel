@@ -4645,15 +4645,16 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        setHumanoidMoving(humanoid, keys.size > 0);
+        setHumanoidMoving(humanoid, keys.size > 0 && !isAirborne);
       } else {
         moveAccumulator = 0;
         setHumanoidMoving(humanoid, false);
       }
     } else {
       moveAccumulator = 0;
-      setHumanoidMoving(humanoid, false);
+      setHumanoidMoving(humanoid, !isAirborne && keys.size > 0);
     }
+    humanoid.root.scaling.set(1, 1, 1);
 
     // Refresh tonic buff timer + sticky CC chip on self-frame each frame.
     if (net) {
@@ -5264,15 +5265,15 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2 + 0.45;
         camera.beta = Math.PI / 2.38;
         camera.radius = 34;
-      } else if (veFollow === 'walk' || veFollow === 'yaw') {
-        // Side play-cam so Walk stride / wish facing reads; lock each frame.
+      } else if (veFollow === 'walk' || veFollow === 'yaw' || veFollow === 'jump-pose') {
+        // Side play-cam so Walk stride / wish facing / hop pose reads; lock each frame.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
         camera.setTarget(player.position.add(new Vector3(0, 1.0, 0)));
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
-        camera.radius = 7;
+        camera.radius = veFollow === 'jump-pose' ? 9 : 7;
       } else if (veFollow === 'cast-anim') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -8402,6 +8403,52 @@ async function main(): Promise<void> {
       window.setTimeout(waitApex, 100);
     };
     window.setTimeout(waitApex, 600);
+  }
+
+  // ?ve=jump-pose — E2.9 airborne walk off, root.scaling (1,1,1), no squash.
+  if (ve === 'jump-pose') {
+    camera.radius = 9;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'jump-pose') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE jump-pose: waiting for Connected…';
+    let ticks = 0;
+    let jumped = false;
+    const waitJumpPose = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE jump-pose: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitJumpPose, 200);
+        return;
+      }
+      keys.add('w');
+      keys.add(' ');
+      const pose = net.getLocalPose();
+      if (!jumped && pose) {
+        jumped = true;
+        net.sendMove(0.2, 0, true);
+      }
+      const y = pose?.y ?? 0;
+      const scaleY = humanoid.root.scaling.y;
+      const walkOn = scene.animationGroups.some(
+        (g) => /walk/i.test(g.name) && g.isPlaying && !/remote_/i.test(g.name),
+      );
+      const air = y > 0.12;
+      const rigid = Math.abs(scaleY - 1) < 0.04;
+      if (mark) {
+        if (air && rigid && !walkOn) {
+          mark.textContent = `Jump-pose OK · walk off · scale ${scaleY.toFixed(2)} · y=${y.toFixed(2)}`;
+        } else {
+          mark.textContent = `VE jump-pose: y=${y.toFixed(2)} · walk ${walkOn ? 'on' : 'off'} · scale ${scaleY.toFixed(2)}`;
+        }
+      }
+      if (ticks < 200) window.setTimeout(waitJumpPose, 80);
+    };
+    window.setTimeout(waitJumpPose, 600);
   }
 
   // ?ve=hop-wow — rigid hop, no squash, no camera slam. Does not replace ?ve=jump (#257).
