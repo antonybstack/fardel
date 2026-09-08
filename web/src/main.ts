@@ -255,6 +255,9 @@ let veLoadoutBuffLock = false;
 /** VE lock: hold seeded bottom-left HUD layout chrome for ?ve=hud-layout (#104). */
 let veHudLayoutLock = false;
 
+/** VE lock: hold resting chrome for ?ve=rest-chrome (freeze enter state, no auto-exit). */
+let veRestChromeLock = false;
+
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
   gcdMs: number;
@@ -292,7 +295,10 @@ function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
     badge.classList.remove('hidden', 'exiting');
     badge.textContent = 'Resting…';
     // Auto-exit chrome after a short settle so enter vs exit is readable.
-    restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
+    // Skip auto-exit if VE rest-chrome lock is active (freeze for screenshot).
+    if (!veRestChromeLock) {
+      restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
+    }
     return;
   }
   // exit
@@ -10420,6 +10426,7 @@ async function main(): Promise<void> {
     camera.radius = 9.5;
     camera.alpha = Math.PI / 2.25;
     camera.beta = Math.PI / 3.05;
+    veRestChromeLock = true;
   }
   if (net && ve === 'rest-chrome') {
     const mark = document.getElementById('persistMark');
@@ -10444,6 +10451,9 @@ async function main(): Promise<void> {
       }
       if (ch0) {
         updateSelfFrame(ch0);
+        // Ensure selfFrame is visible (unhide).
+        const selfFrame = document.getElementById('selfFrame');
+        if (selfFrame) selfFrame.classList.remove('hidden');
         // Seed mid-HP for visible bars + resting chrome.
         const fakeHp = Math.floor(ch0.maxHp * 0.68);
         const fillEl = document.getElementById('sfHpFill');
@@ -10462,11 +10472,14 @@ async function main(): Promise<void> {
       }
 
       if (!seeded) {
-        // Seed resting state for screenshot.
+        // Hide chat panel so selfFrame + Resting badge are clearly visible bottom-left.
+        const chatPanel = document.getElementById('chatPanel');
+        if (chatPanel) chatPanel.classList.add('hidden');
+        // Seed resting state for screenshot (frozen — no auto-exit via veRestChromeLock).
         setRestingState('enter');
         seeded = true;
         if (mark) {
-          mark.textContent = 'Rest-chrome OK · resting badge + border visible · HUD only';
+          mark.textContent = 'Rest-chrome OK · selfFrame + Resting badge visible';
         }
         return;
       }
