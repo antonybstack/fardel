@@ -3748,8 +3748,6 @@ async function main(): Promise<void> {
   const NPC_TICK_HZ = 10;
   const npcWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
   const npcLastXz = new Map<string, { x: number; z: number }>();
-  const npcStunnedNow = (n: NpcView): boolean =>
-    Number(n.stunnedUntilMicros / 1000n) > Date.now();
   const proxyInterps = new Map<string, PoseInterp>();
 
   const ensureRemoteFx = (key: string): RemoteFx => {
@@ -4911,8 +4909,6 @@ async function main(): Promise<void> {
           st.hold = NPC_WALK_HOLD_S;
           st.dx = stepX * NPC_TICK_HZ;
           st.dz = stepZ * NPC_TICK_HZ;
-        } else if (isAlive && npcStunnedNow(npc)) {
-          npcWalkHold.delete(key);
         }
       }
       npcLastXz.set(key, { x: npc.x, z: npc.z });
