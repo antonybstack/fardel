@@ -10472,9 +10472,15 @@ async function main(): Promise<void> {
       }
 
       if (!seeded) {
-        // Hide chat panel so selfFrame + Resting badge are clearly visible bottom-left.
+        // Hide chat panel (no .hidden CSS rule — use style.display).
         const chatPanel = document.getElementById('chatPanel');
-        if (chatPanel) chatPanel.classList.add('hidden');
+        if (chatPanel) chatPanel.style.display = 'none';
+        // Force selfFrame into safe viewport (normal bottom:22px clips under OS shelf).
+        const selfFrame = document.getElementById('selfFrame');
+        if (selfFrame) {
+          selfFrame.style.bottom = '140px';
+          selfFrame.style.zIndex = '15';
+        }
         // Seed resting state for screenshot (frozen — no auto-exit via veRestChromeLock).
         setRestingState('enter');
         seeded = true;
