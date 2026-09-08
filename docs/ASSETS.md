@@ -60,6 +60,7 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Loadout strip + tonic buff readability (#91): bronze on / cool hollow off chips + warm amber `#sfBuff.active` pulse; `?ve=loadout-buff` (user-attachments VE)
 - Combat log strip readability (#78): dark plate + damage/heal/kill/system distinct (no neon); `?ve=combat-log-read` (`ve/babylon-combat-log-read.png`)
 - Cast bar chrome readability (#74): Emberbolt/`#castBar` + CANCEL≠LOCKOUT toast chrome crisp vs #39 cyan fog; `?ve=castbar-read` (`ve/babylon-castbar-read.png`)
+- GCD bar chrome readability (#117): cool blue/silver `#gcdBar` distinct from warm cast / crimson lockout under #39 fog; `?ve=gcd-read`
 
 ### Path / ground targets (Issue #44)
 
