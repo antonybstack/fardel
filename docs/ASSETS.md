@@ -38,10 +38,12 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Inventing new gameplay systems for art’s sake
 - **Purchasing** asset packs (paid itch/store tiers, Asset Store, etc.)
 
-### Material / lighting targets (Issue #32)
+### Material / lighting targets (Issue #32 / #277)
+
+**#277 lock (lifts #39):** cool forest-interior hemi 0.88 `(0.48, 0.62, 0.78)` + cool-dusk sun 0.48 `(0.62, 0.72, 0.88)`, LINEAR fog still `(0.34, 0.55, 0.7)` / start 16 / end 200. Stylized, not photoreal. Constants in `web/src/world/forest.ts`.
 
 - Fog denser than current procedural kitbash; tint toward blue-cyan
-- Sun warmer; fill cooler; ground albedo richer greens with path contrast
+- Cool-dusk key + cooler canopy fill (#277); ground albedo richer greens with path contrast
 - Foliage mostly matte (low specular); avoid plastic shine
 - VE: `?ve=atmosphere` (or similar) + embedded shot; FPS still playable
 

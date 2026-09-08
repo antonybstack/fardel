@@ -14,6 +14,7 @@ import {
   Quaternion,
   Scene,
   StandardMaterial,
+  Texture,
   TransformNode,
   Vector3,
 } from '@babylonjs/core';
@@ -52,6 +53,31 @@ function makeUnderstoryMat(scene: Scene, name: string, tint: Color3): StandardMa
   m.emissiveColor = new Color3(0.015, 0.03, 0.012);
   m.backFaceCulling = false;
   return m;
+}
+
+/**
+ * Ground-plane disc. CreateDisc is XY; after rotation.x = π/2, world-Z squash
+ * is scaling.y (local Z is the disc normal). scaling.z is a no-op (#299).
+ */
+function placeGroundDisc(
+  scene: Scene,
+  name: string,
+  x: number,
+  z: number,
+  y: number,
+  radius: number,
+  tessellation: number,
+  sx: number,
+  sz: number,
+  material: StandardMaterial,
+): Mesh {
+  const d = MeshBuilder.CreateDisc(name, { radius, tessellation }, scene);
+  d.rotation.x = Math.PI / 2;
+  d.position.set(x, y, z);
+  d.scaling.x = sx;
+  d.scaling.y = sz;
+  d.material = material;
+  return d;
 }
 
 type TreeBuildOpts = {
@@ -358,171 +384,225 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
 }
 
 /**
- * Distant mountain silhouettes (#55): cool grey-blue layered ranges that read
- * through locked #39 cyan fog at play cam. Near/mid/far value steps — mood
- * backdrop only (low lit faces, no busy ridge noise). Procedural DIY.
+ * Fog / sky (#270) + lighting (#277, lifts #39). Stylized dusk forest, not photoreal.
+ *
+ * | Param        | #39                         | now                                       |
+ * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 200 (#272)          |
+ * | fog color    | (0.34, 0.55, 0.7)           | unchanged                                 |
+ * | clearColor   | (0.24, 0.36, 0.46)          | matches fogColor                          |
+ * | hemi         | 0.78 cool (0.68,0.78,0.86)  | 0.88 cooler canopy fill (#277)            |
+ * | sun          | 0.98 warm (1.0,0.82,0.52)   | 0.48 cool-dusk key (#277)                 |
+ */
+const FOG_COLOR = new Color3(0.34, 0.55, 0.7);
+const FOG_START = 16;
+/** #272: 120 m pad is gone — fog must reach the larger forest, not clip at 95. */
+const FOG_END = 200;
+/** Grass plane extent (m). 120 was the toy disc. */
+const GROUND_EXTENT = 480;
+
+function fogCss(c: Color3): string {
+  return `rgb(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)})`;
+}
+
+/**
+ * Distant mountain silhouettes (#273): farther / taller layered ranges.
+ * LINEAR fogEnd 200 would flatten anything past the forest into a cardboard
+ * wall, so ridges use applyFog=false and baked dusk-blue value steps.
+ * Procedural DIY — no packs.
  */
 function buildMountainBackdrop(scene: Scene): void {
-  // Near range — darkest cool grey-blue ridge (readable silhouette, not black cutout).
-  const nearRock = new StandardMaterial('mountainNearMat', scene);
-  nearRock.diffuseColor = new Color3(0.14, 0.18, 0.24);
-  nearRock.specularColor = new Color3(0.01, 0.012, 0.016);
-  nearRock.emissiveColor = new Color3(0.018, 0.028, 0.042);
+  const silMat = (name: string, glow: Color3): StandardMaterial => {
+    const m = new StandardMaterial(name, scene);
+    m.diffuseColor = Color3.Black();
+    m.specularColor = Color3.Black();
+    m.emissiveColor = glow;
+    m.disableLighting = true;
+    m.fogEnabled = false;
+    return m;
+  };
 
-  // Mid range — medium value step.
-  const midRock = new StandardMaterial('mountainMidMat', scene);
-  midRock.diffuseColor = new Color3(0.2, 0.26, 0.34);
-  midRock.specularColor = new Color3(0.012, 0.014, 0.018);
-  midRock.emissiveColor = new Color3(0.032, 0.045, 0.062);
+  // Darker near → paler far (atmospheric perspective into FOG_COLOR).
+  const nearRock = silMat('mountainNearMat', new Color3(0.13, 0.19, 0.26));
+  const midRock = silMat('mountainMidMat', new Color3(0.21, 0.34, 0.46));
+  const farRock = silMat('mountainFarMat', new Color3(0.30, 0.48, 0.62));
+  const snowMid = silMat('snowMidMat', new Color3(0.48, 0.58, 0.68));
+  const snowFar = silMat('snowFarMat', new Color3(0.38, 0.51, 0.64));
 
-  // Far range — softest, fog-blended cool blue (still a ridge line through haze).
-  const farRock = new StandardMaterial('mountainFarMat', scene);
-  farRock.diffuseColor = new Color3(0.26, 0.34, 0.44);
-  farRock.specularColor = new Color3(0.01, 0.012, 0.016);
-  farRock.emissiveColor = new Color3(0.055, 0.078, 0.11);
-
-  // Soft snow — readable through cyan fog, not neon white.
-  const snowNear = new StandardMaterial('snowNearMat', scene);
-  snowNear.diffuseColor = new Color3(0.58, 0.66, 0.74);
-  snowNear.specularColor = new Color3(0.06, 0.07, 0.09);
-  snowNear.emissiveColor = new Color3(0.1, 0.12, 0.14);
-
-  const snowFar = new StandardMaterial('snowFarMat', scene);
-  snowFar.diffuseColor = new Color3(0.52, 0.62, 0.72);
-  snowFar.specularColor = new Color3(0.04, 0.05, 0.07);
-  snowFar.emissiveColor = new Color3(0.12, 0.145, 0.17);
-
+  type Layer = 'near' | 'mid' | 'far';
   type Peak = {
-    x: number;
-    z: number;
+    r: number;
+    yaw: number;
     h: number;
     w: number;
-    yaw: number;
-    layer: 'near' | 'mid' | 'far';
+    layer: Layer;
     snow?: boolean;
   };
 
-  // Far layer — tall soft peaks deeper in haze.
+  const xz = (r: number, yaw: number): { x: number; z: number } => ({
+    x: r * Math.sin(yaw),
+    z: -r * Math.cos(yaw),
+  });
+
+  const dress = (mesh: Mesh, mat: StandardMaterial, yaw: number, sx: number, sz: number): void => {
+    mesh.rotation.y = yaw;
+    mesh.scaling.x = sx;
+    mesh.scaling.z = sz;
+    mesh.isPickable = false;
+    mesh.applyFog = false;
+    mesh.material = mat;
+  };
+
+  const sxFor = (layer: Layer): number =>
+    layer === 'far' ? 2.4 : layer === 'mid' ? 2.05 : 1.7;
+
+  const placePeak = (name: string, p: Peak, rock: StandardMaterial, snow: StandardMaterial | null, idx: number): void => {
+    const { x, z } = xz(p.r, p.yaw);
+    const tess = 7;
+    const sx = sxFor(p.layer);
+    const mtn = MeshBuilder.CreateCylinder(
+      name,
+      { height: p.h, diameterTop: p.w * 0.1, diameterBottom: p.w, tessellation: tess },
+      scene,
+    );
+    mtn.position.set(x, p.h * 0.34, z);
+    dress(mtn, rock, p.yaw, sx, 0.72);
+
+    const side = idx % 2 === 0 ? 1 : -1;
+    const sh = xz(p.r + 12, p.yaw + side * 0.07);
+    const shoulder = MeshBuilder.CreateCylinder(
+      `${name}_s`,
+      {
+        height: p.h * 0.55,
+        diameterTop: p.w * 0.12,
+        diameterBottom: p.w * 0.7,
+        tessellation: tess,
+      },
+      scene,
+    );
+    shoulder.position.set(sh.x, p.h * 0.24, sh.z);
+    dress(shoulder, rock, p.yaw + side * 0.35, sx * 0.85, 0.78);
+
+    if (snow) {
+      const cap = MeshBuilder.CreateCylinder(
+        `${name}_snow`,
+        {
+          height: p.h * 0.1,
+          diameterTop: p.w * 0.04,
+          diameterBottom: p.w * 0.18,
+          tessellation: tess,
+        },
+        scene,
+      );
+      cap.position.set(x, p.h * 0.72, z);
+      dress(cap, snow, p.yaw, sx, 0.72);
+    }
+  };
+
+  // Far range ~750–900 m, mid ~480–560 m, near foothills past the 175 m tree ring.
   const farPeaks: Peak[] = [
-    { x: -95, z: -175, h: 115, w: 78, yaw: 0.12, layer: 'far', snow: true },
-    { x: -15, z: -190, h: 138, w: 92, yaw: -0.18, layer: 'far', snow: true },
-    { x: 70, z: -180, h: 122, w: 82, yaw: 0.22, layer: 'far', snow: true },
-    { x: 145, z: -160, h: 98, w: 68, yaw: -0.28, layer: 'far', snow: true },
-    { x: -155, z: -150, h: 88, w: 62, yaw: 0.35, layer: 'far' },
+    { r: 820, yaw: -0.92, h: 300, w: 180, layer: 'far' },
+    { r: 870, yaw: -0.62, h: 380, w: 220, layer: 'far', snow: true },
+    { r: 900, yaw: -0.32, h: 440, w: 250, layer: 'far', snow: true },
+    { r: 880, yaw: -0.02, h: 460, w: 260, layer: 'far', snow: true },
+    { r: 850, yaw: 0.3, h: 400, w: 230, layer: 'far', snow: true },
+    { r: 800, yaw: 0.58, h: 340, w: 200, layer: 'far', snow: true },
+    { r: 760, yaw: 0.88, h: 280, w: 170, layer: 'far' },
   ];
-
-  // Mid layer — main readable silhouette ridge.
   const midPeaks: Peak[] = [
-    { x: -70, z: -138, h: 78, w: 58, yaw: 0.08, layer: 'mid', snow: true },
-    { x: 10, z: -150, h: 95, w: 68, yaw: -0.12, layer: 'mid', snow: true },
-    { x: 85, z: -142, h: 86, w: 60, yaw: 0.2, layer: 'mid', snow: true },
-    { x: -125, z: -120, h: 62, w: 48, yaw: 0.4, layer: 'mid' },
-    { x: 130, z: -125, h: 70, w: 52, yaw: -0.32, layer: 'mid' },
+    { r: 500, yaw: -0.85, h: 170, w: 140, layer: 'mid' },
+    { r: 540, yaw: -0.52, h: 210, w: 160, layer: 'mid', snow: true },
+    { r: 560, yaw: -0.18, h: 240, w: 175, layer: 'mid', snow: true },
+    { r: 545, yaw: 0.18, h: 220, w: 165, layer: 'mid', snow: true },
+    { r: 510, yaw: 0.5, h: 185, w: 150, layer: 'mid' },
+    { r: 485, yaw: 0.82, h: 155, w: 130, layer: 'mid' },
   ];
-
-  // Near foothills — darker foreground ridge steps (no snow clutter).
   const nearPeaks: Peak[] = [
-    { x: -90, z: -108, h: 36, w: 42, yaw: 0.15, layer: 'near' },
-    { x: -35, z: -115, h: 44, w: 48, yaw: -0.1, layer: 'near' },
-    { x: 25, z: -112, h: 40, w: 45, yaw: 0.18, layer: 'near' },
-    { x: 80, z: -105, h: 34, w: 40, yaw: -0.22, layer: 'near' },
-    { x: -140, z: -95, h: 30, w: 38, yaw: 0.45, layer: 'near' },
-    { x: 120, z: -98, h: 32, w: 36, yaw: -0.35, layer: 'near' },
+    { r: 345, yaw: -0.8, h: 48, w: 95, layer: 'near' },
+    { r: 360, yaw: -0.48, h: 58, w: 105, layer: 'near' },
+    { r: 375, yaw: -0.14, h: 64, w: 115, layer: 'near' },
+    { r: 365, yaw: 0.22, h: 60, w: 110, layer: 'near' },
+    { r: 350, yaw: 0.54, h: 52, w: 100, layer: 'near' },
+    { r: 335, yaw: 0.86, h: 46, w: 90, layer: 'near' },
   ];
 
   const allPeaks = [...farPeaks, ...midPeaks, ...nearPeaks];
   for (let i = 0; i < allPeaks.length; i++) {
     const p = allPeaks[i]!;
-    const rock =
-      p.layer === 'near' ? nearRock : p.layer === 'mid' ? midRock : farRock;
-    const mtn = MeshBuilder.CreateCylinder(
-      `mountain_${p.layer}_${i}`,
-      {
-        height: p.h,
-        diameterTop: 0.4,
-        diameterBottom: p.w,
-        tessellation: 5,
-      },
-      scene,
-    );
-    mtn.position.set(p.x, p.h * 0.4, p.z);
-    mtn.rotation.y = p.yaw;
-    mtn.scaling.x = 1.35 + (i % 3) * 0.12;
-    mtn.scaling.z = 1.05;
-    mtn.isPickable = false;
-    mtn.material = rock;
+    const rock = p.layer === 'near' ? nearRock : p.layer === 'mid' ? midRock : farRock;
+    const snow = !p.snow ? null : p.layer === 'far' ? snowFar : snowMid;
+    placePeak(`mountain_${p.layer}_${i}`, p, rock, snow, i);
+  }
 
-    if (p.snow) {
-      const snowMat = p.layer === 'far' ? snowFar : snowNear;
-      const cap = MeshBuilder.CreateCylinder(
-        `snow_${p.layer}_${i}`,
+  const placeRidge = (
+    prefix: string,
+    radius: number,
+    count: number,
+    hBase: number,
+    hVar: number,
+    wBase: number,
+    mat: StandardMaterial,
+    yaw0: number,
+    yaw1: number,
+  ): void => {
+    for (let i = 0; i < count; i++) {
+      const yaw = yaw0 + ((i + 0.5) / count) * (yaw1 - yaw0);
+      const r = radius + hash01(i + radius) * 22 - 11;
+      const h = hBase + hash01(i * 3 + radius) * hVar;
+      const { x, z } = xz(r, yaw);
+      const ridge = MeshBuilder.CreateCylinder(
+        `${prefix}_${i}`,
         {
-          height: p.h * 0.14,
-          diameterTop: 0.15,
-          diameterBottom: p.w * 0.22,
-          tessellation: 5,
+          height: h,
+          diameterTop: wBase * 0.18,
+          diameterBottom: wBase,
+          tessellation: 7,
         },
         scene,
       );
-      cap.position.set(p.x, p.h * 0.72, p.z);
-      cap.rotation.y = p.yaw;
-      cap.scaling.x = mtn.scaling.x;
-      cap.scaling.z = mtn.scaling.z;
-      cap.isPickable = false;
-      cap.material = snowMat;
+      ridge.position.set(x, h * 0.28, z);
+      dress(ridge, mat, yaw, 2.0, 0.7);
     }
-  }
+  };
 
-  // Soft near ridge band — darker value under mid peaks (layered read, low detail).
-  for (let i = 0; i < 7; i++) {
-    const x = -95 + i * 32 + hash01(i + 50) * 8;
-    const z = -96 - hash01(i + 70) * 12;
-    const h = 18 + hash01(i + 90) * 14;
-    const ridge = MeshBuilder.CreateCylinder(
-      `foothill_${i}`,
-      {
-        height: h,
-        diameterTop: 1.5,
-        diameterBottom: 32 + hash01(i) * 16,
-        tessellation: 5,
-      },
-      scene,
-    );
-    ridge.position.set(x, h * 0.32, z);
-    ridge.isPickable = false;
-    ridge.material = nearRock;
-  }
+  placeRidge('foothill', 310, 9, 28, 18, 80, nearRock, -0.95, 0.95);
+  placeRidge('midridge', 470, 8, 88, 36, 110, midRock, -0.9, 0.9);
+  placeRidge('farridge', 720, 8, 130, 50, 160, farRock, -0.95, 0.95);
 }
 
 /**
- * Painterly sky dome (#55): soft vertical gradient into locked fog color
- * (0.34/0.55/0.7) so horizon has no hard seam; slightly warmer/lighter zenith.
- * Procedural DynamicTexture — no packs. Does not touch fog/sun/hemi constants.
+ * Painterly sky dome (#55 / #270): vertical gradient into FOG_COLOR so the
+ * horizon has no seam vs LINEAR fog. Fog disabled on the mesh — a fogged
+ * 20-seg sphere is what painted the banding/halos. Procedural DIY, no packs.
  */
 function buildSkyDome(scene: Scene): void {
-  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 420, segments: 20 }, scene);
+  const sky = MeshBuilder.CreateSphere('skyDome', { diameter: 2000, segments: 32 }, scene);
   sky.infiniteDistance = true;
   sky.isPickable = false;
+  sky.applyFog = false;
 
-  // V-up gradient: zenith (top) → fog-matched horizon (bottom). Sphere UVs: v~1 at +Y.
-  const size = 64;
-  const tex = new DynamicTexture('skyGradTex', { width: 4, height: size }, scene, false);
+  // V-up gradient: zenith (top) → fog-matched horizon (equator and below).
+  // Sphere UVs: v~0 at +Y. DynamicTexture invertY default maps canvas-top → v=0.
+  const size = 256;
+  const tex = new DynamicTexture('skyGradTex', { width: 32, height: size }, scene, false);
+  tex.wrapU = Texture.CLAMP_ADDRESSMODE;
+  tex.wrapV = Texture.CLAMP_ADDRESSMODE;
   const ctx = tex.getContext();
   const grad = ctx.createLinearGradient(0, 0, 0, size);
-  // Fog lock color ~ rgb(87,140,179) — horizon / lower sky blends into EXP2 fog.
-  grad.addColorStop(0.0, 'rgb(118, 158, 198)'); // zenith: slightly warmer/lighter
-  grad.addColorStop(0.35, 'rgb(100, 148, 188)');
-  grad.addColorStop(0.62, 'rgb(90, 142, 182)');
-  grad.addColorStop(0.82, 'rgb(87, 140, 179)'); // → fogColor 0.34/0.55/0.7
-  grad.addColorStop(1.0, 'rgb(87, 140, 179)');
+  const fog = fogCss(FOG_COLOR);
+  // Slightly lighter zenith; wide lower band is exact fogColor (no halo).
+  grad.addColorStop(0.0, 'rgb(112, 152, 192)');
+  grad.addColorStop(0.22, 'rgb(100, 146, 186)');
+  grad.addColorStop(0.48, fog);
+  grad.addColorStop(1.0, fog);
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 4, size);
+  ctx.fillRect(0, 0, 32, size);
   tex.hasAlpha = false;
   tex.update();
 
   const skyMat = new StandardMaterial('skyMat', scene);
   skyMat.backFaceCulling = false;
   skyMat.disableLighting = true;
+  skyMat.fogEnabled = false;
   skyMat.diffuseColor = new Color3(0, 0, 0);
   skyMat.specularColor = new Color3(0, 0, 0);
   skyMat.emissiveColor = new Color3(1, 1, 1);
@@ -530,29 +610,36 @@ function buildSkyDome(scene: Scene): void {
   sky.material = skyMat;
 }
 
-/** Matte foliage/bark — keep specular low; kill emissive so cyan fog wins. */
+/** Matte foliage/bark (#275): fog on, alpha-test leaf cards so they dissolve not pop. */
 function mattePackMaterials(meshes: AbstractMesh[]): void {
   const seen = new Set<Material>();
   for (const mesh of meshes) {
+    mesh.applyFog = true;
     const mat = mesh.material;
     if (!mat || seen.has(mat)) continue;
     seen.add(mat);
     const leafish = /leaf|leaves|grass|fern|bush|plant/i.test(mat.name || mesh.name || '');
     if (mat instanceof PBRMaterial) {
       mat.metallic = 0;
-      mat.roughness = 0.92;
+      mat.roughness = 0.94;
       mat.emissiveColor = new Color3(0, 0, 0);
-      mat.environmentIntensity = 0.3;
-      mat.specularIntensity = 0.12;
+      mat.environmentIntensity = 0.22;
+      mat.specularIntensity = 0.08;
       if (leafish) {
-        // Bias toward lush green under cyan fog (pack _C leaf cards can read warm/red).
         mat.albedoColor = new Color3(0.55, 0.85, 0.42);
+        mat.useAlphaFromAlbedoTexture = true;
+        mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHATEST;
+        mat.alphaCutOff = 0.42;
       }
     } else if (mat instanceof StandardMaterial) {
-      mat.specularColor = new Color3(0.03, 0.03, 0.02);
+      mat.specularColor = new Color3(0.02, 0.02, 0.015);
       mat.emissiveColor = new Color3(0, 0, 0);
+      mat.fogEnabled = true;
       if (leafish) {
         mat.diffuseColor = new Color3(0.45, 0.7, 0.32);
+        mat.useAlphaFromDiffuseTexture = true;
+        mat.transparencyMode = Material.MATERIAL_ALPHATEST;
+        mat.alphaCutOff = 0.42;
       }
     }
   }
@@ -621,6 +708,7 @@ function placeClone(
   clone.getChildMeshes(true).forEach((m) => {
     m.isVisible = true;
     m.isPickable = false;
+    m.applyFog = true;
   });
   clone.position.set(x, 0, z);
   clone.rotation.y = yaw;
@@ -654,31 +742,33 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   }
   if (midTemplates.length === 0) return false;
 
-  // Quaternius trees are ~author-scale metres; scale up for "huge" clearing grandeur.
+  // #272: Quaternius author-scale is toy-yard; WoW/hordes read is player-tiny vs trunks.
+  // Heroes sit on the clearing rim so play-cam is not inside a canopy.
   const heroSpots: Array<{ name: string; x: number; z: number; scale: number; yaw: number; ti: number }> = [
-    { name: 'heroTreeNE', x: 22, z: -18, scale: 2.0, yaw: 0.4, ti: 0 },
-    { name: 'heroTreeNW', x: -24, z: -16, scale: 2.25, yaw: -0.6, ti: 1 },
-    { name: 'heroTreeSE', x: 18, z: 26, scale: 1.9, yaw: 1.1, ti: 2 % heroTemplates.length },
-    { name: 'heroTreeSW', x: -20, z: 22, scale: 2.1, yaw: 2.2, ti: 0 },
-    { name: 'heroTreeN', x: 4, z: -32, scale: 2.4, yaw: 0.2, ti: 1 % heroTemplates.length },
+    { name: 'heroTreeN', x: 6, z: -40, scale: 6.8, yaw: 0.18, ti: 1 },
+    { name: 'heroTreeNE', x: 34, z: -28, scale: 5.8, yaw: 0.45, ti: 0 },
+    { name: 'heroTreeNW', x: -36, z: -24, scale: 6.2, yaw: -0.55, ti: 1 },
+    { name: 'heroTreeSW', x: -32, z: 34, scale: 5.4, yaw: 2.15, ti: 0 },
+    { name: 'heroTreeSE', x: 30, z: 38, scale: 5.0, yaw: 1.05, ti: 2 },
+    { name: 'heroTreeW', x: -28, z: 6, scale: 4.8, yaw: -1.2, ti: 0 },
   ];
   for (const h of heroSpots) {
     const tmpl = heroTemplates[h.ti % heroTemplates.length]!;
     placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
   }
 
-  const ringCount = 28;
-  const innerR = 28;
-  const outerR = 52;
+  const ringCount = 36;
+  const innerR = 48;
+  const outerR = 110;
   for (let i = 0; i < ringCount; i++) {
     const a = (i / ringCount) * Math.PI * 2 + hash01(i * 3) * 0.35;
     const r = innerR + hash01(i * 7) * (outerR - innerR);
     // Keep south-east approach / path readable.
-    if (a > 0.15 && a < 0.55 && r < 34) continue;
+    if (a > 0.15 && a < 0.55 && r < 62) continue;
     const tmpl = midTemplates[i % midTemplates.length]!;
-    const s = 1.15 + hash01(i * 11) * 0.95;
+    const s = 2.4 + hash01(i * 11) * 1.6;
     // Variant personality: classic / taller / stubbier via Y scale.
-    const yMul = i % 3 === 1 ? 1.25 : i % 3 === 2 ? 0.82 : 1.0;
+    const yMul = i % 3 === 1 ? 1.28 : i % 3 === 2 ? 0.82 : 1.0;
     const clone = placeClone(
       tmpl,
       `midTree_${i}`,
@@ -690,11 +780,11 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     clone.scaling.y *= yMul;
   }
 
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 + 0.4;
-    const r = 55 + hash01(i * 19) * 18;
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2 + 0.4;
+    const r = 135 + hash01(i * 19) * 40;
     const tmpl = midTemplates[i % midTemplates.length]!;
-    const s = 0.85 + hash01(i * 23) * 0.55;
+    const s = 2.0 + hash01(i * 23) * 1.4;
     placeClone(
       tmpl,
       `farTree_${i}`,
@@ -720,15 +810,19 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     if (t) underTemplates.push(t);
   }
 
+  // #278: 80 clones of 6 pack templates (shared meshes, no uniques).
+  // Mac play-cam floor 30 FPS (`fpsHud.FPS_FLOOR`). SwiftShader VE is not FPS truth.
   let underPlaced = 0;
-  for (let i = 0; i < 28 && underTemplates.length > 0; i++) {
+  for (let i = 0; i < 80 && underTemplates.length > 0; i++) {
     const a = hash01(i * 41) * Math.PI * 2;
-    const r = 11 + hash01(i * 43) * 38;
-    if (r < 10) continue;
-    if (a > 0.15 && a < 0.55 && r < 22) continue; // path/clearing readable
-    const tmpl = underTemplates[i % underTemplates.length]!;
-    const isRock = tmpl.name.includes('Rock') || (i % underTemplates.length) >= 4;
-    const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.4 + hash01(i * 47) * 2.2;
+    const r = 12 + hash01(i * 43) * 95;
+    if (r < 11) continue;
+    if (a > 0.15 && a < 0.55 && r < 32) continue; // path/clearing readable
+    const plantish = i % 8 < 6;
+    const ti = plantish ? i % 3 : 3 + (i % 3);
+    const tmpl = underTemplates[ti % underTemplates.length]!;
+    const isRock = tmpl.name.includes('Rock') || ti >= 4;
+    const s = isRock ? 1.2 + hash01(i * 47) * 1.6 : 1.5 + hash01(i * 47) * 2.4;
     placeClone(
       tmpl,
       `under_${i}`,
@@ -760,10 +854,7 @@ function placeProceduralForest(scene: Scene): void {
   ];
   for (let i = 0; i < limeSpots.length; i++) {
     const s = limeSpots[i]!;
-    const patch = MeshBuilder.CreateDisc(`limeMoss_${i}`, { radius: s.r, tessellation: 16 }, scene);
-    patch.rotation.x = Math.PI / 2;
-    patch.position.set(s.x, 0.025, s.z);
-    patch.material = limeMat;
+    placeGroundDisc(scene, `limeMoss_${i}`, s.x, s.z, 0.025, s.r, 16, 1, 1, limeMat);
   }
 
   const trunkMatA = makeTrunkMat(scene, 'trunkMatA', new Color3(0.32, 0.28, 0.24));
@@ -773,12 +864,12 @@ function placeProceduralForest(scene: Scene): void {
   const foliageC = makeFoliageMat(scene, 'foliageC', new Color3(0.16, 0.34, 0.16));
   const underMat = makeUnderstoryMat(scene, 'understoryMat', new Color3(0.2, 0.42, 0.16));
 
-  placeHeroTree(scene, 'heroElderN', 3, -34, 1.9, 0.18, trunkMatA, foliageB, 'landmark');
-  placeHeroTree(scene, 'heroElderSW', -22, 24, 1.7, 2.15, trunkMatB, foliageA, 'landmark');
-  placeHeroTree(scene, 'heroSentNE', 24, -17, 1.4, 0.45, trunkMatA, foliageA, 'sentinel');
-  placeHeroTree(scene, 'heroSentNW', -26, -15, 1.5, -0.55, trunkMatB, foliageB, 'sentinel');
-  placeHeroTree(scene, 'heroSentSE', 19, 27, 1.25, 1.05, trunkMatA, foliageC, 'standard');
-  placeHeroTree(scene, 'heroSentE', 30, 6, 1.35, -1.2, trunkMatB, foliageC, 'sentinel');
+  placeHeroTree(scene, 'heroElderN', 6, -40, 3.4, 0.18, trunkMatA, foliageB, 'landmark');
+  placeHeroTree(scene, 'heroElderSW', -32, 34, 3.0, 2.15, trunkMatB, foliageA, 'landmark');
+  placeHeroTree(scene, 'heroSentNE', 34, -28, 2.7, 0.45, trunkMatA, foliageA, 'sentinel');
+  placeHeroTree(scene, 'heroSentNW', -36, -24, 2.8, -0.55, trunkMatB, foliageB, 'sentinel');
+  placeHeroTree(scene, 'heroSentSE', 30, 38, 2.4, 1.05, trunkMatA, foliageC, 'standard');
+  placeHeroTree(scene, 'heroSentW', -28, 6, 2.5, -1.2, trunkMatB, foliageC, 'sentinel');
 
   const midClassic = buildMergedMidTree(scene, 'midClassic', trunkMatB, foliageB, {
     trunkHeight: 7.5,
@@ -818,13 +909,13 @@ function placeProceduralForest(scene: Scene): void {
   const matsUnder: Matrix[] = [];
 
   const innerCount = 68;
-  const innerR0 = 22;
-  const innerR1 = 38;
+  const innerR0 = 58;
+  const innerR1 = 95;
   for (let i = 0; i < innerCount; i++) {
     const a = (i / innerCount) * Math.PI * 2 + hash01(i * 3) * 0.28;
     const r = innerR0 + hash01(i * 7) * (innerR1 - innerR0);
-    if (a > 0.12 && a < 0.52 && r < 32) continue;
-    const s = 0.72 + hash01(i * 11) * 0.9;
+    if (a > 0.12 && a < 0.52 && r < 72) continue;
+    const s = 1.6 + hash01(i * 11) * 1.4;
     const sy = s * (0.88 + hash01(i * 13) * 0.38);
     const m = composeInstanceMatrix(
       Math.cos(a) * r,
@@ -843,8 +934,8 @@ function placeProceduralForest(scene: Scene): void {
   const midCount = 40;
   for (let i = 0; i < midCount; i++) {
     const a = (i / midCount) * Math.PI * 2 + 0.22 + hash01(i * 5) * 0.2;
-    const r = 42 + hash01(i * 9) * 14;
-    const s = 0.65 + hash01(i * 15) * 0.7;
+    const r = 100 + hash01(i * 9) * 28;
+    const s = 1.5 + hash01(i * 15) * 1.1;
     const m = composeInstanceMatrix(
       Math.cos(a) * r,
       Math.sin(a) * r,
@@ -862,8 +953,8 @@ function placeProceduralForest(scene: Scene): void {
   const farCount = 48;
   for (let i = 0; i < farCount; i++) {
     const a = (i / farCount) * Math.PI * 2 + hash01(i * 19) * 0.15;
-    const r = 58 + hash01(i * 23) * 22;
-    const s = 0.7 + hash01(i * 29) * 0.85;
+    const r = 135 + hash01(i * 23) * 40;
+    const s = 1.6 + hash01(i * 29) * 1.2;
     matsFar.push(
       composeInstanceMatrix(
         Math.cos(a) * r,
@@ -876,16 +967,17 @@ function placeProceduralForest(scene: Scene): void {
     );
   }
 
-  const underCount = 64;
+  // #278 fallback: ThinInstance understory (shared mesh). Same 30 FPS floor.
+  const underCount = 110;
   for (let i = 0; i < underCount; i++) {
     const a = (i / underCount) * Math.PI * 2 + hash01(i * 43) * 0.4;
     const band = hash01(i * 47);
     const r =
       band < 0.35
-        ? 10 + hash01(i * 53) * 8
-        : 18 + hash01(i * 53) * 12;
-    if (r < 11 && a > 0.15 && a < 0.55) continue;
-    const s = 0.7 + hash01(i * 59) * 1.1;
+        ? 14 + hash01(i * 53) * 16
+        : 32 + hash01(i * 53) * 40;
+    if (r < 14 && a > 0.15 && a < 0.55) continue;
+    const s = 1.1 + hash01(i * 59) * 1.4;
     matsUnder.push(
       composeInstanceMatrix(
         Math.cos(a) * r,
@@ -905,56 +997,78 @@ function placeProceduralForest(scene: Scene): void {
   thinInstanceFromMatrices(understory, matsUnder);
 }
 
+/**
+ * #278: GPU-instanced fern/grass beside the path. Two merged clusters,
+ * ThinInstances (not unique meshes). Floor: 30 fps (`fpsHud.FPS_FLOOR`).
+ */
+function placeThinUnderstory(scene: Scene): void {
+  const matA = makeUnderstoryMat(scene, 'thinUnderA', new Color3(0.18, 0.4, 0.14));
+  const matB = makeUnderstoryMat(scene, 'thinUnderB', new Color3(0.23, 0.46, 0.16));
+  const clusterA = buildUnderstoryCluster(scene, 'thinUnderClusterA', matA);
+  const clusterB = buildUnderstoryCluster(scene, 'thinUnderClusterB', matB);
+  const matsA: Matrix[] = [];
+  const matsB: Matrix[] = [];
+  const count = 128;
+  for (let i = 0; i < count; i++) {
+    const a = hash01(i * 73) * Math.PI * 2;
+    const r = 16 + hash01(i * 79) * 72;
+    if (r < 12) continue;
+    if (a > 0.12 && a < 0.58 && r < 40) continue;
+    const s = 1.15 + hash01(i * 83) * 1.55;
+    const m = composeInstanceMatrix(
+      Math.cos(a) * r,
+      Math.sin(a) * r,
+      s * (0.75 + hash01(i * 89) * 0.5),
+      s,
+      s * (0.75 + hash01(i * 97) * 0.5),
+      hash01(i * 101) * Math.PI * 2,
+    );
+    if (i % 2 === 0) matsA.push(m);
+    else matsB.push(m);
+  }
+  thinInstanceFromMatrices(clusterA, matsA);
+  thinInstanceFromMatrices(clusterB, matsB);
+}
 
 /**
- * Procedural clearing path (#44): warm grey-brown dirt/stone + soft moss/dirt
- * edge + trail strip + cheap stone flecks. Readable vs lush grass under cyan
- * fog without fighting #39 lighting lock. FPS-friendly (few discs/boxes).
+ * Clearing path (#274): dirt vs grass, not a shiny disc. Small worn hollow
+ * plus a trail that recedes SE into fog. Matte, procedural DIY.
  */
 function buildClearingPath(scene: Scene): void {
-  // Soft moss/dirt blend ring — subtle edge vs lush grass (not a hard dark rim).
-  const edge = MeshBuilder.CreateDisc('pathEdge', { radius: 9.6, tessellation: 28 }, scene);
-  edge.rotation.x = Math.PI / 2;
-  edge.position.y = 0.022;
-  const edgeMat = new StandardMaterial('pathEdgeMat', scene);
-  edgeMat.diffuseColor = new Color3(0.34, 0.32, 0.18);
-  edgeMat.specularColor = new Color3(0.012, 0.014, 0.01);
-  edgeMat.emissiveColor = new Color3(0.02, 0.022, 0.012);
-  edge.material = edgeMat;
+  const matteDirt = (name: string, diff: Color3, emit: Color3): StandardMaterial => {
+    const m = new StandardMaterial(name, scene);
+    m.diffuseColor = diff;
+    m.specularColor = new Color3(0.006, 0.005, 0.004);
+    m.emissiveColor = emit;
+    return m;
+  };
 
-  // Main packed path — Art #44 warm grey-brown (not chalky cool / not neon).
-  const dirt = MeshBuilder.CreateDisc('dirtPatch', { radius: 8.4, tessellation: 28 }, scene);
-  dirt.rotation.x = Math.PI / 2;
-  dirt.position.y = 0.03;
-  const dirtMat = new StandardMaterial('dirtMat', scene);
-  dirtMat.diffuseColor = new Color3(0.48, 0.36, 0.26);
-  dirtMat.specularColor = new Color3(0.02, 0.016, 0.012);
-  dirtMat.emissiveColor = new Color3(0.022, 0.016, 0.01);
-  dirt.material = dirtMat;
+  // Small irregular worn hollows at spawn — not a concentric disc pad.
+  // DummySpawn (5, 0) and vendor (-2.5, 2) must sit on dirt (ellipse < 1).
+  const hollowMat = matteDirt('dirtMat', new Color3(0.46, 0.34, 0.24), new Color3(0.012, 0.009, 0.006));
+  const hollows: Array<{ x: number; z: number; r: number; sx: number; sz: number }> = [
+    { x: 0.4, z: 0.2, r: 3.4, sx: 1.52, sz: 0.82 },
+    { x: 2.6, z: 2.8, r: 2.2, sx: 1.4, sz: 0.65 },
+    { x: -2.2, z: -1.4, r: 1.8, sx: 0.9, sz: 1.2 },
+    { x: 1.2, z: -2.6, r: 1.5, sx: 1.5, sz: 0.7 },
+    { x: 5.0, z: 0.0, r: 1.7, sx: 1.2, sz: 0.85 },
+  ];
+  for (let i = 0; i < hollows.length; i++) {
+    const h = hollows[i]!;
+    placeGroundDisc(scene, `dirtHollow_${i}`, h.x, h.z, 0.028, h.r, 16, h.sx, h.sz, hollowMat);
+  }
 
-  // Inner worn center — slightly richer warm tone for multi-tone read at play cam.
-  const worn = MeshBuilder.CreateDisc('pathWorn', { radius: 4.2, tessellation: 22 }, scene);
-  worn.rotation.x = Math.PI / 2;
-  worn.position.y = 0.036;
-  const wornMat = new StandardMaterial('pathWornMat', scene);
-  wornMat.diffuseColor = new Color3(0.5, 0.38, 0.28);
-  wornMat.specularColor = new Color3(0.022, 0.018, 0.014);
-  wornMat.emissiveColor = new Color3(0.024, 0.018, 0.012);
-  worn.material = wornMat;
-
-  // Elongated trail strip toward the mid-tree gap (SE) — readable from play cam.
-  const trail = MeshBuilder.CreateGround(
-    'pathTrail',
-    { width: 3.4, height: 18, subdivisions: 1 },
-    scene,
-  );
-  trail.position.set(5.5, 0.034, 6.5);
-  trail.rotation.y = -0.55;
-  const trailMat = new StandardMaterial('pathTrailMat', scene);
-  trailMat.diffuseColor = new Color3(0.46, 0.34, 0.24);
-  trailMat.specularColor = new Color3(0.018, 0.014, 0.01);
-  trailMat.emissiveColor = new Color3(0.02, 0.014, 0.01);
-  trail.material = trailMat;
+  const trailMat = matteDirt('pathTrailMat', new Color3(0.45, 0.33, 0.23), new Color3(0.011, 0.008, 0.005));
+  const placeTrail = (name: string, x: number, z: number, w: number, len: number, yaw: number, y: number): void => {
+    const t = MeshBuilder.CreateGround(name, { width: w, height: len, subdivisions: 2 }, scene);
+    t.position.set(x, y, z);
+    t.rotation.y = yaw;
+    t.material = trailMat;
+  };
+  // Recedes SE through the tree gap, then a second beat further into fog.
+  placeTrail('pathTrail', 7.2, 10, 3.1, 28, -0.52, 0.03);
+  placeTrail('pathTrailFar', 18, 32, 2.5, 36, -0.38, 0.028);
+  placeTrail('pathTrailFar2', 28, 58, 2.1, 28, -0.22, 0.026);
 
   // Faint moss patches near path — soft grass→dirt value variation (no terrain system).
   const mossPatchMat = new StandardMaterial('pathMossPatchMat', scene);
@@ -969,40 +1083,34 @@ function buildClearingPath(scene: Scene): void {
   ];
   for (let i = 0; i < mossPatches.length; i++) {
     const p = mossPatches[i]!;
-    const m = MeshBuilder.CreateDisc(`pathMossPatch_${i}`, { radius: p.r, tessellation: 12 }, scene);
-    m.rotation.x = Math.PI / 2;
-    m.position.set(p.x, 0.018, p.z);
-    m.material = mossPatchMat;
+    placeGroundDisc(scene, `pathMossPatch_${i}`, p.x, p.z, 0.018, p.r, 12, 1, 1, mossPatchMat);
   }
 
   // Cobble-ish worn patches along trail (cheap discs, shared mat) — warm stone.
   const cobbleMat = new StandardMaterial('pathCobbleMat', scene);
   cobbleMat.diffuseColor = new Color3(0.46, 0.4, 0.32);
-  cobbleMat.specularColor = new Color3(0.03, 0.026, 0.022);
-  cobbleMat.emissiveColor = new Color3(0.02, 0.016, 0.012);
+  cobbleMat.specularColor = new Color3(0.012, 0.01, 0.008);
+  cobbleMat.emissiveColor = new Color3(0.01, 0.008, 0.006);
   const cobbleSpots: Array<{ x: number; z: number; r: number }> = [
-    { x: 0.8, z: 1.2, r: 0.55 },
-    { x: -1.4, z: -0.6, r: 0.42 },
-    { x: 2.2, z: -2.1, r: 0.48 },
-    { x: -2.6, z: 2.4, r: 0.38 },
-    { x: 4.6, z: 4.0, r: 0.5 },
-    { x: 6.8, z: 7.2, r: 0.44 },
-    { x: 8.4, z: 9.6, r: 0.4 },
-    { x: 3.1, z: 5.5, r: 0.36 },
+    { x: 0.6, z: 0.8, r: 0.5 },
+    { x: 4.2, z: 5.5, r: 0.42 },
+    { x: 8.0, z: 11.5, r: 0.4 },
+    { x: 12.5, z: 20, r: 0.38 },
+    { x: 17, z: 30, r: 0.44 },
+    { x: 22, z: 40, r: 0.36 },
+    { x: 26, z: 52, r: 0.4 },
+    { x: 30, z: 64, r: 0.34 },
   ];
   for (let i = 0; i < cobbleSpots.length; i++) {
     const s = cobbleSpots[i]!;
-    const c = MeshBuilder.CreateDisc(`pathCobble_${i}`, { radius: s.r, tessellation: 10 }, scene);
-    c.rotation.x = Math.PI / 2;
-    c.position.set(s.x, 0.04, s.z);
-    c.material = cobbleMat;
+    placeGroundDisc(scene, `pathCobble_${i}`, s.x, s.z, 0.04, s.r, 10, 1, 1, cobbleMat);
   }
 
   // Tiny stone flecks — shared mat, few instances, web-cheap, warm grey.
   const stoneMat = new StandardMaterial('pathStoneMat', scene);
   stoneMat.diffuseColor = new Color3(0.5, 0.44, 0.36);
-  stoneMat.specularColor = new Color3(0.035, 0.03, 0.026);
-  stoneMat.emissiveColor = new Color3(0.02, 0.017, 0.014);
+  stoneMat.specularColor = new Color3(0.014, 0.012, 0.01);
+  stoneMat.emissiveColor = new Color3(0.01, 0.008, 0.006);
   const stoneProto = MeshBuilder.CreateBox(
     'pathStoneProto',
     { width: 0.28, height: 0.06, depth: 0.22 },
@@ -1014,9 +1122,10 @@ function buildClearingPath(scene: Scene): void {
   stoneProto.material = stoneMat;
   for (let i = 0; i < 16; i++) {
     const inst = stoneProto.createInstance(`pathStone_${i}`);
-    const a = hash01(i * 41) * Math.PI * 2;
-    const r = 1.2 + hash01(i * 47) * 6.5;
-    inst.position.set(Math.cos(a) * r, 0.045, Math.sin(a) * r);
+    const t = i / 15;
+    const x = 1.2 + t * 28 + (hash01(i * 41) - 0.5) * 2.4;
+    const z = 0.8 + t * 62 + (hash01(i * 47) - 0.5) * 2.2;
+    inst.position.set(x, 0.045, z);
     inst.rotation.y = hash01(i * 53) * Math.PI;
     const s = 0.55 + hash01(i * 59) * 0.9;
     inst.scaling.set(s, 0.7 + hash01(i * 61) * 0.5, s * (0.7 + hash01(i * 67) * 0.5));
@@ -1026,7 +1135,7 @@ function buildClearingPath(scene: Scene): void {
 
 /**
  * Forest clearing: Quaternius Standard heroes + mid + understory (CC0),
- * procedural mountain silhouettes, locked #32/#39 atmosphere (warm sun / cool hemi / cyan fog).
+ * procedural mountain silhouettes (#273), #39 sun/hemi + #270 LINEAR fog/sky lock.
  * Path/ground polish #44 via buildClearingPath; sky/horizon silhouette #55.
  * Procedural fallback uses post-#40 ThinInstance density + LOD.
  */
@@ -1035,49 +1144,65 @@ export async function buildForestClearing(scene: Scene): Promise<{
   hemi: HemisphericLight;
   sun: DirectionalLight;
 }> {
-  // Atmosphere lock from #32/#39: blue/cyan fog mid→far, warm sun + cool hemi, lush ground.
-  // Mood > volumetric soup — StandardMaterial + EXP2 fog only (web-cheap).
-  // Hemi/sun locked for Dev4 (#33) robe mats — do not flip casually.
-  scene.clearColor = new Color4(0.24, 0.36, 0.46, 1);
-  scene.fogMode = Scene.FOGMODE_EXP2;
-  scene.fogDensity = 0.015;
-  scene.fogColor = new Color3(0.34, 0.55, 0.7);
+  // Atmosphere: #270 fog/sky + #277 cool forest interior (lifts #39 midday key).
+  scene.clearColor = new Color4(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b, 1);
+  scene.fogMode = Scene.FOGMODE_LINEAR;
+  scene.fogStart = FOG_START;
+  scene.fogEnd = FOG_END;
+  scene.fogColor = FOG_COLOR.clone();
 
-  const hemi = new HemisphericLight('hemiForest', new Vector3(0.12, 1, 0.22), scene);
-  hemi.intensity = 0.78;
-  // Cool canopy-filtered fill (stable for #33) + green ground bounce.
-  hemi.diffuse = new Color3(0.68, 0.78, 0.86);
-  hemi.groundColor = new Color3(0.16, 0.26, 0.14);
-  hemi.specular = new Color3(0.1, 0.12, 0.14);
+  const hemi = new HemisphericLight('hemiForest', new Vector3(0.08, 1, 0.18), scene);
+  hemi.intensity = 0.88;
+  hemi.diffuse = new Color3(0.48, 0.62, 0.78);
+  hemi.groundColor = new Color3(0.1, 0.18, 0.12);
+  hemi.specular = new Color3(0.06, 0.08, 0.1);
 
-  const sun = new DirectionalLight('sunForest', new Vector3(-0.5, -0.68, -0.4), scene);
-  sun.position = new Vector3(48, 55, 28);
-  sun.intensity = 0.98;
-  // Warmer golden-hour key for fantasy clearing readability.
-  sun.diffuse = new Color3(1.0, 0.82, 0.52);
-  sun.specular = new Color3(0.42, 0.32, 0.18);
+  const sun = new DirectionalLight('sunForest', new Vector3(-0.72, -0.38, -0.28), scene);
+  sun.position = new Vector3(62, 38, 22);
+  sun.intensity = 0.48;
+  sun.diffuse = new Color3(0.62, 0.72, 0.88);
+  sun.specular = new Color3(0.18, 0.2, 0.24);
 
   const ground = MeshBuilder.CreateGround(
     'clearing',
-    { width: 120, height: 120, subdivisions: 2 },
+    { width: GROUND_EXTENT, height: GROUND_EXTENT, subdivisions: 40 },
     scene,
   );
   const groundMat = new StandardMaterial('clearingMat', scene);
-  // Richer saturated grass albedo vs cyan fog (#44 keeps this lush).
-  groundMat.diffuseColor = new Color3(0.26, 0.52, 0.18);
-  groundMat.specularColor = new Color3(0.012, 0.018, 0.01);
-  groundMat.emissiveColor = new Color3(0.035, 0.07, 0.022);
+  // Lush grass, matte — the old emissive made a plastic pad (#274).
+  groundMat.diffuseColor = new Color3(0.24, 0.48, 0.17);
+  groundMat.specularColor = new Color3(0.006, 0.01, 0.005);
+  groundMat.emissiveColor = new Color3(0.018, 0.038, 0.012);
   ground.material = groundMat;
 
-  // Soft moss ring around the dirt clearing — dirt/grass transition without new packs.
-  const moss = MeshBuilder.CreateDisc('mossRing', { radius: 14, tessellation: 32 }, scene);
-  moss.rotation.x = Math.PI / 2;
-  moss.position.y = 0.015;
+  // Scattered moss clumps — grass variation, not a ring-pad.
   const mossMat = new StandardMaterial('mossMat', scene);
-  mossMat.diffuseColor = new Color3(0.22, 0.48, 0.16);
-  mossMat.specularColor = new Color3(0.01, 0.016, 0.008);
-  mossMat.emissiveColor = new Color3(0.03, 0.065, 0.02);
-  moss.material = mossMat;
+  mossMat.diffuseColor = new Color3(0.2, 0.44, 0.15);
+  mossMat.specularColor = new Color3(0.006, 0.01, 0.005);
+  mossMat.emissiveColor = new Color3(0.016, 0.036, 0.012);
+  const mossClumps: Array<{ x: number; z: number; r: number }> = [
+    { x: -5.5, z: 4.2, r: 2.4 },
+    { x: 6.5, z: -3.8, r: 2.0 },
+    { x: -3.2, z: -6.5, r: 1.7 },
+    { x: 8.5, z: 5.0, r: 1.9 },
+    { x: 14, z: 16, r: 2.2 },
+    { x: 22, z: 36, r: 1.8 },
+  ];
+  for (let i = 0; i < mossClumps.length; i++) {
+    const c = mossClumps[i]!;
+    placeGroundDisc(
+      scene,
+      `mossClump_${i}`,
+      c.x,
+      c.z,
+      0.014,
+      c.r,
+      14,
+      1.2 + hash01(i * 3) * 0.4,
+      0.75 + hash01(i * 7) * 0.35,
+      mossMat,
+    );
+  }
 
   // #44 path/ground polish — readable trail vs lush grass under locked #39 fog/sun.
   // Art warm grey-brown multi-tone dirt (not chalky) + cheap procedural detail.
@@ -1088,6 +1213,7 @@ export async function buildForestClearing(scene: Scene): Promise<{
     console.warn('[forest] Quaternius pack unavailable — procedural fallback (post-#40 density)');
     placeProceduralForest(scene);
   }
+  placeThinUnderstory(scene);
 
   // Hybrid: mountains stay procedural (pack mountains optional / heavy).
   buildMountainBackdrop(scene);

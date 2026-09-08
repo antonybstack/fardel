@@ -328,6 +328,7 @@ public static partial class Module
             maxStep *= Tonic.MoveSpeedMult;
         }
         Movement.ClampWishStep(ref dx, ref dz, maxStep);
+        Movement.ApplyAirControl(ref dx, ref dz, pose.Y);
         var x = pose.X + dx;
         var z = pose.Z + dz;
 
@@ -341,7 +342,9 @@ public static partial class Module
         // Apply gravity
         velY += Movement.Gravity * dtSeconds;
 
-        // Jump intent: only if grounded or within coyote time
+        // Jump intent: grounded or coyote. No pre-land buffer (#259): coyote covers
+        // the next grounded Move (~20Hz ≤ 50ms). A stored intent would bunny-hop
+        // hold-Space land (JumpSmoke #157). velY<=0.01 blocks mid-air / same-tick re-boost.
         var grounded = y <= Movement.GroundY + 0.01f;
         var coyoteAllowed = (nowMicros - lastGroundedMicros) <= Movement.CoyoteTimeMicros;
         if (jump && (grounded || coyoteAllowed) && velY <= 0.01f)

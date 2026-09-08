@@ -457,11 +457,13 @@ git fetch origin develop
 git checkout develop
 git pull origin develop
 
-# Pin SHA
-PIN_SHA=$(git rev-parse HEAD)
+# Pin SHA onto a frozen branch — never PR live develop (it follows later merges).
+PIN_SHA=$(git rev-parse origin/develop)
+SHORT=$(git rev-parse --short=8 "$PIN_SHA")
+git checkout -B "release/$SHORT" "$PIN_SHA"
+git push -u origin "release/$SHORT"
 
-# Open PR develop → main (or fast-forward if allowed)
-gh pr create --base main --head develop --title "Release: $PIN_SHA" --body "Pin: $PIN_SHA\n\nSmokes green. No P0s."
+gh pr create --base main --head "release/$SHORT" --title "release: pin $SHORT to main" --body "Pin: $PIN_SHA\n\nFrozen branch. Do not expand if develop moves. Smokes green. No P0s."
 
 # After merge:
 git checkout main

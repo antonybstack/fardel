@@ -11,12 +11,38 @@ public static class Movement
 
     /// <summary>Gravity acceleration (meters per second squared, downward).</summary>
     public const float Gravity = -20f;
-    /// <summary>Initial upward velocity when jump intent is true (meters per second).</summary>
-    public const float JumpVelocity = 6f;
+    /// <summary>
+    /// Initial upward velocity when jump intent is true (meters per second).
+    /// Discrete peak at 20Hz is ~1.8m — readable at play-cam r≈14–22 without mesh scale.
+    /// </summary>
+    public const float JumpVelocity = 8f;
     /// <summary>Ground Y level (clamped when grounded).</summary>
     public const float GroundY = 0f;
-    /// <summary>Coyote time: grace period for jump after leaving ground (microseconds).</summary>
+    /// <summary>
+    /// Coyote time: grace period for jump after leaving ground (microseconds).
+    /// E1.8 (#259) v1 jump-queue: live client is ~20Hz, so a Space tap on the first
+    /// grounded Move after land is ≤50ms late — same order as a 100ms pre-land buffer.
+    /// A stored pre-land intent needs a pose field and would re-boost if <c>jump:true</c>
+    /// is held through land (JumpSmoke hold-Space #157). No extra field; no multi-jump.
+    /// </summary>
     public const long CoyoteTimeMicros = 50_000L;
+    /// <summary>
+    /// Scale applied to XZ wish while <c>Y &gt; GroundY</c> (WoW-like air control).
+    /// Grounded WASD is unchanged. No schema.
+    /// </summary>
+    public const float AirControlScale = 0.25f;
+
+    /// <summary>Damp XZ wish while airborne. Call after <see cref="ClampWishStep"/>.</summary>
+    public static void ApplyAirControl(ref float dx, ref float dz, float y)
+    {
+        if (y <= GroundY)
+        {
+            return;
+        }
+
+        dx *= AirControlScale;
+        dz *= AirControlScale;
+    }
 
     /// <summary>Clamp a wish displacement to MaxStepMeters (XZ). Y ignored for slice 1.</summary>
     public static void ClampWishStep(ref float dx, ref float dz)

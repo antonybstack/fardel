@@ -257,46 +257,26 @@ try
         return;
     }
     conn.Reducers.Move(0f, 0f, jump: true);
-    var coyoteLeft = await WaitPoseTight(
-        conn, identity,
-        p => p.Y > Movement.GroundY + 0.05f || MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f,
-        2000);
-    if (coyoteLeft is null)
+    // Burst gravity + coyote jump in one wall-clock window (CoyoteTimeMicros=50ms).
+    var ticksToApex = TicksToApex();
+    for (var i = 0; i < ticksToApex; i++)
     {
-        Fail("coyote: jump did not leave ground");
-        return;
-    }
-    var coyoteApex = coyoteLeft;
-    for (var i = 0; i < 16; i++)
-    {
-        if (coyoteApex.Y > Movement.GroundY + 0.05f && coyoteApex.VelY <= 0.01f)
-        {
-            break;
-        }
-        var velBefore = coyoteApex.VelY;
         conn.Reducers.Move(0f, 0f, jump: false);
-        var stepped = await WaitPoseTight(conn, identity, p => p.VelY < velBefore - 0.1f, 500);
-        if (stepped is null)
-        {
-            Fail($"coyote: burst gravity timeout (Y={coyoteApex.Y} VelY={coyoteApex.VelY})");
-            return;
-        }
-        coyoteApex = stepped;
-    }
-    if (coyoteApex.Y <= Movement.GroundY + 0.05f || coyoteApex.VelY > 0.01f)
-    {
-        Fail($"coyote: never reached airborne apex Y={coyoteApex.Y} VelY={coyoteApex.VelY}");
-        return;
     }
     conn.Reducers.Move(0f, 0f, jump: true);
-    var coyoteBoost = await WaitPoseTight(
-        conn, identity, p => MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f, 500);
-    if (coyoteBoost is null || MathF.Abs(coyoteBoost.VelY - Movement.JumpVelocity) > 1f)
+    for (var i = 0; i < 4; i++)
     {
-        Fail($"coyote within window did not boost VelY (Y={coyoteApex.Y} VelY={coyoteApex.VelY} -> {coyoteBoost?.VelY})");
+        conn.Reducers.Move(0f, 0f, jump: false);
+        conn.FrameTick();
+    }
+    var stackedMin = EstimateHopPeak() + 0.4f;
+    var coyoteBoost = await WaitPoseTight(conn, identity, p => p.Y > stackedMin, 2000);
+    if (coyoteBoost is null || coyoteBoost.Y <= stackedMin)
+    {
+        Fail($"coyote within window did not re-boost (Y={coyoteBoost?.Y} VelY={coyoteBoost?.VelY} need >{stackedMin:F2})");
         return;
     }
-    Console.WriteLine($"coyote jump: Y={coyoteApex.Y}->{coyoteBoost.Y} velY {coyoteApex.VelY}->{coyoteBoost.VelY}");
+    Console.WriteLine($"coyote jump: Y={coyoteBoost.Y} velY={coyoteBoost.VelY} stackedMin={stackedMin:F2}");
 
     PlayerPose? coyoteFalling = coyoteBoost;
     using (var expireCts = new CancellationTokenSource(timeoutMs))
@@ -448,6 +428,8 @@ try
         return;
     }
     Console.WriteLine("hold-Space Move(0,0,true) air pump land OK (no VelY re-boost)");
+    // E1.8 (#259): this land-with-jump:true still Y/VelY≈0 is why we do not store a
+    // 100ms pre-land jump buffer — it would re-boost here. Coyote is the v1 queue.
 
     // Same-tick jump+XZ (#158): live client sendMove(dx, dz, wish.jump) in one reducer.
     // Oversized wish proves clamp + VelY together (gap (c) on the issue).
@@ -485,10 +467,12 @@ try
     Console.WriteLine($"jump+XZ: X {xzBeforeX}->{xzJump.X} (d={xzDx:F3} clamped {xzExpected}) Y={xzJump.Y} velY={xzJump.VelY}");
 
     // Air-phase strafe: Move(dx,0,jump:false) still integrates gravity.
+    // Airborne XZ is scaled (E1.2 #253) — same wish is much smaller than grounded.
     var airBeforeX = xzJump.X;
     var airBeforeY = xzJump.Y;
     var airBeforeVelY = xzJump.VelY;
     var airStrafe = 0.4f;
+    var airExpected = airStrafe * Movement.AirControlScale;
     conn.Reducers.Move(airStrafe, 0f, jump: false);
     var xzAir = await WaitPose(conn, identity, p => MathF.Abs(p.X - airBeforeX) > 0.01f, timeoutMs);
     if (xzAir is null)
@@ -496,9 +480,15 @@ try
         Fail("air strafe timeout — no X change");
         return;
     }
-    if (MathF.Abs(xzAir.X - airBeforeX - airStrafe) > 0.05f)
+    var airDx = xzAir.X - airBeforeX;
+    if (MathF.Abs(airDx - airExpected) > 0.03f)
     {
-        Fail($"air strafe X delta={xzAir.X - airBeforeX} expected ~{airStrafe}");
+        Fail($"air strafe X delta={airDx} expected ~{airExpected} (AirControlScale={Movement.AirControlScale})");
+        return;
+    }
+    if (MathF.Abs(airDx) >= MathF.Abs(airStrafe) * 0.6f)
+    {
+        Fail($"air strafe X delta={airDx} not << grounded wish {airStrafe}");
         return;
     }
     if (xzAir.VelY > airBeforeVelY + 0.01f)
@@ -539,6 +529,35 @@ try
         Fail("jump+XZ did not land (Y/VelY)");
         return;
     }
+
+    // E1.3 #254: same wish grounded vs airborne — air displacement clearly smaller.
+    var groundBeforeX = xzLand.X;
+    conn.Reducers.Move(airStrafe, 0f, jump: false);
+    var groundStep = await WaitPose(conn, identity, p => MathF.Abs(p.X - groundBeforeX) > 0.01f, timeoutMs);
+    if (groundStep is null)
+    {
+        Fail("grounded XZ timeout — no X change");
+        return;
+    }
+    if (MathF.Abs(groundStep.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(groundStep.VelY) > 0.1f)
+    {
+        Fail($"grounded XZ left ground Y={groundStep.Y} VelY={groundStep.VelY}");
+        return;
+    }
+    var groundDx = groundStep.X - groundBeforeX;
+    if (MathF.Abs(groundDx - airStrafe) > 0.05f)
+    {
+        Fail($"grounded XZ delta={groundDx} expected ~{airStrafe}");
+        return;
+    }
+    if (MathF.Abs(airDx) >= MathF.Abs(groundDx) * 0.5f)
+    {
+        Fail($"airborne XZ {airDx} not << grounded {groundDx}");
+        return;
+    }
+    Console.WriteLine(
+        $"air vs ground XZ: air={airDx:F3} ground={groundDx:F3} scale={Movement.AirControlScale}");
 
     // Grounded second jump after land is still allowed (#120).
     if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseBeforeSecond)
@@ -604,6 +623,39 @@ static void Fail(string msg)
     Environment.ExitCode = 1;
 }
 
+
+static int TicksToApex()
+{
+    const float dt = 0.05f;
+    var step = MathF.Abs(Movement.Gravity) * dt;
+    if (step < 1e-4f)
+    {
+        return 8;
+    }
+    return Math.Max(1, (int)MathF.Round(Movement.JumpVelocity / step));
+}
+
+static float EstimateHopPeak()
+{
+    const float dt = 0.05f;
+    var velY = Movement.JumpVelocity;
+    var y = velY * dt;
+    var peak = y;
+    for (var i = 0; i < 64; i++)
+    {
+        velY += Movement.Gravity * dt;
+        y += velY * dt;
+        if (y > peak)
+        {
+            peak = y;
+        }
+        if (y <= Movement.GroundY)
+        {
+            break;
+        }
+    }
+    return peak;
+}
 
 static async Task<PlayerPose?> WaitPose(DbConnection conn, Identity identity, Func<PlayerPose, bool> pred, int timeoutMs)
 {

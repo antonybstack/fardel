@@ -55,7 +55,6 @@ import {
   preloadPlayerHumanoid,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
-  setHumanoidJumpSquash,
   setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
@@ -951,6 +950,24 @@ function setDebugHudVisible(open: boolean): void {
   const fps = document.getElementById('fpsHud');
   if (status) status.classList.toggle('hidden', !open);
   if (fps) fps.classList.toggle('hidden', !open);
+}
+
+/**
+ * CrowdProxy amber capsules are AOI/perf debug — hidden in default play (#271).
+ * Visible only with F3/?debug=1 or AOI/minimap/fps VE hooks.
+ */
+function showCrowdDebugCapsules(ve: string | null, debugHud: boolean): boolean {
+  if (debugHud) return true;
+  switch (ve) {
+    case 'aoi':
+    case 'minimap':
+    case 'minimap-read':
+    case 'minimap-pip':
+    case 'fps':
+      return true;
+    default:
+      return false;
+  }
 }
 
 /** Compact party member frames: hex + leader tag + distance / pose hint. */
@@ -1999,7 +2016,7 @@ async function createScene(engine: Engine): Promise<{
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
   await buildForestClearing(scene);
 
-  // Local player: Quaternius CC0 wizard (crowd proxies stay capsules).
+  // Local player: Quaternius CC0 wizard (crowd proxies are debug-only, #271).
   await preloadPlayerHumanoid(scene);
   const humanoid = createPlayerHumanoid(scene);
   const player = humanoid.root;
@@ -2023,7 +2040,8 @@ async function createScene(engine: Engine): Promise<{
   };
   player.position = new Vector3(0, 0, 0);
 
-  // CrowdProxy source mesh (hidden) — instances are amber, distinct from local blue player.
+  // CrowdProxy source mesh (hidden). Instances are amber AOI debug — default play
+  // does not enable them (#271). Visible only via F3/?debug=1 or aoi/minimap/fps VE.
   const proxySource = MeshBuilder.CreateCapsule(
     'crowdProxySource',
     { height: 1.5, radius: 0.28 },
@@ -2961,15 +2979,20 @@ async function main(): Promise<void> {
   let net: GameNet | null = null;
   let bagOpen = false;
   let keysLegendOpen = false;
-  /** #139 — client-only hop presence (squash/stretch + camera dip + JUMP toast). */
+  /** #252 — hop presence is JUMP toast only; no squash/stretch or camera dip. */
   let jumpWasAirborne = false;
   let jumpTakeoffMs = 0;
   let jumpApexToasted = false;
   let jumpPeakY = 0;
-  let jumpLandSquashUntil = 0;
-  let jumpCamDipY = 0;
+  /** #256 — follow Y spring so land does not punch the camera. */
+  const CAM_FOLLOW_Y_OFFSET = 1.35;
+  const CAM_FOLLOW_Y_HZ = 10;
+  const CAM_FOLLOW_SNAP_METERS = 2.5;
+  let camFollowY = CAM_FOLLOW_Y_OFFSET;
+  let camFollowYSeeded = false;
   const bootParams = new URLSearchParams(window.location.search);
-  const firstSessionVe = (bootParams.get('ve') || '') === 'first-session';
+  const ve = bootParams.get('ve') || '';
+  const firstSessionVe = ve === 'first-session';
   let firstSessionCueShown = false;
   let firstSessionLegendFlash = false;
   let firstSessionFlashTimer: number | null = null;
@@ -3108,6 +3131,8 @@ async function main(): Promise<void> {
   const MOVE_SEND_HZ = 20;
   /** Presentation lerp only; snap teleports. */
   const POSE_SNAP_METERS = 2.5;
+  /** Match Movement.Gravity — display-only airborne extrapolation (#258). */
+  const POSE_GRAVITY = -20;
   type PoseInterp = {
     seeded: boolean;
     fx: number;
@@ -3119,6 +3144,9 @@ async function main(): Promise<void> {
     tz: number;
     tyaw: number;
     u: number;
+    vx: number;
+    vy: number;
+    vz: number;
   };
   const makePoseInterp = (): PoseInterp => ({
     seeded: false,
@@ -3131,6 +3159,9 @@ async function main(): Promise<void> {
     tz: 0,
     tyaw: 0,
     u: 1,
+    vx: 0,
+    vy: 0,
+    vz: 0,
   });
   const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
   const lerpYaw = (a: number, b: number, t: number) => {
@@ -3153,6 +3184,7 @@ async function main(): Promise<void> {
       i.fz = i.tz = z;
       i.fyaw = i.tyaw = yaw;
       i.u = 1;
+      i.vx = i.vy = i.vz = 0;
       i.seeded = true;
       return;
     }
@@ -3171,8 +3203,13 @@ async function main(): Promise<void> {
       i.fz = i.tz = z;
       i.fyaw = i.tyaw = yaw;
       i.u = 1;
+      i.vx = i.vy = i.vz = 0;
       return;
     }
+    const invSnap = MOVE_SEND_HZ;
+    i.vx = (x - cx) * invSnap;
+    i.vy = (y - cy) * invSnap;
+    i.vz = (z - cz) * invSnap;
     i.fx = cx;
     i.fy = cy;
     i.fz = cz;
@@ -3195,6 +3232,20 @@ async function main(): Promise<void> {
   const advancePoseInterp = (i: PoseInterp, dt: number) => {
     if (!i.seeded) return;
     i.u = Math.min(1, i.u + dt * MOVE_SEND_HZ);
+    const air = i.ty > 0.05 || i.fy > 0.05;
+    if (!air || i.u < 1 || dt <= 0) return;
+    // Between 20Hz snapshots, keep the hop arc moving (display only).
+    i.tx += i.vx * dt;
+    i.tz += i.vz * dt;
+    i.ty += i.vy * dt;
+    i.vy += POSE_GRAVITY * dt;
+    if (i.ty <= 0) {
+      i.ty = 0;
+      i.vy = 0;
+    }
+    i.fx = i.tx;
+    i.fy = i.ty;
+    i.fz = i.tz;
   };
   const localInterp = makePoseInterp();
   const remoteInterps = new Map<string, PoseInterp>();
@@ -3336,6 +3387,14 @@ async function main(): Promise<void> {
   };
 
   const syncProxyMeshes = (proxies: CrowdProxyView[]) => {
+    if (!showCrowdDebugCapsules(ve, debugHudVisible)) {
+      for (const [key, inst] of proxyInstances) {
+        inst.dispose();
+        proxyInstances.delete(key);
+        proxyInterps.delete(key);
+      }
+      return;
+    }
     const seen = new Set<string>();
     for (const p of proxies) {
       // Neighborhood SQL should exclude far proxies; skip any that leak.
@@ -4525,7 +4584,7 @@ async function main(): Promise<void> {
     const pose = net?.getLocalPose();
     const isAirborne = pose && pose.y > GROUND_Y + AIRBORNE_THRESHOLD;
 
-    // #139 — hop presence at play-cam: stretch while airborne, squat on land, brief JUMP toast.
+    // #252 — hop presence: JUMP toast only. Rigid scale; no camera dip.
     {
       const y = pose?.y ?? player.position.y;
       const air = y > GROUND_Y + AIRBORNE_THRESHOLD;
@@ -4537,9 +4596,6 @@ async function main(): Promise<void> {
         }
         jumpWasAirborne = true;
         jumpPeakY = Math.max(jumpPeakY, y);
-        const t = Math.min(1, (now - jumpTakeoffMs) / 280);
-        setHumanoidJumpSquash(humanoid, 1.1 + 0.32 * t);
-        jumpCamDipY = -0.55 * (1 - t) + 0.18 * t;
         const nearApex = now - jumpTakeoffMs > 160 && y + 0.02 >= jumpPeakY;
         if (!jumpApexToasted && (nearApex || y > 0.18)) {
           jumpApexToasted = true;
@@ -4549,17 +4605,7 @@ async function main(): Promise<void> {
           pushSystemToast('jump', 'Jump', ttl);
         }
       } else {
-        if (jumpWasAirborne) jumpLandSquashUntil = now + 180;
         jumpWasAirborne = false;
-        if (now < jumpLandSquashUntil) {
-          const u = (jumpLandSquashUntil - now) / 180;
-          setHumanoidJumpSquash(humanoid, 1 - 0.28 * u, 1 + 0.2 * u);
-          jumpCamDipY = -0.22 * u;
-        } else {
-          setHumanoidJumpSquash(humanoid, 1, 1);
-          jumpCamDipY *= Math.max(0, 1 - dt * 8);
-          if (Math.abs(jumpCamDipY) < 0.01) jumpCamDipY = 0;
-        }
       }
     }
 
@@ -5091,7 +5137,9 @@ async function main(): Promise<void> {
       },
       remotes: net?.getRemotes() ?? [],
       npcs: net?.getNpcs() ?? [],
-      proxies: net?.getProxies() ?? [],
+      proxies: showCrowdDebugCapsules(ve, debugHudVisible)
+        ? (net?.getProxies() ?? [])
+        : [],
     });
 
     // FPS / AOI overlay ~4Hz (Babylon engine.getFps).
@@ -5191,8 +5239,20 @@ async function main(): Promise<void> {
       if (veFollow === 'minimap-pip') {
         camera.alpha = Math.PI / 2.45;
         camera.beta = Math.PI / 3.3;
-        camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
+        camera.setTarget(player.position.add(new Vector3(0, CAM_FOLLOW_Y_OFFSET, 0)));
         camera.radius = 22;
+      } else if (veFollow === 'sky-horizon') {
+        // Lock every frame: setTarget(player) rebuilds alpha/beta and eats the range shot.
+        camera.setTarget(player.position.add(new Vector3(0, 8, -8)));
+        camera.alpha = Math.PI / 2.55;
+        camera.beta = Math.PI / 2.48;
+        camera.radius = 32;
+      } else if (veFollow === 'place-wow') {
+        // Establishing: SW of pad, looking north — huge trees, path, dusk-blue range.
+        camera.setTarget(player.position.add(new Vector3(0, 7, 2)));
+        camera.alpha = Math.PI / 2 + 0.45;
+        camera.beta = Math.PI / 2.38;
+        camera.radius = 34;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -5200,9 +5260,20 @@ async function main(): Promise<void> {
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
         veFollow !== 'loot-f' &&
-        veFollow !== 'rest-exit'
+        veFollow !== 'rest-exit' &&
+        veFollow !== 'path-ground'
       ) {
-        const follow = player.position.add(new Vector3(0, 1.35 + jumpCamDipY, 0));
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        const follow = new Vector3(player.position.x, camFollowY, player.position.z);
         const radius = camera.radius;
         camera.setTarget(follow);
         camera.radius = radius;
@@ -5498,9 +5569,7 @@ async function main(): Promise<void> {
     },
   );
 
-  // Optional VE / autotest hooks.
-  const params = new URLSearchParams(window.location.search);
-  const ve = params.get('ve');
+  // Optional VE / autotest hooks. `ve` is parsed from bootParams at main() start.
 
   // ?ve=persist — kill dummy for XP, then soft-reload with token so HUD proves restore.
   if (net && ve === 'persist') {
@@ -5626,15 +5695,12 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        net.seedCrowdProxies();
-        syncProxyMeshes(net.getProxies());
         if (mark) {
-          const aoi = net.getAoi();
           const ok =
             ve === 'quaternius-env'
               ? 'Quaternius env OK · Standard CC0 heroes+mid+understory · mountains procedural'
               : 'Forest OK · density+LOD · Connected';
-          mark.textContent = aoi ? `${ok} · AOI near ${aoi.nearCount}` : ok;
+          mark.textContent = ok;
         }
         return;
       }
@@ -5643,7 +5709,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitForest, 600);
   }
 
-  // ?ve=atmosphere — yard mood shot: fog depth, warm sun, lush ground clearing.
+  // ?ve=atmosphere — yard mood shot: fog depth, cool-dusk canopy fill, lush ground.
   if (ve === 'atmosphere') {
     camera.radius = 42;
     camera.alpha = Math.PI / 2.65;
@@ -5657,11 +5723,9 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        net.seedCrowdProxies();
-        syncProxyMeshes(net.getProxies());
         if (mark) {
           mark.textContent =
-            'Atmosphere OK · fog+warm sun+ground · Connected · yard mood';
+            'Atmosphere OK · fog+cool dusk+canopy fill · Connected · yard mood';
         }
         return;
       }
@@ -5670,11 +5734,11 @@ async function main(): Promise<void> {
     window.setTimeout(waitAtmosphere, 600);
   }
 
-  // ?ve=path-ground — play-cam frame of polished dirt/stone trail vs lush grass (#44).
+  // ?ve=path-ground — dirt trail vs lush grass, not a plastic disc (#44 / #274).
   if (ve === 'path-ground') {
-    camera.radius = 15;
-    camera.alpha = Math.PI / 3.1;
-    camera.beta = Math.PI / 2.75;
+    camera.radius = 16;
+    camera.alpha = Math.PI / 3.2;
+    camera.beta = Math.PI / 2.65;
   }
 
   if (net && ve === 'path-ground') {
@@ -5684,14 +5748,13 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        // Bias toward SE trail strip + soft path/grass edge under cyan fog.
-        camera.setTarget(player.position.add(new Vector3(4.2, 0.15, 5.2)));
-        camera.radius = 15;
-        camera.alpha = Math.PI / 3.1;
-        camera.beta = Math.PI / 2.75;
+        camera.setTarget(player.position.add(new Vector3(7, 0.25, 10)));
+        camera.radius = 16;
+        camera.alpha = Math.PI / 3.2;
+        camera.beta = Math.PI / 2.65;
         if (mark) {
           mark.textContent =
-            'Path-ground OK · dirt/stone trail vs lush grass · Connected';
+            'Path-ground OK · dirt trail vs lush grass · Connected';
         }
         return;
       }
@@ -5700,13 +5763,26 @@ async function main(): Promise<void> {
     window.setTimeout(waitPathGround, 600);
   }
 
-  // ?ve=sky-horizon — play-cam frame of layered mountain silhouette + sky gradient (#55).
-  if (ve === 'sky-horizon') {
-    camera.radius = 18;
-    camera.alpha = Math.PI / 2.05;
-    camera.beta = Math.PI / 2.55;
+  // ?ve=place-wow — E3.7 establishing shot vs hordes place ref (scale/fog/path).
+  if (net && ve === 'place-wow') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE place-wow: waiting for Connected…';
+    const waitPlaceWow = () => {
+      if (!net) return;
+      if (latestStatus.state === 'connected') {
+        if (mark) {
+          mark.textContent =
+            'Place-wow OK · huge trees · fog · no capsules · Connected';
+        }
+        return;
+      }
+      window.setTimeout(waitPlaceWow, 300);
+    };
+    window.setTimeout(waitPlaceWow, 600);
   }
 
+  // ?ve=sky-horizon — establishing shot of layered mountain ranges (#55 / #273).
+  // Pose is locked each frame in the render loop (follow rebuilds alpha/beta).
   if (net && ve === 'sky-horizon') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE sky-horizon: waiting for Connected…';
@@ -5714,14 +5790,9 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        // Face distant N mountains; mid play-cam so ridges read through cyan fog.
-        camera.setTarget(player.position.add(new Vector3(0, 2.5, -12)));
-        camera.radius = 18;
-        camera.alpha = Math.PI / 2.05;
-        camera.beta = Math.PI / 2.55;
         if (mark) {
           mark.textContent =
-            'Sky-horizon OK · layered ridges + fog-matched sky · Connected';
+            'Sky-horizon OK · distant layered ranges · Connected';
         }
         return;
       }
@@ -5746,7 +5817,7 @@ async function main(): Promise<void> {
       if (st.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Humanoid OK · body+head+limbs+staff · Connected · crowd capsules OK';
+            'Humanoid OK · body+head+limbs+staff · Connected';
         }
         return;
       }
@@ -8079,7 +8150,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitJump, 600);
   }
 
-  // ?ve=jump-apex — play-cam hop presence (JUMP toast + stretch). Do not replace ?ve=jump (#139).
+  // ?ve=jump-apex — play-cam rigid hop (JUMP toast, no squash). Do not replace ?ve=jump (#252).
   if (ve === 'jump-apex') {
     camera.radius = 22;
     camera.alpha = Math.PI / 2.45;
@@ -8091,7 +8162,7 @@ async function main(): Promise<void> {
     let jumpAttempted = false;
     let peakY = 0;
     let apexOk = false;
-    let okStretch = 0;
+    let okScaleY = 0;
     let okPeak = 0;
     const GROUND_THRESHOLD = 0.08;
     const waitApex = () => {
@@ -8125,18 +8196,18 @@ async function main(): Promise<void> {
       }
       const toastEl = document.querySelector('.sysToast.jump');
       const toastOk = !!toastEl && /Jump/i.test(toastEl.textContent || '');
-      const stretchY = humanoid.root.scaling.y;
-      const stretchOk = stretchY > 1.08;
+      const scaleY = humanoid.root.scaling.y;
+      const rigidOk = Math.abs(scaleY - 1) < 0.05;
       const radiusOk = camera.radius >= 20;
-      if (!apexOk && peakY > 0.3 && toastOk && stretchOk && radiusOk) {
+      if (!apexOk && peakY > 0.3 && toastOk && rigidOk && radiusOk) {
         apexOk = true;
-        okStretch = stretchY;
+        okScaleY = scaleY;
         okPeak = peakY;
       }
       if (apexOk) {
         if (mark) {
           mark.textContent =
-            `Jump-apex OK · JUMP toast · stretch y=${okStretch.toFixed(2)} · r=22 · peak=${okPeak.toFixed(2)}m · #139`;
+            `Jump-apex OK · JUMP toast · rigid y=${okScaleY.toFixed(2)} · r=22 · peak=${okPeak.toFixed(2)}m · #252`;
         }
         window.setTimeout(waitApex, 400);
         return;
@@ -8144,17 +8215,95 @@ async function main(): Promise<void> {
       if (ticks > 90) {
         if (mark) {
           mark.textContent =
-            `Jump-apex FAIL · peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
+            `Jump-apex FAIL · peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · rigid ${rigidOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
         }
         return;
       }
       if (mark && jumpAttempted) {
         mark.textContent =
-          `VE jump-apex: peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchY.toFixed(2)}`;
+          `VE jump-apex: peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · scaleY ${scaleY.toFixed(2)}`;
       }
       window.setTimeout(waitApex, 100);
     };
     window.setTimeout(waitApex, 600);
+  }
+
+  // ?ve=hop-wow — rigid hop, no squash, no camera slam. Does not replace ?ve=jump (#257).
+  if (ve === 'hop-wow') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'hop-wow') {
+    const mark = document.getElementById('persistMark');
+    let ticks = 0;
+    let jumpAttempted = false;
+    let peakY = 0;
+    let hopOk = false;
+    let okScaleY = 1;
+    let okPeak = 0;
+    const GROUND_THRESHOLD = 0.08;
+    const waitHop = () => {
+      if (!net) return;
+      ticks += 1;
+      camera.radius = 18;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE hop-wow: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitHop, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE hop-wow: waiting for pose…';
+        if (ticks < 100) window.setTimeout(waitHop, 100);
+        return;
+      }
+      if (!jumpAttempted && ticks > 5) {
+        jumpAttempted = true;
+        net.sendMove(0, 0, true);
+        if (mark) mark.textContent = 'VE hop-wow: Space tapped · play-cam r=18…';
+        window.setTimeout(waitHop, 120);
+        return;
+      }
+      peakY = Math.max(peakY, pose.y);
+      if (pose.y > GROUND_THRESHOLD) {
+        net.sendMove(0, 0, false);
+      } else if (jumpAttempted && peakY > 0.15) {
+        net.sendMove(0, 0, true);
+      }
+      const scaleY = humanoid.root.scaling.y;
+      const rigidOk = Math.abs(scaleY - 1) < 0.05;
+      const radiusOk = camera.radius >= 14 && camera.radius <= 22;
+      const airNow = pose.y > 0.35;
+      if (!hopOk && peakY > 0.5 && rigidOk && radiusOk && airNow) {
+        hopOk = true;
+        okScaleY = scaleY;
+        okPeak = peakY;
+      }
+      if (hopOk) {
+        okPeak = Math.max(okPeak, peakY);
+        if (mark) {
+          mark.textContent =
+            `Hop-wow OK · rigid y=${okScaleY.toFixed(2)} · no slam · r=18 · peak=${okPeak.toFixed(2)}m · #257`;
+        }
+        window.setTimeout(waitHop, 200);
+        return;
+      }
+      if (ticks > 100) {
+        if (mark) {
+          mark.textContent =
+            `Hop-wow FAIL · peak=${peakY.toFixed(2)}m · rigid ${rigidOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
+        }
+        return;
+      }
+      if (mark && jumpAttempted) {
+        mark.textContent =
+          `VE hop-wow: peak=${peakY.toFixed(2)}m · scaleY ${scaleY.toFixed(2)} · y=${pose.y.toFixed(2)}`;
+      }
+      window.setTimeout(waitHop, 80);
+    };
+    window.setTimeout(waitHop, 600);
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
