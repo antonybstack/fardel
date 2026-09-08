@@ -1885,6 +1885,12 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 .sysToast.bag .toastTag { color: #a8b4d0; }
 
+/* Zoom limit — muted cool silver (bag/chat family); not neon (#192). */
+.sysToast.zoomLimit {
+  border-color: rgba(168, 180, 200, 0.42);
+}
+.sysToast.zoomLimit .toastTag { color: #a8b4d0; }
+
 .clLine.vendor {
   color: #c6ceda;
 }
