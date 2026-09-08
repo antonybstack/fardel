@@ -102,3 +102,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** E8.2 maps camera-forward W to `Run_Weapon`. `?ve=walk` holds W, and the render-loop gait would override the Walk clip.
 - **Do this:** Keep `ve === 'walk'` on Walk. `?ve=run` holds W and requests running. Do not `findAnim(Walk, Run_Weapon)` — Run must not alias as Walk.
 - **Seen in:** #327
+
+### 2026-09-08 — camera,trunk — Quaternius tree world AABB is not a bole
+- **Cause:** TwistedTree bark+leaves share one mesh. Hero scale ~5.2 makes the XZ AABB ~30 m, which swallows the clearing if used as a collision cylinder.
+- **Do this:** Discover `heroTree*` / `midTree_*` / `*_trunk` roots and collide a vertical cylinder of `scale * bole` (~1.55 hero / ~0.82 mid). Do not raycast foliage or the full world bbox. Keep E1 Y-spring; do not `setTarget` on the play follow.
+- **Seen in:** #351

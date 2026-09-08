@@ -1951,6 +1951,170 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
   return `Disconnected\nconn: offline\nuri: ${s.uri}\ndb: ${s.database}`;
 }
 
+/** Vertical bole colliders for camera push-in. Quaternius AABB is canopy-wide — do not use it. */
+type TrunkCollider = {
+  name: string;
+  kind: 'hero' | 'mid';
+  x: number;
+  z: number;
+  r: number;
+  y0: number;
+  y1: number;
+};
+
+const CAM_TRUNK_PAD = 1.25;
+const CAM_TRUNK_HERO_BOLE = 1.55;
+const CAM_TRUNK_MID_BOLE = 0.82;
+const CAM_TRUNK_MIN_HIT = 0.55;
+const CAM_COLLISION_VE_RADIUS = 56;
+
+function collectTrunkColliders(scene: Scene): TrunkCollider[] {
+  const trunks: TrunkCollider[] = [];
+  const seen = new Set<string>();
+  const add = (
+    name: string,
+    kind: 'hero' | 'mid',
+    x: number,
+    z: number,
+    r: number,
+    y0: number,
+    y1: number,
+  ): void => {
+    const key = name.replace(/_trunk$/i, '');
+    if (seen.has(key) || !(r > 0.4) || y1 - y0 < 2) return;
+    seen.add(key);
+    trunks.push({ name: key, kind, x, z, r, y0, y1 });
+  };
+
+  for (const mesh of scene.meshes) {
+    if (!mesh.isEnabled() || mesh.isVisible === false) continue;
+    if (/Template/i.test(mesh.name)) continue;
+    mesh.computeWorldMatrix(true);
+    if (mesh.absolutePosition.y < -40) continue;
+
+    if (/_trunk$/i.test(mesh.name)) {
+      const bi = mesh.getBoundingInfo();
+      bi.update(mesh.getWorldMatrix());
+      const bb = bi.boundingBox;
+      const hx = (bb.maximumWorld.x - bb.minimumWorld.x) * 0.5;
+      const hz = (bb.maximumWorld.z - bb.minimumWorld.z) * 0.5;
+      add(
+        mesh.name,
+        /hero/i.test(mesh.name) ? 'hero' : 'mid',
+        (bb.minimumWorld.x + bb.maximumWorld.x) * 0.5,
+        (bb.minimumWorld.z + bb.maximumWorld.z) * 0.5,
+        Math.min(hx, hz) * 0.8,
+        bb.minimumWorld.y,
+        bb.maximumWorld.y,
+      );
+      continue;
+    }
+
+    const parent = mesh.parent as {
+      name: string;
+      getAbsolutePosition: () => Vector3;
+      absoluteScaling: Vector3;
+    } | null;
+    const selfIsRoot =
+      /^(heroTree|heroElder|heroSent)/.test(mesh.name) || /^midTree_/.test(mesh.name);
+    const parentIsRoot =
+      !!parent &&
+      (/^(heroTree|heroElder|heroSent)/.test(parent.name) || /^midTree_/.test(parent.name));
+    if (!selfIsRoot && !parentIsRoot) continue;
+    const root = selfIsRoot ? mesh : parent!;
+    const pos = root.getAbsolutePosition();
+    const scale = Math.max(Math.abs(root.absoluteScaling.x), 0.5);
+    const hero = !/^midTree_/.test(root.name);
+    add(
+      root.name,
+      hero ? 'hero' : 'mid',
+      pos.x,
+      pos.z,
+      scale * (hero ? CAM_TRUNK_HERO_BOLE : CAM_TRUNK_MID_BOLE),
+      0,
+      scale * (hero ? 18 : 8),
+    );
+  }
+  for (const node of scene.transformNodes) {
+    if (/Template/i.test(node.name) || node.getAbsolutePosition().y < -40) continue;
+    const hero = /^(heroTree|heroElder|heroSent)/.test(node.name);
+    const mid = /^midTree_/.test(node.name);
+    if (!hero && !mid) continue;
+    const pos = node.getAbsolutePosition();
+    const scale = Math.max(Math.abs(node.absoluteScaling.x), 0.5);
+    add(
+      node.name,
+      hero ? 'hero' : 'mid',
+      pos.x,
+      pos.z,
+      scale * (hero ? CAM_TRUNK_HERO_BOLE : CAM_TRUNK_MID_BOLE),
+      0,
+      scale * (hero ? 18 : 8),
+    );
+  }
+  if (!trunks.some((t) => t.kind === 'hero')) {
+    const fallback: Array<{ name: string; x: number; z: number; r: number }> = [
+      { name: 'heroTreeN', x: 6, z: -40, r: 8 },
+      { name: 'heroTreeNE', x: 34, z: -28, r: 7.1 },
+      { name: 'heroTreeNW', x: -36, z: -24, r: 7.4 },
+      { name: 'heroTreeSW', x: -32, z: 34, r: 6.8 },
+      { name: 'heroTreeSE', x: 30, z: 38, r: 6.5 },
+    ];
+    for (const h of fallback) add(h.name, 'hero', h.x, h.z, h.r, 0, 28);
+  }
+  return trunks;
+}
+
+function nearestHeroTrunk(x: number, z: number, trunks: TrunkCollider[]): TrunkCollider | null {
+  let best: TrunkCollider | null = null;
+  let bestD = Infinity;
+  for (const t of trunks) {
+    if (t.kind !== 'hero') continue;
+    const d = (t.x - x) * (t.x - x) + (t.z - z) * (t.z - z);
+    if (d < bestD) {
+      bestD = d;
+      best = t;
+    }
+  }
+  return best;
+}
+
+/** Pull ArcRotate radius in so the cam-to-target segment stops at a trunk bole. */
+function clampRadiusVsTrunks(
+  target: Vector3,
+  alpha: number,
+  beta: number,
+  desired: number,
+  minRadius: number,
+  trunks: TrunkCollider[],
+): { radius: number; hit: string | null } {
+  const sinb = Math.sin(beta);
+  const dx = Math.cos(alpha) * sinb;
+  const dy = Math.cos(beta);
+  const dz = Math.sin(alpha) * sinb;
+  let best = desired;
+  let hit: string | null = null;
+  for (const t of trunks) {
+    const ox = target.x - t.x;
+    const oz = target.z - t.z;
+    const r = t.r + CAM_TRUNK_PAD;
+    if (ox * ox + oz * oz <= r * r) continue;
+    const a = dx * dx + dz * dz;
+    if (a < 1e-10) continue;
+    const b = 2 * (ox * dx + oz * dz);
+    const c = ox * ox + oz * oz - r * r;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) continue;
+    const tHit = (-b - Math.sqrt(disc)) / (2 * a);
+    if (tHit <= CAM_TRUNK_MIN_HIT || tHit >= best) continue;
+    const y = target.y + tHit * dy;
+    if (y < t.y0 - 0.4 || y > t.y1 + 0.4) continue;
+    best = tHit;
+    hit = t.name;
+  }
+  return { radius: Math.max(minRadius, best), hit };
+}
+
 async function createScene(engine: Engine): Promise<{
   scene: Scene;
   camera: ArcRotateCamera;
@@ -1958,6 +2122,7 @@ async function createScene(engine: Engine): Promise<{
   humanoid: HumanoidParts;
   proxySource: Mesh;
   setLocalGhost: (on: boolean) => void;
+  trunks: TrunkCollider[];
 }> {
   const scene = new Scene(engine);
 
@@ -2017,6 +2182,7 @@ async function createScene(engine: Engine): Promise<{
 
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
   await buildForestClearing(scene);
+  const trunks = collectTrunkColliders(scene);
 
   // Local player: Quaternius CC0 wizard (crowd proxies are debug-only, #271).
   await preloadPlayerHumanoid(scene);
@@ -2058,7 +2224,7 @@ async function createScene(engine: Engine): Promise<{
   proxyMat.emissiveColor = new Color3(0.18, 0.08, 0.02);
   proxySource.material = proxyMat;
 
-  return { scene, camera, player, humanoid, proxySource, setLocalGhost };
+  return { scene, camera, player, humanoid, proxySource, setLocalGhost, trunks };
 }
 
 
@@ -2476,7 +2642,6 @@ function wishFromKeys(
   wish.normalize();
   return { dx: wish.x, dz: wish.z, jump };
 }
-
 
 /** Hide/show staff group + children (Babylon setEnabled on empty parent is not always enough). */
 function setStaffMeshVisible(staff: Mesh, visible: boolean): void {
@@ -2975,7 +3140,8 @@ async function main(): Promise<void> {
     preserveDrawingBuffer: true,
     stencil: true,
   });
-  const { scene, camera, player, humanoid, proxySource, setLocalGhost } = await createScene(engine);
+  const { scene, camera, player, humanoid, proxySource, setLocalGhost, trunks } =
+    await createScene(engine);
   const castRangeRing = createCastRangeRing(scene);
 
   let net: GameNet | null = null;
@@ -2992,6 +3158,32 @@ async function main(): Promise<void> {
   const CAM_FOLLOW_SNAP_METERS = 2.5;
   let camFollowY = CAM_FOLLOW_Y_OFFSET;
   let camFollowYSeeded = false;
+  /** Intended wheel radius; collision may pull `camera.radius` in for a frame. */
+  let camZoomRadius = camera.radius;
+  let camAppliedRadius = camera.radius;
+  let camCollideHit: string | null = null;
+  let camCollideThisFrame = false;
+  scene.onBeforeRenderObservable.add(() => {
+    if (!camCollideThisFrame) return;
+    const minR = camera.lowerRadiusLimit ?? 4;
+    const maxR = camera.upperRadiusLimit ?? 80;
+    const veCam = new URLSearchParams(window.location.search).get('ve');
+    if (veCam !== 'cam-collision' && Math.abs(camera.radius - camAppliedRadius) > 0.08) {
+      camZoomRadius = camera.radius;
+    }
+    camZoomRadius = Math.min(maxR, Math.max(minR, camZoomRadius));
+    const { radius, hit } = clampRadiusVsTrunks(
+      camera.target,
+      camera.alpha,
+      camera.beta,
+      camZoomRadius,
+      minR,
+      trunks,
+    );
+    camera.radius = radius;
+    camAppliedRadius = radius;
+    camCollideHit = hit;
+  });
   /** E2.4 visual facing from camera-relative wish. Server pose.yaw stays 0. */
   const YAW_FACE_HZ = 12;
   let localFacingYaw = 0;
@@ -5314,6 +5506,7 @@ async function main(): Promise<void> {
     // Skip follow for framed VE shots so the subject stays on-camera.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
+      camCollideThisFrame = false;
       if (veFollow === 'minimap-pip') {
         camera.alpha = Math.PI / 2.45;
         camera.beta = Math.PI / 3.3;
@@ -5384,6 +5577,34 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 9;
+      } else if (veFollow === 'cam-collision') {
+        // Orbit into the nearest hero bole; collision keeps the camera in the clearing.
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
+        const hero = nearestHeroTrunk(player.position.x, player.position.z, trunks);
+        if (hero) {
+          // Graze the bole so the trunk reads in-frame; look-at stays the player in the clearing.
+          camera.alpha =
+            Math.atan2(hero.z - player.position.z, hero.x - player.position.x) + 0.16;
+        }
+        camera.beta = Math.PI / 2.18;
+        camZoomRadius = CAM_COLLISION_VE_RADIUS;
+        camCollideThisFrame = true;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -5407,12 +5628,13 @@ async function main(): Promise<void> {
         // Mutate target in place. setTarget() rebuilds alpha/beta/radius from
         // the camera world position and feels like the view lags WASD (#315).
         // Do NOT zero inertialAlpha/Beta/Radius here — Babylon RMB orbit and
-        // wheel zoom write those offsets (#366). VE shots that lock alpha may
-        // still clear inertia on their own branches.
+        // wheel zoom write those offsets (#366). Collision reads the post-input
+        // radius onBeforeRender and may pull it in vs trunks.
         const tgt = camera.target;
         tgt.x = player.position.x;
         tgt.y = camFollowY;
         tgt.z = player.position.z;
+        camCollideThisFrame = true;
       }
     }
     scene.render();
@@ -8515,6 +8737,36 @@ async function main(): Promise<void> {
       window.setTimeout(hold, 900);
     };
     window.setTimeout(hold, 500);
+  }
+
+  // ?ve=cam-collision — orbit into a hero bole; camera stays in the clearing (#351).
+  if (ve === 'cam-collision') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = CAM_COLLISION_VE_RADIUS;
+    camZoomRadius = CAM_COLLISION_VE_RADIUS;
+    const hero0 = nearestHeroTrunk(player.position.x, player.position.z, trunks);
+    if (hero0) {
+      camera.alpha =
+        Math.atan2(hero0.z - player.position.z, hero0.x - player.position.x) + 0.16;
+    }
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision: orbiting into trunk…';
+    let ticks = 0;
+    const waitCol = () => {
+      ticks += 1;
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const ok = !!hit && got + 0.5 < want;
+      const cam = camera.position;
+      if (mark) {
+        mark.textContent = ok
+          ? `Cam-collision OK · r=${got.toFixed(1)} < want=${want.toFixed(0)} · ${hit} · clearing`
+          : `VE cam-collision: r=${got.toFixed(1)} want=${want.toFixed(0)} hit=${hit ?? 'none'} · n=${trunks.length} xz=${Math.hypot(cam.x, cam.z).toFixed(1)}`;
+      }
+      if (ticks < 80) window.setTimeout(waitCol, 200);
+    };
+    window.setTimeout(waitCol, 400);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
