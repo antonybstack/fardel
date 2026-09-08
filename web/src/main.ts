@@ -65,6 +65,7 @@ import {
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
   setHumanoidAirborne,
+  setHumanoidCasting,
   setHumanoidDead,
   setHumanoidMoving,
   type HumanoidParts,
@@ -3579,8 +3580,13 @@ async function main(): Promise<void> {
         if (parts && !casting) {
           // Restore robe emissive after windup (match createPlayerHumanoid scale).
           parts.mat.emissiveColor = parts.mat.diffuseColor.scale(ROBE_EMISSIVE_SCALE);
+          setHumanoidCasting(parts, false);
         }
         continue;
+      }
+
+      if (rc.castingSpellId === SPELL_EMBERBOLT) {
+        setHumanoidCasting(parts, true);
       }
 
       // Windup: orange pulse on remote + beam to target + head bar.
@@ -3911,7 +3917,11 @@ async function main(): Promise<void> {
         spellId === SPELL_SPARK ? SPARK_COLOR : EMBER_COLOR,
         spellId === SPELL_SPARK ? 160 : 400,
       );
-      playHumanoidCast(humanoid);
+      if (spellId === SPELL_EMBERBOLT) {
+        setHumanoidCasting(humanoid, true);
+      } else {
+        playHumanoidCast(humanoid);
+      }
       const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
       const mesh = npcMeshes.get(tid.toString());
       const from = casterMuzzle(player.position);
@@ -4272,6 +4282,7 @@ async function main(): Promise<void> {
         if (castUntilMs > Date.now()) {
           castUntilMs = 0;
           castTotalMs = 0;
+          setHumanoidCasting(humanoid, false);
         }
         return;
       }
@@ -4286,6 +4297,7 @@ async function main(): Promise<void> {
         castUntilMs = 0;
         castTotalMs = 0;
         lastCastSpell = 0;
+        setHumanoidCasting(humanoid, false);
         const after = net?.getCharacter();
         if (after) updateSelfFrame(after);
         const refund = after ? Math.max(0, (after.mana ?? 0) - beforeMana) : EMBERBOLT_MANA_COST;
@@ -5055,6 +5067,14 @@ async function main(): Promise<void> {
         castHardInterruptToasted = false;
       }
       prevLocalCasting = serverCasting || castUntilMs > now;
+      if (ve === 'cast-anim') {
+        setHumanoidCasting(humanoid, true);
+      } else {
+        const emberHold =
+          (combatNow?.castingSpellId === SPELL_EMBERBOLT && serverCasting) ||
+          (lastCastSpell === SPELL_EMBERBOLT && castUntilMs > now);
+        setHumanoidCasting(humanoid, emberHold);
+      }
     }
     const castLeft = Math.max(0, castUntilMs - now);
     if (gcdLeft > 0 || castLeft > 0 || now - latestDamageAtMs < 1600) {
@@ -6799,7 +6819,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitLook, 600);
   }
 
-  // ?ve=cast-anim — E2.5/E2.7 Spell1 one-shot on Spark/Emberbolt path.
+  // ?ve=cast-anim — E8.6 hold Spell1 for Emberbolt windup (Spark stays one-shot).
   if (ve === 'cast-anim') {
     camera.radius = 8;
     camera.alpha = Math.PI / 2.2;
@@ -6809,11 +6829,6 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE cast-anim: waiting for Connected…';
     let ticks = 0;
-    const playingNames = (): string =>
-      scene.animationGroups
-        .filter((g) => g.isPlaying)
-        .map((g) => g.name.replace(/^player__/, ''))
-        .join(' · ');
     const waitCast = () => {
       if (!net) return;
       ticks += 1;
@@ -6836,17 +6851,16 @@ async function main(): Promise<void> {
       }
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
-      const casting = scene.animationGroups.some(
-        (g) => /spell|staff_attack/i.test(g.name) && g.isPlaying,
-      );
-      if (!casting) playHumanoidCast(humanoid);
-      const playing = playingNames();
+      setHumanoidCasting(humanoid, true);
+      const pb = readHumanoidPlayback(humanoid);
+      const castOk =
+        pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
       if (mark) {
-        mark.textContent = /spell/i.test(playing)
-          ? `Cast OK · ${playing} · Connected`
-          : `VE cast-anim · ${playing || 'no clip'} · Connected`;
+        mark.textContent = castOk
+          ? `Cast OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
       }
-      if (ticks < 240) window.setTimeout(waitCast, 250);
+      if (!castOk && ticks < 240) window.setTimeout(waitCast, 200);
     };
     window.setTimeout(waitCast, 600);
   }

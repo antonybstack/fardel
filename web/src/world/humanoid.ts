@@ -55,6 +55,8 @@ type HumanoidAnim = {
   cast: AnimationGroup | null;
   airborne: boolean;
   dead: boolean;
+  /** Emberbolt windup hold — not the Spark one-shot. */
+  casting: boolean;
 };
 
 const animByRoot = new WeakMap<Mesh, HumanoidAnim>();
@@ -458,6 +460,7 @@ export function createPlayerHumanoid(
     cast,
     airborne: false,
     dead: false,
+    casting: false,
   });
 
   root.material = robeMat;
@@ -488,19 +491,21 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
   }
   const playing = a?.dead && a.death
     ? a.death.name
-    : a?.cast?.isPlaying
+    : a?.casting && a.cast
       ? a.cast.name
-      : a?.flinch?.isPlaying
-        ? a.flinch.name
-        : a?.air?.isPlaying
-          ? a.air.name
-          : a?.run?.isPlaying
-            ? a.run.name
-            : a?.walk?.isPlaying
-              ? a.walk.name
-              : a?.idle?.isPlaying
-                ? a.idle.name
-                : null;
+      : a?.cast?.isPlaying
+        ? a.cast.name
+        : a?.flinch?.isPlaying
+          ? a.flinch.name
+          : a?.air?.isPlaying
+            ? a.air.name
+            : a?.run?.isPlaying
+              ? a.run.name
+              : a?.walk?.isPlaying
+                ? a.walk.name
+                : a?.idle?.isPlaying
+                  ? a.idle.name
+                  : null;
   return { skinned, playing, idle: a?.idle?.name ?? null };
 }
 
@@ -528,7 +533,7 @@ export function setHumanoidAirborne(
     if (a.idle) a.idle.speedRatio = 1;
     return;
   }
-  if (a.cast?.isPlaying) return;
+  if (a.casting || a.cast?.isPlaying) return;
   stopIfPlaying(a.flinch);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
@@ -552,7 +557,7 @@ export function setHumanoidMoving(
 ): void {
   const a = animByRoot.get(parts.root);
   if (!a) return;
-  if (a.dead || a.airborne) return;
+  if (a.dead || a.airborne || a.casting) return;
   if (a.cast?.isPlaying) return;
   if (a.flinch?.isPlaying) return;
   if (a.idle) a.idle.speedRatio = 1;
@@ -592,6 +597,7 @@ export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
     return;
   }
   a.airborne = false;
+  a.casting = false;
   stopIfPlaying(a.idle);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
@@ -611,7 +617,7 @@ export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
 /** One-shot hit react. Does not touch Move intents; loco resumes after. */
 export function playHumanoidFlinch(parts: HumanoidParts): void {
   const a = animByRoot.get(parts.root);
-  if (!a?.flinch || a.airborne || a.dead) return;
+  if (!a?.flinch || a.airborne || a.dead || a.casting) return;
   if (a.cast?.isPlaying) return;
   stopIfPlaying(a.idle);
   stopIfPlaying(a.walk);
@@ -619,16 +625,46 @@ export function playHumanoidFlinch(parts: HumanoidParts): void {
   if (a.idle) a.idle.speedRatio = 1;
   stopIfPlaying(a.flinch);
   a.flinch.onAnimationGroupEndObservable.addOnce(() => {
-    if (a.dead) return;
+    if (a.dead || a.casting) return;
     setHumanoidMoving(parts, false);
   });
   a.flinch.start(false, 1.0, a.flinch.from, a.flinch.to, false);
 }
 
-/** Play a one-shot cast clip (Spell1) then return to idle/walk. */
+/** Emberbolt windup: loop Spell until CastEndsAt / cancel / interrupt. */
+export function setHumanoidCasting(
+  parts: HumanoidParts,
+  casting: boolean,
+): void {
+  const a = animByRoot.get(parts.root);
+  if (!a) return;
+  if (!casting) {
+    if (!a.casting) return;
+    a.casting = false;
+    stopIfPlaying(a.cast);
+    if (a.cast) a.cast.speedRatio = 1;
+    if (!a.dead && !a.airborne) setHumanoidMoving(parts, false);
+    return;
+  }
+  if (a.dead || !a.cast) return;
+  const already = a.casting;
+  a.casting = true;
+  a.airborne = false;
+  stopIfPlaying(a.idle);
+  stopIfPlaying(a.walk);
+  stopIfPlaying(a.run);
+  stopIfPlaying(a.air);
+  stopIfPlaying(a.flinch);
+  if (a.idle) a.idle.speedRatio = 1;
+  if (already && a.cast.isPlaying) return;
+  if (a.cast.isPlaying) a.cast.stop();
+  a.cast.start(true, 1.0, a.cast.from, a.cast.to, false);
+}
+
+/** Play a one-shot cast clip (Spell1) then return to idle/walk. Spark path. */
 export function playHumanoidCast(parts: HumanoidParts): void {
   const a = animByRoot.get(parts.root);
-  if (!a?.cast || a.dead) return;
+  if (!a?.cast || a.dead || a.casting) return;
   stopIfPlaying(a.flinch);
   if (a.idle?.isPlaying) a.idle.stop();
   if (a.walk?.isPlaying) a.walk.stop();
@@ -637,6 +673,7 @@ export function playHumanoidCast(parts: HumanoidParts): void {
   a.airborne = false;
   if (a.idle) a.idle.speedRatio = 1;
   a.cast.onAnimationGroupEndObservable.addOnce(() => {
+    if (a.casting || a.dead) return;
     setHumanoidMoving(parts, false);
   });
   a.cast.start(false, 1.0, a.cast.from, a.cast.to, false);

@@ -138,3 +138,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Prefer `/recievehit$/i`. One-shot then resume Idle/Walk. Do not cancel Move intents.
 - **Seen in:** #330
 
+### 2026-09-08 — humanoid,cast — Spell1 one-shot ends before Emberbolt CastEndsAt
+- **Cause:** `playHumanoidCast` is a one-shot. Wizard.glb Spell1 is shorter than the windup, so Idle returns while the cast bar is still up.
+- **Do this:** `setHumanoidCasting` loops Spell until CastEndsAt / cancel / interrupt. Spark stays the one-shot. Do not treat animation-end as the windup end.
+- **Seen in:** #331
+
