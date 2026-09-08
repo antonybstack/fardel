@@ -62,6 +62,7 @@ import {
 } from './world/forest';
 import {
   createPlayerHumanoid,
+  hostileRobeColor,
   partyRobeColor,
   playHumanoidCast,
   playHumanoidFlinch,
@@ -197,6 +198,8 @@ type NpcMesh = {
   remoteRingMat: StandardMaterial;
   markerMat: StandardMaterial;
   nameplate: Nameplate | null;
+  /** Kind=2 skinned body. Dummy stays the scarecrow (null). */
+  humanoid: HumanoidParts | null;
 };
 
 type RemoteFx = {
@@ -2362,6 +2365,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
   let body: Mesh;
   let mat: StandardMaterial;
   let extraMats: StandardMaterial[] = [];
+  let humanoid: HumanoidParts | null = null;
   if (isDummy) {
     // Scarecrow / practice dummy — wood post + crossbeam + canvas (not a cylinder).
     const dummy = createTrainingDummy(scene, `npc_${npc.npcId}`);
@@ -2370,6 +2374,20 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     body.position.y = DIRT_SURFACE_Y;
     mat = dummy.mat;
     extraMats = dummy.extraMats;
+  } else if (npc.kind === NPC_KIND_HOSTILE) {
+    // Same wizard clone as remotes (IBM once on the container). Idle_Weapon,
+    // not bind-T, not a red capsule. Dummy stays the scarecrow.
+    const parts = createPlayerHumanoid(scene, {
+      name: `hostile_${npc.npcId}`,
+      robeColor: hostileRobeColor(),
+    });
+    parts.root.parent = root;
+    body = parts.root;
+    mat = parts.mat;
+    humanoid = parts;
+    setHumanoidMoving(parts, false);
+    const yaw = Math.atan2(-npc.x, -npc.z);
+    if (Number.isFinite(yaw)) parts.root.rotation.y = yaw;
   } else {
     body = MeshBuilder.CreateCapsule(
       `npcBody_${npc.npcId}`,
@@ -2379,9 +2397,8 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     body.parent = root;
     body.position.y = 0.8;
     mat = new StandardMaterial(`npcMat_${npc.npcId}`, scene);
-    const hostile = npc.kind === NPC_KIND_HOSTILE;
-    mat.diffuseColor = hostile ? new Color3(0.72, 0.18, 0.16) : new Color3(0.7, 0.35, 0.35);
-    mat.emissiveColor = hostile ? new Color3(0.22, 0.04, 0.03) : new Color3(0, 0, 0);
+    mat.diffuseColor = new Color3(0.7, 0.35, 0.35);
+    mat.emissiveColor = new Color3(0, 0, 0);
     mat.specularColor = new Color3(0.1, 0.1, 0.1);
     body.material = mat;
   }
@@ -2481,6 +2498,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     remoteRingMat,
     markerMat,
     nameplate,
+    humanoid,
   };
 }
 
@@ -5760,6 +5778,7 @@ async function main(): Promise<void> {
         camera.radius = 6;
       } else if (
         veFollow === 'hostile-spawn' ||
+        veFollow === 'hostile-body' ||
         veFollow === 'leash' ||
         veFollow === 'hostile-read'
       ) {
@@ -9083,41 +9102,83 @@ async function main(): Promise<void> {
     window.setTimeout(waitOrbit, 200);
   }
 
-  // ?ve=hostile-spawn — two yard hostiles as capsules; dummy stays trainer (#354).
-  if (ve === 'hostile-spawn') {
+  // ?ve=hostile-spawn / ?ve=hostile-body — Kind=2 skinned Idle, dummy trainer (#400).
+  if (ve === 'hostile-spawn' || ve === 'hostile-body') {
     camera.radius = 18;
     camera.alpha = Math.PI / 2.05;
     camera.beta = Math.PI / 2.7;
   }
-  if (net && ve === 'hostile-spawn') {
+  if (net && (ve === 'hostile-spawn' || ve === 'hostile-body')) {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE hostile-spawn: waiting for hostiles…';
+    if (mark) mark.textContent = 'VE hostile-body: waiting for hostiles…';
     let ticks = 0;
     const waitH = () => {
       if (!net) return;
       ticks += 1;
       const npcs = net.getNpcs();
       const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
-      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY);
-      if (hostiles.length >= 2 && dummyOk) {
-        if (mark) {
-          mark.textContent = `Hostile spawn OK · n=${hostiles.length} · capsule · dummy trainer · #354`;
+      const dummyRow = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyMesh = dummyRow
+        ? npcMeshes.get(dummyRow.npcId.toString())
+        : undefined;
+      const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
+      const hostileParts: HumanoidParts[] = [];
+      let capsuleLeft = false;
+      for (const n of hostiles) {
+        const mesh = npcMeshes.get(n.npcId.toString());
+        if (mesh?.humanoid) {
+          setHumanoidMoving(mesh.humanoid, false);
+          hostileParts.push(mesh.humanoid);
+        } else if (mesh) {
+          capsuleLeft = true;
         }
-        return;
+      }
+      if (
+        hostiles.length >= 2 &&
+        dummyTrainer &&
+        hostileParts.length >= 2 &&
+        !capsuleLeft
+      ) {
+        const pbs = hostileParts.map(readHumanoidPlayback);
+        const pb0 = pbs[0]!;
+        const bodyOk = pbs.every(
+          (pb) =>
+            pb.skinned > 0 &&
+            !!pb.playing &&
+            /idle/i.test(pb.playing) &&
+            pb.height >= 1.5 &&
+            pb.height <= 2.15,
+        );
+        if (bodyOk) {
+          if (mark) {
+            mark.textContent =
+              `Hostile body OK · n=${hostiles.length} · ${pb0.playing} · skinned ${pb0.skinned} · dummy trainer · #400`;
+          }
+          return;
+        }
+        if (ticks > 80) {
+          if (mark) {
+            mark.textContent =
+              `T-POSE · clip=${pb0.playing ?? 'none'} · skeleton=${pb0.skinned} · dummy trainer · #400`;
+          }
+          return;
+        }
       }
       if (ticks > 80) {
         if (mark) {
-          mark.textContent =
-            `Hostile spawn FAIL · hostiles ${hostiles.length}/2 · dummy ${dummyOk ? 'y' : 'n'} · #354`;
+          mark.textContent = capsuleLeft
+            ? `Hostile body FAIL · capsule · dummy ${dummyTrainer ? 'trainer' : 'n'} · #400`
+            : `Hostile body FAIL · hostiles ${hostiles.length}/2 · body ${hostileParts.length} · dummy ${dummyTrainer ? 'trainer' : 'n'} · #400`;
         }
         return;
       }
       if (mark) {
-        mark.textContent = `VE hostile-spawn: hostiles ${hostiles.length}/2 · dummy ${dummyOk ? 'y' : 'n'}…`;
+        mark.textContent =
+          `VE hostile-body: hostiles ${hostiles.length}/2 · body ${hostileParts.length} · dummy ${dummyTrainer ? 'y' : 'n'}…`;
       }
       window.setTimeout(waitH, 250);
     };
-    window.setTimeout(waitH, 400);
+    window.setTimeout(waitH, 800);
   }
 
   // ?ve=leash — pull then drop (#355). ?ve=aggro is the #360 session shot.

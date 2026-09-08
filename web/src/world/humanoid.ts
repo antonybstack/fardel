@@ -896,3 +896,8 @@ export function remoteRobeColor(identityHex: string): Color3 {
 export function partyRobeColor(): Color3 {
   return new Color3(0.15, 0.85, 0.28);
 }
+
+/** Crimson robe for Kind=2 yard hostiles — distinct from local indigo / remotes. */
+export function hostileRobeColor(): Color3 {
+  return new Color3(0.78, 0.22, 0.18);
+}
