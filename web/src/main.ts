@@ -3152,8 +3152,8 @@ async function main(): Promise<void> {
           latestStatus.state === 'connected'
             ? { ...latestStatus, castFeedback: 'Staff required' }
             : latestStatus;
-        pushSystemToast('equip', 'Staff required · equip staff · U', TOAST_VE_TTL_MS);
-        pushCombatLog('equip', 'Staff required · equip with U');
+        pushSystemToast('equip', 'Staff required · equip staff · I', TOAST_VE_TTL_MS);
+        pushCombatLog('equip', 'Staff required · equip with I');
         return;
       }
       const manaCost =
@@ -6146,8 +6146,8 @@ async function main(): Promise<void> {
     camera.beta = Math.PI / 3.1;
     const mark = document.getElementById('persistMark');
     window.setTimeout(() => {
-      pushSystemToast('equip', 'Staff required · equip staff · U', TOAST_VE_TTL_MS);
-      pushCombatLog('equip', 'Staff required · equip with U');
+      pushSystemToast('equip', 'Staff required · equip staff · I', TOAST_VE_TTL_MS);
+      pushCombatLog('equip', 'Staff required · equip with I');
       if (mark) mark.textContent = 'Staff-block OK · toast + combat log';
     }, 400);
   }
