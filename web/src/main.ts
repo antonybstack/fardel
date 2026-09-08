@@ -47,7 +47,14 @@ import {
   type VendorView,
   type CombatView,
 } from './net/connection';
-import { buildForestClearing } from './world/forest';
+import {
+  buildForestClearing,
+  COLLISION_VE_HERO,
+  getTrunkCapsules,
+  nearestTrunk,
+  PLAYER_TRUNK_RADIUS,
+  slideAgainstTrunks,
+} from './world/forest';
 import {
   createPlayerHumanoid,
   partyRobeColor,
@@ -4898,6 +4905,12 @@ async function main(): Promise<void> {
             dx *= s;
             dz *= s;
           }
+          const poseNow = net.getLocalPose();
+          if (poseNow && (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6)) {
+            const slid = slideAgainstTrunks(poseNow.x, poseNow.z, dx, dz);
+            dx = slid.dx;
+            dz = slid.dz;
+          }
           if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump || isAirborne) {
             if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump) {
               leaveRestIfActive('move');
@@ -5549,6 +5562,20 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2 + 0.45;
         camera.beta = Math.PI / 2.38;
         camera.radius = 34;
+      } else if (veFollow === 'collision') {
+        // Side-on: player pressed against the north hero bole.
+        const hx = COLLISION_VE_HERO.x;
+        const hz = COLLISION_VE_HERO.z;
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x * 0.4 + hx * 0.6;
+        tgt.y = 3.4;
+        tgt.z = player.position.z * 0.4 + hz * 0.6;
+        camera.alpha = 0.42;
+        camera.beta = Math.PI / 2.38;
+        camera.radius = 16;
       } else if (veFollow === 'idle') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6165,6 +6192,98 @@ async function main(): Promise<void> {
       window.setTimeout(waitPlaceWow, 300);
     };
     window.setTimeout(waitPlaceWow, 600);
+  }
+
+  // ?ve=collision — E9.1 blocked path against a hero bole (#339).
+  if (ve === 'collision') {
+    camera.radius = 16;
+    camera.beta = Math.PI / 2.38;
+    camera.alpha = 0.42;
+  }
+  if (net && ve === 'collision') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE collision: waiting for Connected…';
+    let ticks = 0;
+    let blockedTicks = 0;
+    const yardClear = (): boolean => {
+      for (const c of getTrunkCapsules()) {
+        const dDummy = Math.hypot(c.x - 5, c.z - 0);
+        const dVendor = Math.hypot(c.x - -2.5, c.z - 2);
+        if (dDummy < c.radius + PLAYER_TRUNK_RADIUS + 2.5) return false;
+        if (dVendor < c.radius + PLAYER_TRUNK_RADIUS + 2.5) return false;
+      }
+      return true;
+    };
+    const waitCollision = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE collision: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitCollision, 200);
+        else if (mark) mark.textContent = 'VE collision FAIL · not Connected';
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE collision: waiting for pose…';
+        if (ticks < 240) window.setTimeout(waitCollision, 200);
+        return;
+      }
+      const hero =
+        getTrunkCapsules().find(
+          (c) =>
+            c.kind === 'hero' &&
+            Math.hypot(c.x - COLLISION_VE_HERO.x, c.z - COLLISION_VE_HERO.z) < 0.5,
+        ) ?? nearestTrunk(pose.x, pose.z, 'hero');
+      if (!hero) {
+        if (mark) mark.textContent = 'VE collision FAIL · no hero capsules';
+        return;
+      }
+      const dx = hero.x - pose.x;
+      const dz = hero.z - pose.z;
+      const d = Math.hypot(dx, dz);
+      const surface = hero.radius + PLAYER_TRUNK_RADIUS;
+      const ghosted = d < surface - 0.5;
+      if (ghosted) {
+        if (mark) {
+          mark.textContent =
+            `Collision FAIL · ghosted hero r=${hero.radius.toFixed(2)} d=${d.toFixed(2)}`;
+        }
+        return;
+      }
+      const step = Math.min(MAX_STEP_METERS, Math.max(0, d));
+      if (step > 1e-4) {
+        const slid = slideAgainstTrunks(pose.x, pose.z, (dx / d) * step, (dz / d) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+        if (slid.blocked || d <= surface + 0.4) blockedTicks += 1;
+      } else if (d <= surface + 0.4) {
+        blockedTicks += 1;
+      }
+      const dummyOk = yardClear();
+      if (blockedTicks >= 4 && dummyOk) {
+        if (mark) {
+          mark.textContent =
+            `Collision OK · blocked against a hero trunk · r=${hero.radius.toFixed(1)} d=${d.toFixed(2)} · dummy/vendor clear`;
+        }
+        return;
+      }
+      if (ticks > 180) {
+        if (mark) {
+          mark.textContent =
+            `Collision FAIL · d=${d.toFixed(1)} surface=${surface.toFixed(1)} blocked=${blockedTicks} dummy=${dummyOk ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE collision: walk hero d=${d.toFixed(1)} / ${surface.toFixed(1)} · r=${hero.radius.toFixed(1)}`;
+      }
+      window.setTimeout(waitCollision, 50);
+    };
+    window.setTimeout(waitCollision, 600);
   }
 
   // ?ve=sky-horizon — establishing shot of layered mountain ranges (#55 / #273).

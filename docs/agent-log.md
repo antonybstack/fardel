@@ -122,3 +122,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Pack clips are Idle/Walk/Run/Spell/Death/RecieveHit/Roll only — no Jump or Falling.
 - **Do this:** Airborne: stop Walk/Run, hold Idle_Weapon at speedRatio 0 (staff grip, not T, not a walk cycle). Do not use Roll as a hop. Do not squash `root.scaling`.
 - **Seen in:** #328
+
+### 2026-09-08 — place,collision — pack bark AABB is branches, not the walking bole
+- **Cause:** TwistedTree bark primitive includes limbs. World AABB × 0.42 then a 3.4 m clamp parks the player inside a ~6 m-scale bole. Server Move has no obstacle table.
+- **Do this:** Author-scale chest-height radius × instance XZ (TwistedTree ~1.18, CommonTree ~0.52). Clip the WASD *wish* in `forest.ts`; do not send client positions; do not add Lib.cs capsules on E9.1. Keep dummy (5,0) / vendor (−2.5, 2) outside keep-out.
+- **Seen in:** #339
