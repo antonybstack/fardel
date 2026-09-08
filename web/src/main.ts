@@ -1951,6 +1951,10 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
   return `Disconnected\nconn: offline\nuri: ${s.uri}\ndb: ${s.database}`;
 }
 
+/** #352 — WoW-like zoom stops: close, not inside mesh; establishing, not orbital infinity. */
+const CAM_ZOOM_MIN = 4.5;
+const CAM_ZOOM_MAX = 42;
+
 /** Vertical bole colliders for camera push-in. Quaternius AABB is canopy-wide — do not use it. */
 type TrunkCollider = {
   name: string;
@@ -2137,8 +2141,8 @@ async function createScene(engine: Engine): Promise<{
   );
   const canvas = engine.getRenderingCanvas();
   camera.attachControl(canvas, true);
-  camera.lowerRadiusLimit = 4;
-  camera.upperRadiusLimit = 80;
+  camera.lowerRadiusLimit = CAM_ZOOM_MIN;
+  camera.upperRadiusLimit = CAM_ZOOM_MAX;
   camera.wheelPrecision = 30;
   camera.panningSensibility = 0;
 
@@ -2158,8 +2162,8 @@ async function createScene(engine: Engine): Promise<{
       const now = Date.now();
       const delta = e.deltaY;
       const currentRadius = camera.radius;
-      const lowerLimit = camera.lowerRadiusLimit ?? 4;
-      const upperLimit = camera.upperRadiusLimit ?? 80;
+      const lowerLimit = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
+      const upperLimit = camera.upperRadiusLimit ?? CAM_ZOOM_MAX;
       const isAtMin = currentRadius <= lowerLimit && delta < 0;
       const isAtMax = currentRadius >= upperLimit && delta > 0;
       if ((isAtMin || isAtMax) && now - lastZoomLimitToastMs > ZOOM_LIMIT_TOAST_DEBOUNCE_MS) {
@@ -3165,8 +3169,8 @@ async function main(): Promise<void> {
   let camCollideThisFrame = false;
   scene.onBeforeRenderObservable.add(() => {
     if (!camCollideThisFrame) return;
-    const minR = camera.lowerRadiusLimit ?? 4;
-    const maxR = camera.upperRadiusLimit ?? 80;
+    const minR = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
+    const maxR = camera.upperRadiusLimit ?? CAM_ZOOM_MAX;
     const veCam = new URLSearchParams(window.location.search).get('ve');
     if (veCam !== 'cam-collision' && Math.abs(camera.radius - camAppliedRadius) > 0.08) {
       camZoomRadius = camera.radius;
@@ -5613,7 +5617,8 @@ async function main(): Promise<void> {
         veFollow !== 'tab-target' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
-        veFollow !== 'path-ground'
+        veFollow !== 'path-ground' &&
+        veFollow !== 'zoom-stop'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -8713,26 +8718,51 @@ async function main(): Promise<void> {
     window.setTimeout(waitCue, 300);
   }
 
-  // ?ve=zoom-stop — wheel into lowerRadiusLimit (deltaY<0 zooms in / min).
+  // ?ve=zoom-stop — wheel into min then max (#352). deltaY<0 zooms in.
   if (ve === 'zoom-stop') {
-    const lower = camera.lowerRadiusLimit ?? 4;
-    camera.radius = lower;
-    camera.alpha = Math.PI / 2.3;
-    camera.beta = Math.PI / 3.1;
+    const lower = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
+    const upper = camera.upperRadiusLimit ?? CAM_ZOOM_MAX;
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE zoom-stop: seeding Zoom min…';
     const canvasEl = document.getElementById('renderCanvas');
+    let phase: 'min' | 'max' = 'min';
+    let minOk = false;
+    let maxOk = false;
     const hold = () => {
-      camera.radius = lower;
-      canvasEl?.dispatchEvent(
-        new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }),
-      );
-      const toast = document.querySelector('.sysToast.zoomLimit');
-      const ok = !!toast && /Zoom min/i.test(toast.textContent || '');
-      if (mark) {
-        mark.textContent = ok
-          ? 'Zoom-stop OK · Zoom min toast · wheel deltaY<0 at lowerRadiusLimit · #192'
-          : 'VE zoom-stop: firing wheel deltaY<0 at min…';
+      if (phase === 'min') {
+        camera.radius = lower;
+        camera.alpha = Math.PI / 2.15;
+        camera.beta = Math.PI / 2.55;
+        canvasEl?.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }),
+        );
+        const toast = document.querySelector('.sysToast.zoomLimit');
+        minOk = !!toast && /Zoom min/i.test(toast.textContent || '');
+        if (mark) {
+          mark.textContent = minOk
+            ? `Zoom-stop min OK · r=${lower} · Zoom min toast`
+            : 'VE zoom-stop: firing wheel deltaY<0 at min…';
+        }
+        if (minOk) {
+          phase = 'max';
+          window.setTimeout(hold, 1600);
+          return;
+        }
+      } else {
+        camera.radius = upper;
+        camera.alpha = Math.PI / 2.45;
+        camera.beta = Math.PI / 3.2;
+        canvasEl?.dispatchEvent(
+          new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }),
+        );
+        const toast = document.querySelector('.sysToast.zoomLimit');
+        maxOk = !!toast && /Zoom max/i.test(toast.textContent || '');
+        if (mark) {
+          mark.textContent =
+            minOk && maxOk
+              ? `Zoom-stop OK · min ${lower} · max ${upper} · Zoom min+max toasts · #352`
+              : `VE zoom-stop: min ok · firing wheel deltaY>0 at max…`;
+        }
       }
       window.setTimeout(hold, 900);
     };
