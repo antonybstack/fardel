@@ -328,3 +328,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Latch only living remotes (`hp > 0`, clip `Idle_Weapon`, not Walk/Death, AABB height ≥ 1.0, `y > 0.12`). Stand SecondClient at (0, −6) (south of origin; pads A/B/C + dummy all >7 m). Do not stand at (−2.5, 0) (vendor / pad-B). Do not fall back to a dead remote. Mutate `camera.target`. New VE key if CDN HITs the old PNG.
 - **Seen in:** #449 / #464
 
+### 2026-09-08 — humanoid,gait — releasing WASD skates one Walk stride at 0 wish
+- **Cause:** `setHumanoidMoving(false)` stopped Walk then started Idle. One CPU-skin frame still applied mid-stride Walk (or no group) while sendMove was already 0.
+- **Do this:** `startLoop(idle)` first, zero Walk/Run `speedRatio`, then `stopIfPlaying(walk, idle)`. Same order as cast-cancel. `?ve=walk-stop` persistMark `/^Idle OK/` + skinned, not Walk.
+- **Seen in:** #450
+
