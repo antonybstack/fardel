@@ -660,11 +660,16 @@ export function setHumanoidAirborne(
   if (a.idle) a.idle.speedRatio = 0;
 }
 
+/** In-place Walk stride ~2.2 m/s; Run_Weapon ~5 m/s. Wish is 4.5. */
+const WALK_REF_MPS = 2.2;
+const RUN_REF_MPS = 5.0;
+
 /** Switch Idle ↔ Walk/Run. `running` is fast/forward gait (no-op if clips missing). */
 export function setHumanoidMoving(
   parts: HumanoidParts,
   moving: boolean,
   running = false,
+  speedMps = 0,
 ): void {
   const a = animByRoot.get(parts.root);
   if (!a) return;
@@ -687,6 +692,10 @@ export function setHumanoidMoving(
   stopIfPlaying(a.walk, loc);
   stopIfPlaying(a.run, loc);
   startLoop(loc);
+  // Clip is in-place (armature translation 0). Match cycle to XZ so feet don't slide.
+  const ref = loc === a.run ? RUN_REF_MPS : WALK_REF_MPS;
+  const mps = speedMps > 0.15 ? speedMps : ref;
+  loc.speedRatio = Math.max(0.7, Math.min(1.85, mps / ref));
 }
 
 /** Play Death once and hold the fallen pose. Respawn restores Idle_Weapon. */
