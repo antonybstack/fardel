@@ -5942,8 +5942,7 @@ async function main(): Promise<void> {
         veFollow === 'aggro' ||
         veFollow === 'hostile-read' ||
         veFollow === 'hostile-types' ||
-        veFollow === 'brigand-body' ||
-        veFollow === 'kick'
+        veFollow === 'brigand-body'
       ) {
         // Dummy (5,0) + Kind=2 (3,7)/(-7,3) + Kind=3 (7,-3) in one shot.
         camera.inertialAlphaOffset = 0;
@@ -5956,6 +5955,18 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.05;
         camera.beta = Math.PI / 2.7;
         camera.radius = 18;
+      } else if (veFollow === 'kick' || veFollow === 'stun') {
+        // Dummy (5,0) + Kind=3 pad C (7,-3). Origin KickRange 8; Stun walks in.
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = 4;
+        tgt.y = 1.35;
+        tgt.z = -1.2;
+        camera.alpha = Math.PI / 2.15;
+        camera.beta = Math.PI / 2.65;
+        camera.radius = 16;
       } else if (veFollow === 'hostile-hit') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6190,6 +6201,7 @@ async function main(): Promise<void> {
         veFollow !== 'hostile-types' &&
         veFollow !== 'brigand-body' &&
         veFollow !== 'kick' &&
+        veFollow !== 'stun' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
@@ -18581,21 +18593,21 @@ async function main(): Promise<void> {
   void lastCastSpell;
   void CAST_HARD_INTERRUPT_REMAIN_MS;
   void CAST_SILENCE_MS;
-  // ?ve=kick — KickNpc Kind=2 interrupt; dummy still kickable (#419).
+  // ?ve=kick — KickNpc Kind=3 Brigand interrupt; dummy still kickable (#452).
   if (ve === 'kick') {
-    camera.radius = 18;
-    camera.alpha = Math.PI / 2.05;
-    camera.beta = Math.PI / 2.7;
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 2.65;
   }
   if (net && ve === 'kick') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE kick: waiting for dummy + hostile…';
+    if (mark) mark.textContent = 'VE kick: waiting for dummy + brigand…';
     let ticks = 0;
     let dummyKicked = false;
-    let hostileKicked = false;
+    let brigandKicked = false;
     let dummyBusy = false;
-    let hostileBusy = false;
-    let hostileId = 0n;
+    let brigandBusy = false;
+    let brigandId = 0n;
     const waitKickNpc = () => {
       if (!net) return;
       ticks += 1;
@@ -18607,15 +18619,15 @@ async function main(): Promise<void> {
       const npcs = net.getNpcs();
       syncNpcMeshes(npcs);
       const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
-      const hostile = npcs.find((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigand = npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
       const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
-      const hMesh = hostile ? npcMeshes.get(hostile.npcId.toString()) : undefined;
-      const hLabel = hMesh?.nameplate?.label ?? '';
+      const bMesh = brigand ? npcMeshes.get(brigand.npcId.toString()) : undefined;
+      const bLabel = bMesh?.nameplate?.label ?? '';
       const dLabel = dMesh?.nameplate?.label ?? '';
-      if (dummyKicked && hostileKicked && toastKindsPresent().has('kick') && hLabel === 'Hostile') {
+      if (dummyKicked && brigandKicked && toastKindsPresent().has('kick') && bLabel === 'Brigand') {
         if (mark) {
           mark.textContent =
-            `Kick OK · Hostile #${hostileId} · interrupt · dummy kickable · #419`;
+            `Kick OK · Brigand #${brigandId} · interrupt · dummy kickable · #452`;
         }
         return;
       }
@@ -18635,30 +18647,30 @@ async function main(): Promise<void> {
         window.setTimeout(waitKickNpc, 280);
         return;
       }
-      if (dummyKicked && !hostileKicked && !hostileBusy && hostile && gcd <= 0) {
-        hostileBusy = true;
-        hostileId = hostile.npcId;
-        net.setTarget(hostile.npcId);
-        void net.kickNpc(hostile.npcId).then(() => {
-          hostileKicked = true;
-          hostileBusy = false;
-          const bit = `Kick · Hostile #${hostile.npcId} · interrupt`;
+      if (dummyKicked && !brigandKicked && !brigandBusy && brigand && gcd <= 0) {
+        brigandBusy = true;
+        brigandId = brigand.npcId;
+        net.setTarget(brigand.npcId);
+        void net.kickNpc(brigand.npcId).then(() => {
+          brigandKicked = true;
+          brigandBusy = false;
+          const bit = `Kick · Brigand #${brigand.npcId} · interrupt`;
           pushCombatLog('kick', bit);
           pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
         }).catch(() => {
-          hostileBusy = false;
+          brigandBusy = false;
         });
         window.setTimeout(waitKickNpc, 280);
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE kick: dummy ${dummyKicked ? 'ok' : dLabel || 'no'} · H ${hostileKicked ? 'ok' : hLabel || 'no'}`;
+          `VE kick: dummy ${dummyKicked ? 'ok' : dLabel || 'no'} · B ${brigandKicked ? 'ok' : bLabel || 'no'}`;
       }
       if (ticks > 220) {
         if (mark) {
           mark.textContent =
-            `Kick FAIL · dummy ${dummyKicked ? 'ok' : 'no'} · hostile ${hostileKicked ? 'ok' : 'no'} · #419`;
+            `Kick FAIL · dummy ${dummyKicked ? 'ok' : 'no'} · brigand ${brigandKicked ? 'ok' : 'no'} · #452`;
         }
         return;
       }
@@ -18731,22 +18743,22 @@ async function main(): Promise<void> {
   void CAST_RANGE_METERS;
   void KICK_MANA_COST;
   void KICK_RANGE_METERS;
-  // ?ve=stun — StunNpc Kind=2 lock; dummy still stunnable (#420).
-  // StunRange 5m: dummy in from origin; pads ~7.6m OOR — walk to ~4m (no aggro).
+  // ?ve=stun — StunNpc Kind=3 Brigand lock; dummy still stunnable (#452).
+  // StunRange 5m: dummy in from origin; pad C ~7.6m OOR — walk to ~4m (no aggro).
   if (ve === 'stun') {
-    camera.radius = 18;
-    camera.alpha = Math.PI / 2.05;
-    camera.beta = Math.PI / 2.7;
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 2.65;
   }
   if (net && ve === 'stun') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE stun: waiting for dummy + hostile…';
+    if (mark) mark.textContent = 'VE stun: waiting for dummy + brigand…';
     let ticks = 0;
     let dummyStunned = false;
-    let hostileStunned = false;
+    let brigandStunned = false;
     let dummyBusy = false;
-    let hostileBusy = false;
-    let hostileId = 0n;
+    let brigandBusy = false;
+    let brigandId = 0n;
     const waitStunNpc = () => {
       if (!net) return;
       ticks += 1;
@@ -18758,15 +18770,15 @@ async function main(): Promise<void> {
       const npcs = net.getNpcs();
       syncNpcMeshes(npcs);
       const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
-      const hostile = npcs.find((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigand = npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
       const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
-      const hMesh = hostile ? npcMeshes.get(hostile.npcId.toString()) : undefined;
-      const hLabel = hMesh?.nameplate?.label ?? '';
+      const bMesh = brigand ? npcMeshes.get(brigand.npcId.toString()) : undefined;
+      const bLabel = bMesh?.nameplate?.label ?? '';
       const dLabel = dMesh?.nameplate?.label ?? '';
-      if (dummyStunned && hostileStunned && toastKindsPresent().has('stun') && hLabel === 'Hostile') {
+      if (dummyStunned && brigandStunned && toastKindsPresent().has('stun') && bLabel === 'Brigand') {
         if (mark) {
           mark.textContent =
-            `Stun OK · Hostile #${hostileId} · lock · dummy stunnable · #420`;
+            `Stun OK · Brigand #${brigandId} · lock · dummy stunnable · #452`;
         }
         return;
       }
@@ -18786,15 +18798,15 @@ async function main(): Promise<void> {
         window.setTimeout(waitStunNpc, 280);
         return;
       }
-      if (dummyStunned && !hostileStunned && !hostileBusy && hostile) {
+      if (dummyStunned && !brigandStunned && !brigandBusy && brigand) {
         const local = net.getLocalPose();
         if (local) {
-          const dist = Math.hypot(hostile.x - local.x, hostile.z - local.z);
+          const dist = Math.hypot(brigand.x - local.x, brigand.z - local.z);
           if (dist > STUN_RANGE_METERS - 0.4) {
-            net.sendMove(hostile.x - local.x, hostile.z - local.z, false);
+            net.sendMove(brigand.x - local.x, brigand.z - local.z, false);
             if (mark) {
               mark.textContent =
-                `VE stun: dummy ok · walk ${dist.toFixed(1)}m → Hostile (range ${STUN_RANGE_METERS})`;
+                `VE stun: dummy ok · walk ${dist.toFixed(1)}m → Brigand (range ${STUN_RANGE_METERS})`;
             }
             window.setTimeout(waitStunNpc, 80);
             return;
@@ -18804,29 +18816,29 @@ async function main(): Promise<void> {
           window.setTimeout(waitStunNpc, 120);
           return;
         }
-        hostileBusy = true;
-        hostileId = hostile.npcId;
-        net.setTarget(hostile.npcId);
-        void net.stunNpc(hostile.npcId).then(() => {
-          hostileStunned = true;
-          hostileBusy = false;
-          const bit = `Stun · Hostile #${hostile.npcId} · lock`;
+        brigandBusy = true;
+        brigandId = brigand.npcId;
+        net.setTarget(brigand.npcId);
+        void net.stunNpc(brigand.npcId).then(() => {
+          brigandStunned = true;
+          brigandBusy = false;
+          const bit = `Stun · Brigand #${brigand.npcId} · lock`;
           pushCombatLog('stun', bit);
           pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
         }).catch(() => {
-          hostileBusy = false;
+          brigandBusy = false;
         });
         window.setTimeout(waitStunNpc, 280);
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE stun: dummy ${dummyStunned ? 'ok' : dLabel || 'no'} · H ${hostileStunned ? 'ok' : hLabel || 'no'}`;
+          `VE stun: dummy ${dummyStunned ? 'ok' : dLabel || 'no'} · B ${brigandStunned ? 'ok' : bLabel || 'no'}`;
       }
       if (ticks > 220) {
         if (mark) {
           mark.textContent =
-            `Stun FAIL · dummy ${dummyStunned ? 'ok' : 'no'} · hostile ${hostileStunned ? 'ok' : 'no'} · #420`;
+            `Stun FAIL · dummy ${dummyStunned ? 'ok' : 'no'} · brigand ${brigandStunned ? 'ok' : 'no'} · #452`;
         }
         return;
       }
