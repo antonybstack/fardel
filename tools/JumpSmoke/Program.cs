@@ -166,6 +166,79 @@ try
     }
     Console.WriteLine($"landed: Y={landY} lastGroundedMicros={landPose.LastGroundedMicros} (advanced from {spawnLastGroundedMicros})");
 
+    // Hold-Space air pump (#157): live client keeps jump:true while Space is held.
+    // After rise, pump Move(0,0,true) until land — gravity must still integrate; VelY must
+    // not reset to JumpVelocity mid-air.
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var holdRose = false;
+    float holdPeakVelY = 0f;
+    using (var holdCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!holdCts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            var air = conn.Db.PlayerPose.Identity.Find(identity);
+            if (air is null)
+            {
+                Fail("PlayerPose missing during hold-Space jump");
+                return;
+            }
+            if (!holdRose)
+            {
+                if (air.Y > Movement.GroundY + 0.05f
+                    || MathF.Abs(air.VelY - Movement.JumpVelocity) < 1f)
+                {
+                    holdRose = true;
+                    holdPeakVelY = air.VelY;
+                    Console.WriteLine($"hold-Space jumped: Y={air.Y} velY={air.VelY}");
+                }
+            }
+            else
+            {
+                // Mid-air re-boost: VelY snaps back to JumpVelocity after it had fallen.
+                if (air.Y > Movement.GroundY + 0.08f
+                    && MathF.Abs(air.VelY - Movement.JumpVelocity) < 0.5f
+                    && holdPeakVelY < Movement.JumpVelocity - 1f)
+                {
+                    Fail($"hold-Space air pump re-boosted VelY to {air.VelY} (was {holdPeakVelY})");
+                    return;
+                }
+                if (air.VelY < holdPeakVelY)
+                {
+                    holdPeakVelY = air.VelY;
+                }
+                if (MathF.Abs(air.Y - Movement.GroundY) < 0.05f && MathF.Abs(air.VelY) < 0.1f)
+                {
+                    Console.WriteLine($"hold-Space landed: Y={air.Y} velY={air.VelY}");
+                    break;
+                }
+            }
+            conn.Reducers.Move(0f, 0f, jump: true);
+            try
+            {
+                await Task.Delay(50, holdCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (!holdRose)
+    {
+        Fail("hold-Space jump timeout — no pose update with rising Y");
+        return;
+    }
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } holdLand
+        || MathF.Abs(holdLand.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(holdLand.VelY) > 0.1f)
+    {
+        Fail("hold-Space air pump did not land (Y/VelY)");
+        return;
+    }
+    Console.WriteLine("hold-Space Move(0,0,true) air pump land OK (no VelY re-boost)");
+
     // Second jump while airborne should not re-boost (anti multi-jump)
     // Get current pose
     if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseBeforeSecond)
