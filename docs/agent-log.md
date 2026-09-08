@@ -212,3 +212,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Pre-hostiles Tab sorted Kind=1 ahead of Kind=2. Hunt Tab lives in `cyclePreferHostiles` in `main.ts`.
 - **Do this:** Play Tab uses the main.ts helper (in-range hostiles, then dummy). Do not call `net.cycleTarget()` for hunt. `?ve=tab-target` still `setTarget(dummy)`.
 - **Seen in:** #358
+
+### 2026-09-08 — place,fog — LINEAR fogEnd 200 bands the 480 m forest
+- **Cause:** Fog hits 100% at 200 m while unfogged mountains continue, so the forest rim reads as a stacked band / halo vs sky=fogColor.
+- **Do this:** LINEAR start 22 / end 260. Do not raise end to reach ridges (`applyFog=false` + baked steps). Do not switch EXP2. Sky lower band = fogColor.
+- **Seen in:** #348

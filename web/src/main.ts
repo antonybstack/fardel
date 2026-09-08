@@ -6338,7 +6338,7 @@ async function main(): Promise<void> {
       if (st.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Atmosphere OK · fog+cool dusk+canopy fill · Connected · yard mood';
+            'Atmosphere OK · no banding · sky=fogColor · cool dusk · Connected';
         }
         return;
       }
@@ -6497,7 +6497,7 @@ async function main(): Promise<void> {
       if (st.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Sky-horizon OK · distant layered ranges · Connected';
+            'Sky-horizon OK · no banding · sky=fogColor · distant layered ranges · Connected';
         }
         return;
       }
