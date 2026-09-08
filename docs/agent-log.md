@@ -78,6 +78,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Snap local grounded XZ. Mutate `camera.target` in place (do not `setTarget` on the play follow). ALPHATEST on hero canopies only; cap unique pack understory clones (~24). Do not lerp the local walker.
 - **Seen in:** #315
 
+### 2026-09-08 — camera,feel — RMB orbit dead after the #316 follow snap
+- **Cause:** Play follow zeroed `inertialAlphaOffset` / `inertialBetaOffset` / `inertialRadiusOffset` every frame while mutating `camera.target`. Babylon `ArcRotateCameraPointersInput` applies RMB via `inertialAlphaOffset -= offsetX / angularSensibilityX`.
+- **Do this:** Mutate `target.x/y/z` in place. Do **not** zero inertial offsets on the play follow. VE shots that lock alpha/beta may still clear inertia. `?ve=rmb-look` (cursor chrome) is not orbit — use `?ve=rmb-orbit` persistMark `RMB orbit OK · dAlpha`.
+- **Seen in:** #366 / #316
+
 ### 2026-09-08 — humanoid,interp — remote Walk restarts every 20 Hz snapshot
 - **Cause:** Grounded `advancePoseInterp` parks at `u=1` between snapshots. Frame-to-frame `hypot(dx,dz)/dt` on `samplePoseInterp` is 0 most frames, so `setHumanoidMoving(false)` stops Walk and restarts it from frame 0 on the next snap.
 - **Do this:** Drive remote Walk from `PoseInterp` `vx,vz` while `u<1`, with ~150ms hold. Do not use parked sample deltas. `?ve=remote-walk` needs a moving other identity (`tools/SecondClient`); local `sendMove` does not create a remote XZ delta.
@@ -87,3 +92,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Each body PR adds a `veFollow === '…'` branch next to walk/yaw. Parallel PRs all edit the same else-if.
 - **Do this:** Keep idle / walk / yaw / jump-pose / look-at / remote-walk / cast-anim as one chain. OR the new mode in; do not drop `idle` or `jump-pose`.
 - **Seen in:** #317 / #269 vs #313/#318
+
+### 2026-09-08 — ve,smoke — HTTP 200 of a T-pose PNG is not Idle VE
+- **Cause:** Release/Pages VE treated persistMark `Quaternius char OK` / empty + PNG HTTP 200 as Done. Bind-pose T still GATE PASS 28/28 because the matrix had no client Idle check.
+- **Do this:** Screenshot `?ve=idle` on a *seat* Vite (never `:3000` / db `fardel`). Quote persistMark: must match `/^Idle OK/` and contain `Idle_Weapon` + `skinned` ≥ 1. `T-POSE` / empty / `Quaternius char OK` = fail. IdleSmoke (`tools/IdleSmoke/run.sh` → `tools/qa/idle-smoke.mjs`) is the matrix gate.
+- **Seen in:** #321 / Pages pin `3b7968d3`

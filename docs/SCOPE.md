@@ -22,7 +22,7 @@ That sentence is **met** on `develop` (party, loot, trade, vendor, rest, bandage
 
 | In | Out (park it) |
 |---|---|
-| Active wave in [CAMPAIGN.md](CAMPAIGN.md) (0 = Pages cut; 1 = hunt) | Continents, mounts, auction house |
+| Active wave in [CAMPAIGN.md](CAMPAIGN.md) (12h character / place / encounter) | Continents, mounts, auction house |
 | Classless bag-as-build; intents not positions | Class lock-in, client-sent positions |
 | Kitbash until Wave 5 free/OSS pack pass ([ASSETS.md](ASSETS.md)) | Custom character creator, photoreal, cinema VFX, **paid** packs |
 | Chunk AOI as designed ([ADR 0001](adr/0001-aoi-interest.md)) | Coarse network LOD, LOS interest, multiple shards |
@@ -33,7 +33,7 @@ That sentence is **met** on `develop` (party, loot, trade, vendor, rest, bandage
 
 ### Next (after the current wave is on Pages)
 
-- File the next wave’s Issues from [CAMPAIGN.md](CAMPAIGN.md) (hunt → PvP → second place → 4-spell book → look-language)
+- File the next wave’s Issues from [CAMPAIGN.md](CAMPAIGN.md) only after E8–E10 are on Pages (PvP → second zone → 4-spell book → look-language)
 - Pick real **free/OSS** asset packs + fill credits ledger (Wave 5)
 - Prod authority host decision
 - Coarse pose tier only if metrics demand (ADR 0001 follow-up)
