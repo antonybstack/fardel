@@ -64,6 +64,7 @@ export const Npc = __t.object("Npc", {
   spawnY: __t.f32(),
   spawnZ: __t.f32(),
   aggroed: __t.bool(),
+  nextSwingAtMicros: __t.i64(),
 });
 export type Npc = __Infer<typeof Npc>;
 

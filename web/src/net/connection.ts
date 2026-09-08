@@ -38,6 +38,10 @@ export const NPC_KIND_HOSTILE = 2;
 /** Match Combat.HostileAggroRadius / HostileLeashRadius (#355). */
 export const HOSTILE_AGGRO_RADIUS = 3;
 export const HOSTILE_LEASH_RADIUS = 12;
+/** Match Combat.HostileMeleeRange / HostileAttackMs / HostileAttackDamage (#356). */
+export const HOSTILE_MELEE_RANGE = 2;
+export const HOSTILE_ATTACK_MS = 1500;
+export const HOSTILE_ATTACK_DAMAGE = 8;
 /** Match shared Combat mana costs / pool. */
 export const SPARK_MANA_COST = 5;
 export const EMBERBOLT_MANA_COST = 20;

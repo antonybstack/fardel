@@ -177,3 +177,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `?ve=rmb-orbit` did `inertialAlphaOffset += 0.45`. RmbOrbitSmoke passed persistMark while a dead pointer path (or a new follow-loop zero) could still leave live RMB look dead. `?ve=rmb-look` is grabbing chrome.
 - **Do this:** Observe `camera.alpha` after a Playwright `mouse.down({ button: 'right' })` drag on the play follow. persistMark OK only if `|dAlpha| > 0.15` after the drag. Fail if persistMark is OK before the drag. Seat Vite `window.__qa.getState().camera`. Do not `__qa.lookDelta`. Do not inject inertia.
 - **Seen in:** #389 / #366
+
+### 2026-09-08 — npc,combat-log — Character.Hp drop log is hardcoded Thorns
+- **Cause:** Dummy was the only player-HP source. `pushCombatLog('damage', 'Thorns −…')` on any decrease.
+- **Do this:** If a Kind=2 row is Aggroed, label Hostile. Dummy thorns stays Thorns when no hostile is pulled.
+- **Seen in:** #356

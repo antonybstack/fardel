@@ -50,6 +50,7 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<Npc, float> SpawnY { get; }
         public global::SpacetimeDB.Col<Npc, float> SpawnZ { get; }
         public global::SpacetimeDB.Col<Npc, bool> Aggroed { get; }
+        public global::SpacetimeDB.Col<Npc, long> NextSwingAtMicros { get; }
 
         public NpcCols(string tableName)
         {
@@ -64,6 +65,7 @@ namespace SpacetimeDB.Types
             SpawnY = new global::SpacetimeDB.Col<Npc, float>(tableName, "spawn_y");
             SpawnZ = new global::SpacetimeDB.Col<Npc, float>(tableName, "spawn_z");
             Aggroed = new global::SpacetimeDB.Col<Npc, bool>(tableName, "aggroed");
+            NextSwingAtMicros = new global::SpacetimeDB.Col<Npc, long>(tableName, "next_swing_at_micros");
         }
     }
 
