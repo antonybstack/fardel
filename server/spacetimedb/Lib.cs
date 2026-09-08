@@ -747,6 +747,105 @@ public static partial class Module
     }
 
     /// <summary>
+    /// Kick vs Dummy / hostile NPC (#419). Same GCD + KickManaCost as Kick(Identity).
+    /// Hostiles: delay NextSwingAtMicros + shove away. Dummy stays planted, no thorns.
+    /// Kick(Identity) stays the PvP interrupt.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void KickNpc(ReducerContext ctx, ulong npcId)
+    {
+        var selfChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (selfChar.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+
+        if (ctx.Db.Npc.NpcId.Find(npcId) is not { } npc)
+        {
+            throw new Exception("Target missing");
+        }
+        if (npc.Hp <= 0)
+        {
+            throw new Exception("Target dead");
+        }
+        if (npc.Kind != NpcKindDummy && !Combat.IsHostileKind(npc.Kind))
+        {
+            throw new Exception("Invalid target");
+        }
+
+        var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        {
+            var dx = selfPose.X - npc.X;
+            var dz = selfPose.Z - npc.Z;
+            var range = Combat.KickRangeMeters;
+            if (dx * dx + dz * dz > range * range)
+            {
+                throw new Exception("Out of range");
+            }
+        }
+
+        var selfCombat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp < selfCombat.GcdReadyAt)
+        {
+            throw new Exception("GCD");
+        }
+        if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < selfCombat.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
+        if (ctx.Timestamp < selfCombat.CastLockedUntil)
+        {
+            throw new Exception("silenced");
+        }
+        if (selfCombat.CastingSpellId != 0)
+        {
+            throw new Exception("Busy casting");
+        }
+
+        TickManaRegen(ctx, ref selfChar);
+        if (Combat.KickManaCost > 0 && selfChar.Mana < Combat.KickManaCost)
+        {
+            ctx.Db.Character.Identity.Update(selfChar);
+            throw new Exception("Insufficient mana");
+        }
+        if (Combat.KickManaCost > 0)
+        {
+            selfChar.Mana -= Combat.KickManaCost;
+        }
+        ctx.Db.Character.Identity.Update(selfChar);
+
+        selfCombat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
+        selfCombat.LastSpellId = 0;
+        selfCombat.LastCastAt = ctx.Timestamp;
+        ctx.Db.PlayerCombat.Identity.Update(selfCombat);
+
+        if (Combat.IsHostileKind(npc.Kind))
+        {
+            var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+            npc.NextSwingAtMicros = now + (long)Combat.KickNpcInterruptMs * 1000L;
+            var ax = npc.X - selfPose.X;
+            var az = npc.Z - selfPose.Z;
+            var len = MathF.Sqrt(ax * ax + az * az);
+            if (len > 1e-4f)
+            {
+                var shove = Combat.KickNpcShoveMeters;
+                StepToward(ref npc, npc.X + ax / len * shove, npc.Z + az / len * shove, shove);
+            }
+            ctx.Db.Npc.NpcId.Update(npc);
+            Log.Info(
+                $"KickNpc {ctx.Sender} → npc {npc.NpcId} kind={npc.Kind} " +
+                $"(interrupt {Combat.KickNpcInterruptMs}ms + shove {Combat.KickNpcShoveMeters}m)");
+        }
+        else
+        {
+            Log.Info($"KickNpc {ctx.Sender} → dummy {npc.NpcId} (trainer, no shove)");
+        }
+    }
+
+    /// <summary>
     /// Stun / Bash — short hard-CC on a nearby player. Breaks windup without
     /// CastLockedUntil silence; sets StunnedUntil so Move/Cast reject with
     /// "stunned" for StunDurationMs. Instant; spends StunManaCost + shared GCD.

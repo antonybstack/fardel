@@ -4470,6 +4470,25 @@ async function main(): Promise<void> {
         pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${KICK_MANA_COST}`, TOAST_VE_TTL_MS);
         return;
       }
+      const tgtId = net.getCombat()?.targetNpcId ?? 0n;
+      const npc = tgtId !== 0n ? net.getNpcs().find((n) => n.npcId === tgtId) : undefined;
+      if (npc && npc.hp > 0 && (npc.kind === NPC_KIND_DUMMY || isHostileKind(npc.kind))) {
+        const label =
+          npc.kind === NPC_KIND_DUMMY
+            ? 'Dummy'
+            : npc.kind === NPC_KIND_BRIGAND
+              ? 'Brigand'
+              : 'Hostile';
+        void net.kickNpc(npc.npcId).then(() => {
+          const bit = `Kick · ${label} #${npc.npcId} · interrupt`;
+          pushCombatLog('kick', bit);
+          pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+        }).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          pushSystemToast('rate', msg.slice(0, 96) || 'Kick failed');
+        });
+        return;
+      }
       void net.kickNearestCastingRemote().then((hex) => {
         if (!hex) { pushSystemToast('rate', 'No casting remote in Kick range'); return; }
         const bit = `Kick · interrupted ${hex.slice(0, 8)}… · silence ${(CAST_SILENCE_MS / 1000).toFixed(1)}s`;
@@ -5853,7 +5872,8 @@ async function main(): Promise<void> {
         veFollow === 'leash' ||
         veFollow === 'aggro' ||
         veFollow === 'hostile-read' ||
-        veFollow === 'hostile-types'
+        veFollow === 'hostile-types' ||
+        veFollow === 'kick'
       ) {
         // Dummy (5,0) + Kind=2 (3,7)/(-7,3) + Kind=3 (7,-3) in one shot.
         camera.inertialAlphaOffset = 0;
@@ -6041,6 +6061,7 @@ async function main(): Promise<void> {
         veFollow !== 'tab-hostile' &&
         veFollow !== 'hostile-read' &&
         veFollow !== 'hostile-types' &&
+        veFollow !== 'kick' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
@@ -17744,11 +17765,97 @@ async function main(): Promise<void> {
   void lastCastSpell;
   void CAST_HARD_INTERRUPT_REMAIN_MS;
   void CAST_SILENCE_MS;
-  // ?ve=kick / ?ve=counterspell
-  if (ve === 'kick' || ve === 'counterspell') {
+  // ?ve=kick — KickNpc Kind=2 interrupt; dummy still kickable (#419).
+  if (ve === 'kick') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'kick') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE kick: waiting for dummy + hostile…';
+    let ticks = 0;
+    let dummyKicked = false;
+    let hostileKicked = false;
+    let dummyBusy = false;
+    let hostileBusy = false;
+    let hostileId = 0n;
+    const waitKickNpc = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (ticks < 240) window.setTimeout(waitKickNpc, 200);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const hostile = npcs.find((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const hMesh = hostile ? npcMeshes.get(hostile.npcId.toString()) : undefined;
+      const hLabel = hMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      if (dummyKicked && hostileKicked && toastKindsPresent().has('kick') && hLabel === 'Hostile') {
+        if (mark) {
+          mark.textContent =
+            `Kick OK · Hostile #${hostileId} · interrupt · dummy kickable · #419`;
+        }
+        return;
+      }
+      const gcd = gcdRemainingMs(net.getCombat());
+      if (!dummyKicked && !dummyBusy && dummy && gcd <= 0) {
+        dummyBusy = true;
+        net.setTarget(dummy.npcId);
+        void net.kickNpc(dummy.npcId).then(() => {
+          dummyKicked = true;
+          dummyBusy = false;
+          const bit = `Kick · Dummy #${dummy.npcId} · trainer`;
+          pushCombatLog('kick', bit);
+          pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+        }).catch(() => {
+          dummyBusy = false;
+        });
+        window.setTimeout(waitKickNpc, 280);
+        return;
+      }
+      if (dummyKicked && !hostileKicked && !hostileBusy && hostile && gcd <= 0) {
+        hostileBusy = true;
+        hostileId = hostile.npcId;
+        net.setTarget(hostile.npcId);
+        void net.kickNpc(hostile.npcId).then(() => {
+          hostileKicked = true;
+          hostileBusy = false;
+          const bit = `Kick · Hostile #${hostile.npcId} · interrupt`;
+          pushCombatLog('kick', bit);
+          pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+        }).catch(() => {
+          hostileBusy = false;
+        });
+        window.setTimeout(waitKickNpc, 280);
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE kick: dummy ${dummyKicked ? 'ok' : dLabel || 'no'} · H ${hostileKicked ? 'ok' : hLabel || 'no'}`;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          mark.textContent =
+            `Kick FAIL · dummy ${dummyKicked ? 'ok' : 'no'} · hostile ${hostileKicked ? 'ok' : 'no'} · #419`;
+        }
+        return;
+      }
+      window.setTimeout(waitKickNpc, 200);
+    };
+    window.setTimeout(waitKickNpc, 600);
+  }
+
+  // ?ve=counterspell — PvP Kick(Identity) vs a casting remote (SecondClient).
+  if (ve === 'counterspell') {
     camera.radius = 14; camera.alpha = Math.PI / 2.3; camera.beta = Math.PI / 3.1;
   }
-  if (net && (ve === 'kick' || ve === 'counterspell')) {
+  if (net && ve === 'counterspell') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE kick: waiting…';
     let ticks = 0, kicked = false, nudged = false;
@@ -17764,7 +17871,10 @@ async function main(): Promise<void> {
       const casting = combats.find((c) => c.castingSpellId !== 0 && castRemainingMs(c) > 200);
       const preferred = remotes.find((r) => casting && r.identityHex === casting.identityHex) ?? remotes[0];
       if (preferred) {
-        camera.setTarget(new Vector3((player.position.x + preferred.x) / 2, 1.15, (player.position.z + preferred.z) / 2));
+        const tgt = camera.target;
+        tgt.x = (player.position.x + preferred.x) / 2;
+        tgt.y = 1.15;
+        tgt.z = (player.position.z + preferred.z) / 2;
         const local = net.getLocalPose();
         if (local) {
           const dist = Math.hypot(preferred.x - local.x, preferred.z - local.z);

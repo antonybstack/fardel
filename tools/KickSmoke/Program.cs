@@ -145,6 +145,80 @@ try
     await PumpUntilBoth(() =>
         connA.Db.PlayerCombat.Identity.Find(idA) is { } pc && pc.CastingSpellId == 0,
         timeoutMs, connA, connB, "cleanup cancel");
+
+    await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
+    await TopUpMana(connA, idA, connB);
+    connA.Reducers.EnsureTrainingDummy();
+    await PumpUntilBoth(() => FindDummy(connA) is { Hp: var h } && h == Combat.DummyMaxHp,
+        timeoutMs, connA, connB, "dummy for KickNpc");
+    dummy = FindDummy(connA)!;
+    var dummyX = dummy.X;
+    var dummyZ = dummy.Z;
+    var dummyHpKick = dummy.Hp;
+    var manaBeforeNpc = connA.Db.Character.Identity.Find(idA)!.Mana;
+    await ExpectKickNpcOk(connA, dummy.NpcId, "dummy KickNpc");
+    await PumpUntilBoth(() =>
+    {
+        var ch = connA.Db.Character.Identity.Find(idA);
+        return ch is not null && ch.Mana < manaBeforeNpc;
+    }, timeoutMs, connA, connB, "A mana spent KickNpc dummy");
+    dummy = FindDummy(connA)!;
+    if (dummy.Hp != dummyHpKick)
+    {
+        Fail($"KickNpc damaged dummy ({dummyHpKick}->{dummy.Hp})");
+        return;
+    }
+    if (MathF.Abs(dummy.X - dummyX) > 0.05f || MathF.Abs(dummy.Z - dummyZ) > 0.05f)
+    {
+        Fail($"KickNpc moved dummy trainer ({dummyX},{dummyZ})->({dummy.X},{dummy.Z})");
+        return;
+    }
+    Console.WriteLine("KickNpc dummy trainer OK (no shove, no HP)");
+
+    await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
+    await TopUpMana(connA, idA, connB);
+    await PumpUntilBoth(() => FindHostileNear(connA, Combat.HostileSpawnAx, Combat.HostileSpawnAz) is { Hp: > 0 },
+        timeoutMs, connA, connB, "hostile pad A");
+    var padA = FindHostileNear(connA, Combat.HostileSpawnAx, Combat.HostileSpawnAz)!;
+    if (padA.Kind != Combat.NpcKindHostile)
+    {
+        Fail($"pad A kind={padA.Kind} want Kind=2");
+        return;
+    }
+    var a0x = padA.X;
+    var a0z = padA.Z;
+    var dummyHpBeforeHostile = FindDummy(connA)!.Hp;
+    await ExpectKickNpcOk(connA, padA.NpcId, "Kind=2 KickNpc");
+    await PumpUntilBoth(() =>
+    {
+        var n = FindNpc(connA, padA.NpcId);
+        return n is { Hp: > 0, NextSwingAtMicros: > 0 };
+    }, timeoutMs, connA, connB, "pad A swing interrupted");
+    var kicked = FindNpc(connA, padA.NpcId)!;
+    if (kicked.Kind != Combat.NpcKindHostile)
+    {
+        Fail($"KickNpc changed pad A kind={kicked.Kind}");
+        return;
+    }
+    var shoved = Dist(kicked.X, kicked.Z, a0x, a0z);
+    if (shoved < Combat.KickNpcShoveMeters * 0.5f)
+    {
+        Fail($"KickNpc did not shove Kind=2 ({shoved:0.##}m)");
+        return;
+    }
+    if (FindDummy(connA) is not { Hp: var dHp } || dHp != dummyHpBeforeHostile)
+    {
+        Fail("dummy trainer HP changed during KickNpc hostile");
+        return;
+    }
+    Console.WriteLine($"KickNpc Kind=2 OK id={kicked.NpcId} shove={shoved:0.##} swingAt={kicked.NextSwingAtMicros}");
+
+    await MoveTo(connA, idA, Combat.KickRangeMeters * 3f, 0f, connB);
+    await ExpectKickNpcFail(connA, padA.NpcId, "Out of range", "far KickNpc");
+    Console.WriteLine("out-of-range KickNpc reject OK");
+    await ExpectKickNpcFail(connA, 999999999UL, "Target missing", "missing KickNpc");
+    Console.WriteLine("missing KickNpc reject OK");
+
     Console.WriteLine("OK: KickSmoke passed");
     Environment.ExitCode = 0;
 }
@@ -240,8 +314,77 @@ static async Task MoveTo(DbConnection conn, Identity id, float x, float z, DbCon
 
 static Npc? FindDummy(DbConnection conn)
 {
-    foreach (var n in conn.Db.Npc.Iter()) if (n.Kind == 1) return n;
+    foreach (var n in conn.Db.Npc.Iter()) if (n.Kind == Combat.NpcKindDummy) return n;
     return null;
+}
+
+static Npc? FindNpc(DbConnection conn, ulong id)
+{
+    foreach (var n in conn.Db.Npc.Iter()) if (n.NpcId == id) return n;
+    return null;
+}
+
+static Npc? FindHostileNear(DbConnection conn, float x, float z)
+{
+    Npc? best = null;
+    var bestD = float.MaxValue;
+    foreach (var n in conn.Db.Npc.Iter())
+    {
+        if (n.Kind != Combat.NpcKindHostile || n.Hp <= 0) continue;
+        var dx = n.X - x;
+        var dz = n.Z - z;
+        var d = dx * dx + dz * dz;
+        if (d < bestD) { bestD = d; best = n; }
+    }
+    return best;
+}
+
+static float Dist(float ax, float az, float bx, float bz)
+{
+    var dx = ax - bx;
+    var dz = az - bz;
+    return MathF.Sqrt(dx * dx + dz * dz);
+}
+
+static async Task ExpectKickNpcOk(DbConnection conn, ulong npcId, string label)
+{
+    var tcs = new TaskCompletionSource();
+    void OnKickNpc(ReducerEventContext ctx, ulong _npcId)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Committed: tcs.TrySetResult(); break;
+            case Status.Failed(var reason): tcs.TrySetException(new Exception($"KickNpc failed ({label}): {reason}")); break;
+            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"KickNpc OOE ({label})")); break;
+        }
+    }
+    conn.Reducers.OnKickNpc += OnKickNpc;
+    try { conn.Reducers.KickNpc(npcId); await Pump(tcs.Task, timeoutMs, conn, "kick npc ok " + label); }
+    finally { conn.Reducers.OnKickNpc -= OnKickNpc; }
+}
+
+static async Task ExpectKickNpcFail(DbConnection conn, ulong npcId, string needle, string label)
+{
+    string? fail = null;
+    var tcs = new TaskCompletionSource();
+    void OnKickNpc(ReducerEventContext ctx, ulong _npcId)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason): fail = reason; tcs.TrySetResult(); break;
+            case Status.Committed: tcs.TrySetException(new Exception($"KickNpc committed ({label})")); break;
+            case Status.OutOfEnergy(_): tcs.TrySetException(new Exception($"KickNpc OOE ({label})")); break;
+        }
+    }
+    conn.Reducers.OnKickNpc += OnKickNpc;
+    try { conn.Reducers.KickNpc(npcId); await Pump(tcs.Task, timeoutMs, conn, "kick npc fail " + label); }
+    finally { conn.Reducers.OnKickNpc -= OnKickNpc; }
+    if (string.IsNullOrEmpty(fail) || fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected '{needle}' on KickNpc ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("kick npc fail mismatch");
+    }
+    Console.WriteLine($"KickNpc reject OK ({label}): {fail}");
 }
 
 static void Fail(string msg) { Console.Error.WriteLine("FAIL: " + msg); Environment.ExitCode = 1; }
