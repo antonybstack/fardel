@@ -860,7 +860,8 @@ export function setHumanoidMoving(
 
 /**
  * Stationary yaw: hold Idle_Weapon (speed 0) so feet stay planted.
- * No-op while Walk/Run/#334 gait is playing.
+ * No-op while Walk/Run/#334 gait is playing. Callers must not plant
+ * while sendMove is translating (that is moonwalk).
  */
 export function setHumanoidTurning(
   parts: HumanoidParts,

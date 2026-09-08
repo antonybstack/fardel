@@ -3507,6 +3507,14 @@ async function main(): Promise<void> {
     while (d < -Math.PI) d += Math.PI * 2;
     return a + d * t;
   };
+  const yawDelta = (from: number, to: number) => {
+    let d = to - from;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  };
+  /** Face living Tab-target while walking only if wish is still mostly forward. */
+  const FACE_TARGET_WALK_ALIGN = 0.85;
   const clampU = (u: number) => (u < 0 ? 0 : u > 1 ? 1 : u);
   const retargetPoseInterp = (
     i: PoseInterp,
@@ -4850,17 +4858,29 @@ async function main(): Promise<void> {
     setPlayerBlobShadow(player.position.x, player.position.z);
     {
       const wish = wishFromKeys(keys, camera);
-      let faceYaw: number | null = null;
-      if (wish.dx !== 0 || wish.dz !== 0) {
-        faceYaw = Math.atan2(wish.dx, wish.dz);
-      } else if (selectedTargetId !== 0n && net) {
+      const wishMoving = Math.hypot(wish.dx, wish.dz) > 1e-4;
+      let targetYaw: number | null = null;
+      if (selectedTargetId !== 0n && net) {
         const npc = net.getNpcs().find((n) => n.npcId === selectedTargetId && n.hp > 0);
         if (npc) {
-          faceYaw = Math.atan2(
+          targetYaw = Math.atan2(
             npc.x - player.position.x,
             npc.z - player.position.z,
           );
         }
+      }
+      let faceYaw: number | null = null;
+      if (wishMoving) {
+        const wishYaw = Math.atan2(wish.dx, wish.dz);
+        // Face living target while walking only when wish is still mostly
+        // forward. Perpendicular strafe keeps wish yaw so Walk does not moonwalk.
+        faceYaw =
+          targetYaw != null &&
+          Math.abs(yawDelta(wishYaw, targetYaw)) < FACE_TARGET_WALK_ALIGN
+            ? targetYaw
+            : wishYaw;
+      } else if (targetYaw != null) {
+        faceYaw = targetYaw;
       } else if (rmbLookArmed) {
         const camPos = camera.position;
         const tgt = camera.getTarget();
@@ -4869,14 +4889,9 @@ async function main(): Promise<void> {
         if (fx * fx + fz * fz > 1e-8) faceYaw = Math.atan2(fx, fz);
       }
       if (faceYaw != null) {
-        let d = faceYaw - localFacingYaw;
-        while (d > Math.PI) d -= Math.PI * 2;
-        while (d < -Math.PI) d += Math.PI * 2;
-        const wishMoving = Math.hypot(wish.dx, wish.dz) > 1e-4;
-        // Planted turn while standing (look) or a large A-D facing change.
-        // Aligned loco keeps 12 Hz + Walk/Run (#334 foot lock).
-        localTurningInPlace =
-          Math.abs(d) > 0.28 && (!wishMoving || Math.abs(d) > 0.7);
+        const d = yawDelta(localFacingYaw, faceYaw);
+        // Never plant Idle while translating — planted feet + sendMove slides.
+        localTurningInPlace = Math.abs(d) > 0.28 && !wishMoving;
         const yawHz = localTurningInPlace ? YAW_TURN_HZ : YAW_FACE_HZ;
         const a = 1 - Math.exp(-Math.max(0, dt) * yawHz);
         localFacingYaw = lerpYaw(localFacingYaw, faceYaw, a);
@@ -5188,7 +5203,11 @@ async function main(): Promise<void> {
           const moving = keys.size > 0 && !localTurningInPlace;
           const running =
             moving &&
-            (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
+            (ve === 'run' ||
+              (ve !== 'walk' &&
+                ve !== 'face-target-walk' &&
+                keys.has('w') &&
+                !keys.has('s')));
           setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
           setHumanoidTurning(humanoid, localTurningInPlace);
         }
@@ -5217,7 +5236,11 @@ async function main(): Promise<void> {
         const moving = keys.size > 0 && !localTurningInPlace;
         const running =
           moving &&
-          (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
+          (ve === 'run' ||
+            (ve !== 'walk' &&
+              ve !== 'face-target-walk' &&
+              keys.has('w') &&
+              !keys.has('s')));
         setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
         setHumanoidTurning(humanoid, localTurningInPlace);
       }
@@ -5961,6 +5984,18 @@ async function main(): Promise<void> {
         tgt.y = fy;
         tgt.z = fz;
         camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 8;
+      } else if (veFollow === 'face-target-walk') {
+        // Camera on -X so W walks +X toward Dummy (5,0). Mutate target in place.
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.0;
+        tgt.z = player.position.z;
+        camera.alpha = Math.PI;
         camera.beta = Math.PI / 2.45;
         camera.radius = 8;
       } else if (
@@ -7282,6 +7317,88 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitLook, 200);
     };
     window.setTimeout(waitLook, 600);
+  }
+
+  // ?ve=face-target-walk — walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432).
+  if (ve === 'face-target-walk') {
+    camera.radius = 8;
+    camera.alpha = Math.PI;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'face-target-walk') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE face-target-walk: waiting for Connected…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const waitFace = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE face-target-walk: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitFace, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitFace, 250);
+        return;
+      }
+      net.ensureTrainingDummy();
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ?? null;
+      if (!dummy) {
+        if (mark) mark.textContent = 'VE face-target-walk: seeding dummy…';
+        if (ticks < 200) window.setTimeout(waitFace, 300);
+        return;
+      }
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      keys.add('w');
+      setHumanoidMoving(humanoid, true, false, MOVE_SPEED);
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = clipBare(pb.playing);
+      const toDummy =
+        dummy != null
+          ? Math.atan2(dummy.x - player.position.x, dummy.z - player.position.z)
+          : 0;
+      const faceErr = dummy ? Math.abs(yawDelta(localFacingYaw, toDummy)) : 99;
+      const walkOk =
+        pb.skinned > 0 &&
+        /^walk$/i.test(clip) &&
+        dummy != null &&
+        faceErr < 0.45 &&
+        !localTurningInPlace;
+      if (walkOk) {
+        if (mark) {
+          mark.textContent =
+            `Walk OK · ${clip} · skinned ${pb.skinned} · face target · y=${localFacingYaw.toFixed(2)}`;
+        }
+        return;
+      }
+      if (ticks > 220) {
+        if (mark) {
+          if (pb.skinned <= 0) {
+            mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+          } else {
+            mark.textContent =
+              `Yaw FAIL · clip=${clip} · skinned ${pb.skinned} · y=${localFacingYaw.toFixed(2)} · faceErr=${faceErr.toFixed(2)}`;
+          }
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE face-target-walk: clip=${clip} · y=${localFacingYaw.toFixed(2)} · faceErr=${faceErr.toFixed(2)}…`;
+      }
+      window.setTimeout(waitFace, 200);
+    };
+    window.setTimeout(waitFace, 700);
   }
 
   // ?ve=cast-anim — E8.6 hold Spell1 for Emberbolt windup (Spark stays one-shot).

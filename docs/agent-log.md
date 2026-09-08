@@ -272,3 +272,9 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `HasHostileForPad` counts Hp=0, so `EnsureHostiles` never restocks a corpse. Pickup of the death shard is inside AggroRadius 3; the same-tick revive then melee-kills the VE client (greyout "You died").
 - **Do this:** `PendingHostileRespawn` linger (`HostileCorpseLingerMs`) + Pickup-near-corpse `ReviveHostile` on the same NpcId at SpawnXZ. Dummy is never queued. `?ve=respawn` sparks from origin and waits linger — do not walk to the shard. After a pad pickup in smokes, run past `HostileLeashRadius` before the next pull.
 - **Seen in:** #421
+
+### 2026-09-08 — humanoid,yaw — Tab-target + WASD plants Idle while the root still translates
+- **Cause:** `localTurningInPlace` fired on `|d|>0.7` even while wish-moving, so gait called `setHumanoidMoving(false)` and Idle speed 0. `sendMove` still slid the root — planted feet + translation = moonwalk.
+- **Do this:** Never plant Idle while wish-moving. Face living Tab-target only when `|yawDelta(wish, target)| < 0.85`; else face wish. `#334` speedRatio still owns stride. `?ve=face-target-walk` persistMark `Walk OK` + Walk + `skinned`.
+- **Seen in:** #432
+
