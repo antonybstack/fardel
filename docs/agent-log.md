@@ -117,3 +117,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** CommonTree glTF ships `alphaMode: MASK`. Skipping the ALPHATEST *set* still leaves the loader MASK, so unique or ThinInstance mids alpha-test every leaf (#315 fillrate).
 - **Do this:** When `alphaTestLeaves` is false, force `PBRMATERIAL_OPAQUE` / `MATERIAL_OPAQUE` and clear `useAlphaFromAlbedoTexture`. ALPHATEST only on hero canopies. Mid ring is ThinInstances (`thinInstancePackRoot`), not unique clones.
 - **Seen in:** #340 / #315
+
+### 2026-09-08 — humanoid,jump — Wizard.glb has no Jump/Fall clip
+- **Cause:** Pack clips are Idle/Walk/Run/Spell/Death/RecieveHit/Roll only — no Jump or Falling.
+- **Do this:** Airborne: stop Walk/Run, hold Idle_Weapon at speedRatio 0 (staff grip, not T, not a walk cycle). Do not use Roll as a hop. Do not squash `root.scaling`.
+- **Seen in:** #328

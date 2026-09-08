@@ -48,7 +48,10 @@ type HumanoidAnim = {
   idle: AnimationGroup | null;
   walk: AnimationGroup | null;
   run: AnimationGroup | null;
+  /** Jump/Fall if the GLB has one; Wizard.glb does not. */
+  air: AnimationGroup | null;
   cast: AnimationGroup | null;
+  airborne: boolean;
 };
 
 const animByRoot = new WeakMap<Mesh, HumanoidAnim>();
@@ -429,6 +432,7 @@ export function createPlayerHumanoid(
   // E8.2: Run_Weapon for fast/forward; Walk for slow/strafe. Do not alias Run as Walk.
   const run = findAnim(animGroups, 'Run_Weapon', 'Run');
   const walk = findAnim(animGroups, 'Walk') ?? run;
+  const air = findAnim(animGroups, 'Jump', 'Falling', 'Fall');
   const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Staff_Attack');
   for (const g of animGroups) {
     g.stop();
@@ -436,7 +440,7 @@ export function createPlayerHumanoid(
   if (idle) {
     idle.start(true, 1.0, idle.from, idle.to, false);
   }
-  animByRoot.set(root, { idle, walk, run, cast });
+  animByRoot.set(root, { idle, walk, run, air, cast, airborne: false });
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -466,13 +470,15 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
   }
   const playing = a?.cast?.isPlaying
     ? a.cast.name
-    : a?.run?.isPlaying
-      ? a.run.name
-      : a?.walk?.isPlaying
-        ? a.walk.name
-        : a?.idle?.isPlaying
-          ? a.idle.name
-          : null;
+    : a?.air?.isPlaying
+      ? a.air.name
+      : a?.run?.isPlaying
+        ? a.run.name
+        : a?.walk?.isPlaying
+          ? a.walk.name
+          : a?.idle?.isPlaying
+            ? a.idle.name
+            : null;
   return { skinned, playing, idle: a?.idle?.name ?? null };
 }
 
@@ -487,6 +493,34 @@ function startLoop(g: AnimationGroup | null): void {
   if (g && !g.isPlaying) g.start(true, 1.0, g.from, g.to, false);
 }
 
+/** Airborne hold: Jump/Fall if present, else frozen Idle_Weapon. No squash. */
+export function setHumanoidAirborne(
+  parts: HumanoidParts,
+  airborne: boolean,
+): void {
+  const a = animByRoot.get(parts.root);
+  if (!a) return;
+  a.airborne = airborne;
+  if (!airborne) {
+    stopIfPlaying(a.air);
+    if (a.idle) a.idle.speedRatio = 1;
+    return;
+  }
+  if (a.cast?.isPlaying) return;
+  stopIfPlaying(a.walk);
+  stopIfPlaying(a.run);
+  if (a.air) {
+    stopIfPlaying(a.idle);
+    if (!a.air.isPlaying) {
+      a.air.start(false, 1.0, a.air.from, a.air.to, false);
+    }
+    return;
+  }
+  // Wizard.glb has no Jump/Fall — hold Idle_Weapon (not Walk, not T).
+  startLoop(a.idle);
+  if (a.idle) a.idle.speedRatio = 0;
+}
+
 /** Switch Idle ↔ Walk/Run. `running` is fast/forward gait (no-op if clips missing). */
 export function setHumanoidMoving(
   parts: HumanoidParts,
@@ -495,7 +529,9 @@ export function setHumanoidMoving(
 ): void {
   const a = animByRoot.get(parts.root);
   if (!a) return;
+  if (a.airborne) return;
   if (a.cast?.isPlaying) return;
+  if (a.idle) a.idle.speedRatio = 1;
   if (!moving) {
     stopIfPlaying(a.walk);
     stopIfPlaying(a.run);
@@ -520,6 +556,9 @@ export function playHumanoidCast(parts: HumanoidParts): void {
   if (a.idle?.isPlaying) a.idle.stop();
   if (a.walk?.isPlaying) a.walk.stop();
   if (a.run?.isPlaying) a.run.stop();
+  stopIfPlaying(a.air);
+  a.airborne = false;
+  if (a.idle) a.idle.speedRatio = 1;
   a.cast.onAnimationGroupEndObservable.addOnce(() => {
     setHumanoidMoving(parts, false);
   });
