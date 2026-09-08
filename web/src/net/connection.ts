@@ -94,6 +94,7 @@ export type NpcView = {
   spawnZ: number;
   aggroed: boolean;
   nextSwingAtMicros: bigint;
+  stunnedUntilMicros: bigint;
 };
 
 export type CrowdProxyView = {
@@ -261,6 +262,8 @@ export type GameNet = {
   kickNpc: (npcId: bigint) => Promise<void>;
   kickNearestCastingRemote: () => Promise<string | null>;
   stun: (target: Identity) => Promise<void>;
+  /** Stun vs Dummy / hostile NPC (#420). PvP Stun stays Identity. */
+  stunNpc: (npcId: bigint) => Promise<void>;
   stunNearestRemote: () => Promise<string | null>;
   unequipStaff: () => void;
   equipStaff: () => void;
@@ -482,6 +485,7 @@ type NpcRow = {
   spawnZ?: number;
   aggroed?: boolean;
   nextSwingAtMicros?: bigint | number;
+  stunnedUntilMicros?: bigint | number;
 };
 
 type CharacterRow = {
@@ -586,6 +590,7 @@ function npcView(row: NpcRow): NpcView {
     spawnZ: row.spawnZ ?? 0,
     aggroed: !!row.aggroed,
     nextSwingAtMicros: asBigInt(row.nextSwingAtMicros ?? 0),
+    stunnedUntilMicros: asBigInt(row.stunnedUntilMicros ?? 0),
   };
 }
 
@@ -1657,6 +1662,11 @@ export async function connectToSpacetime(
                 return bestHex;
               },
               stun: (target: Identity) => conn.reducers.stun({ target }),
+              stunNpc: (npcId: bigint) => {
+                castFeedback = `StunNpc → ${npcId}`;
+                emitStatus(identityHex);
+                return conn.reducers.stunNpc({ npcId });
+              },
               stunNearestRemote: async () => {
                 const local = latestPose;
                 if (!local) return null;

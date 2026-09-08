@@ -677,6 +677,7 @@ namespace SpacetimeDB.Types
                 Reducer.SellToVendor args => Reducers.InvokeSellToVendor(eventContext, args),
                 Reducer.SetTarget args => Reducers.InvokeSetTarget(eventContext, args),
                 Reducer.Stun args => Reducers.InvokeStun(eventContext, args),
+                Reducer.StunNpc args => Reducers.InvokeStunNpc(eventContext, args),
                 Reducer.UnequipRobes args => Reducers.InvokeUnequipRobes(eventContext, args),
                 Reducer.UnequipStaff args => Reducers.InvokeUnequipStaff(eventContext, args),
                 Reducer.UseBandage args => Reducers.InvokeUseBandage(eventContext, args),

@@ -23,4 +23,5 @@ export default __t.row({
   spawnZ: __t.f32().name("spawn_z"),
   aggroed: __t.bool(),
   nextSwingAtMicros: __t.i64().name("next_swing_at_micros"),
+  stunnedUntilMicros: __t.i64().name("stunned_until_micros"),
 });

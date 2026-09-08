@@ -248,6 +248,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** KickNpc(ulong) for living Dummy + IsHostileKind. Dummy stays planted (no shove, no thorns). Hostiles: delay NextSwingAtMicros + shove away. Keep Kick(Identity) for KickSmoke PvP. FindHostileNear pins Kind==2.
 - **Seen in:** #419
 
+### 2026-09-08 — npc,stun — Stun(Identity) is PvP; StunRange 5 misses yard pads
+- **Cause:** Stun looks up Character + PlayerCombat on Identity. Dummy at 5m is in StunRange; pads A/B/C are ~7.6m (KickRange 8 reached them from origin). Hostiles do not Move/Cast, so the lock is Npc.StunnedUntilMicros.
+- **Do this:** StunNpc(ulong) for living Dummy + IsHostileKind. Dummy stays planted. Hostiles: StunnedUntilMicros + skip chase/swing for StunNpcLockMs. VE walks to ~4m (inside 5, outside AggroRadius 3). Keep Stun(Identity) for StunSmoke PvP. FindHostileNear pins Kind==2.
+- **Seen in:** #420
+
 ### 2026-09-08 — humanoid,staff — unequip still plays Idle_Weapon (floating grip)
 - **Cause:** `findAnim(..., 'Idle')` is `includes`, so it returns Idle_Weapon. `setHumanoidStaffEquipped(false)` hid the stick then returned without swapping the clip.
 - **Do this:** Exact bare clip names (`Idle` ≠ `Idle_Weapon`, `Run` ≠ `Run_Weapon`). Unequip selects unarmed Idle/Run. `?ve=idle` still Idle_Weapon + skinned. `?ve=sheathed` persistMark `Sheathed OK` + `Idle` (no Weapon) + skinned, staff mesh off.

@@ -37,6 +37,8 @@ namespace SpacetimeDB.Types
         public bool Aggroed;
         [DataMember(Name = "next_swing_at_micros")]
         public long NextSwingAtMicros;
+        [DataMember(Name = "stunned_until_micros")]
+        public long StunnedUntilMicros;
 
         public Npc(
             ulong NpcId,
@@ -50,7 +52,8 @@ namespace SpacetimeDB.Types
             float SpawnY,
             float SpawnZ,
             bool Aggroed,
-            long NextSwingAtMicros
+            long NextSwingAtMicros,
+            long StunnedUntilMicros
         )
         {
             this.NpcId = NpcId;
@@ -65,6 +68,7 @@ namespace SpacetimeDB.Types
             this.SpawnZ = SpawnZ;
             this.Aggroed = Aggroed;
             this.NextSwingAtMicros = NextSwingAtMicros;
+            this.StunnedUntilMicros = StunnedUntilMicros;
         }
 
         public Npc()

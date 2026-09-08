@@ -62,6 +62,7 @@ import SeedLootReducer from "./seed_loot_reducer";
 import SellToVendorReducer from "./sell_to_vendor_reducer";
 import SetTargetReducer from "./set_target_reducer";
 import StunReducer from "./stun_reducer";
+import StunNpcReducer from "./stun_npc_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
 import UseBandageReducer from "./use_bandage_reducer";
@@ -276,6 +277,7 @@ const reducersSchema = __reducers(
   __reducerSchema("sell_to_vendor", SellToVendorReducer),
   __reducerSchema("set_target", SetTargetReducer),
   __reducerSchema("stun", StunReducer),
+  __reducerSchema("stun_npc", StunNpcReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
   __reducerSchema("use_bandage", UseBandageReducer),
