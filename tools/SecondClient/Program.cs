@@ -58,7 +58,11 @@ try
 
     Console.WriteLine($"spawn ({pose.X}, {pose.Z})");
 
-    for (var i = 0; i < 80; i++)
+    // Patrol so ?ve=remote-walk can catch Walk. A one-shot 4m hop arrives
+    // in <1s and the remote is idle before the screenshot.
+    var walkUntil = DateTime.UtcNow.AddSeconds(45);
+    var goPlus = true;
+    while (DateTime.UtcNow < walkUntil)
     {
         if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
         {
@@ -66,18 +70,22 @@ try
             continue;
         }
 
-        var dx = targetX - cur.X;
-        var dz = targetZ - cur.Z;
+        var destX = goPlus ? targetX : -3.0f;
+        var destZ = goPlus ? targetZ : 3.0f;
+        var dx = destX - cur.X;
+        var dz = destZ - cur.Z;
         var dist = MathF.Sqrt(dx * dx + dz * dz);
-        if (dist < 0.2f)
+        if (dist < 0.4f)
         {
-            Console.WriteLine($"arrived ({cur.X}, {cur.Z}) — holding for VE");
-            break;
+            goPlus = !goPlus;
+            Console.WriteLine($"turn ({cur.X:F1}, {cur.Z:F1})");
+            await Frame(conn, 50);
+            continue;
         }
 
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
         conn.Reducers.Move(dx * scale, dz * scale, false);
-        await Frame(conn, 60);
+        await Frame(conn, 50);
     }
 
     if (conn.Db.PlayerPose.Identity.Find(identity) is { } finalPose)
