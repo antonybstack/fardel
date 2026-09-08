@@ -5253,6 +5253,15 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2 + 0.45;
         camera.beta = Math.PI / 2.38;
         camera.radius = 34;
+      } else if (veFollow === 'walk') {
+        // Side play-cam so the Walk stride reads; lock each frame (#262).
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        camera.setTarget(player.position.add(new Vector3(0, 1.0, 0)));
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -6003,6 +6012,56 @@ async function main(): Promise<void> {
       }
     };
     window.setTimeout(waitQ, 600);
+  }
+
+  // ?ve=walk — E2.3/E2.6 play-cam Walk clip (legs moving, not T-pose).
+  if (ve === 'walk') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'walk') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE walk: waiting for Connected…';
+    let ticks = 0;
+    const playingNames = (): string =>
+      scene.animationGroups
+        .filter((g) => g.isPlaying)
+        .map((g) => g.name.replace(/^player__/, ''))
+        .join(' · ');
+    const waitWalk = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE walk: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitWalk, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitWalk, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitWalk, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      setHumanoidMoving(humanoid, true);
+      const playing = playingNames();
+      if (mark) {
+        mark.textContent = playing
+          ? `Walk OK · ${playing} · Connected`
+          : 'VE walk FAIL · no clip playing';
+      }
+      if (ticks < 240) window.setTimeout(waitWalk, 200);
+    };
+    window.setTimeout(waitWalk, 600);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
