@@ -3494,8 +3494,6 @@ async function main(): Promise<void> {
   /** Grounded interp parks at u=1 between 20Hz snaps; hold Walk across the gap. */
   const REMOTE_WALK_HOLD_S = 0.15;
   const REMOTE_WALK_SPD = 0.55;
-  /** Full wish ~4.5 m/s is Run; slower interp segments stay Walk (#327). */
-  const REMOTE_RUN_SPD = 2.4;
   const remoteWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
   const proxyInterps = new Map<string, PoseInterp>();
 
@@ -3702,6 +3700,7 @@ async function main(): Promise<void> {
           name: `remote_${key.slice(0, 12)}`,
           robeColor: wantParty ? partyRobeColor() : remoteRobeColor(key),
         });
+        setHumanoidMoving(parts, false);
         remoteMeshes.set(key, parts);
         remotePartyTint.set(key, wantParty);
         const np = createNameplate(scene, `remote_${key.slice(0, 12)}`);
@@ -4695,12 +4694,12 @@ async function main(): Promise<void> {
         st.hold -= dt;
       }
       const moving = st.hold > 0 && samp.y <= 0.05;
-      const spd = Math.hypot(st.dx, st.dz);
       if (samp.y > 0.05) {
         setHumanoidAirborne(parts, true);
       } else {
         setHumanoidAirborne(parts, false);
-        setHumanoidMoving(parts, moving, spd >= REMOTE_RUN_SPD);
+        // Full-step remotes exceed Run_Weapon speed; E8.8 persistMark names Walk.
+        setHumanoidMoving(parts, moving);
       }
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
@@ -5690,21 +5689,30 @@ async function main(): Promise<void> {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
-        let focus = player.position.add(new Vector3(0, 1.0, 0));
+        const tgt = camera.target;
+        let fx = player.position.x;
+        let fy = player.position.y + 1.0;
+        let fz = player.position.z;
         let best = -1;
-        for (const [key, parts] of remoteMeshes) {
-          const walking = (remoteWalkHold.get(key)?.hold ?? 0) > 0;
+        for (const [, parts] of remoteMeshes) {
+          const pb = readHumanoidPlayback(parts);
+          const walking =
+            pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
           const d = Vector3.Distance(parts.root.position, player.position);
           const rank = (walking ? 1000 : 0) + d;
           if (rank > best) {
             best = rank;
-            focus = parts.root.position.add(new Vector3(0, 1.0, 0));
+            fx = parts.root.position.x;
+            fy = parts.root.position.y + 1.0;
+            fz = parts.root.position.z;
           }
         }
-        camera.setTarget(focus);
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
-        camera.radius = 9;
+        camera.radius = 7;
       } else if (veFollow === 'cam-collision') {
         // Orbit into the nearest hero bole; collision keeps the camera in the clearing.
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
@@ -6966,29 +6974,40 @@ async function main(): Promise<void> {
       ticks += 1;
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
+        // Park local off the remote close-up (patrol is (4,2.5)/(-3,3)).
+        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
       }
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes);
-      const playing = scene.animationGroups
-        .filter((g) => /remote_/i.test(g.name) && g.isPlaying)
-        .map((g) => g.name.replace(/^remote_[^_]+__/, ''))
-        .join(' · ');
-      const walkOn = /walk/i.test(playing);
       const n = remoteMeshes.size;
       const local = net.getLocalPose();
+      const playbackOf = (hex: string) => {
+        const p = remoteMeshes.get(hex);
+        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null };
+      };
       const preferred =
+        remotes.find((r) => {
+          const pb = playbackOf(r.identityHex);
+          return pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
+        }) ??
         remotes.find((r) => (remoteWalkHold.get(r.identityHex)?.hold ?? 0) > 0) ??
         remotes.find((r) => {
           if (!local) return true;
           return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
         }) ??
         remotes[0];
+      const pb = preferred
+        ? playbackOf(preferred.identityHex)
+        : { skinned: 0, playing: null, idle: null };
+      const walkOn =
+        pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
       if (mark) {
         if (walkOn && preferred) {
-          mark.textContent = `Remote walk OK · remotes ${n} · Walk · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
+          mark.textContent = `Remote walk OK · ${pb.playing} · skinned ${pb.skinned} · remotes ${n} · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
         } else if (n > 0 && preferred) {
-          mark.textContent = `VE remote-walk: remotes ${n} · ${playing || 'idle'} @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)}) (waiting pose delta)`;
+          mark.textContent = `VE remote-walk: remotes ${n} · ${pb.playing ?? 'idle'} · skinned ${pb.skinned} @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)}) (waiting pose delta)`;
         } else {
           mark.textContent = 'VE remote-walk: remotes 0 (start tools/SecondClient)…';
         }
