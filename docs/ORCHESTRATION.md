@@ -179,7 +179,7 @@ Release decides cuts **without** Lead greenlight.
 1. **Cut when** (all true): (a) `develop` tip has Reviewer-cleared merges with meaningful delta since `main`, (b) QA Bugs smokes green on that tip (or Release documents a waive), (c) no open P0 blockers on the tip.
 2. Release **pins** a concrete `develop` SHA and opens / merges **develop → main** for that tip only (never silently include later develops mid-cut).
 3. **Bindings arity guard** (`./tools/scripts/check-move-bindings-arity.sh`) must pass on the pinned tip before Mac smoke / Pages (#119 / #166).
-4. Mac Studio smoke on `/Users/antbly/dev/fardel` (local Spacetime and/or tunnel `dev-db.sparkify.dev`); prefer `./tools/scripts/run-smoke-matrix.sh` (compile fail-fast, #130). **Gate on runner exit code and `results.tsv`** — not merely that the script finished (#148).
+4. Mac Studio smoke on `/Users/antbly/dev/fardel` (local Spacetime and/or tunnel `dev-db.sparkify.dev`); run `./tools/scripts/run-smoke-matrix.sh` (dynamic `tools/*Smoke` discovery — JumpSmoke must appear when present; #122). **Do not substitute ConnectSmoke-only or a fixed N.** Gate on runner exit code and `results.tsv` row count matching discovered dirs — not merely that the script finished (#148).
 5. If green: Vite production build + Cloudflare Pages → `https://play.sparkify.dev`.
 6. Post VE + short release beat to Lead / Fardel QA (FYI, not a gate).
 7. Later commits on `develop` wait for the next cut.
@@ -270,7 +270,7 @@ Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as
 1. Diff `main`…`develop`; confirm Reviewer-cleared meaningful delta + green smokes + no P0s.
 2. Pin tip SHA; open PR `develop` → `main` (or fast-forward if policy allows) for that SHA only.
 3. **Bindings arity preflight (#119 / #166):** from repo root run `./tools/scripts/check-move-bindings-arity.sh` — must pass (server `Move(dx,dz,jump)` matches `web/src/module_bindings/move_reducer.ts` + C# `Move.g.cs`; PlayerPose `VelY`/`LastGroundedMicros` in C# **and** web `player_pose_table.ts` `vel_y`/`last_grounded_micros`). Fail the cut if this fails — do not ship a pin like #112.
-4. On Mac: pull that tip at `/Users/antbly/dev/fardel`, publish local if needed, run critical smokes (prefer `./tools/scripts/run-smoke-matrix.sh` — compile fail-fast) + quick Vite playpass. **Require non-zero exit on FAIL** and inspect `results.tsv` — do not green the cut because the runner printed `MATRIX DONE` (#148).
+4. On Mac: pull that tip at `/Users/antbly/dev/fardel`, publish local if needed, run `./tools/scripts/run-smoke-matrix.sh` (dynamic `tools/*Smoke` discovery — JumpSmoke must appear when present on the pin; #122). **Do not substitute a fixed "critical" list or ConnectSmoke-only.** Gate on runner exit code and `results.tsv` row count matching discovered dirs — not merely that the script printed `MATRIX DONE` (#148). Quick Vite playpass.
 5. Build `web/` → deploy Pages project for `play.sparkify.dev`.
 6. Capture VE of live play (or Mac local if Pages lag).
 7. Report: main SHA, Pages URL, smoke result, VE path, anything deferred to next cut (FYI to Lead / Fardel QA).
