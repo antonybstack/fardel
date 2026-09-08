@@ -815,7 +815,10 @@ export function setHumanoidAirborne(
 const WALK_REF_MPS = 2.2;
 const RUN_REF_MPS = 5.0;
 
-/** Switch Idle ↔ Walk/Run. `running` is fast/forward gait (no-op if clips missing). */
+/**
+ * Grounded Walk named (not Run). NPC chase/leash and remotes pass snap m/s
+ * so speedRatio matches XZ. `running=true` is the local W sprint only.
+ */
 export function setHumanoidMoving(
   parts: HumanoidParts,
   moving: boolean,
@@ -856,6 +859,15 @@ export function setHumanoidMoving(
   const ref = loc === a.run ? RUN_REF_MPS : WALK_REF_MPS;
   const mps = speedMps > 0.15 ? speedMps : ref;
   loc.speedRatio = Math.max(0.7, Math.min(1.85, mps / ref));
+}
+
+/** NPC chase / leash return: Walk clip, never Run, never Idle-slide. */
+export function setHumanoidGroundWalk(
+  parts: HumanoidParts,
+  moving: boolean,
+  speedMps = 0,
+): void {
+  setHumanoidMoving(parts, moving, false, speedMps);
 }
 
 /**
