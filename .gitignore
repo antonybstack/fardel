@@ -47,6 +47,7 @@ TestResults/
 
 # Web client (Vite)
 web/node_modules/
+web/node_modules
 web/dist/
 node_modules/
 dist/
@@ -64,6 +65,10 @@ Thumbs.db
 .env.*
 !.env.example
 **/identity.token
+
+# Agent seats (host-local)
+tools/scripts/seats.local.conf
+tools/qa/node_modules/
 
 # Local agent / tooling logs
 unity-*.log

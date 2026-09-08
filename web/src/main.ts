@@ -3558,6 +3558,20 @@ async function main(): Promise<void> {
     },
   });
 
+  if (import.meta.env.DEV) {
+    void import('./qa/hook').then(({ installQaHook }) => {
+      installQaHook({
+        getEngine: () => engine,
+        getScene: () => scene,
+        getCamera: () => camera,
+        getPlayer: () => player,
+        getKeys: () => keys,
+        getNet: () => net,
+        getStatus: () => latestStatus,
+      });
+    });
+  }
+
   bindChatUi({
     whoLabel: () => {
       const hex = latestStatus.state === 'connected' ? latestStatus.identityHex : '';

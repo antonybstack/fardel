@@ -46,9 +46,19 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 
 ## URI overrides
 
-- Default: `http://127.0.0.1:3000`, database `fardel`
-- Default URI: `http://127.0.0.1:3000` on localhost; `https://dev-db.sparkify.dev` when hosted (e.g. play.sparkify.dev)
-- Query override: `?db=https://dev-db.sparkify.dev` (also accepts `?database=`)
+Resolution order (first match wins):
+
+1. `?db=` / `?database=` and `?module=` / `?name=` — **required for agent seats**
+2. Vite `VITE_FARDEL_URI` / `VITE_FARDEL_DB` (worktree `web/.env.local` from `seat-up.sh`)
+3. Default: `http://127.0.0.1:3000` / `fardel` on localhost; `https://dev-db.sparkify.dev` when hosted (`play.sparkify.dev`)
+
+Agent seats must not rely on (3). Example:
+
+```text
+http://127.0.0.1:5241/?db=http://127.0.0.1:3241&module=fardel-qa-1
+```
+
+See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 
 ## Visual eval hooks
 

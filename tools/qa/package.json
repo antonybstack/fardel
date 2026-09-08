@@ -1,0 +1,14 @@
+{
+  "name": "fardel-qa",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Playwright player for isolated Fardel agent seats (never :3000 / db fardel).",
+  "scripts": {
+    "play": "node play.mjs",
+    "install-browser": "playwright install chromium"
+  },
+  "dependencies": {
+    "playwright": "1.55.0"
+  }
+}

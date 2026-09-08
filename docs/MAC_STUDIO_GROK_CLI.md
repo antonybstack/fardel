@@ -91,28 +91,11 @@ Goal: Antony can run the full loop locally without touching the Bot box.
    ```bash
    cd /Users/antbly/dev/fardel
    git fetch origin develop
-   
-   # Create seat worktrees
-   for seat in dev1 dev2 dev3 dev4 dev5 qa-bugs qa-feel; do
-     mkdir -p "/Users/antbly/dev/fardel-wt"
-     git worktree add "/Users/antbly/dev/fardel-wt/$seat" -b "seats/$seat" origin/develop || \
-       git worktree add "/Users/antbly/dev/fardel-wt/$seat" "seats/$seat"
-   done
+   ./tools/scripts/seat-claim.sh --role dev   # → ~/dev/wt/dev-1 from origin/develop
+   ./tools/scripts/seat-claim.sh --role qa    # → ~/dev/wt/qa-1
    ```
 
-6. **Adapt seat env map:**
-   
-   Edit `tools/scripts/fardel-seats.env` to add Mac paths as defaults (or create a Mac-specific variant):
-   
-   ```bash
-   # Original (box):
-   # dev1|3001|5174|fardel-dev1|/workspace/wt/dev1
-   
-   # Mac variant (can conditionally detect OS or maintain two maps):
-   # dev1|3001|5174|fardel-dev1|/Users/antbly/dev/fardel-wt/dev1
-   ```
-   
-   Or keep the script logic but override `FARDEL_WT` paths in parent agent prompts.
+6. **Seat env:** ports and paths come from `tools/scripts/seats.conf` + `seat-lib.sh` (3201–3212 / 3241–3248). Do not edit `fardel-seats.env` (comment pointer only). Box overlay: `FARDEL_WT_ROOT=/workspace/wt` in `seats.local.conf`.
 
 ---
 
@@ -124,7 +107,7 @@ Goal: Antony can run the full loop locally without touching the Bot box.
 | CreateAgent teammates (Dev1–5, QA, etc.) | **Parent-created subagents** with the same charters |
 | Shared Linux box `/workspace` | Mac Studio disk `/Users/antbly/dev/` |
 | `/workspace/fardel` (lead) | `/Users/antbly/dev/fardel` |
-| `/workspace/wt/<seat>` | `/Users/antbly/dev/fardel-wt/<seat>` |
+| `/workspace/wt/<seat>` | `$HOME/dev/wt/<slug>` (`seat-claim.sh`) |
 | Channels Fardel / Fardel QA / Fardel Art | Parent group threads or CLI-equivalent rooms (respect 6-member style caps if any) |
 | `@every 15m` Bot routine | Parent schedule / cron tick with continuous-iterate prompt |
 | Box VE / SwiftShader | Mac screenshots + Pages VEs |
@@ -156,12 +139,11 @@ You are Team Lead for the Fardel MMORPG project.
 **Workspace:** /Users/antbly/dev/fardel (develop branch)
 
 **Seats:**
-- dev1–dev5: /Users/antbly/dev/fardel-wt/{dev1…dev5}
-- qa-bugs: /Users/antbly/dev/fardel-wt/qa-bugs
-- qa-feel: /Users/antbly/dev/fardel-wt/qa-feel
-- lead (you): /Users/antbly/dev/fardel
+- dev-1…dev-12: $HOME/dev/wt/dev-N (claim: ./tools/scripts/seat-claim.sh --role dev)
+- qa-1…qa-8: $HOME/dev/wt/qa-N (claim: --role qa)
+- lead (you): /Users/antbly/dev/fardel — never give agents :3000 / db fardel
 
-**Ports/DBs:** See tools/scripts/fardel-seats.env.
+**Ports/DBs:** seats.conf — stdb 3201–3212 / 3241–3248, vite 5201–5212 / 5241–5248. See TEAM_SEATS.md.
 
 **Your job:**
 1. Scan open Issues: https://github.com/antonybstack/fardel/issues
@@ -207,17 +189,17 @@ When parent assigns a Dev seat, create a subagent with:
 ```text
 You are Dev<N> for the Fardel project.
 
-**Seat:** dev<N>
-**Worktree:** /Users/antbly/dev/fardel-wt/dev<N>
-**Ports:** Spacetime 300<N>, Vite 517<3+N>, DB fardel-dev<N>
+**Seat:** dev-N (alias devN → dev-N)
+**Worktree:** $HOME/dev/wt/dev-N
+**Ports:** Spacetime 3200+N, Vite 5200+N, DB fardel-dev-N (never :3000 / db fardel)
 **Assignment:** #<Issue> <title>
 
 **Your job:**
-1. Work only in your worktree (/Users/antbly/dev/fardel-wt/dev<N>)
+1. Work only in your worktree ($HOME/dev/wt/dev-N)
 2. Fetch latest develop, branch <seat>/<slug>
 3. Implement the assigned Issue (Done-when from assign message)
-4. Source tools/scripts/wt-env.sh dev<N> before running seat commands
-5. Run tools/scripts/ensure-seat-spacetime.sh dev<N> to start your DB
+4. Source tools/scripts/wt-env.sh dev-N before running seat commands
+5. Run tools/scripts/seat-up.sh dev-N (or ensure-seat-spacetime.sh) to start your DB
 6. Publish module: cd $FARDEL_WT/server && spacetime publish $FARDEL_DB -y --env local -s $FARDEL_SPACETIME_URI
 7. Run headless smokes (dotnet run --project tools/<Smoke>)
 8. Capture VE screenshot if UI change (?ve=<name> in Vite browser)
@@ -243,7 +225,7 @@ You are Dev<N> for the Fardel project.
 - End status with `spend: light|med|heavy`
 - See ORCHESTRATION.md § 12 for full rules
 
-**Repeat this pattern for dev1, dev2, dev3, dev4, dev5** with seat-specific paths/ports.
+**Repeat this pattern for dev-1 … dev-5** with seat-specific paths/ports (`seat-claim.sh --role dev`).
 
 ---
 
@@ -254,16 +236,16 @@ You are Dev<N> for the Fardel project.
 ```text
 You are QA Bugs for the Fardel project.
 
-**Seat:** qa-bugs
-**Worktree:** /Users/antbly/dev/fardel-wt/qa-bugs
-**Ports:** Spacetime 3011, Vite 5184, DB fardel-qa-bugs
+**Seat:** qa-1 (alias qa-bugs)
+**Worktree:** $HOME/dev/wt/qa-1
+**Ports:** Spacetime 3241, Vite 5241, DB fardel-qa-1 (never :3000)
 
 **Your job:**
 1. Smoke matrix, flake repros, regression Issues
 2. Optional fix PRs as qa/<slug> → develop
 3. File Issues for bugs (use .github/ISSUE_TEMPLATE/bug.yml)
 4. Do not invent features
-5. Run smokes in your worktree after sourcing tools/scripts/wt-env.sh qa-bugs
+5. Run smokes in your worktree after sourcing tools/scripts/wt-env.sh qa-1
 6. Verify green smoke bar for Release cuts when asked
 
 **Hard rules:**
@@ -278,9 +260,9 @@ You are QA Bugs for the Fardel project.
 ```text
 You are QA Feel for the Fardel project.
 
-**Seat:** qa-feel
-**Worktree:** /Users/antbly/dev/fardel-wt/qa-feel
-**Ports:** Spacetime 3012, Vite 5185, DB fardel-qa-feel
+**Seat:** qa-2 (alias qa-feel)
+**Worktree:** $HOME/dev/wt/qa-2
+**Ports:** Spacetime 3242, Vite 5242, DB fardel-qa-2 (never :3000)
 
 **Your job:**
 1. Feel / UX playtests on Mac or play.sparkify.dev
@@ -409,7 +391,7 @@ No invent past this Issue. Rebase if tip moves.
 ### 10.2. Seat implements
 
 Subagent (Dev/QA):
-1. `cd $FARDEL_WT` (e.g. `/Users/antbly/dev/fardel-wt/dev1`)
+1. `cd $FARDEL_WT` (e.g. `$HOME/dev/wt/dev-1`)
 2. `git fetch origin develop && git checkout -b <seat>/<slug> origin/develop`
 3. Implement
 4. `source tools/scripts/wt-env.sh <seat>`
@@ -686,25 +668,20 @@ Subagents inherit from parent shell.
 
 ### Worktree already exists
 
-**Symptom:** `fatal: 'fardel-wt/dev1' already exists`
+**Symptom:** `fatal: 'wt/dev-1' already exists`
 
 **Fix:** Reuse existing worktree:
 ```bash
-cd /Users/antbly/dev/fardel-wt/dev1
+cd "$HOME/dev/wt/dev-1"
 git fetch origin develop
-git checkout seats/dev1  # or create if missing
+git checkout seats/dev-1
 ```
 
 ### Spacetime port already in use
 
 **Symptom:** `Error: Address already in use (os error 48)`
 
-**Fix:** Kill stale process:
-```bash
-lsof -ti:3001 | xargs kill -9  # Replace 3001 with seat's port
-```
-
-Or use a different port (update `fardel-seats.env`).
+**Fix:** Use `seat-down.sh <slug>` — never `kill -9` on `:3000`. Do not `lsof -ti:3001 | xargs kill`.
 
 ### PR merge conflict (develop moved)
 
@@ -742,18 +719,13 @@ Lead broadcasts tip SHA after merges — subagents should rebase when notified.
 
 ### Workspace paths
 
-- Lead: `/Users/antbly/dev/fardel`
-- Dev1: `/Users/antbly/dev/fardel-wt/dev1`
-- Dev2: `/Users/antbly/dev/fardel-wt/dev2`
-- Dev3: `/Users/antbly/dev/fardel-wt/dev3`
-- Dev4: `/Users/antbly/dev/fardel-wt/dev4`
-- Dev5: `/Users/antbly/dev/fardel-wt/dev5`
-- QA Bugs: `/Users/antbly/dev/fardel-wt/qa-bugs`
-- QA Feel: `/Users/antbly/dev/fardel-wt/qa-feel`
+- Lead: `/Users/antbly/dev/fardel` (`:3000` / db `fardel` only)
+- Dev: `$HOME/dev/wt/dev-N` via `seat-claim.sh --role dev`
+- QA: `$HOME/dev/wt/qa-N` via `seat-claim.sh --role qa`
 
 ### Ports/DBs
 
-See `tools/scripts/fardel-seats.env` (same as box; paths differ).
+See `tools/scripts/seats.conf` / [TEAM_SEATS.md](TEAM_SEATS.md) (3201–3212 / 3241–3248). `fardel-seats.env` is a pointer only.
 
 ### Key commands (per seat)
 
