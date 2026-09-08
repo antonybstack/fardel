@@ -47,8 +47,12 @@ export type HumanoidOptions = {
 
 type HumanoidAnim = {
   idle: AnimationGroup | null;
+  idleWeapon: AnimationGroup | null;
+  idleUnarmed: AnimationGroup | null;
   walk: AnimationGroup | null;
   run: AnimationGroup | null;
+  runWeapon: AnimationGroup | null;
+  runUnarmed: AnimationGroup | null;
   /** Jump/Fall if the GLB has one; Wizard.glb does not. */
   air: AnimationGroup | null;
   death: AnimationGroup | null;
@@ -60,6 +64,7 @@ type HumanoidAnim = {
   casting: boolean;
   /** Stationary yaw — Idle held so feet stay planted. */
   turning: boolean;
+  staffEquipped: boolean;
 };
 
 const animByRoot = new WeakMap<Mesh, HumanoidAnim>();
@@ -117,6 +122,11 @@ export function preloadPlayerHumanoid(scene: Scene): Promise<AssetContainer> {
   return sharedLoad;
 }
 
+function clipBare(name: string): string {
+  const i = name.lastIndexOf('|');
+  return i >= 0 ? name.slice(i + 1) : name;
+}
+
 function findAnim(
   groups: AnimationGroup[],
   ...needles: string[]
@@ -128,6 +138,24 @@ function findAnim(
     if (hit) return hit;
   }
   return null;
+}
+
+/** Bare clip name after `|`. `Idle` must not match `Idle_Weapon`. */
+function findAnimExact(
+  groups: AnimationGroup[],
+  needle: string,
+): AnimationGroup | null {
+  const n = needle.toLowerCase();
+  return groups.find((g) => clipBare(g.name).toLowerCase() === n) ?? null;
+}
+
+function applyStaffClips(a: HumanoidAnim): void {
+  a.idle = a.staffEquipped
+    ? (a.idleWeapon ?? a.idleUnarmed)
+    : (a.idleUnarmed ?? a.idleWeapon);
+  a.run = a.staffEquipped
+    ? (a.runWeapon ?? a.runUnarmed)
+    : (a.runUnarmed ?? a.runWeapon);
 }
 
 function bareName(name: string, prefix: string): string {
@@ -345,11 +373,13 @@ export function createPlayerHumanoid(
   }
 
   let staffMesh: AbstractMesh | null = null;
+  const staffMeshes: AbstractMesh[] = [];
   const robeMeshes: AbstractMesh[] = [];
   for (const m of meshes) {
     const bare = bareName(m.name, prefix);
-    if (/wizard_staff|^staff$/i.test(bare) || bare === 'Wizard_Staff') {
-      staffMesh = m;
+    if (/staff/i.test(bare)) {
+      staffMeshes.push(m);
+      if (!staffMesh) staffMesh = m;
     }
     if (/shoulderpad|pouch/i.test(bare)) {
       robeMeshes.push(m);
@@ -450,9 +480,12 @@ export function createPlayerHumanoid(
   // Wire equip hide: when staff/robes containers toggle, mirror onto real meshes.
   const syncStaff = () => {
     const on = staff.isEnabled();
-    if (staffMesh) {
-      staffMesh.setEnabled(on);
-      staffMesh.isVisible = on;
+    const hide = staffMeshes.length > 0 ? staffMeshes : staffMesh ? [staffMesh] : [];
+    for (const m of hide) {
+      m.setEnabled(on);
+      m.isVisible = on;
+      m.visibility = on ? 1 : 0;
+      m.alwaysSelectAsActiveMesh = on;
     }
   };
   const syncRobes = () => {
@@ -607,12 +640,17 @@ export function createPlayerHumanoid(
     orb.alwaysSelectAsActiveMesh = true;
   }
 
+  const idleWeapon = findAnimExact(animGroups, 'Idle_Weapon');
+  const idleUnarmed = findAnimExact(animGroups, 'Idle');
   const idle =
-    findAnim(animGroups, 'Idle_Weapon', 'Idle') ??
+    idleWeapon ??
+    idleUnarmed ??
     (animGroups.length > 0 ? animGroups[0]! : null);
   // E8.2: Run_Weapon for fast/forward; Walk for slow/strafe. Do not alias Run as Walk.
-  const run = findAnim(animGroups, 'Run_Weapon', 'Run');
-  const walk = findAnim(animGroups, 'Walk') ?? run;
+  const runWeapon = findAnimExact(animGroups, 'Run_Weapon');
+  const runUnarmed = findAnimExact(animGroups, 'Run');
+  const run = runWeapon ?? runUnarmed;
+  const walk = findAnimExact(animGroups, 'Walk') ?? run;
   const air = findAnim(animGroups, 'Jump', 'Falling', 'Fall');
   const death = findAnim(animGroups, 'Death');
   // Pack spelling is RecieveHit (not Receive). Prefer the non-Attacking clip.
@@ -633,8 +671,12 @@ export function createPlayerHumanoid(
   });
   animByRoot.set(root, {
     idle,
+    idleWeapon,
+    idleUnarmed,
     walk,
     run,
+    runWeapon,
+    runUnarmed,
     air,
     death,
     flinch,
@@ -643,6 +685,7 @@ export function createPlayerHumanoid(
     dead: false,
     casting: false,
     turning: false,
+    staffEquipped: true,
   });
 
   root.material = robeMat;
@@ -757,10 +800,15 @@ export function setHumanoidMoving(
   if (a.dead || a.airborne || a.casting) return;
   if (a.cast?.isPlaying) return;
   if (a.flinch?.isPlaying) return;
+  applyStaffClips(a);
   if (a.idle) a.idle.speedRatio = 1;
   if (!moving) {
     stopIfPlaying(a.walk);
     stopIfPlaying(a.run);
+    stopIfPlaying(a.runWeapon, a.run);
+    stopIfPlaying(a.runUnarmed, a.run);
+    stopIfPlaying(a.idleWeapon, a.idle);
+    stopIfPlaying(a.idleUnarmed, a.idle);
     startLoop(a.idle);
     return;
   }
@@ -770,8 +818,12 @@ export function setHumanoidMoving(
     return;
   }
   stopIfPlaying(a.idle, loc);
+  stopIfPlaying(a.idleWeapon, loc);
+  stopIfPlaying(a.idleUnarmed, loc);
   stopIfPlaying(a.walk, loc);
   stopIfPlaying(a.run, loc);
+  stopIfPlaying(a.runWeapon, loc);
+  stopIfPlaying(a.runUnarmed, loc);
   startLoop(loc);
   // Clip is in-place (armature translation 0). Match cycle to XZ so feet don't slide.
   const ref = loc === a.run ? RUN_REF_MPS : WALK_REF_MPS;
@@ -803,8 +855,8 @@ export function setHumanoidTurning(
 }
 
 /**
- * Equip: show staff + restart Idle_Weapon (grip, not bind-T).
- * Unequip: hide the GLB stick so it does not float. Idle keeps playing.
+ * Equip: show staff + Idle_Weapon / Run_Weapon (grip, not bind-T).
+ * Unequip: hide the stick and play unarmed Idle / Run (not a floating grip).
  */
 export function setHumanoidStaffEquipped(
   parts: HumanoidParts,
@@ -812,17 +864,28 @@ export function setHumanoidStaffEquipped(
 ): void {
   parts.staff.setEnabled(equipped);
   const a = animByRoot.get(parts.root);
-  if (!a || a.dead || a.airborne || a.casting) return;
-  if (a.walk?.isPlaying || a.run?.isPlaying || a.flinch?.isPlaying || a.cast?.isPlaying) {
+  if (!a) return;
+  a.staffEquipped = equipped;
+  const prevIdle = a.idle;
+  const prevRun = a.run;
+  applyStaffClips(a);
+  if (a.dead || a.airborne || a.casting) return;
+  if (a.flinch?.isPlaying || a.cast?.isPlaying) return;
+  if (a.walk?.isPlaying) return;
+  if (prevRun?.isPlaying && a.run && a.run !== prevRun) {
+    stopIfPlaying(prevRun);
+    startLoop(a.run);
     return;
   }
-  if (!equipped) return;
-  if (a.idle) a.idle.speedRatio = 1;
+  if (a.run?.isPlaying) return;
+  stopIfPlaying(prevIdle, a.idle);
+  stopIfPlaying(a.idleWeapon, a.idle);
+  stopIfPlaying(a.idleUnarmed, a.idle);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
   if (a.idle) {
-    if (a.idle.isPlaying) a.idle.stop();
-    a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
+    a.idle.speedRatio = 1;
+    if (!a.idle.isPlaying) a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
   }
 }
 

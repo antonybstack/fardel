@@ -5375,6 +5375,7 @@ async function main(): Promise<void> {
       if (ch) {
         if (prevStaffEquipped === null) {
           prevStaffEquipped = ch.staffEquipped;
+          setHumanoidStaffEquipped(humanoid, ch.staffEquipped);
         } else if (ch.staffEquipped !== prevStaffEquipped) {
           const staffMsg = ch.staffEquipped ? 'Staff equipped' : 'Staff unequipped';
           pushCombatLog('equip', staffMsg);
@@ -5864,6 +5865,17 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.55;
         // E8.7: far-cam Idle must still read staff-grip (not 8m close-up).
         camera.radius = 16;
+      } else if (veFollow === 'sheathed') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.0;
+        tgt.z = player.position.z;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'humanoid-polish') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -12090,6 +12102,57 @@ async function main(): Promise<void> {
       if (!idleOk && ticks < 240) window.setTimeout(waitIdle, 200);
     };
     window.setTimeout(waitIdle, 800);
+  }
+
+  // ?ve=sheathed — E8.21 unarmed Idle (not Idle_Weapon grip) with staff hidden.
+  if (ve === 'sheathed') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'sheathed') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE sheathed: waiting for Connected…';
+    let ticks = 0;
+    const waitSheath = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE sheathed: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitSheath, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && ch.staffEquipped) {
+        net.unequipStaff();
+        setHumanoidStaffEquipped(humanoid, false);
+        if (mark) mark.textContent = 'VE sheathed: unequipping staff…';
+        if (ticks < 240) window.setTimeout(waitSheath, 220);
+        return;
+      }
+      setHumanoidStaffEquipped(humanoid, false);
+      setHumanoidMoving(humanoid, false);
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+      const sheathedOk =
+        !!ch &&
+        !ch.staffEquipped &&
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /^idle$/i.test(clip) &&
+        !/weapon/i.test(clip) &&
+        !humanoid.staff.isEnabled();
+      if (mark) {
+        mark.textContent = sheathedOk
+          ? `Sheathed OK · ${clip} · skinned ${pb.skinned}`
+          : pb.skinned <= 0
+            ? `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`
+            : `VE sheathed: ${pb.playing ?? 'none'} · staff ${humanoid.staff.isEnabled() ? 'on' : 'off'} · skinned ${pb.skinned}`;
+      }
+      if (!sheathedOk && ticks < 240) window.setTimeout(waitSheath, 180);
+    };
+    window.setTimeout(waitSheath, 700);
   }
 
   // ?ve=fps — E9.3 dense play-cam floor. Forest fill, not amber crowd capsules.
