@@ -353,3 +353,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Always mutate `camera.target` to the living hop remote’s XZ at **ground** (`y=0.35`), never local. Hide the local wizard. persistMark requires airborne Idle_Weapon + skinned + staff. New VE key — CDN HITs old `464/remote-hop.png` / `464/remote-hop-2.png`.
 - **Seen in:** #449 / #464
 
+### 2026-09-08 — npc,kick — KickNpc(vendorId) landed on Dummy
+- **Cause:** `YardVendor` AutoInc and `Npc` AutoInc both start at 1. KickNpc/StunNpc look up `Npc` first, so `vendor.VendorId == 1` is the trainer. Kind=3 corpse was living-path only.
+- **Do this:** Seed `YardVendor.VendorId = Vendor.SeedId` (9001). Missing Npc + `YardVendor.Find` → `Invalid target`. `Hp <= 0` is `Target dead` before range (Kind=3 corpse). Dummy stays `NpcId` lookup.
+- **Seen in:** #486
+

@@ -18,4 +18,10 @@ public static class Vendor
     public const float SpawnZ = 2.0f;
 
     public const string DefaultLabel = "Vendor";
+
+    /// <summary>
+    /// Explicit YardVendor PK. Npc AutoInc also starts at 1, so KickNpc/StunNpc
+    /// of an AutoInc vendor id would land on Dummy (#486).
+    /// </summary>
+    public const ulong SeedId = 9001;
 }
