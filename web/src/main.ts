@@ -4400,10 +4400,27 @@ async function main(): Promise<void> {
     }
     {
       const wish = wishFromKeys(keys, camera);
+      let faceYaw: number | null = null;
       if (wish.dx !== 0 || wish.dz !== 0) {
-        const targetYaw = Math.atan2(wish.dx, wish.dz);
+        faceYaw = Math.atan2(wish.dx, wish.dz);
+      } else if (selectedTargetId !== 0n && net) {
+        const npc = net.getNpcs().find((n) => n.npcId === selectedTargetId && n.hp > 0);
+        if (npc) {
+          faceYaw = Math.atan2(
+            npc.x - player.position.x,
+            npc.z - player.position.z,
+          );
+        }
+      } else if (rmbLookArmed) {
+        const camPos = camera.position;
+        const tgt = camera.getTarget();
+        const fx = tgt.x - camPos.x;
+        const fz = tgt.z - camPos.z;
+        if (fx * fx + fz * fz > 1e-8) faceYaw = Math.atan2(fx, fz);
+      }
+      if (faceYaw != null) {
         const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
-        localFacingYaw = lerpYaw(localFacingYaw, targetYaw, a);
+        localFacingYaw = lerpYaw(localFacingYaw, faceYaw, a);
       }
       player.rotation.y = localFacingYaw;
     }
@@ -5313,8 +5330,13 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.15;
         camera.beta = Math.PI / 2.55;
         camera.radius = 8;
-      } else if (veFollow === 'walk' || veFollow === 'yaw' || veFollow === 'jump-pose') {
-        // Side play-cam so Walk stride / wish facing / hop pose reads; lock each frame.
+      } else if (
+        veFollow === 'walk' ||
+        veFollow === 'yaw' ||
+        veFollow === 'jump-pose' ||
+        veFollow === 'look-at'
+      ) {
+        // Side play-cam so Walk stride / wish facing / hop pose / look-at reads.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -6202,6 +6224,46 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitYaw, 200);
     };
     window.setTimeout(waitYaw, 600);
+  }
+
+  // ?ve=look-at — E2.10 standing faces Tab-target; WASD yaw still wins.
+  if (ve === 'look-at') {
+    camera.radius = 10;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'look-at') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE look-at: waiting for Connected…';
+    let ticks = 0;
+    const waitLook = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE look-at: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitLook, 200);
+        return;
+      }
+      net.ensureTrainingDummy();
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      if (mark) {
+        if (dummy && Math.abs(localFacingYaw) > 0.25) {
+          mark.textContent = `Look-at OK · target npc#${dummy.npcId} · yaw ${localFacingYaw.toFixed(2)} · Connected`;
+        } else if (dummy) {
+          mark.textContent = `VE look-at: target npc#${dummy.npcId} · yaw ${localFacingYaw.toFixed(2)} (turning)`;
+        } else {
+          mark.textContent = 'VE look-at: waiting for Dummy…';
+        }
+      }
+      if (ticks < 240) window.setTimeout(waitLook, 200);
+    };
+    window.setTimeout(waitLook, 600);
   }
 
   // ?ve=cast-anim — E2.5/E2.7 Spell1 one-shot on Spark/Emberbolt path.
