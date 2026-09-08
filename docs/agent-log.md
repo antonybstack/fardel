@@ -333,3 +333,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `startLoop(idle)` first, zero Walk/Run `speedRatio`, then `stopIfPlaying(walk, idle)`. Same order as cast-cancel. `?ve=walk-stop` persistMark `/^Idle OK/` + skinned, not Walk.
 - **Seen in:** #450
 
+### 2026-09-08 — camera,body — zoom min 4.5 still clips Dummy / hostiles
+- **Cause:** `clampRadiusVsTrunks` used `lowerRadiusLimit` (4.5) as the collision floor. Dummy is ~5 m from origin; at min zoom the cam-to-player segment sits inside the scarecrow. Trees were far enough that the floor never mattered.
+- **Do this:** User zoom still stops at 4.5. Collision may pull to `CAM_COLLIDE_FLOOR` (~1.55). Live Dummy/Hostile/Brigand cylinders (corpses skipped). persistMark `Dummy` at `?ve=cam-collision-dummy`. Do not aggro.
+- **Seen in:** #466
+

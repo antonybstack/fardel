@@ -2043,12 +2043,13 @@ const CAM_ZOOM_MAX = 42;
 /** Vertical bole colliders for camera push-in. Quaternius AABB is canopy-wide — do not use it. */
 type TrunkCollider = {
   name: string;
-  kind: 'hero' | 'mid';
+  kind: 'hero' | 'mid' | 'dummy' | 'hostile' | 'brigand';
   x: number;
   z: number;
   r: number;
   y0: number;
   y1: number;
+  pad?: number;
 };
 
 const CAM_TRUNK_PAD = 1.25;
@@ -2056,6 +2057,11 @@ const CAM_TRUNK_HERO_BOLE = 1.55;
 const CAM_TRUNK_MID_BOLE = 0.82;
 const CAM_TRUNK_MIN_HIT = 0.55;
 const CAM_COLLISION_VE_RADIUS = 56;
+/** User zoom min is 4.5; collision may pull closer so nearby bodies do not swallow the cam. */
+const CAM_COLLIDE_FLOOR = 1.55;
+const CAM_BODY_PAD = 0.45;
+const CAM_BODY_DUMMY_R = 0.58;
+const CAM_BODY_HOSTILE_R = 0.48;
 
 function collectTrunkColliders(scene: Scene): TrunkCollider[] {
   const trunks: TrunkCollider[] = [];
@@ -2180,7 +2186,7 @@ function nearestHeroTrunk(x: number, z: number, trunks: TrunkCollider[]): TrunkC
 /** Graze the bole so the trunk reads in-frame. Hero +0.16 misses thin mid cylinders. */
 function trunkAimAlpha(px: number, pz: number, t: TrunkCollider): number {
   const dist = Math.hypot(t.x - px, t.z - pz);
-  const r = t.r + CAM_TRUNK_PAD;
+  const r = t.r + (t.pad ?? CAM_TRUNK_PAD);
   const graze =
     t.kind === 'hero'
       ? 0.16
@@ -2238,7 +2244,7 @@ function clampRadiusVsTrunks(
   for (const t of trunks) {
     const ox = target.x - t.x;
     const oz = target.z - t.z;
-    const r = t.r + CAM_TRUNK_PAD;
+    const r = t.r + (t.pad ?? CAM_TRUNK_PAD);
     if (ox * ox + oz * oz <= r * r) continue;
     const a = dx * dx + dz * dz;
     if (a < 1e-10) continue;
@@ -2254,6 +2260,33 @@ function clampRadiusVsTrunks(
     hit = t.name;
   }
   return { radius: Math.max(minRadius, best), hit };
+}
+
+/** Living Dummy / Hostile / Brigand capsules. Corpses skipped (#466). */
+function collectBodyColliders(
+  npcs: NpcView[],
+  meshes: Map<string, NpcMesh>,
+): TrunkCollider[] {
+  const out: TrunkCollider[] = [];
+  for (const n of npcs) {
+    if (n.hp <= 0) continue;
+    const dummy = n.kind === NPC_KIND_DUMMY;
+    const brigand = n.kind === NPC_KIND_BRIGAND;
+    if (!dummy && !isHostileKind(n.kind)) continue;
+    const mesh = meshes.get(n.npcId.toString());
+    const pos = mesh?.root.position;
+    out.push({
+      name: dummy ? 'Dummy' : brigand ? 'Brigand' : 'Hostile',
+      kind: dummy ? 'dummy' : brigand ? 'brigand' : 'hostile',
+      x: pos?.x ?? n.x,
+      z: pos?.z ?? n.z,
+      r: dummy ? CAM_BODY_DUMMY_R : CAM_BODY_HOSTILE_R,
+      y0: 0,
+      y1: dummy ? 2.2 : 1.95,
+      pad: CAM_BODY_PAD,
+    });
+  }
+  return out;
 }
 
 async function createScene(engine: Engine): Promise<{
@@ -3350,6 +3383,7 @@ async function main(): Promise<void> {
   let camCollideThisFrame = false;
   /** Frozen mid bole for `?ve=cam-collision-mid` so walk-in does not retarget. */
   let camCollisionMidAimed: TrunkCollider | null = null;
+  const npcMeshes = new Map<string, NpcMesh>();
   scene.onBeforeRenderObservable.add(() => {
     if (!camCollideThisFrame) return;
     const minR = camera.lowerRadiusLimit ?? CAM_ZOOM_MIN;
@@ -3358,18 +3392,20 @@ async function main(): Promise<void> {
     if (
       veCam !== 'cam-collision' &&
       veCam !== 'cam-collision-mid' &&
+      veCam !== 'cam-collision-dummy' &&
       Math.abs(camera.radius - camAppliedRadius) > 0.08
     ) {
       camZoomRadius = camera.radius;
     }
     camZoomRadius = Math.min(maxR, Math.max(minR, camZoomRadius));
+    const bodies = collectBodyColliders(net?.getNpcs() ?? [], npcMeshes);
     const { radius, hit } = clampRadiusVsTrunks(
       camera.target,
       camera.alpha,
       camera.beta,
       camZoomRadius,
-      minR,
-      trunks,
+      CAM_COLLIDE_FLOOR,
+      [...trunks, ...bodies],
     );
     camera.radius = radius;
     camAppliedRadius = radius;
@@ -3465,7 +3501,6 @@ async function main(): Promise<void> {
   let castHardInterruptToasted = false;
   let manaWhileCasting = -1;
   let lastSeenCastEndsAtMicros = 0n;
-  const npcMeshes = new Map<string, NpcMesh>();
   const vendorMeshes = new Map<string, { root: Mesh; mat: StandardMaterial; nameplate: Nameplate | null }>();
   let vendorOpen = false; void vendorOpen;
   const groundSparkles = new Map<string, GroundSparkle>();
@@ -6457,6 +6492,37 @@ async function main(): Promise<void> {
           camZoomRadius = CAM_COLLISION_VE_RADIUS;
         }
         camera.beta = Math.PI / 2.18;
+        camCollideThisFrame = true;
+      } else if (veFollow === 'cam-collision-dummy') {
+        // Min-zoom orbit into Dummy. Collision may pull below zoom min (#466).
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
+        const dummy = (net?.getNpcs() ?? []).find(
+          (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+        );
+        if (dummy) {
+          const mesh = npcMeshes.get(dummy.npcId.toString());
+          const dx = (mesh?.root.position.x ?? dummy.x) - player.position.x;
+          const dz = (mesh?.root.position.z ?? dummy.z) - player.position.z;
+          camera.alpha = Math.atan2(dz, dx) + 0.08;
+        }
+        camera.beta = Math.PI / 2.18;
+        camZoomRadius = CAM_ZOOM_MIN;
         camCollideThisFrame = true;
       } else if (veFollow === 'encounter') {
         // Kind=2 (3,7) + Kind=3 (7,-3) + Dummy (5,0) as people while pad A is pulled (#456).
@@ -12054,6 +12120,69 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitMid, 200);
     };
     window.setTimeout(waitMid, 400);
+  }
+
+  // ?ve=cam-collision-dummy — min-zoom orbit into Dummy; must not sit inside the mesh (#466).
+  // Living Hostile/Brigand use the same body cylinders. Corpses ignored. Dummy stays trainer.
+  if (net && ve === 'cam-collision-dummy') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = CAM_ZOOM_MIN;
+    camZoomRadius = CAM_ZOOM_MIN;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision-dummy: finding Dummy…';
+    let ticks = 0;
+    const standOff = 3.2;
+    const waitDummy = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cam-collision-dummy: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitDummy, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      const dummy = net.getNpcs().find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      if (!pose || !dummy) {
+        if (mark) mark.textContent = 'VE cam-collision-dummy: waiting for Dummy…';
+        if (ticks < 240) window.setTimeout(waitDummy, 200);
+        return;
+      }
+      const mesh = npcMeshes.get(dummy.npcId.toString());
+      const tx = mesh?.root.position.x ?? dummy.x;
+      const tz = mesh?.root.position.z ?? dummy.z;
+      const dx = tx - pose.x;
+      const dz = tz - pose.z;
+      const d = Math.hypot(dx, dz);
+      if (d > standOff + 0.25) {
+        const step = Math.min(MAX_STEP_METERS, d - standOff);
+        const slid = slideAgainstTrunks(pose.x, pose.z, (dx / d) * step, (dz / d) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const cam = camera.position;
+      const camD = Math.hypot(cam.x - tx, cam.z - tz);
+      const ok = hit === 'Dummy' && got < want && camD > CAM_BODY_DUMMY_R;
+      if (ok) {
+        if (mark) {
+          mark.textContent =
+            `Cam-collision OK · Dummy · r=${got.toFixed(1)} < want=${want.toFixed(1)} · min-zoom`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          d > standOff + 0.25
+            ? `VE cam-collision-dummy: walk d=${d.toFixed(1)} → Dummy`
+            : `VE cam-collision-dummy: r=${got.toFixed(1)} want=${want.toFixed(1)} hit=${hit ?? 'none'} · camD=${camD.toFixed(2)}`;
+      }
+      if (ticks < 280) window.setTimeout(waitDummy, 200);
+    };
+    window.setTimeout(waitDummy, 400);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
