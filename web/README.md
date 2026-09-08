@@ -78,6 +78,7 @@ Until generate succeeds, the HUD shows a TODO and the Babylon scene still boots.
 | `?ve=cast-cancel` | Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast (`ve/babylon-cast-cancel.png`) |
 | `?ve=cast-feedback` | Prominent Emberbolt cast bar + CANCEL ≠ LOCKOUT toasts + Rest enter chrome (`ve/babylon-cast-feedback.png`) |
 | `?ve=castbar-read` | Cast / CANCEL / LOCKOUT chrome readable over #39 cyan fog (`ve/babylon-castbar-read.png`); HUD `Castbar-read OK · … · fog chrome` |
+| `?ve=gcd-block` | GCD-blocked cast press shows cool blue/silver toast + combat-log (#188); HUD `GCD-block OK · toast GCD blue/silver · combat-log · #188` |
 | `?ve=gcd-read` | Cool blue/silver `#gcdBar` mid-sweep (+ cast amber contrast) under #39 fog (#117); HUD `GCD-read OK · … · cool≠amber · fog chrome` |
 | `?ve=bandage` | BuyYardBandage + UseBandage HP heal; toast/bag (`ve/babylon-bandage.png`) |
 | `?ve=humanoid` | Frame local procedural humanoid + staff |

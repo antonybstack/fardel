@@ -2127,6 +2127,26 @@ body[data-rmb-look="armed"] #status[data-conn] {
   font-weight: 750;
 }
 
+/* GCD = cool blue/silver cooldown block. Matches #gcdBar family (#117); ≠ OOM cyan / CANCEL amber / LOCKOUT crimson. */
+.sysToast.gcd {
+  border: 2px solid rgba(158, 188, 228, 0.96);
+  background: linear-gradient(180deg, rgba(18, 30, 48, 0.97), rgba(6, 10, 18, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(2, 4, 10, 0.92),
+    0 4px 18px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(100, 140, 200, 0.38);
+}
+.sysToast.gcd .toastTag {
+  color: #e0ecff;
+  background: rgba(100, 140, 200, 0.28);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(140, 170, 210, 0.7);
+  font-weight: 750;
+}
+
+.clLine.gcd .clTag { color: #b8c0cc; }
+
 /* CANCEL = soft amber refund. LOCKOUT = harsh crimson hard-interrupt. Fog-immune fills. */
 .sysToast.castCancel {
   border: 2px solid rgba(255, 190, 90, 0.98);
