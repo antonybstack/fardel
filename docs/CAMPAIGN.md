@@ -17,7 +17,7 @@ Score the farm on this session, not PR count:
 ## One active wave
 
 - Work **one** wave at a time.
-- Each wave is 4–8 Issues and a **session Done-when** you can feel on Pages.
+- A wave has a **session Done-when** you can feel on Pages. The 24h hop/body/place slice was ~9 Issues/lane and finished in a few farm hours — the **12h** wave is three fat epics (~12 Issues each) so the seats stay busy.
 - Do not file or implement the next wave until the current wave is **on Pages** (or explicitly waived here).
 - Empty Issues board → Lead (or Art) files the **next wave from this page**. Do not invent HUD chrome to keep seats busy.
 
@@ -26,12 +26,13 @@ Score the farm on this session, not PR count:
 | Wave | Status | Session Done-when on play.sparkify.dev |
 |------|--------|----------------------------------------|
 | **0. Ship the yard** | **done** | Frozen pin `00cfbcfe` on `main` (#246). Pages 200. VE `https://ve.sparkify.dev/release/00cfbcfe/play.png`. |
-| **24h hop / body / place** | **active** | See [PARITY.md](PARITY.md). Rigid hop, skinned walk, WoW-scale clearing — not hunt, not HUD chrome. |
-| **1. The yard hunts back** | parked | 2–3 hostile types, aggro/leash, corpse loot. Dummy is a trainer. **Do not file until PARITY 24h session Done-whens are on Pages.** |
+| **24h hop / body / place** | **done** | Pin `2d869151` / #320. persistMark `Idle OK · Idle_Weapon · skinned 1`. VE https://ve.sparkify.dev/release/2d869151/idle.png. Hop+place were already on the prior pin. |
+| **12h character / place / encounter** | **active** | See [PARITY.md](PARITY.md) E8/E9/E10. Person at play cam, denser solid forest at ≥30 FPS, Tab-target hunt + WoW camera. |
+| **1. The yard hunts back** | **absorbed** | Hunt tickets live inside E10 (encounter). Do not file a second hunt wave. |
 | **2. Other players matter** | later | You can fight or contest another client in the yard. Death/loot rules readable. |
-| **3. A second place** | later | A path to a second clearing (not an open world). Minimap N means somewhere. |
-| **4. A deeper book** | later | 4 hotbar skills with roles (filler / windup / interrupt / self). Shared GCD stays. |
-| **5. Look-language** | later | One credited/free pack pass for humanoid + forest vs kitbash ([ASSETS.md](ASSETS.md) #31). Art files Issues; Devs implement. |
+| **3. A second place** | later | A path to a second *zone* (not an open world). E9.4 is only a receding silhouette, not this wave. |
+| **4. A deeper book** | later | 4 hotbar skills with roles (filler / windup / interrupt / self). Shared GCD stays. **Parked.** |
+| **5. Look-language** | later | One credited/free pack pass for humanoid + forest vs kitbash ([ASSETS.md](ASSETS.md) #31). E8/E9 polish the current packs; do not buy. |
 
 ### Wave 0 — Ship the yard
 
@@ -39,22 +40,23 @@ Score the farm on this session, not PR count:
 - **How:** branch `release/<shortsha>` from the frozen SHA; PR **that branch** → `main` (never live `develop`). Bindings arity + smoke matrix (exit code + `results.tsv`). Then Pages deploy.
 - **Must not:** merge a `develop`→`main` PR whose head follows later merges (#224 failure mode).
 
-### Wave 1 — The yard hunts back (file when Wave 0 is on Pages)
+### 12h character / place / encounter (active)
 
-Session Done-when: in one browser on Pages, you can pull a hostile, kill it, loot the corpse, and another hostile can aggro you if you stay close. Dummy may remain as a trainer.
+Session Done-when on [play.sparkify.dev](https://play.sparkify.dev):
 
-Suggested Issues (Lead files; do not invent past these):
+1. **Character** — default play cam is a person (staff gripped Idle, Walk+Run, jump/fall pose, death pose, remotes not T, Emberbolt holds Spell). `?ve=character-wow`.
+2. **Environment** — cannot walk through trunks; mid-forest instanced; ≥30 FPS; path recedes to a second silhouette. `?ve=place-wow` vs [hordes place ref](https://ve.sparkify.dev/parity/hordes-place-ref.jpg).
+3. **Encounter** — RMB orbit without clipping trunks; zoom stops; Tab a hostile; it hits back; kill; loot. Dummy stays a trainer. `?ve=encounter`.
 
-1. `lane:server` — Hostile NPC type + spawn in the yard (not only Dummy). Smoke: pack/hostile HP + death.
-2. `lane:server` — Aggro / leash (intent-based; no client positions). Smoke: enter/leave range.
-3. `lane:server` + `lane:client` — Corpse loot on hostile death (reuse WorldLoot). VE `?ve=hunt-loot`.
-4. `lane:client` `feel` — Hostile telegraph / nameplate vs Dummy (readable at play cam). VE `?ve=hostile-read`.
+Epics: **E8** #323 Dev3 (`humanoid.ts`) · **E9** #324 Dev4 (`forest.ts`) · **E10** #325 Dev2 (camera + hunt schema). Queues in `LOOP.md`.
 
-Serialize the schema tickets (one Dev at a time). Client feel can parallel after spawn exists.
+### Wave 1 — absorbed by E10
+
+Do not file a parallel hunt wave. Hostile spawn/aggro/attack/loot are E10.4–E10.7.
 
 ### Waves 2–5
 
-File only when the previous wave’s session Done-when is true on Pages. Keep 4–8 Issues. Same labels. No auction house, continents, 20-spell books, paid packs — see SCOPE **Not now**.
+File only when the 12h session Done-when is true on Pages. No auction house, continents, 20-spell books, paid packs — see SCOPE **Not now**.
 
 ## Empty board
 
