@@ -9919,6 +9919,109 @@ async function main(): Promise<void> {
     window.setTimeout(waitH, 500);
   }
 
+  // ?ve=respawn — kill pad A from origin (outside aggro), linger revive at home (#421).
+  // Do not walk to the corpse: pickup is inside AggroRadius and the revive eats the player.
+  if (ve === 'respawn') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.1;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'respawn') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE respawn: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'kill' | 'wait' | 'done' = 'kill';
+    let lastCast = 0;
+    let deadId = 0n;
+    let okTicks = 0;
+    const padAx = 3;
+    const padAz = 7;
+    const waitR = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyGone = !npcs.some((n) => n.kind === NPC_KIND_DUMMY);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      const selfHp = net.getCharacter()?.hp ?? 0;
+      const local = net.getLocalPose();
+      const originSafe =
+        !!local && Math.hypot(local.x - padAx, local.z - padAz) > HOSTILE_AGGRO_RADIUS + 1;
+      const tgt = camera.target;
+      tgt.x = padAx * 0.55;
+      tgt.y = 1.15;
+      tgt.z = padAz * 0.55;
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE respawn: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 360) window.setTimeout(waitR, 200);
+        return;
+      }
+      if (dummyGone) {
+        if (mark) mark.textContent = 'Respawn FAIL · dummy gone · #421';
+        return;
+      }
+      if (selfHp <= 0) {
+        if (mark) mark.textContent = 'Respawn FAIL · player died in aggro · #421';
+        return;
+      }
+      if (phase === 'kill') {
+        if (padA.hp > 0) {
+          net.setTarget(padA.npcId);
+          const now = Date.now();
+          if (now - lastCast >= GCD_MS + 80) {
+            net.cast(SPELL_SPARK);
+            lastCast = now;
+          }
+          if (mark) {
+            mark.textContent = `VE respawn: spark pad A · hp ${padA.hp}/${padA.maxHp}`;
+          }
+        } else {
+          deadId = padA.npcId;
+          phase = 'wait';
+          if (mark) mark.textContent = 'VE respawn: corpse — waiting linger…';
+        }
+      } else if (phase === 'wait') {
+        if (local && !originSafe) {
+          net.sendMove(-local.x, -local.z, false);
+        }
+        const alive = hostiles.find((n) => n.npcId === deadId && n.hp > 0)
+          ?? hostiles.find(
+            (n) =>
+              n.hp > 0 &&
+              Math.hypot((n.spawnX || n.x) - padAx, (n.spawnZ || n.z) - padAz) < 0.6,
+          );
+        const atHome =
+          !!alive && Math.hypot(alive.x - padAx, alive.z - padAz) < 0.8;
+        const toastOk = toastKindsPresent().has('respawn');
+        if (alive && atHome && dummyOk && selfHp > 0 && originSafe) {
+          okTicks += 1;
+          if (mark) {
+            mark.textContent = `Respawn OK · pad A · dummy trainer · #421`;
+          }
+          if (okTicks >= 8) {
+            phase = 'done';
+            return;
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE respawn: wait A hp ${alive?.hp ?? 0} home ${atHome ? 'y' : 'n'} toast ${toastOk ? 'y' : 'n'}`;
+        }
+      }
+      if (ticks > 360) {
+        if (mark) mark.textContent = `Respawn FAIL · phase ${phase} · #421`;
+        return;
+      }
+      window.setTimeout(waitR, 200);
+    };
+    window.setTimeout(waitR, 500);
+  }
+
   // ?ve=tab-hostile — Tab prefers in-range hostiles; dummy stays selectable (#358).
   if (ve === 'tab-hostile') {
     camera.radius = 16;

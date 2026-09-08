@@ -262,3 +262,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `createPlayerHumanoid` lifts cloth as `0.72 + robe*0.55`, so brigand violet and hostile crimson both land near white-lavender under #39 fog. Same wizard staff silhouette.
 - **Do this:** `variant: 'brigand'` skips the wash, hides staff/pads, starts unarmed Idle. persistMark names both clips + `skinned`. Dummy stays scarecrow. Do not flip pad Kind (pads A/B stay Kind=2).
 - **Seen in:** #428
+
+### 2026-09-08 — npc,respawn — dead Kind=2 occupy the pad; loot-at-pad pulls the revive
+- **Cause:** `HasHostileForPad` counts Hp=0, so `EnsureHostiles` never restocks a corpse. Pickup of the death shard is inside AggroRadius 3; the same-tick revive then melee-kills the VE client (greyout "You died").
+- **Do this:** `PendingHostileRespawn` linger (`HostileCorpseLingerMs`) + Pickup-near-corpse `ReviveHostile` on the same NpcId at SpawnXZ. Dummy is never queued. `?ve=respawn` sparks from origin and waits linger — do not walk to the shard. After a pad pickup in smokes, run past `HostileLeashRadius` before the next pull.
+- **Seen in:** #421
