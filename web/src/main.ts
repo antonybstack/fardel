@@ -2543,6 +2543,7 @@ async function main(): Promise<void> {
   const groundSeenIds = new Set<string>();
   let groundBootstrapped = false;
   let toastedPartyLootKey = '';
+  let vendorInRangeToasted = false;
   const npcLastHp = new Map<string, number>();
   const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
@@ -4253,6 +4254,16 @@ async function main(): Promise<void> {
             ? 'Vendor nearby · E sell ember_shard (+5 XP)'
             : 'Vendor nearby · E buy ember_shard (−5 XP)';
         }
+        if (!vendorInRangeToasted) {
+          vendorInRangeToasted = true;
+          const ch = net?.getCharacter();
+          const msg = ch?.hasEmberShard
+            ? 'Vendor nearby · E sell ember_shard (+5 XP)'
+            : 'Vendor nearby · E buy ember_shard (−5 XP)';
+          pushSystemToast('vendor', msg, TOAST_VE_TTL_MS);
+        }
+      } else {
+        vendorInRangeToasted = false;
       }
     }
 
