@@ -799,11 +799,26 @@ body {
 }
 
 .loIcon.tonic {
-  color: #c9a060;
+  color: #e0b878;
 }
 
 .loIcon.bandage {
-  color: #c8b8a0;
+  color: #6ecf8a;
+}
+
+/* Held chips: tonic speed-amber vs bandage heal-green (#163). */
+.loChip[data-kind="tonic"].on {
+  border-color: rgba(224, 176, 96, 0.88);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.48),
+    inset 0 0 0 1px rgba(224, 176, 96, 0.22);
+}
+
+.loChip[data-kind="bandage"].on {
+  border-color: rgba(80, 200, 130, 0.82);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.48),
+    inset 0 0 0 1px rgba(80, 200, 130, 0.22);
 }
 
 .loChip.off .loIcon {
@@ -1289,17 +1304,23 @@ body[data-rmb-look="armed"] #status[data-conn] {
   color: #e07038;
 }
 
-/* Heal — clear green (bandage / rest / tonic). */
+/* Heal — bandage HP green; rest stays mint. Tonic is speed-amber, not a heal (#163). */
 .clLine.bandage,
-.clLine.rest,
-.clLine.tonic {
+.clLine.rest {
   color: #3ecf78;
   font-weight: 650;
 }
 .clLine.bandage .clTag,
-.clLine.rest .clTag,
-.clLine.tonic .clTag {
+.clLine.rest .clTag {
   color: #34c06c;
+}
+
+.clLine.tonic {
+  color: #e0b878;
+  font-weight: 650;
+}
+.clLine.tonic .clTag {
+  color: #d4a05c;
 }
 
 /* Critical / kill — brighter weight, no glow soup. */
@@ -1890,10 +1911,18 @@ body[data-rmb-look="armed"] #status[data-conn] {
   border-color: rgba(196, 210, 230, 0.65);
   background: rgba(24, 34, 52, 0.95);
 }
+/* Tonic — warm amber speed buff (#91 / #163); not heal green. */
 .sysToast.tonic {
-  border-color: rgba(125, 255, 181, 0.55);
+  border-color: rgba(224, 176, 96, 0.72);
+  background: linear-gradient(180deg, rgba(42, 26, 10, 0.94), rgba(10, 8, 6, 0.9));
 }
-.sysToast.tonic .toastTag { color: #7dffb5; }
+.sysToast.tonic .toastTag {
+  color: #e0b878;
+  background: rgba(180, 120, 50, 0.16);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(224, 176, 96, 0.4);
+}
 
 .sysToast.rest {
   border-color: rgba(90, 220, 140, 0.75);
@@ -1910,10 +1939,18 @@ body[data-rmb-look="armed"] #status[data-conn] {
   border: 1px solid rgba(125, 255, 181, 0.4);
 }
 
+/* Bandage — HP heal green; distinct from tonic amber (#163). */
 .sysToast.bandage {
-  border-color: rgba(120, 230, 170, 0.55);
+  border-color: rgba(80, 200, 130, 0.72);
+  background: linear-gradient(180deg, rgba(8, 32, 20, 0.94), rgba(8, 14, 12, 0.9));
 }
-.sysToast.bandage .toastTag { color: #7dffc0; }
+.sysToast.bandage .toastTag {
+  color: #7dffb5;
+  background: rgba(50, 160, 100, 0.16);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(80, 200, 130, 0.4);
+}
 
 /* Bag open/close — muted cool silver tag (bag/chat family); not neon. */
 .sysToast.bag {
