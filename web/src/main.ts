@@ -3780,9 +3780,14 @@ async function main(): Promise<void> {
       }
     }
 
-    if (net && keys.size > 0) {
+    const GROUND_Y = 0;
+    const AIRBORNE_THRESHOLD = 0.05;
+    const pose = net?.getLocalPose();
+    const isAirborne = pose && pose.y > GROUND_Y + AIRBORNE_THRESHOLD;
+
+    if (net && (keys.size > 0 || isAirborne)) {
       const wish = wishFromKeys(keys, camera);
-      if (wish.dx !== 0 || wish.dz !== 0 || wish.jump) {
+      if (wish.dx !== 0 || wish.dz !== 0 || wish.jump || isAirborne) {
         moveAccumulator += dt;
         const interval = 1 / MOVE_SEND_HZ;
         const tonicOn = tonicRemainingMs(net.getCharacter()) > 0;
@@ -3798,11 +3803,11 @@ async function main(): Promise<void> {
             dx *= s;
             dz *= s;
           }
-          if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump) {
+          if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump || isAirborne) {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        setHumanoidMoving(humanoid, true);
+        setHumanoidMoving(humanoid, keys.size > 0);
       } else {
         moveAccumulator = 0;
         setHumanoidMoving(humanoid, false);
