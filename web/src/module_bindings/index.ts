@@ -49,6 +49,7 @@ import EquipRobesReducer from "./equip_robes_reducer";
 import EquipStaffReducer from "./equip_staff_reducer";
 import InviteToPartyReducer from "./invite_to_party_reducer";
 import KickReducer from "./kick_reducer";
+import KickNpcReducer from "./kick_npc_reducer";
 import LeavePartyReducer from "./leave_party_reducer";
 import MoveReducer from "./move_reducer";
 import OfferTradeReducer from "./offer_trade_reducer";
@@ -61,6 +62,7 @@ import SeedLootReducer from "./seed_loot_reducer";
 import SellToVendorReducer from "./sell_to_vendor_reducer";
 import SetTargetReducer from "./set_target_reducer";
 import StunReducer from "./stun_reducer";
+import StunNpcReducer from "./stun_npc_reducer";
 import UnequipRobesReducer from "./unequip_robes_reducer";
 import UnequipStaffReducer from "./unequip_staff_reducer";
 import UseBandageReducer from "./use_bandage_reducer";
@@ -262,6 +264,7 @@ const reducersSchema = __reducers(
   __reducerSchema("equip_staff", EquipStaffReducer),
   __reducerSchema("invite_to_party", InviteToPartyReducer),
   __reducerSchema("kick", KickReducer),
+  __reducerSchema("kick_npc", KickNpcReducer),
   __reducerSchema("leave_party", LeavePartyReducer),
   __reducerSchema("move", MoveReducer),
   __reducerSchema("offer_trade", OfferTradeReducer),
@@ -274,6 +277,7 @@ const reducersSchema = __reducers(
   __reducerSchema("sell_to_vendor", SellToVendorReducer),
   __reducerSchema("set_target", SetTargetReducer),
   __reducerSchema("stun", StunReducer),
+  __reducerSchema("stun_npc", StunNpcReducer),
   __reducerSchema("unequip_robes", UnequipRobesReducer),
   __reducerSchema("unequip_staff", UnequipStaffReducer),
   __reducerSchema("use_bandage", UseBandageReducer),

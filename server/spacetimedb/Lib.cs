@@ -160,6 +160,12 @@ public static partial class Module
         /// <summary>Next auto-attack eligible at this unix micros. 0 = swing on first melee (#356).</summary>
         [SpacetimeDB.Default(0)]
         public long NextSwingAtMicros;
+        /// <summary>
+        /// StunNpc lock: skip chase/swing while now &lt; this micros (#420).
+        /// Same duration as PlayerCombat.StunnedUntilMicros. Dummy does not AI.
+        /// </summary>
+        [SpacetimeDB.Default(0)]
+        public long StunnedUntilMicros;
     }
 
     /// <summary>Ground loot in the yard — SeedLoot / dummy death inserts; Pickup despawns.</summary>
@@ -279,6 +285,20 @@ public static partial class Module
         public ulong ScheduleId;
         public ScheduleAt ScheduledAt;
         public Identity Player;
+    }
+
+    /// <summary>#421 — corpse linger then revive Kind=2/3 at home pad. Dummy never queued.</summary>
+    [SpacetimeDB.Table(Accessor = "PendingHostileRespawn", Scheduled = nameof(ResolveHostileRespawn), ScheduledAt = nameof(ScheduledAt))]
+    public partial struct PendingHostileRespawn
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong ScheduleId;
+        public ScheduleAt ScheduledAt;
+        public ulong NpcId;
+        public int Kind;
+        public float SpawnX;
+        public float SpawnY;
+        public float SpawnZ;
     }
 
     /// <summary>#355 — repeating proximity aggro / leash tick. Not public (clients watch Npc XZ).</summary>
@@ -747,6 +767,105 @@ public static partial class Module
     }
 
     /// <summary>
+    /// Kick vs Dummy / hostile NPC (#419). Same GCD + KickManaCost as Kick(Identity).
+    /// Hostiles: delay NextSwingAtMicros + shove away. Dummy stays planted, no thorns.
+    /// Kick(Identity) stays the PvP interrupt.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void KickNpc(ReducerContext ctx, ulong npcId)
+    {
+        var selfChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (selfChar.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+
+        if (ctx.Db.Npc.NpcId.Find(npcId) is not { } npc)
+        {
+            throw new Exception("Target missing");
+        }
+        if (npc.Hp <= 0)
+        {
+            throw new Exception("Target dead");
+        }
+        if (npc.Kind != NpcKindDummy && !Combat.IsHostileKind(npc.Kind))
+        {
+            throw new Exception("Invalid target");
+        }
+
+        var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        {
+            var dx = selfPose.X - npc.X;
+            var dz = selfPose.Z - npc.Z;
+            var range = Combat.KickRangeMeters;
+            if (dx * dx + dz * dz > range * range)
+            {
+                throw new Exception("Out of range");
+            }
+        }
+
+        var selfCombat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp < selfCombat.GcdReadyAt)
+        {
+            throw new Exception("GCD");
+        }
+        if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < selfCombat.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
+        if (ctx.Timestamp < selfCombat.CastLockedUntil)
+        {
+            throw new Exception("silenced");
+        }
+        if (selfCombat.CastingSpellId != 0)
+        {
+            throw new Exception("Busy casting");
+        }
+
+        TickManaRegen(ctx, ref selfChar);
+        if (Combat.KickManaCost > 0 && selfChar.Mana < Combat.KickManaCost)
+        {
+            ctx.Db.Character.Identity.Update(selfChar);
+            throw new Exception("Insufficient mana");
+        }
+        if (Combat.KickManaCost > 0)
+        {
+            selfChar.Mana -= Combat.KickManaCost;
+        }
+        ctx.Db.Character.Identity.Update(selfChar);
+
+        selfCombat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
+        selfCombat.LastSpellId = 0;
+        selfCombat.LastCastAt = ctx.Timestamp;
+        ctx.Db.PlayerCombat.Identity.Update(selfCombat);
+
+        if (Combat.IsHostileKind(npc.Kind))
+        {
+            var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+            npc.NextSwingAtMicros = now + (long)Combat.KickNpcInterruptMs * 1000L;
+            var ax = npc.X - selfPose.X;
+            var az = npc.Z - selfPose.Z;
+            var len = MathF.Sqrt(ax * ax + az * az);
+            if (len > 1e-4f)
+            {
+                var shove = Combat.KickNpcShoveMeters;
+                StepToward(ref npc, npc.X + ax / len * shove, npc.Z + az / len * shove, shove);
+            }
+            ctx.Db.Npc.NpcId.Update(npc);
+            Log.Info(
+                $"KickNpc {ctx.Sender} → npc {npc.NpcId} kind={npc.Kind} " +
+                $"(interrupt {Combat.KickNpcInterruptMs}ms + shove {Combat.KickNpcShoveMeters}m)");
+        }
+        else
+        {
+            Log.Info($"KickNpc {ctx.Sender} → dummy {npc.NpcId} (trainer, no shove)");
+        }
+    }
+
+    /// <summary>
     /// Stun / Bash — short hard-CC on a nearby player. Breaks windup without
     /// CastLockedUntil silence; sets StunnedUntil so Move/Cast reject with
     /// "stunned" for StunDurationMs. Instant; spends StunManaCost + shared GCD.
@@ -848,6 +967,102 @@ public static partial class Module
         targetCombat.StunnedUntilMicros = ctx.Timestamp.MicrosecondsSinceUnixEpoch
             + (long)Combat.StunDurationMs * 1000L;
         ctx.Db.PlayerCombat.Identity.Update(targetCombat);
+    }
+
+    /// <summary>
+    /// Stun vs Dummy / hostile NPC (#420). Same GCD + StunManaCost + StunDurationMs
+    /// as Stun(Identity). Dummy stays planted (trainer). Hostiles skip chase/swing
+    /// while StunnedUntilMicros. Stun(Identity) stays the PvP hard-CC.
+    /// </summary>
+    [SpacetimeDB.Reducer]
+    public static void StunNpc(ReducerContext ctx, ulong npcId)
+    {
+        var selfChar = ctx.Db.Character.Identity.Find(ctx.Sender)
+            ?? throw new Exception("Character missing");
+        if (selfChar.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
+
+        if (ctx.Db.Npc.NpcId.Find(npcId) is not { } npc)
+        {
+            throw new Exception("Target missing");
+        }
+        if (npc.Hp <= 0)
+        {
+            throw new Exception("Target dead");
+        }
+        if (npc.Kind != NpcKindDummy && !Combat.IsHostileKind(npc.Kind))
+        {
+            throw new Exception("Invalid target");
+        }
+
+        var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerPose missing");
+        {
+            var dx = selfPose.X - npc.X;
+            var dz = selfPose.Z - npc.Z;
+            var range = Combat.StunRangeMeters;
+            if (dx * dx + dz * dz > range * range)
+            {
+                throw new Exception("Out of range");
+            }
+        }
+
+        var selfCombat = ctx.Db.PlayerCombat.Identity.Find(ctx.Sender)
+            ?? throw new Exception("PlayerCombat missing");
+        if (ctx.Timestamp < selfCombat.GcdReadyAt)
+        {
+            throw new Exception("GCD");
+        }
+        if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < selfCombat.StunnedUntilMicros)
+        {
+            throw new Exception("stunned");
+        }
+        if (ctx.Timestamp < selfCombat.CastLockedUntil)
+        {
+            throw new Exception("silenced");
+        }
+        if (selfCombat.CastingSpellId != 0)
+        {
+            throw new Exception("Busy casting");
+        }
+
+        TickManaRegen(ctx, ref selfChar);
+        if (Combat.StunManaCost > 0 && selfChar.Mana < Combat.StunManaCost)
+        {
+            ctx.Db.Character.Identity.Update(selfChar);
+            throw new Exception("Insufficient mana");
+        }
+        if (Combat.StunManaCost > 0)
+        {
+            selfChar.Mana -= Combat.StunManaCost;
+        }
+        ctx.Db.Character.Identity.Update(selfChar);
+
+        selfCombat.GcdReadyAt = ctx.Timestamp + Ms(Combat.GcdMs);
+        selfCombat.LastSpellId = 0;
+        selfCombat.LastCastAt = ctx.Timestamp;
+        ctx.Db.PlayerCombat.Identity.Update(selfCombat);
+
+        var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        var lockUntil = now + (long)Combat.StunNpcLockMs * 1000L;
+        npc.StunnedUntilMicros = lockUntil;
+        if (Combat.IsHostileKind(npc.Kind) && npc.NextSwingAtMicros < lockUntil)
+        {
+            npc.NextSwingAtMicros = lockUntil;
+        }
+        ctx.Db.Npc.NpcId.Update(npc);
+        if (Combat.IsHostileKind(npc.Kind))
+        {
+            Log.Info(
+                $"StunNpc {ctx.Sender} → npc {npc.NpcId} kind={npc.Kind} " +
+                $"(lock {Combat.StunNpcLockMs}ms)");
+        }
+        else
+        {
+            Log.Info($"StunNpc {ctx.Sender} → dummy {npc.NpcId} (trainer lock {Combat.StunNpcLockMs}ms)");
+        }
     }
 
     /// <summary>Unequip staff — Cast already gates on StaffEquipped (slice 3 nice-to-have).</summary>
@@ -1344,6 +1559,12 @@ public static partial class Module
                 row.SpawnZ = row.Z;
             }
 
+            if (ctx.Timestamp.MicrosecondsSinceUnixEpoch < row.StunnedUntilMicros)
+            {
+                ctx.Db.Npc.NpcId.Update(row);
+                continue;
+            }
+
             var homeDx = row.X - row.SpawnX;
             var homeDz = row.Z - row.SpawnZ;
             var homeDist = MathF.Sqrt(homeDx * homeDx + homeDz * homeDz);
@@ -1390,6 +1611,10 @@ public static partial class Module
         }
 
         var now = ctx.Timestamp.MicrosecondsSinceUnixEpoch;
+        if (now < row.StunnedUntilMicros)
+        {
+            return;
+        }
         if (row.NextSwingAtMicros > 0 && now < row.NextSwingAtMicros)
         {
             return;
@@ -1477,6 +1702,10 @@ public static partial class Module
             // Dummy + hostiles both drop ember_shard WorldLoot. Pickup is F. (#357)
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
             SharePartyLootDrop(ctx, caster, row.X, row.Y, row.Z);
+            if (Combat.IsHostileKind(row.Kind))
+            {
+                ScheduleHostileRespawn(ctx, row);
+            }
         }
 
         // Dummy thorns only — hostiles hit back in #356, not here.
@@ -1577,6 +1806,115 @@ public static partial class Module
         }
 
         Log.Info($"Player {pending.Player} respawned at yard origin");
+    }
+
+    static void HostileHomePad(Npc row, out float x, out float y, out float z)
+    {
+        var hasHome = MathF.Abs(row.SpawnX) > 0.01f || MathF.Abs(row.SpawnZ) > 0.01f;
+        x = hasHome ? row.SpawnX : row.X;
+        y = hasHome ? row.SpawnY : row.Y;
+        z = hasHome ? row.SpawnZ : row.Z;
+    }
+
+    static void ScheduleHostileRespawn(ReducerContext ctx, Npc row)
+    {
+        if (!Combat.IsHostileKind(row.Kind))
+        {
+            return;
+        }
+
+        HostileHomePad(row, out var sx, out var sy, out var sz);
+        ctx.Db.PendingHostileRespawn.Insert(new PendingHostileRespawn
+        {
+            ScheduledAt = new ScheduleAt.Time(ctx.Timestamp + Ms(Combat.HostileCorpseLingerMs)),
+            NpcId = row.NpcId,
+            Kind = row.Kind,
+            SpawnX = sx,
+            SpawnY = sy,
+            SpawnZ = sz,
+        });
+        Log.Info($"Npc {row.NpcId} kind={row.Kind} corpse linger {Combat.HostileCorpseLingerMs}ms");
+    }
+
+    /// <summary>Revive Kind=2/3 at home pad. No-op if already living or Dummy.</summary>
+    [SpacetimeDB.Reducer]
+    public static void ResolveHostileRespawn(ReducerContext ctx, PendingHostileRespawn pending)
+    {
+        ReviveHostile(ctx, pending.NpcId, pending.Kind, pending.SpawnX, pending.SpawnY, pending.SpawnZ);
+    }
+
+    static void MaybeRespawnHostileNearLoot(ReducerContext ctx, float x, float z)
+    {
+        const float radius = 3f;
+        var radiusSq = radius * radius;
+        Npc? best = null;
+        var bestDistSq = float.MaxValue;
+        foreach (var n in ctx.Db.Npc.Iter())
+        {
+            if (!Combat.IsHostileKind(n.Kind) || n.Hp > 0)
+            {
+                continue;
+            }
+
+            var dx = n.X - x;
+            var dz = n.Z - z;
+            var distSq = dx * dx + dz * dz;
+            if (distSq > radiusSq || distSq >= bestDistSq)
+            {
+                continue;
+            }
+
+            bestDistSq = distSq;
+            best = n;
+        }
+
+        if (best is not { } dead)
+        {
+            return;
+        }
+
+        HostileHomePad(dead, out var sx, out var sy, out var sz);
+        ReviveHostile(ctx, dead.NpcId, dead.Kind, sx, sy, sz);
+    }
+
+    static void ReviveHostile(ReducerContext ctx, ulong npcId, int kind, float spawnX, float spawnY, float spawnZ)
+    {
+        if (!Combat.IsHostileKind(kind))
+        {
+            return;
+        }
+
+        if (ctx.Db.Npc.NpcId.Find(npcId) is { } row)
+        {
+            if (row.Kind == NpcKindDummy || !Combat.IsHostileKind(row.Kind) || row.Hp > 0)
+            {
+                return;
+            }
+
+            row.Hp = row.MaxHp > 0 ? row.MaxHp : Combat.HostileMaxHp;
+            if (row.MaxHp <= 0)
+            {
+                row.MaxHp = Combat.HostileMaxHp;
+            }
+            row.X = spawnX;
+            row.Y = spawnY;
+            row.Z = spawnZ;
+            row.SpawnX = spawnX;
+            row.SpawnY = spawnY;
+            row.SpawnZ = spawnZ;
+            row.Aggroed = false;
+            row.NextSwingAtMicros = 0;
+            row.StunnedUntilMicros = 0;
+            ctx.Db.Npc.NpcId.Update(row);
+            Log.Info($"Npc {row.NpcId} kind={row.Kind} respawned at pad ({spawnX:0.##},{spawnZ:0.##})");
+            return;
+        }
+
+        if (!HasHostileForPad(ctx, spawnX, spawnZ))
+        {
+            InsertHostile(ctx, spawnX, spawnY, spawnZ, kind);
+            Log.Info($"Npc kind={kind} inserted at pad ({spawnX:0.##},{spawnZ:0.##}) after missing corpse");
+        }
     }
 
 
@@ -2165,6 +2503,7 @@ public static partial class Module
 
         ctx.Db.WorldLoot.LootId.Delete(item.LootId);
         Log.Info($"Pickup {item.ItemId} id={item.LootId} by {ctx.Sender} xp={character.Xp}");
+        MaybeRespawnHostileNearLoot(ctx, item.X, item.Z);
     }
 
     static void ClearWorldLoot(ReducerContext ctx)

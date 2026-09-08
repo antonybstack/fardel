@@ -151,6 +151,16 @@ public static class Combat
     public const float KickRangeMeters = 8f;
     /// <summary>Mana spent by the kicker (instant; not refunded).</summary>
     public const int KickManaCost = 10;
+    /// <summary>
+    /// KickNpc delays the next hostile swing by this many ms (#419). Same window
+    /// as PvP Kick silence so the interrupt reads. Dummy does not swing.
+    /// </summary>
+    public const int KickNpcInterruptMs = CastSilenceMs;
+    /// <summary>
+    /// Shove a living hostile away from the kicker. Dummy stays planted (trainer).
+    /// Sized so origin KickNpc on pad A (~7.6m) does not enter AggroRadius.
+    /// </summary>
+    public const float KickNpcShoveMeters = 1.2f;
 
     /// <summary>
     /// Stun / Bash — short hard-CC. Breaks target windup (no mana refund) and
@@ -162,9 +172,22 @@ public static class Combat
     public const int StunManaCost = 15;
     /// <summary>Move + Cast reject with "stunned" while Timestamp &lt; StunnedUntil.</summary>
     public const int StunDurationMs = 1500;
+    /// <summary>
+    /// StunNpc lock on Dummy + hostiles (#420). Same window as PvP Stun.
+    /// StunRangeMeters is 5: Dummy at 5m is in range from origin; pads A/B/C
+    /// (~7.6m) are not — walk to ~4m (inside range, outside AggroRadius 3).
+    /// </summary>
+    public const int StunNpcLockMs = StunDurationMs;
 
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
+
+    /// <summary>
+    /// After a hostile dies, linger as a corpse then revive at home pad (#421).
+    /// Pickup of that corpse's WorldLoot also revives immediately. Dummy is not
+    /// scheduled and never changes Kind.
+    /// </summary>
+    public const int HostileCorpseLingerMs = 4000;
 
     public static bool TryGetSpell(int spellId, out int castMs, out int damage)
     {

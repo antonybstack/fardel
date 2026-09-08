@@ -43,12 +43,21 @@ export type HumanoidOptions = {
   name?: string;
   /** Robe / cloth diffuse (local blue, remotes teal/green/magenta). */
   robeColor?: Color3;
+  /**
+   * Kind=3: unarmed Idle, hide staff/pads, saturated robe (no 0.72 wash).
+   * Kind=2 / player keep wizard staff + Idle_Weapon.
+   */
+  variant?: 'player' | 'hostile' | 'brigand';
 };
 
 type HumanoidAnim = {
   idle: AnimationGroup | null;
+  idleWeapon: AnimationGroup | null;
+  idleUnarmed: AnimationGroup | null;
   walk: AnimationGroup | null;
   run: AnimationGroup | null;
+  runWeapon: AnimationGroup | null;
+  runUnarmed: AnimationGroup | null;
   /** Jump/Fall if the GLB has one; Wizard.glb does not. */
   air: AnimationGroup | null;
   death: AnimationGroup | null;
@@ -60,6 +69,7 @@ type HumanoidAnim = {
   casting: boolean;
   /** Stationary yaw — Idle held so feet stay planted. */
   turning: boolean;
+  staffEquipped: boolean;
 };
 
 const animByRoot = new WeakMap<Mesh, HumanoidAnim>();
@@ -117,6 +127,11 @@ export function preloadPlayerHumanoid(scene: Scene): Promise<AssetContainer> {
   return sharedLoad;
 }
 
+function clipBare(name: string): string {
+  const i = name.lastIndexOf('|');
+  return i >= 0 ? name.slice(i + 1) : name;
+}
+
 function findAnim(
   groups: AnimationGroup[],
   ...needles: string[]
@@ -128,6 +143,24 @@ function findAnim(
     if (hit) return hit;
   }
   return null;
+}
+
+/** Bare clip name after `|`. `Idle` must not match `Idle_Weapon`. */
+function findAnimExact(
+  groups: AnimationGroup[],
+  needle: string,
+): AnimationGroup | null {
+  const n = needle.toLowerCase();
+  return groups.find((g) => clipBare(g.name).toLowerCase() === n) ?? null;
+}
+
+function applyStaffClips(a: HumanoidAnim): void {
+  a.idle = a.staffEquipped
+    ? (a.idleWeapon ?? a.idleUnarmed)
+    : (a.idleUnarmed ?? a.idleWeapon);
+  a.run = a.staffEquipped
+    ? (a.runWeapon ?? a.runUnarmed)
+    : (a.runUnarmed ?? a.runWeapon);
 }
 
 function bareName(name: string, prefix: string): string {
@@ -296,6 +329,7 @@ export function createPlayerHumanoid(
   opts: HumanoidOptions = {},
 ): HumanoidParts {
   const prefix = opts.name ?? 'player';
+  const brigand = opts.variant === 'brigand';
   // Mid-sat indigo cloth vs final #32/#39 lock (cool hemi + warm sun + cyan fog).
   const robeDiffuse = opts.robeColor ?? new Color3(0.34, 0.45, 0.78);
   const root = new Mesh(prefix, scene);
@@ -345,11 +379,13 @@ export function createPlayerHumanoid(
   }
 
   let staffMesh: AbstractMesh | null = null;
+  const staffMeshes: AbstractMesh[] = [];
   const robeMeshes: AbstractMesh[] = [];
   for (const m of meshes) {
     const bare = bareName(m.name, prefix);
-    if (/wizard_staff|^staff$/i.test(bare) || bare === 'Wizard_Staff') {
-      staffMesh = m;
+    if (/staff/i.test(bare)) {
+      staffMeshes.push(m);
+      if (!staffMesh) staffMesh = m;
     }
     if (/shoulderpad|pouch/i.test(bare)) {
       robeMeshes.push(m);
@@ -437,7 +473,7 @@ export function createPlayerHumanoid(
 
   // Staff: parent to Weapon.R (Idle_Weapon grip). Equip API still toggles the GLB mesh.
   const skinnedBody = meshes.find((m) => !!m.skeleton) ?? null;
-  if (staffMesh) {
+  if (staffMesh && !brigand) {
     attachStaffToWeaponBone(staffMesh, skinnedBody?.skeleton ?? null, skinnedBody);
   }
   retargetAnimGroupsToClones(
@@ -450,9 +486,12 @@ export function createPlayerHumanoid(
   // Wire equip hide: when staff/robes containers toggle, mirror onto real meshes.
   const syncStaff = () => {
     const on = staff.isEnabled();
-    if (staffMesh) {
-      staffMesh.setEnabled(on);
-      staffMesh.isVisible = on;
+    const hide = staffMeshes.length > 0 ? staffMeshes : staffMesh ? [staffMesh] : [];
+    for (const m of hide) {
+      m.setEnabled(on);
+      m.isVisible = on;
+      m.visibility = on ? 1 : 0;
+      m.alwaysSelectAsActiveMesh = on;
     }
   };
   const syncRobes = () => {
@@ -476,32 +515,49 @@ export function createPlayerHumanoid(
 
   // Atlas already has cloth/skin/hair. A strong albedo multiply tints Face
   // indigo and collapses material separation. Do not StandardMaterial Wizard.001.
-  robeMat.diffuseColor = new Color3(
-    0.72 + robeDiffuse.r * 0.55,
-    0.70 + robeDiffuse.g * 0.50,
-    0.78 + robeDiffuse.b * 0.45,
-  );
-  robeMat.emissiveColor = new Color3(
-    Math.min(0.1, robeDiffuse.r * ROBE_EMISSIVE_SCALE),
-    Math.min(0.11, robeDiffuse.g * ROBE_EMISSIVE_SCALE),
-    Math.min(0.16, robeDiffuse.b * ROBE_EMISSIVE_SCALE + 0.02),
-  );
+  // Kind=3 skips the 0.72 wash so violet actually reads vs Kind=2 crimson.
+  if (brigand) {
+    robeMat.diffuseColor = new Color3(
+      Math.min(1, robeDiffuse.r * 1.08),
+      Math.min(1, robeDiffuse.g * 0.95),
+      Math.min(1, robeDiffuse.b * 1.05),
+    );
+    robeMat.emissiveColor = new Color3(
+      Math.min(0.16, robeDiffuse.r * 0.22),
+      Math.min(0.08, robeDiffuse.g * 0.16),
+      Math.min(0.22, robeDiffuse.b * 0.28),
+    );
+  } else {
+    robeMat.diffuseColor = new Color3(
+      0.72 + robeDiffuse.r * 0.55,
+      0.70 + robeDiffuse.g * 0.50,
+      0.78 + robeDiffuse.b * 0.45,
+    );
+    robeMat.emissiveColor = new Color3(
+      Math.min(0.1, robeDiffuse.r * ROBE_EMISSIVE_SCALE),
+      Math.min(0.11, robeDiffuse.g * ROBE_EMISSIVE_SCALE),
+      Math.min(0.16, robeDiffuse.b * ROBE_EMISSIVE_SCALE + 0.02),
+    );
+  }
   robeMat.specularColor = new Color3(0.05, 0.06, 0.08);
-  robeMat.ambientColor = new Color3(0.38, 0.42, 0.52);
+  robeMat.ambientColor = brigand
+    ? new Color3(0.28, 0.18, 0.42)
+    : new Color3(0.38, 0.42, 0.52);
   robeMat.backFaceCulling = false;
 
   const clothPbrs: PBRMaterial[] = [];
   const tuneCloth = (pbr: PBRMaterial) => {
     pbr.albedoColor.copyFrom(robeMat.diffuseColor);
     pbr.emissiveColor.copyFrom(robeMat.emissiveColor);
-    pbr.emissiveIntensity = 0.28;
+    pbr.emissiveIntensity = brigand ? 0.42 : 0.28;
     pbr.metallic = 0;
     pbr.roughness = 0.9;
     pbr.backFaceCulling = false;
     pbr.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
     if (pbr.albedoTexture) {
       const tex = pbr.albedoTexture as Texture;
-      tex.level = 1.65;
+      // Lower atlas lift so Kind=3 violet albedo actually reads vs Kind=2.
+      tex.level = brigand ? 0.85 : 1.65;
       tex.hasAlpha = false;
     }
   };
@@ -568,7 +624,7 @@ export function createPlayerHumanoid(
     for (const pbr of clothPbrs) tuneCloth(pbr);
   });
 
-  if (staffMesh) {
+  if (staffMesh && !brigand) {
     const sm = staffMesh.material;
     if (sm instanceof PBRMaterial) {
       tuneWood(sm);
@@ -607,12 +663,12 @@ export function createPlayerHumanoid(
     orb.alwaysSelectAsActiveMesh = true;
   }
 
-  const idle =
-    findAnim(animGroups, 'Idle_Weapon', 'Idle') ??
-    (animGroups.length > 0 ? animGroups[0]! : null);
+  const idleWeapon = findAnimExact(animGroups, 'Idle_Weapon');
+  const idleUnarmed = findAnimExact(animGroups, 'Idle');
   // E8.2: Run_Weapon for fast/forward; Walk for slow/strafe. Do not alias Run as Walk.
-  const run = findAnim(animGroups, 'Run_Weapon', 'Run');
-  const walk = findAnim(animGroups, 'Walk') ?? run;
+  const runWeapon = findAnimExact(animGroups, 'Run_Weapon');
+  const runUnarmed = findAnimExact(animGroups, 'Run');
+  const walk = findAnimExact(animGroups, 'Walk') ?? runWeapon ?? runUnarmed;
   const air = findAnim(animGroups, 'Jump', 'Falling', 'Fall');
   const death = findAnim(animGroups, 'Death');
   // Pack spelling is RecieveHit (not Receive). Prefer the non-Attacking clip.
@@ -623,18 +679,14 @@ export function createPlayerHumanoid(
   for (const g of animGroups) {
     g.stop();
   }
-  if (idle) {
-    idle.start(true, 1.0, idle.from, idle.to, false);
-  }
-  // Idle deforms vs bind; re-plant after the first CPU skin so feet sit on y=0
-  // at ~1.8 m. Do not introduce another scaled ancestor (breaks Assimp IBM).
-  scene.onBeforeRenderObservable.addOnce(() => {
-    plantToTargetHeight();
-  });
-  animByRoot.set(root, {
-    idle,
+  const anim: HumanoidAnim = {
+    idle: idleWeapon ?? idleUnarmed ?? (animGroups.length > 0 ? animGroups[0]! : null),
+    idleWeapon,
+    idleUnarmed,
     walk,
-    run,
+    run: runWeapon ?? runUnarmed,
+    runWeapon,
+    runUnarmed,
     air,
     death,
     flinch,
@@ -643,7 +695,25 @@ export function createPlayerHumanoid(
     dead: false,
     casting: false,
     turning: false,
+    staffEquipped: !brigand,
+  };
+  applyStaffClips(anim);
+  if (anim.idle) {
+    anim.idle.start(true, 1.0, anim.idle.from, anim.idle.to, false);
+  }
+  if (brigand) {
+    staff.setEnabled(false);
+    for (const m of robeMeshes) {
+      m.setEnabled(false);
+      m.isVisible = false;
+    }
+  }
+  // Idle deforms vs bind; re-plant after the first CPU skin so feet sit on y=0
+  // at ~1.8 m. Do not introduce another scaled ancestor (breaks Assimp IBM).
+  scene.onBeforeRenderObservable.addOnce(() => {
+    plantToTargetHeight();
   });
+  animByRoot.set(root, anim);
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -683,21 +753,23 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
   const height = Number.isFinite(minY) ? Math.max(0, maxY - minY) : 0;
   const playing = a?.dead && a.death
     ? a.death.name
-    : a?.casting && a.cast
-      ? a.cast.name
-      : a?.cast?.isPlaying
+    : a?.death?.isPlaying
+      ? a.death.name
+      : a?.casting && a.cast
         ? a.cast.name
-        : a?.flinch?.isPlaying
-          ? a.flinch.name
-          : a?.air?.isPlaying
-            ? a.air.name
-            : a?.run?.isPlaying
-              ? a.run.name
-              : a?.walk?.isPlaying
-                ? a.walk.name
-                : a?.idle?.isPlaying
-                  ? a.idle.name
-                  : null;
+        : a?.cast?.isPlaying
+          ? a.cast.name
+          : a?.flinch?.isPlaying
+            ? a.flinch.name
+            : a?.air?.isPlaying
+              ? a.air.name
+              : a?.run?.isPlaying
+                ? a.run.name
+                : a?.walk?.isPlaying
+                  ? a.walk.name
+                  : a?.idle?.isPlaying
+                    ? a.idle.name
+                    : null;
   return { skinned, playing, idle: a?.idle?.name ?? null, height };
 }
 
@@ -712,7 +784,8 @@ function startLoop(g: AnimationGroup | null): void {
   if (g && !g.isPlaying) g.start(true, 1.0, g.from, g.to, false);
 }
 
-/** Airborne hold: Jump/Fall if present, else frozen Idle_Weapon. No squash. */
+/** Airborne hold: Jump/Fall if present, else frozen Idle_Weapon. No squash.
+ * Remotes use the same hold — Walk must not keep cycling in the air. */
 export function setHumanoidAirborne(
   parts: HumanoidParts,
   airborne: boolean,
@@ -745,7 +818,10 @@ export function setHumanoidAirborne(
 const WALK_REF_MPS = 2.2;
 const RUN_REF_MPS = 5.0;
 
-/** Switch Idle ↔ Walk/Run. `running` is fast/forward gait (no-op if clips missing). */
+/**
+ * Grounded Walk named (not Run). NPC chase/leash and remotes pass snap m/s
+ * so speedRatio matches XZ. `running=true` is the local W sprint only.
+ */
 export function setHumanoidMoving(
   parts: HumanoidParts,
   moving: boolean,
@@ -757,11 +833,24 @@ export function setHumanoidMoving(
   if (a.dead || a.airborne || a.casting) return;
   if (a.cast?.isPlaying) return;
   if (a.flinch?.isPlaying) return;
+  stopIfPlaying(a.death);
+  applyStaffClips(a);
   if (a.idle) a.idle.speedRatio = 1;
   if (!moving) {
-    stopIfPlaying(a.walk);
-    stopIfPlaying(a.run);
+    // Start Idle while Walk/Run still play, then stop them. Stopping first
+    // leaves one CPU-skin frame of mid-stride Walk at 0 wish (skate) or no
+    // group (bind-T). Same order as cast-cancel.
+    if (a.walk) a.walk.speedRatio = 0;
+    if (a.run) a.run.speedRatio = 0;
+    if (a.runWeapon) a.runWeapon.speedRatio = 0;
+    if (a.runUnarmed) a.runUnarmed.speedRatio = 0;
     startLoop(a.idle);
+    stopIfPlaying(a.walk, a.idle);
+    stopIfPlaying(a.run, a.idle);
+    stopIfPlaying(a.runWeapon, a.idle);
+    stopIfPlaying(a.runUnarmed, a.idle);
+    stopIfPlaying(a.idleWeapon, a.idle);
+    stopIfPlaying(a.idleUnarmed, a.idle);
     return;
   }
   const loc = running && a.run ? a.run : (a.walk ?? a.run);
@@ -770,8 +859,12 @@ export function setHumanoidMoving(
     return;
   }
   stopIfPlaying(a.idle, loc);
+  stopIfPlaying(a.idleWeapon, loc);
+  stopIfPlaying(a.idleUnarmed, loc);
   stopIfPlaying(a.walk, loc);
   stopIfPlaying(a.run, loc);
+  stopIfPlaying(a.runWeapon, loc);
+  stopIfPlaying(a.runUnarmed, loc);
   startLoop(loc);
   // Clip is in-place (armature translation 0). Match cycle to XZ so feet don't slide.
   const ref = loc === a.run ? RUN_REF_MPS : WALK_REF_MPS;
@@ -779,9 +872,19 @@ export function setHumanoidMoving(
   loc.speedRatio = Math.max(0.7, Math.min(1.85, mps / ref));
 }
 
+/** NPC chase / leash return: Walk clip, never Run, never Idle-slide. */
+export function setHumanoidGroundWalk(
+  parts: HumanoidParts,
+  moving: boolean,
+  speedMps = 0,
+): void {
+  setHumanoidMoving(parts, moving, false, speedMps);
+}
+
 /**
  * Stationary yaw: hold Idle_Weapon (speed 0) so feet stay planted.
- * No-op while Walk/Run/#334 gait is playing.
+ * No-op while Walk/Run/#334 gait is playing. Callers must not plant
+ * while sendMove is translating (that is moonwalk).
  */
 export function setHumanoidTurning(
   parts: HumanoidParts,
@@ -803,8 +906,10 @@ export function setHumanoidTurning(
 }
 
 /**
- * Equip: show staff + restart Idle_Weapon (grip, not bind-T).
- * Unequip: hide the GLB stick so it does not float. Idle keeps playing.
+ * Equip: show staff + Idle_Weapon / Run_Weapon (grip, not bind-T).
+ * Unequip: hide the stick and play unarmed Idle / Run (not a floating grip).
+ * Remotes must follow Character.staffEquipped — hiding the mesh is not enough
+ * (`Idle_Weapon` is an includes-match on `Idle`).
  */
 export function setHumanoidStaffEquipped(
   parts: HumanoidParts,
@@ -812,17 +917,29 @@ export function setHumanoidStaffEquipped(
 ): void {
   parts.staff.setEnabled(equipped);
   const a = animByRoot.get(parts.root);
-  if (!a || a.dead || a.airborne || a.casting) return;
-  if (a.walk?.isPlaying || a.run?.isPlaying || a.flinch?.isPlaying || a.cast?.isPlaying) {
+  if (!a) return;
+  a.staffEquipped = equipped;
+  const prevIdle = a.idle;
+  const prevRun = a.run;
+  applyStaffClips(a);
+  if (a.dead || a.airborne || a.casting) return;
+  if (a.flinch?.isPlaying || a.cast?.isPlaying) return;
+  stopIfPlaying(a.death);
+  if (a.walk?.isPlaying) return;
+  if (prevRun?.isPlaying && a.run && a.run !== prevRun) {
+    stopIfPlaying(prevRun);
+    startLoop(a.run);
     return;
   }
-  if (!equipped) return;
-  if (a.idle) a.idle.speedRatio = 1;
+  if (a.run?.isPlaying) return;
+  stopIfPlaying(prevIdle, a.idle);
+  stopIfPlaying(a.idleWeapon, a.idle);
+  stopIfPlaying(a.idleUnarmed, a.idle);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
   if (a.idle) {
-    if (a.idle.isPlaying) a.idle.stop();
-    a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
+    a.idle.speedRatio = 1;
+    if (!a.idle.isPlaying) a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
   }
 }
 
@@ -865,8 +982,12 @@ export function setHumanoidDead(parts: HumanoidParts, dead: boolean): void {
 /** One-shot hit react. Does not touch Move intents; loco resumes after. */
 export function playHumanoidFlinch(parts: HumanoidParts): void {
   const a = animByRoot.get(parts.root);
-  if (!a?.flinch || a.airborne || a.dead || a.casting) return;
-  if (a.cast?.isPlaying) return;
+  if (!a?.flinch || a.airborne || a.dead) return;
+  // HP drop can land on the same tick as CastEndsAt. Do not keep Spell over RecieveHit.
+  a.casting = false;
+  a.turning = false;
+  stopIfPlaying(a.cast);
+  if (a.cast) a.cast.speedRatio = 1;
   stopIfPlaying(a.idle);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
@@ -890,12 +1011,17 @@ export function setHumanoidCasting(
     if (!a.casting) return;
     a.casting = false;
     a.turning = false;
+    // setHumanoidMoving returns while a.cast isPlaying — start Idle first.
+    applyStaffClips(a);
+    if (a.idle) a.idle.speedRatio = 1;
+    if (!a.dead && !a.airborne) startLoop(a.idle);
     stopIfPlaying(a.cast);
     if (a.cast) a.cast.speedRatio = 1;
-    if (!a.dead && !a.airborne) setHumanoidMoving(parts, false);
     return;
   }
   if (a.dead || !a.cast) return;
+  // RecieveHit owns the body until the one-shot ends (remote DummyStrike / Emberbolt land).
+  if (a.flinch?.isPlaying) return;
   const already = a.casting;
   a.casting = true;
   a.turning = false;
@@ -952,4 +1078,9 @@ export function partyRobeColor(): Color3 {
 /** Crimson robe for Kind=2 yard hostiles — distinct from local indigo / remotes. */
 export function hostileRobeColor(): Color3 {
   return new Color3(0.78, 0.22, 0.18);
+}
+
+/** Saturated violet for Kind=3 — skip the 0.72 cloth wash so it reads vs crimson. */
+export function brigandRobeColor(): Color3 {
+  return new Color3(0.42, 0.16, 0.68);
 }

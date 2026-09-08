@@ -143,6 +143,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `setHumanoidCasting` loops Spell until CastEndsAt / cancel / interrupt. Spark stays the one-shot. Do not treat animation-end as the windup end.
 - **Seen in:** #331
 
+### 2026-09-08 — humanoid,cast — cancel stops Spell before Idle and flashes bind-T
+- **Cause:** `setHumanoidCasting(false)` called `stopIfPlaying(cast)` then `setHumanoidMoving(false)`. One CPU-skin frame has no playing group → bind-T pop mid-Spell1. Recover via `setHumanoidMoving` also no-ops: that helper `return`s while `a.cast?.isPlaying`.
+- **Do this:** Do not go through `setHumanoidMoving`. `applyStaffClips` + `startLoop(a.idle)` while Spell still plays, then `stopIfPlaying(a.cast)`. `?ve=cast-cancel-pose` persistMark names the recover clip + `skinned`. Do not change `?ve=cast-cancel` chrome mark.
+- **Seen in:** #431 / #441
+
 ### 2026-09-08 — npc,smoke — first `Npc.Iter()` living row is not Dummy after hostiles
 - **Cause:** #354 inserts Kind=2 yard hostiles. `if (n.Hp > 0) break` can pick a hostile; dummy thorns never fire.
 - **Do this:** Find Dummy by `Kind == Combat.NpcKindDummy` (1). Do not assume Iter() order.
@@ -228,6 +233,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Patrol in-range pads, EquipStaff, stand-cast Emberbolt immediately (no Move during CastEndsAt). persistMark via `readHumanoidPlayback`: `Remote cast OK` + Spell named + `skinned` ≥ 1. Mutate `camera.target` for `?ve=remote-cast` (do not `setTarget`). Env `FARDEL_SPACETIME_URI` + `FARDEL_DB` — never `:3000` / db `fardel`.
 - **Seen in:** #403
 
+### 2026-09-08 — humanoid,remote,flinch — remotes stay Idle/Walk on HP drop
+- **Cause:** `playHumanoidFlinch` returned while `a.casting`. SecondClient Emberbolt thorns land on the CastEndsAt tick; `syncRemoteCastFx` runs after `syncRemoteMeshes`, so the HP delta is recorded under last-frame Spell and never retried. `setHumanoidDead` was never called for remotes, so Hp=0 kept Walk.
+- **Do this:** Interrupt Spell for RecieveHit (`playHumanoidFlinch` clears `casting`). `setHumanoidDead` on remote Hp=0. Do not stomp a playing flinch with Spell. `?ve=remote-death` + `FARDEL_SECOND_DIE=1` DummyStrike. persistMark names Death/RecieveHit + `skinned`. Mutate `camera.target` (do not `setTarget`).
+- **Seen in:** #429
+
 ### 2026-09-08 — ve,hostile — ?ve=hostile-body fails 1/2 after a Kind=2 kill
 - **Cause:** Harness required `hp > 0` Idle. Dead Kind=2 still occupy pads and do not respawn; #404 corpse is still a skinned person. Seat VE after RecieveHit/Death then read 1/2 living.
 - **Do this:** Count Kind=2 skinned `Idle|Death`. Require ≥1 living Idle + dummy trainer (no humanoid). persistMark `Hostile body OK` + Idle_Weapon + `skinned` ≥ 1. `capsule` / `T-POSE` = fail. Do not add a respawn reducer from this lane.
@@ -237,3 +247,94 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `CountHostiles` / `LivingHostiles` / `FindHostileNear` require `Kind == NpcKindHostile`. Flipping pad B to Kind=3 makes HostileSpawnSmoke `living.Count < 2`.
 - **Do this:** Keep pads A/B Kind=2. Second type is Kind=3 on pad C (`HostileSpawnC*`). `Combat.IsHostileKind` for aggro/leash/swing. Find Dummy by `Kind == 1`. Keep `HostileAggroRadius` under 3.6. `#423` asserts both types.
 - **Seen in:** #418
+
+### 2026-09-08 — npc,kick — Kick(Identity) is PvP; Dummy is not a Kick target
+- **Cause:** Kick looks up Character + PlayerCombat on Identity. NPCs have ulong NpcId. Hostiles do not cast. Origin is ~7.6m from pads A/B/C — inside KickRange 8, outside AggroRadius 3.
+- **Do this:** KickNpc(ulong) for living Dummy + IsHostileKind. Dummy stays planted (no shove, no thorns). Hostiles: delay NextSwingAtMicros + shove away. Keep Kick(Identity) for KickSmoke PvP. FindHostileNear pins Kind==2.
+- **Seen in:** #419
+
+### 2026-09-08 — npc,stun — Stun(Identity) is PvP; StunRange 5 misses yard pads
+- **Cause:** Stun looks up Character + PlayerCombat on Identity. Dummy at 5m is in StunRange; pads A/B/C are ~7.6m (KickRange 8 reached them from origin). Hostiles do not Move/Cast, so the lock is Npc.StunnedUntilMicros.
+- **Do this:** StunNpc(ulong) for living Dummy + IsHostileKind. Dummy stays planted. Hostiles: StunnedUntilMicros + skip chase/swing for StunNpcLockMs. VE walks to ~4m (inside 5, outside AggroRadius 3). Keep Stun(Identity) for StunSmoke PvP. FindHostileNear pins Kind==2.
+- **Seen in:** #420
+
+### 2026-09-08 — npc,smoke — HostileSmoke Pickup() without commit hangs on leftover shard
+- **Cause:** KickNpc shoves off-pad; corpse linger + extra WorldLoot can make fire-and-forget Pickup miss the LootId the harness stored. PumpUntil "corpse loot despawned" then burns the full timeout.
+- **Do this:** Kick then Stun both kinds from origin / stun stand-off, wait A+C home (`Aggroed=false` on spawn) before the hunt loop. `OnPickup` Committed before waiting that LootId gone. Dummy stays trainer.
+- **Seen in:** #469
+
+### 2026-09-08 — humanoid,staff — unequip still plays Idle_Weapon (floating grip)
+- **Cause:** `findAnim(..., 'Idle')` is `includes`, so it returns Idle_Weapon. `setHumanoidStaffEquipped(false)` hid the stick then returned without swapping the clip.
+- **Do this:** Exact bare clip names (`Idle` ≠ `Idle_Weapon`, `Run` ≠ `Run_Weapon`). Unequip selects unarmed Idle/Run. `?ve=idle` still Idle_Weapon + skinned. `?ve=sheathed` persistMark `Sheathed OK` + `Idle` (no Weapon) + skinned, staff mesh off.
+- **Seen in:** #430
+
+### 2026-09-08 — humanoid,npc — Kind=3 violet robe washed to the same pink as Kind=2
+- **Cause:** `createPlayerHumanoid` lifts cloth as `0.72 + robe*0.55`, so brigand violet and hostile crimson both land near white-lavender under #39 fog. Same wizard staff silhouette.
+- **Do this:** `variant: 'brigand'` skips the wash, hides staff/pads, starts unarmed Idle. persistMark names both clips + `skinned`. Dummy stays scarecrow. Do not flip pad Kind (pads A/B stay Kind=2).
+- **Seen in:** #428
+
+### 2026-09-08 — npc,respawn — dead Kind=2 occupy the pad; loot-at-pad pulls the revive
+- **Cause:** `HasHostileForPad` counts Hp=0, so `EnsureHostiles` never restocks a corpse. Pickup of the death shard is inside AggroRadius 3; the same-tick revive then melee-kills the VE client (greyout "You died").
+- **Do this:** `PendingHostileRespawn` linger (`HostileCorpseLingerMs`) + Pickup-near-corpse `ReviveHostile` on the same NpcId at SpawnXZ. Dummy is never queued. `?ve=respawn` sparks from origin and waits linger — do not walk to the shard. After a pad pickup in smokes, run past `HostileLeashRadius` before the next pull.
+- **Seen in:** #421
+
+### 2026-09-08 — humanoid,yaw — Tab-target + WASD plants Idle while the root still translates
+- **Cause:** `localTurningInPlace` fired on `|d|>0.7` even while wish-moving, so gait called `setHumanoidMoving(false)` and Idle speed 0. `sendMove` still slid the root — planted feet + translation = moonwalk.
+- **Do this:** Never plant Idle while wish-moving. Face living Tab-target only when `|yawDelta(wish, target)| < 0.85`; else face wish. `#334` speedRatio still owns stride. `?ve=face-target-walk` persistMark `Walk OK` + Walk + `skinned`.
+- **Seen in:** #432
+
+### 2026-09-08 — ve,kick — ?ve=kick / ?ve=stun persistMark required label Hostile
+- **Cause:** Harness `npcs.find(kind === NPC_KIND_HOSTILE)` + `hLabel === 'Hostile'`. KickNpc/StunNpc already `IsHostileKind` (Kind=2+3) and keybinds already send Brigand, but VE never named it.
+- **Do this:** Pick `NPC_KIND_BRIGAND` and persistMark `Brigand`. Dummy stays trainer. Do not add a Kind==2 check in Lib.cs. FindHostileNear in Kick/StunSmoke still pins Kind==2 on pads A/B.
+- **Seen in:** #452
+
+### 2026-09-08 — ve,tab — ?ve=tab-hostile persistMark required Kind=2 Hostile
+- **Cause:** Harness waited for two `NPC_KIND_HOSTILE` and `tgt.kind === HOSTILE` + `/hostile/i` on the target frame. `tabTargetCycle` already uses `isHostileKind`, so Tab visits Kind=3, but VE never named Brigand.
+- **Do this:** Cycle until Kind=2, Kind=3, and Dummy have been selected. Hold on Brigand. persistMark names `Brigand` + dummy selectable. Dummy stays in the cycle.
+- **Seen in:** #453
+
+### 2026-09-08 — ve,leash — ?ve=leash / ?ve=aggro pin pad A Kind=2
+- **Cause:** Harness `npcs.filter(kind === NPC_KIND_HOSTILE)` + pad A (3,7). TickHostile already `IsHostileKind`, so pad C Brigand pulls/leashes, but VE never named it.
+- **Do this:** Pull pad C (`HostileSpawnC*` 7,-3) Kind=3. persistMark `Leash OK` + `Brigand`. Dummy never aggro. Drop run stays past `HostileLeashRadius`.
+- **Seen in:** #455
+
+### 2026-09-08 — ve,nameplate — Brigand HP pip used the generic Dummy-green branch
+- **Cause:** `paintNameplate` treated `label === 'Dummy' || label === 'Hostile'` as first-class pips. Kind=3 already paints `Brigand` via `npcPlateName`, so the pip fell through to the generic green fill.
+- **Do this:** First-class pip for `Brigand` (violet). Kind=2 stays coral Hostile. Dummy stays parchment/green. Combat log already uses `npcPlateName`.
+- **Seen in:** #454
+
+### 2026-09-08 — ve,encounter — ?ve=encounter persistMark ignored Kind=3
+- **Cause:** Harness pulled pad A Kind=2 and required `plateLabel === 'Hostile'`. Kind=3 already exists as a skinned person; VE never named Brigand and a close fight follow hid pad C.
+- **Do this:** Require living Kind=2 + Kind=3 skinned + dummy trainer (no humanoid). persistMark names both. `capsule` = fail. Wide frame so pad C is in the shot.
+- **Seen in:** #456
+
+### 2026-09-08 — camera,trunk — origin cam-collision cannot hit midTree_*
+- **Cause:** E10.2 zoom max is 42 m. Mid ring starts ~48 m. Hero `+0.16` graze also misses thin mid cylinders (bole ~2.5 m).
+- **Do this:** Walk to ~13 m of a `midTree_*` whose ray is not a hero, then overshoot radius. Scale mid graze by `(r+pad)/dist`. persistMark must name `midTree_*` — hero-only hit = fail. Keep E1 Y-spring.
+- **Seen in:** #465 / #351
+
+### 2026-09-08 — ve,remote,sheath — persistMark Idle while VE camera is a Death pose
+- **Cause:** `?ve=remote-sheathed` latched unarmed Idle without `hp > 0` / not-Death. `FARDEL_SECOND_SHEATH` walked to (4, 2.5); leftover `FARDEL_SECOND_DIE` identity or pad-C path is a corpse. Camera still looked at the only remote.
+- **Do this:** Latch only living remotes (`hp > 0`, clip `Idle` not `Idle_Weapon` / Death, AABB height ≥ 1.2 m). Stop Death when swapping to live Idle. Stand SecondClient west of origin `(-2.5, 0)` (outside `HostileAggroRadius` 3), not (4, 2.5) and not stacked on yard-origin corpses. Apply `setHumanoidDead` before staff unequip. Mutate `camera.target` (do not `setTarget`).
+- **Seen in:** #448 / #463
+
+### 2026-09-08 — ve,r2 — wrangler put does not bust ve.sparkify.dev cache
+- **Cause:** Public VE is `Cache-Control: max-age=14400`. Overwriting `463/remote-sheathed.png` left Reviewer on the Death-pose etag (`cf-cache-status: HIT`, last-modified 21:29:41).
+- **Do this:** Put a **new key** (`463/remote-sheathed-2.png`) or `?v=` on the PR URL. Confirm Content-Length / etag / last-modified moved before asking Reviewer. `fish -c ve-upload.sh`.
+- **Seen in:** #448 / #463
+
+### 2026-09-08 — ve,remote,hop — persistMark Idle_Weapon while VE is a graveyard
+- **Cause:** `?ve=remote-hop` latched `/idle/i` + `y>0.12` and fell back to `remotes[0]`. Leftover `FARDEL_SECOND_DIE` identities / pad corpses filled the frame. SecondClient walked to (4, 2.5).
+- **Do this:** Latch only living remotes (`hp > 0`, clip `Idle_Weapon`, not Walk/Death, AABB height ≥ 1.0, `y > 0.12`). Stand SecondClient at (0, −6) (south of origin; pads A/B/C + dummy all >7 m). Do not stand at (−2.5, 0) (vendor / pad-B). Do not fall back to a dead remote. Mutate `camera.target`. New VE key if CDN HITs the old PNG.
+- **Seen in:** #449 / #464
+
+### 2026-09-08 — humanoid,gait — releasing WASD skates one Walk stride at 0 wish
+- **Cause:** `setHumanoidMoving(false)` stopped Walk then started Idle. One CPU-skin frame still applied mid-stride Walk (or no group) while sendMove was already 0.
+- **Do this:** `startLoop(idle)` first, zero Walk/Run `speedRatio`, then `stopIfPlaying(walk, idle)`. Same order as cast-cancel. `?ve=walk-stop` persistMark `/^Idle OK/` + skinned, not Walk.
+- **Seen in:** #450
+
+### 2026-09-08 — camera,body — zoom min 4.5 still clips Dummy / hostiles
+- **Cause:** `clampRadiusVsTrunks` used `lowerRadiusLimit` (4.5) as the collision floor. Dummy is ~5 m from origin; at min zoom the cam-to-player segment sits inside the scarecrow. Trees were far enough that the floor never mattered.
+- **Do this:** User zoom still stops at 4.5. Collision may pull to `CAM_COLLIDE_FLOOR` (~1.55). Live Dummy/Hostile/Brigand cylinders (corpses skipped). persistMark `Dummy` at `?ve=cam-collision-dummy`. Do not aggro.
+- **Seen in:** #466
+
