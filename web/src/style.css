@@ -608,27 +608,28 @@ body {
   50% { opacity: 1; }
 }
 
-/* Rest enter/exit — brief resting chrome on self-frame (client-only). */
+/* Rest enter/exit — brief resting chrome on self-frame (client-only).
+   Cool soft cyan-mint (fog-safe) — distinct from tonic amber + cast-bar amber (#116). */
 #selfFrame.resting {
-  border-color: rgba(90, 220, 140, 0.78);
+  border-color: rgba(80, 180, 160, 0.65);
   box-shadow:
-    0 0 16px rgba(80, 220, 140, 0.38),
+    0 0 10px rgba(60, 160, 145, 0.22),
     0 2px 12px rgba(0, 0, 0, 0.35),
-    inset 0 0 0 1px rgba(125, 255, 181, 0.28);
+    inset 0 0 0 1px rgba(100, 200, 185, 0.24);
 }
 
 .sfRest {
   margin-top: 4px;
-  color: #7dffb5;
+  color: #88d4c4;
   font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  text-shadow: 0 0 8px rgba(80, 255, 160, 0.5);
+  text-shadow: 0 0 6px rgba(70, 180, 160, 0.35);
 }
 .sfRest.hidden { display: none; }
 .sfRest.exiting {
-  color: #b8d0c4;
+  color: #b0cec8;
   text-shadow: none;
   opacity: 0.85;
 }
