@@ -3873,6 +3873,10 @@ async function main(): Promise<void> {
         if (prev != null && rHp < prev && rHp > 0) {
           playHumanoidFlinch(parts);
         }
+        setHumanoidDead(parts, rHp <= 0);
+        if (prev != null && prev <= 0 && rHp > 0) {
+          setHumanoidMoving(parts, false);
+        }
         remoteLastHp.set(key, rHp);
       }
     }
@@ -4872,6 +4876,11 @@ async function main(): Promise<void> {
       parts.root.position.x = samp.x;
       parts.root.position.y = samp.y;
       parts.root.position.z = samp.z;
+      const rHpNow = net?.getCharacterFor(key)?.hp;
+      if (typeof rHpNow === 'number' && rHpNow <= 0) {
+        setHumanoidDead(parts, true);
+        continue;
+      }
       let st = remoteWalkHold.get(key);
       if (!st) {
         st = { hold: 0, dx: 0, dz: 0 };
@@ -5997,6 +6006,36 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 8;
+      } else if (veFollow === 'remote-death') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = player.position.x;
+        let fy = player.position.y + 1.05;
+        let fz = player.position.z;
+        let best = -1;
+        for (const [, parts] of remoteMeshes) {
+          const pb = readHumanoidPlayback(parts);
+          const death =
+            pb.skinned > 0 && !!pb.playing && /death/i.test(pb.playing);
+          const hit =
+            pb.skinned > 0 && !!pb.playing && /recievehit/i.test(pb.playing);
+          const d = Vector3.Distance(parts.root.position, player.position);
+          const rank = (death ? 2000 : hit ? 1000 : 0) + d;
+          if (rank > best) {
+            best = rank;
+            fx = parts.root.position.x;
+            fy = parts.root.position.y + 0.35;
+            fz = parts.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.55;
+        camera.beta = Math.PI / 2.7;
+        camera.radius = 7;
       } else if (veFollow === 'cam-collision') {
         // Orbit into the nearest hero bole; collision keeps the camera in the clearing.
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
@@ -7492,6 +7531,87 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitRemoteCast, 180);
     };
     window.setTimeout(waitRemoteCast, 700);
+  }
+
+  // ?ve=remote-death — E8.20 other wizards RecieveHit on HP drop, Death at Hp=0.
+  if (ve === 'remote-death') {
+    camera.radius = 7;
+    camera.alpha = 0.55;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'remote-death') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-death: waiting for remotes…';
+    let ticks = 0;
+    let nudged = false;
+    let sawFlinch = false;
+    const waitRemoteDeath = () => {
+      if (!net) return;
+      ticks += 1;
+      if (!nudged && latestStatus.state === 'connected') {
+        nudged = true;
+        // Park local off the remote close-up (SecondClient DummyStrike at dummy pad).
+        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
+      }
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      const n = remoteMeshes.size;
+      const playbackOf = (hex: string) => {
+        const p = remoteMeshes.get(hex);
+        return p
+          ? readHumanoidPlayback(p)
+          : { skinned: 0, playing: null, idle: null, height: 0 };
+      };
+      const flinchRemote = remotes.find((r) => {
+        const pb = playbackOf(r.identityHex);
+        return pb.skinned > 0 && !!pb.playing && /recievehit/i.test(pb.playing);
+      });
+      const deadRemote = remotes.find((r) => {
+        const pb = playbackOf(r.identityHex);
+        const ch = net.getCharacterFor(r.identityHex);
+        return (
+          pb.skinned > 0 &&
+          !!pb.playing &&
+          /death/i.test(pb.playing) &&
+          (ch?.hp ?? 1) <= 0
+        );
+      });
+      if (flinchRemote) sawFlinch = true;
+      const preferred =
+        deadRemote ??
+        flinchRemote ??
+        remotes.find((r) => {
+          const ch = net.getCharacterFor(r.identityHex);
+          return typeof ch?.hp === 'number' && ch.hp < (ch.maxHp ?? ch.hp);
+        }) ??
+        remotes[0];
+      const pb = preferred
+        ? playbackOf(preferred.identityHex)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const deathOk =
+        pb.skinned > 0 && !!pb.playing && /death/i.test(pb.playing);
+      const hitOk =
+        pb.skinned > 0 && !!pb.playing && /recievehit/i.test(pb.playing);
+      const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+      if (mark) {
+        if (deathOk && preferred) {
+          mark.textContent = `Remote death OK · ${clip} · skinned ${pb.skinned}${sawFlinch ? ' · RecieveHit seen' : ''}`;
+        } else if (hitOk && preferred) {
+          mark.textContent = `Remote hit OK · ${clip} · skinned ${pb.skinned}`;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (n > 0 && preferred) {
+          const ch = net.getCharacterFor(preferred.identityHex);
+          mark.textContent = `VE remote-death: remotes ${n} · ${pb.playing ?? 'idle'} · skinned ${pb.skinned} · hp ${ch?.hp ?? '?'}/${ch?.maxHp ?? '?'}`;
+        } else {
+          mark.textContent =
+            'VE remote-death: remotes 0 (start tools/SecondClient FARDEL_SECOND_DIE=1)…';
+        }
+      }
+      if (deathOk) return;
+      if (ticks < 360) window.setTimeout(waitRemoteDeath, 160);
+    };
+    window.setTimeout(waitRemoteDeath, 700);
   }
 
   // ?ve=projectile — local Emberbolt thicker beam (+ Spark bolt VFX path); impact pop.

@@ -67,6 +67,68 @@ try
     conn.Reducers.EnsureTrainingDummy();
     await Frame(conn, 200);
 
+    var suicide = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_DIE"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
+    if (suicide)
+    {
+        // ?ve=remote-death: stand in-yard and DummyStrike until Hp=0 so the
+        // browser sees RecieveHit then Death. Move is rejected while dead.
+        var walkGuard = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < walkGuard)
+        {
+            if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+            {
+                await Frame(conn, 50);
+                continue;
+            }
+            var dx = targetX - cur.X;
+            var dz = targetZ - cur.Z;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist < 0.4f)
+            {
+                Console.WriteLine($"die-pad ({cur.X:F1}, {cur.Z:F1})");
+                break;
+            }
+            var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+            conn.Reducers.Move(dx * scale, dz * scale, false);
+            await Frame(conn, 50);
+        }
+        if (conn.Db.PlayerPose.Identity.Find(identity) is { } diePose)
+        {
+            Console.WriteLine($"READY die-pad ({diePose.X:F2}, {diePose.Z:F2}) identity={identity}");
+        }
+        while (true)
+        {
+            if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+            {
+                Console.WriteLine("dead — waiting respawn");
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            try { conn.Reducers.EnsureTrainingDummy(); } catch { /* ignore */ }
+            await Frame(conn, 80);
+            var dummy = FindDummy(conn);
+            if (dummy is null || dummy.Hp <= 0)
+            {
+                await Frame(conn, 200);
+                continue;
+            }
+            var hp = conn.Db.Character.Identity.Find(identity)?.Hp ?? 0;
+            Console.WriteLine($"DummyStrike hp={hp}");
+            try
+            {
+                conn.Reducers.DummyStrike();
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("DummyStrike: " + e.Message);
+            }
+            await Frame(conn, 220);
+        }
+    }
+
     // In-range pads vs dummy (5,0). CastRange=8; (-3,3) was OOR so Emberbolt never
     // stuck CastingSpellId. Walk between pads for ?ve=remote-walk, then stand-cast
     // for ?ve=remote-cast (Move during windup cancels).
