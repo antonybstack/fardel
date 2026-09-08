@@ -112,6 +112,7 @@ try
 
     // Silence must not freeze locomotion (≠ stun). Prove Move while CastLockedUntil is live,
     // before waiting GCD (silence window is only CastSilenceMs).
+    var lockTick = Environment.TickCount64;
     var poseBefore = conn.Db.PlayerPose.Identity.Find(id)!;
     await ExpectMoveCommit(conn, Movement.MaxStepMeters, 0f, jump: false, "silence xz");
     await PumpUntil(() =>
@@ -141,7 +142,13 @@ try
     }
 
     // Wait past GCD so silence (not GCD) is the reject reason.
-    await DelayPump(conn, Combat.GcdMs + 80);
+    // Subtract time spent proving Move so we still land inside CastSilenceMs.
+    var usedMs = (int)(Environment.TickCount64 - lockTick);
+    var gcdWait = Combat.GcdMs + 80 - usedMs;
+    if (gcdWait > 0)
+    {
+        await DelayPump(conn, gcdWait);
+    }
     await TopUpMana(conn, id);
 
     // Ensure still locked
