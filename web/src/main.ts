@@ -3269,6 +3269,8 @@ async function main(): Promise<void> {
   /** Grounded interp parks at u=1 between 20Hz snaps; hold Walk across the gap. */
   const REMOTE_WALK_HOLD_S = 0.15;
   const REMOTE_WALK_SPD = 0.55;
+  /** Full wish ~4.5 m/s is Run; slower interp segments stay Walk (#327). */
+  const REMOTE_RUN_SPD = 2.4;
   const remoteWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
   const proxyInterps = new Map<string, PoseInterp>();
 
@@ -4448,7 +4450,8 @@ async function main(): Promise<void> {
         st.hold -= dt;
       }
       const moving = st.hold > 0 && samp.y <= 0.05;
-      setHumanoidMoving(parts, moving);
+      const spd = Math.hypot(st.dx, st.dz);
+      setHumanoidMoving(parts, moving, spd >= REMOTE_RUN_SPD);
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
         const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
@@ -4700,14 +4703,22 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        setHumanoidMoving(humanoid, keys.size > 0 && !isAirborne);
+        const moving = keys.size > 0 && !isAirborne;
+        const running =
+          moving &&
+          (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
+        setHumanoidMoving(humanoid, moving, running);
       } else {
         moveAccumulator = 0;
         setHumanoidMoving(humanoid, false);
       }
     } else {
       moveAccumulator = 0;
-      setHumanoidMoving(humanoid, !isAirborne && keys.size > 0);
+      const moving = !isAirborne && keys.size > 0;
+      const running =
+        moving &&
+        (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
+      setHumanoidMoving(humanoid, moving, running);
     }
     humanoid.root.scaling.set(1, 1, 1);
 
@@ -5333,11 +5344,12 @@ async function main(): Promise<void> {
         camera.radius = 8;
       } else if (
         veFollow === 'walk' ||
+        veFollow === 'run' ||
         veFollow === 'yaw' ||
         veFollow === 'jump-pose' ||
         veFollow === 'look-at'
       ) {
-        // Side play-cam so Walk stride / wish facing / hop pose / look-at reads.
+        // Side play-cam so Walk/Run stride / wish facing / hop pose / look-at reads.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -6179,6 +6191,55 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitWalk, 200);
     };
     window.setTimeout(waitWalk, 600);
+  }
+
+  // ?ve=run — E8.2 play-cam Run_Weapon (fast/forward gait, not Walk / T-pose).
+  if (ve === 'run') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'run') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE run: waiting for Connected…';
+    let ticks = 0;
+    const waitRun = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE run: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitRun, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitRun, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitRun, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      setHumanoidMoving(humanoid, true, true);
+      const pb = readHumanoidPlayback(humanoid);
+      const runOk =
+        pb.skinned > 0 &&
+        !!pb.playing &&
+        /run/i.test(pb.playing);
+      if (mark) {
+        mark.textContent = runOk
+          ? `Run OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+      }
+      if (ticks < 240) window.setTimeout(waitRun, 200);
+    };
+    window.setTimeout(waitRun, 600);
   }
 
   // ?ve=yaw — E2.4 face camera-relative wish (slerp, no client positions).
