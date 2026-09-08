@@ -783,7 +783,9 @@ body {
 
 
 
-/* Keybind legend overlay — toggle H / ?ve=keys (client-only). */
+/* Keybind legend overlay — toggle H / ?ve=keys / ?ve=keys-read (client-only).
+   Classic MMO help plate: dark translucent + cool silver border (chat/bag family).
+   Readable under locked #39 cyan fog — no fog/sun/hemi edits. */
 #keysLegend {
   position: absolute;
   left: 50%;
@@ -793,53 +795,107 @@ body {
   pointer-events: none;
   width: min(580px, 94vw);
   padding: 10px 12px 9px;
-  background: rgba(8, 12, 24, 0.88);
-  border: 1px solid rgba(196, 160, 106, 0.4);
-  border-radius: 10px;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  background: rgba(6, 10, 20, 0.92);
+  border: 1px solid rgba(168, 178, 196, 0.42);
+  border-radius: 8px;
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.58),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.05);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 #keysLegend.hidden {
   display: none;
 }
 
+/* Cool silver head (override warm bag gold while legend is open). */
+#keysLegend .bagTitle {
+  color: #d8dde6;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+#keysLegend .bagKey {
+  color: #1a2030;
+  background: linear-gradient(180deg, #eef1f6 0%, #cfd6e2 100%);
+  border: 1px solid rgba(190, 200, 214, 0.9);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
 #keysLegend .klRows {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
 }
 
 #keysLegend .klRow {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 8px;
+  align-items: center;
+  gap: 5px 8px;
+  padding: 6px 2px 7px;
+  border-top: 1px solid rgba(168, 178, 196, 0.18);
+}
+
+#keysLegend .klRow:first-child {
+  border-top: none;
+  padding-top: 2px;
+}
+
+/* Group labels — presentation only; existing binds unchanged. */
+#keysLegend .klRow::before {
+  content: attr(data-group);
+  flex: 0 0 auto;
+  min-width: 3.6em;
+  margin-right: 4px;
+  color: #9aa3b2;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
 }
 
 #keysLegend .klChip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #c8d6f0;
+  color: #d6dce8;
   font-size: 12px;
   line-height: 1.3;
   padding: 2px 4px 2px 2px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
 }
 
+/* Light keycap on dark plate — crisp under cyan fog. */
 #keysLegend .klChip kbd {
   display: inline-block;
-  color: #9ec0ff;
+  color: #1a2030;
   font-family: inherit;
   font-size: 11px;
   font-weight: 700;
-  border: 1px solid rgba(106, 162, 255, 0.35);
+  border: 1px solid rgba(190, 200, 214, 0.88);
   border-radius: 4px;
   padding: 1px 6px;
-  background: rgba(20, 32, 56, 0.65);
+  background: linear-gradient(180deg, #eef1f6 0%, #c8d0de 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.42);
   min-width: 1.1em;
   text-align: center;
+  text-shadow: none;
+}
+
+#keysLegend .bagFoot {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(168, 178, 196, 0.16);
+  color: #7e8a9c;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 /* Party member frames — compact roster under status (name/hex + HP + dist/pose). */
