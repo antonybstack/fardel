@@ -9038,7 +9038,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 400);
   }
 
-  // ?ve=trade-feel — showcase all trade offer flow states (#162).
+  // ?ve=trade-feel — stack incoming/waiting/accepted/cancelled chrome (#162).
   if (ve === 'trade-feel') {
     camera.radius = 13;
     camera.alpha = Math.PI / 2.15;
@@ -9047,31 +9047,42 @@ async function main(): Promise<void> {
   if (ve === 'trade-feel') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE trade-feel: seeding trade state stack…';
-    let phase = 0;
     const seedTradeFeel = () => {
       const root = document.getElementById('toastStack');
       if (root) root.innerHTML = '';
-      // Cycle through all trade states to show distinct chrome (#162).
-      if (phase === 0) {
-        pushSystemToast('tradeIncoming', 'Trade offer from a1b2c3d4… · ember_shard · T accept · Y decline', TOAST_VE_TTL_MS);
-      } else if (phase === 1) {
-        pushSystemToast('tradeWaiting', 'Offering +5 XP to e5f6g7h8… · awaiting accept · Y cancel', TOAST_VE_TTL_MS);
-      } else if (phase === 2) {
-        pushSystemToast('tradeAccepted', 'Trade accepted · received ember_shard', TOAST_VE_TTL_MS);
-      } else {
-        pushSystemToast('tradeCancelled', 'Trade cancelled', TOAST_VE_TTL_MS);
-      }
+      pushSystemToast(
+        'tradeIncoming',
+        'Trade offer from a1b2c3d4… · ember_shard · T accept · Y decline',
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'tradeWaiting',
+        'Offering +5 XP to e5f6g7h8… · awaiting accept · Y cancel',
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'tradeAccepted',
+        'Trade accepted · received ember_shard',
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast('tradeCancelled', 'Trade cancelled', TOAST_VE_TTL_MS);
     };
-    const cyclePhase = () => {
-      phase = (phase + 1) % 4;
+    const hold = () => {
       seedTradeFeel();
-      window.setTimeout(cyclePhase, 3500);
+      const kinds = toastKindsPresent();
+      const ok =
+        kinds.has('tradeIncoming') &&
+        kinds.has('tradeWaiting') &&
+        kinds.has('tradeAccepted') &&
+        kinds.has('tradeCancelled');
+      if (mark) {
+        mark.textContent = ok
+          ? 'Trade-feel OK · incoming/waiting/accepted/cancelled · distinct chrome · #162'
+          : 'VE trade-feel: waiting toast stack…';
+      }
+      window.setTimeout(hold, 2800);
     };
-    seedTradeFeel();
-    window.setTimeout(cyclePhase, 3500);
-    if (mark) {
-      mark.textContent = 'Trade-feel OK · incoming/waiting/accepted/cancelled · distinct chrome · #162';
-    }
+    hold();
   }
 
 
@@ -9597,7 +9608,11 @@ async function main(): Promise<void> {
       const ch = net.getCharacter();
       if (ch) updateBagPanel(ch);
       const trade = net.getTrade();
-      const toastOk = toastKindsPresent().has('trade');
+      const kinds = toastKindsPresent();
+      const toastOk =
+        kinds.has('tradeWaiting') ||
+        kinds.has('tradeAccepted') ||
+        kinds.has('tradeIncoming');
       const logOk = combatLogKindsPresent().has('trade');
       const shard = !!ch?.hasEmberShard;
 
@@ -9664,8 +9679,8 @@ async function main(): Promise<void> {
           .then(() => {
             pushCombatLog('trade', `Offered ember_shard → ${target.identityHex.slice(0, 8)}…`);
             pushSystemToast(
-              'trade',
-              `Trade offered · ember_shard · waiting accept`,
+              'tradeWaiting',
+              `Offering ember_shard to ${target.identityHex.slice(0, 8)}… · awaiting accept · Y cancel`,
               TOAST_VE_TTL_MS,
             );
           })
