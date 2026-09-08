@@ -262,7 +262,7 @@ static async Task MoveTo(DbConnection conn, Identity id, float tx, float tz)
         var dist = MathF.Sqrt(dx * dx + dz * dz);
         if (dist < 0.5f) return;
         var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
-        conn.Reducers.Move(dx * scale, dz * scale);
+        conn.Reducers.Move(dx * scale, dz * scale, false);
         await Frame(conn, 16);
     }
 }

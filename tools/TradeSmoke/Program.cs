@@ -230,7 +230,7 @@ static async Task MoveTo(DbConnection mover, Identity id, float x, float z, DbCo
         var dx = x - p.X;
         var dz = z - p.Z;
         if (dx * dx + dz * dz < 0.05f) break;
-        mover.Reducers.Move(dx, dz);
+        mover.Reducers.Move(dx, dz, false);
         await DelayPumpBoth(mover, other, 40);
     }
     await PumpUntilBoth(() =>

@@ -36,7 +36,7 @@ try
     // Walk far first, then seed loot at origin so Pickup must fail range.
     for (var i = 0; i < 24; i++)
     {
-        conn.Reducers.Move(Loot.PickupRangeMeters, 0f);
+        conn.Reducers.Move(Loot.PickupRangeMeters, 0f, false);
         await DelayPump(conn, 40);
     }
     await PumpUntil(() =>
@@ -106,7 +106,7 @@ try
         {
             break;
         }
-        conn.Reducers.Move(dx, dz);
+        conn.Reducers.Move(dx, dz, false);
         await DelayPump(conn, 40);
     }
     await PumpUntil(() =>
