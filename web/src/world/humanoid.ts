@@ -855,7 +855,7 @@ export function playHumanoidFlinch(parts: HumanoidParts): void {
   a.flinch.start(false, 1.0, a.flinch.from, a.flinch.to, false);
 }
 
-/** Emberbolt windup: loop Spell until CastEndsAt / cancel / interrupt. */
+/** Windup: loop Spell until CastEndsAt / cancel / interrupt (local + remotes). */
 export function setHumanoidCasting(
   parts: HumanoidParts,
   casting: boolean,
@@ -865,6 +865,7 @@ export function setHumanoidCasting(
   if (!casting) {
     if (!a.casting) return;
     a.casting = false;
+    a.turning = false;
     stopIfPlaying(a.cast);
     if (a.cast) a.cast.speedRatio = 1;
     if (!a.dead && !a.airborne) setHumanoidMoving(parts, false);
@@ -873,6 +874,7 @@ export function setHumanoidCasting(
   if (a.dead || !a.cast) return;
   const already = a.casting;
   a.casting = true;
+  a.turning = false;
   a.airborne = false;
   stopIfPlaying(a.idle);
   stopIfPlaying(a.walk);
