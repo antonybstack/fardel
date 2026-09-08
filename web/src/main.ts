@@ -6292,7 +6292,7 @@ async function main(): Promise<void> {
       if (latestStatus.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Place-wow OK · huge trees · receding path · second silhouette · fog · no capsules · Connected';
+            'Place-wow OK · huge trees · receding path · hero variety · fog · no capsules · Connected';
         }
         return;
       }
