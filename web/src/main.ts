@@ -1107,7 +1107,8 @@ type SystemToastKind =
   | 'outOfRange'
   | 'bandage'
   | 'canvasFocus'
-  | 'bag';
+  | 'bag'
+  | 'zoomLimit';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1172,11 +1173,13 @@ function pushSystemToast(
                                               ? 'STUN'
                                               : kind === 'outOfRange'
                                                 ? 'RANGE'
-                                                : kind === 'canvasFocus'
-                                                  ? 'FOCUS'
-                                                  : kind === 'bag'
-                                                    ? 'BAG'
-                                                    : 'SAY';
+                                : kind === 'canvasFocus'
+                                  ? 'FOCUS'
+                                  : kind === 'bag'
+                                    ? 'BAG'
+                                    : kind === 'zoomLimit'
+                                      ? 'ZOOM'
+                                      : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1773,6 +1776,25 @@ async function createScene(engine: Engine): Promise<{
     | undefined;
   if (pointers) {
     pointers.buttons = [2];
+  }
+
+  // Toast only on overscroll so the #30 soft clamp stays (#192).
+  let lastZoomLimitToastMs = 0;
+  const ZOOM_LIMIT_TOAST_DEBOUNCE_MS = 800;
+  if (canvas) {
+    canvas.addEventListener('wheel', (e) => {
+      const now = Date.now();
+      const delta = e.deltaY;
+      const currentRadius = camera.radius;
+      const lowerLimit = camera.lowerRadiusLimit ?? 4;
+      const upperLimit = camera.upperRadiusLimit ?? 80;
+      const isAtMin = currentRadius <= lowerLimit && delta < 0;
+      const isAtMax = currentRadius >= upperLimit && delta > 0;
+      if ((isAtMin || isAtMax) && now - lastZoomLimitToastMs > ZOOM_LIMIT_TOAST_DEBOUNCE_MS) {
+        lastZoomLimitToastMs = now;
+        pushSystemToast('zoomLimit', isAtMin ? 'Zoom min' : 'Zoom max', 1200);
+      }
+    }, { passive: true });
   }
 
   if (canvas) {
@@ -7051,6 +7073,32 @@ async function main(): Promise<void> {
       mark.textContent =
         `Keys-read OK · H toggles · ${chips} binds · ${groups || 'Move/Combat/Social'} · dark plate · #115 fog`;
     }
+  }
+
+  // ?ve=zoom-stop — wheel into lowerRadiusLimit (deltaY<0 zooms in / min).
+  if (ve === 'zoom-stop') {
+    const lower = camera.lowerRadiusLimit ?? 4;
+    camera.radius = lower;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE zoom-stop: seeding Zoom min…';
+    const canvasEl = document.getElementById('renderCanvas');
+    const hold = () => {
+      camera.radius = lower;
+      canvasEl?.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }),
+      );
+      const toast = document.querySelector('.sysToast.zoomLimit');
+      const ok = !!toast && /Zoom min/i.test(toast.textContent || '');
+      if (mark) {
+        mark.textContent = ok
+          ? 'Zoom-stop OK · Zoom min toast · wheel deltaY<0 at lowerRadiusLimit · #192'
+          : 'VE zoom-stop: firing wheel deltaY<0 at min…';
+      }
+      window.setTimeout(hold, 900);
+    };
+    window.setTimeout(hold, 500);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
