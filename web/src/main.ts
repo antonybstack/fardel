@@ -4727,10 +4727,15 @@ async function main(): Promise<void> {
     // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
     // radius from current cam position → target; walking forward increases that
     // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
-    // Skip follow for ?ve=vendor-stall / vendor-panel / vendor-interact so the shop silhouette stays framed.
+    // Skip follow for framed VE shots so the subject stays on-camera.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
-      if (veFollow !== 'vendor-stall' && veFollow !== 'vendor-panel' && veFollow !== 'vendor-interact') {
+      if (
+        veFollow !== 'vendor-stall' &&
+        veFollow !== 'vendor-panel' &&
+        veFollow !== 'vendor-interact' &&
+        veFollow !== 'dummy-hp'
+      ) {
         const follow = player.position.add(new Vector3(0, 1.35, 0));
         const radius = camera.radius;
         camera.setTarget(follow);
