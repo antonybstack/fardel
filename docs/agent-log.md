@@ -338,3 +338,33 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** User zoom still stops at 4.5. Collision may pull to `CAM_COLLIDE_FLOOR` (~1.55). Live Dummy/Hostile/Brigand cylinders (corpses skipped). persistMark `Dummy` at `?ve=cam-collision-dummy`. Do not aggro.
 - **Seen in:** #466
 
+### 2026-09-08 — camera,hop — bole Y-extent misses the airborne cam ray
+- **Cause:** `clampRadiusVsTrunks` dropped hits when `target.y + tHit*dy` was above collider `y1`. Short `*_trunk` AABBs miss the hop-cam ray; land re-hits and punches radius. E1 Y-spring is not the punch.
+- **Do this:** Treat hero/mid boles as infinite vertical cylinders (skip Y clip). Keep Y-spring; do not zero inertial on the play follow. persistMark `?ve=cam-collision-hop` must name a trunk while `y` is above ground. Grounded-only pass = fail.
+- **Seen in:** #483
+
+### 2026-09-08 — npc,tab — first Tab after a pull follows npcId, not aggro
+- **Cause:** `tabTargetCycle` sorted in-range hostiles by id. From origin both pads sit in CastRange 8, so Tab can land on pad B while pad A (or C) is the one swinging.
+- **Do this:** Sort in-range hostiles aggroed-first, then id. Dummy stays after hostiles (trainer, still in the cycle). persistMark `?ve=tab-aggro` names the pulled kind. Do not `net.cycleTarget()`.
+- **Seen in:** #484 / #358 / #361
+
+### 2026-09-08 — ve,remote,hop — persistMark hop OK while the PNG is You on dirt
+- **Cause:** `?ve=remote-hop` only aimed at a remote while `root.y>0.12` that frame and fell back to `player.position`. persistMark could still read apex (`y=1.68`) from waitHop; Playwright then screenshotted the grounded local. Aiming at `root.y+0.85` also recenters the jumper so a 1.5 m hop still reads as standing.
+- **Do this:** Always mutate `camera.target` to the living hop remote’s XZ at **ground** (`y=0.35`), never local. Hide the local wizard. persistMark requires airborne Idle_Weapon + skinned + staff. New VE key — CDN HITs old `464/remote-hop.png` / `464/remote-hop-2.png`.
+- **Seen in:** #449 / #464
+
+### 2026-09-08 — npc,kick — KickNpc(vendorId) landed on Dummy
+- **Cause:** `YardVendor` AutoInc and `Npc` AutoInc both start at 1. KickNpc/StunNpc look up `Npc` first, so `vendor.VendorId == 1` is the trainer. Kind=3 corpse was living-path only.
+- **Do this:** Seed `YardVendor.VendorId = Vendor.SeedId` (9001). Missing Npc + `YardVendor.Find` → `Invalid target`. `Hp <= 0` is `Target dead` before range (Kind=3 corpse). Dummy stays `NpcId` lookup.
+- **Seen in:** #486
+
+### 2026-09-08 — ve,hunt — hunt-loop camera sits on pad A so Kind=3 never reads
+- **Cause:** `?ve=hunt-loop` Tabbed the first in-range hostile (id-sort Kind=2) and framed `(2.2, 3.4)` / loot `(3.1, 5.4)` — pad A. Pad C Brigand is `(7, -3)`.
+- **Do this:** Cycle Tab until Kind=3. Frame pad C. persistMark names `Brigand`. Stay at origin (outside AggroRadius). Dummy trainer. Capsule = fail.
+- **Seen in:** #485 / #422
+
+### 2026-09-08 — tsc,release,hop — npm run build fails TS6133 remoteHopLatch
+- **Cause:** #490 hop cam writes `remoteHopLatch` (airborne remote hex) but never reads it. `tsconfig` `noUnusedLocals` fails Pages `tsc --noEmit`.
+- **Do this:** `void remoteHopLatch;` next to the declaration (same as `_latestXpAtMs`). Do not invent leftover-remote hide from this lane.
+- **Seen in:** #490 / #495 / pin e9382135
+

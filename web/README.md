@@ -95,6 +95,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=character-wow` | Idle_Weapon / sheathed Idle / Walk (face dummy) / Run / hop / Spell plus a Kind=2 person (not capsule); Dummy trainer (#433 / #451); HUD `Character wow OK · … · sheathed · Hostile Idle_Weapon · skinned 1 · dummy trainer` |
 | `?ve=face-target-walk` | Walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432); HUD `Walk OK · Walk · skinned 1 · face target` |
 | `?ve=tab-hostile` | Tab visits Kind=2 and Kind=3; dummy still in cycle (#453); HUD `Tab-hostile OK · Brigand #… · dummy selectable · #453`. |
+| `?ve=tab-aggro` | After a pull, Tab selects the **aggroed** NPC (not lowest id) while Kind=2 and Kind=3 are in range (#484); HUD `Tab-aggro OK · Brigand · pulled · dummy trainer`. Dummy stays in the cycle |
 | `?ve=hostile-read` | Hostile coral plate vs Dummy parchment vs Vendor mint at play cam (#359); HUD `Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359`. |
 | `?ve=hostile-types` | Kind=2 Hostile coral vs Kind=3 Brigand violet vs Dummy parchment vs Vendor mint (#418); HUD `Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418`. |
 | `?ve=brigand-plate` | Kind=2 Hostile coral vs Kind=3 Brigand violet nameplates + combat log names both (#454); HUD `Brigand-plate OK · Hostile coral · Brigand violet · Dummy parchment · log both · #454`. |
@@ -102,7 +103,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=stun` | StunNpc Kind=3 Brigand lock + dummy still stunnable (#452); HUD `Stun OK · Brigand #… · lock · dummy stunnable · #452`. Walk to ~4m (StunRange 5, AggroRadius 3). |
 | `?ve=respawn` | Kill pad A from origin (outside aggro), linger revive at home pad (#421); HUD `Respawn OK · pad A · dummy trainer · #421`. Do not walk into AggroRadius. Dummy stays trainer. |
 | `?ve=encounter` | Kind=2 Hostile + Kind=3 Brigand as people, dummy trainer, pad A fight (#456); HUD `Encounter OK · Hostile · Brigand · dummy trainer · fighting · skinned · #456`. capsule = fail. |
-| `?ve=hunt-loop` | Tab a hostile, Spark hit, kill, corpse loot at play cam (#422); HUD `Hunt-loop OK · Tab · hit · death · loot · dummy trainer · #422`. Stay outside AggroRadius. Dummy stays trainer. |
+| `?ve=hunt-loop` | Tab Kind=3 Brigand, Spark hit, kill, corpse loot at play cam (#485 / #422); HUD `Hunt-loop OK · Tab · hit · death · loot · Brigand · dummy trainer`. Stay outside AggroRadius. Dummy stays trainer. Capsule = fail |
 | `?ve=keys` | Open keybind legend overlay (H); HUD `Keys legend OK · …` (`ve/babylon-keys.png`) |
 | `?ve=keys-read` | Keybind legend chrome readability under #39 cyan fog (#115); HUD `Keys-read OK · …` |
 | `?ve=first-session` | First-connect H legend flash + canvas-focus toast (#134); HUD `First-session OK · H legend · canvas focus · #134` |
@@ -138,6 +139,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=cam-collision` | Orbit into a **hero** bole; camera stays in the clearing (#351); HUD `Cam-collision OK · r=… · heroTree… · clearing` |
 | `?ve=cam-collision-mid` | Orbit into a **midTree_*** bole; camera stays in the open (#465); HUD `Cam-collision OK · r=… · midTree_… · mid`. Hero-only hit = fail |
 | `?ve=cam-collision-dummy` | Min-zoom orbit into **Dummy**; camera stays outside the scarecrow (#466); HUD `Cam-collision OK · Dummy · r=… · min-zoom`. Living Hostile/Brigand use the same cylinders; corpses ignored |
+| `?ve=cam-collision-hop` | Space-hop while orbiting into a **hero** (or mid) bole (#483); HUD `Cam-collision OK · r=… · heroTree… · hop y=…`. Grounded-only hit = fail. E1 Y-spring stays |
 | `?ve=fps` | Dense play-cam FPS HUD ≥30 (#341); persistMark `FPS OK · N fps (floor 30) · dense play-cam` |
 | `?ve=vendor-panel` | Vendor buy/sell panel chrome vs #39 fog (#106) — bronze buy / mint sell on silver plate; interim capture `/workspace/ve-capture/pr-vendor-panel.png` (no `ve/*.png` commit) |
 | `?ve=vendor-stall` | Shop silhouette posts+counter+awning under #39 fog (#58) (`ve/babylon-vendor-stall.png`) |

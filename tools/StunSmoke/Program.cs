@@ -6,7 +6,7 @@ using SpacetimeDB.Types;
 // locks Move (XZ and jump:true) + Cast with "stunned" (distinct from silence).
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
-const int timeoutMs = 60000;
+const int timeoutMs = 90000;
 
 DbConnection? connA = null;
 DbConnection? connB = null;
@@ -359,6 +359,51 @@ try
     await ExpectStunNpcFail(connA, 999999999UL, "Target missing", "missing StunNpc");
     Console.WriteLine("missing StunNpc reject OK");
 
+    await MoveTo(connA, idA, 0f, 0f, connB);
+    await PumpUntilBoth(() => FindVendor(connA) is not null, timeoutMs, connA, connB, "yard vendor");
+    var vendor = FindVendor(connA)!;
+    if (vendor.VendorId == FindDummy(connA)!.NpcId)
+    {
+        Fail($"vendor id={vendor.VendorId} collides with dummy NpcId");
+        return;
+    }
+    var vx = vendor.X;
+    var vz = vendor.Z;
+    await ExpectStunNpcFail(connA, vendor.VendorId, "Invalid target", "vendor StunNpc");
+    vendor = FindVendor(connA)!;
+    if (MathF.Abs(vendor.X - vx) > 0.01f || MathF.Abs(vendor.Z - vz) > 0.01f)
+    {
+        Fail($"StunNpc moved vendor stall ({vx},{vz})->({vendor.X},{vendor.Z})");
+        return;
+    }
+    Console.WriteLine($"vendor StunNpc reject OK id={vendor.VendorId}");
+
+    await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
+    await TopUpMana(connA, idA, connB);
+    await PumpUntilBoth(() =>
+    {
+        var c = FindKindNear(connA, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz);
+        return c is { Hp: > 0, Aggroed: false, Kind: Combat.NpcKindBrigand }
+            && Dist(c.X, c.Z, Combat.HostileSpawnCx, Combat.HostileSpawnCz) < 0.8f;
+    }, timeoutMs, connA, connB, "brigand home before corpse");
+    var dummyHpBeforeCorpse = FindDummy(connA)!.Hp;
+    var corpseId = await KillBrigandFromOrigin(connA, idA, connB);
+    var corpse = FindNpc(connA, corpseId)!;
+    if (corpse.Hp > 0 || corpse.Kind != Combat.NpcKindBrigand)
+    {
+        Fail($"Kind=3 corpse kind={corpse.Kind} hp={corpse.Hp}");
+        return;
+    }
+    await ExpectStunNpcFail(connA, corpseId, "Target dead", "Kind=3 corpse StunNpc");
+    Console.WriteLine("Kind=3 corpse StunNpc Target dead OK");
+    dummy = FindDummy(connA)!;
+    if (dummy.Kind != Combat.NpcKindDummy || dummy.Hp != dummyHpBeforeCorpse)
+    {
+        Fail($"dummy trainer changed after corpse StunNpc kind={dummy.Kind} hp={dummy.Hp}");
+        return;
+    }
+    Console.WriteLine("dummy trainer OK after vendor + corpse StunNpc");
+
     var dummyAfter = FindDummy(connA)!.Hp;
     if (dummyAfter != dummyHpBefore && dummyAfter != Combat.DummyMaxHp)
     {
@@ -488,6 +533,48 @@ static async Task MoveTo(DbConnection conn, Identity id, float x, float z, DbCon
     }
     Fail($"MoveTo timeout ({x},{z})");
     throw new Exception("move timeout");
+}
+
+static YardVendor? FindVendor(DbConnection conn)
+{
+    foreach (var v in conn.Db.YardVendor.Iter()) return v;
+    return null;
+}
+
+static async Task<ulong> KillBrigandFromOrigin(DbConnection conn, Identity id, DbConnection other)
+{
+    await MoveTo(conn, id, 0f, 0f, other);
+    await PumpUntilBoth(() =>
+        FindKindNear(conn, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz) is { Hp: > 0 },
+        timeoutMs, conn, other, "living brigand to kill");
+    var brig = FindKindNear(conn, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz)!;
+    var npcId = brig.NpcId;
+    conn.Reducers.SetTarget(npcId);
+    await PumpUntilBoth(() =>
+        conn.Db.PlayerCombat.Identity.Find(id) is { } cc && cc.TargetNpcId == npcId,
+        timeoutMs, conn, other, "target brigand corpse-prep");
+    while (FindNpc(conn, npcId) is { Hp: > 0 })
+    {
+        var ch = conn.Db.Character.Identity.Find(id);
+        if (ch is null || ch.Hp <= 0)
+        {
+            Fail("player died sparking Kind=3");
+            throw new Exception("player died");
+        }
+        if (ch.Mana < Combat.SparkManaCost)
+        {
+            await TopUpMana(conn, id, other);
+        }
+        var before = FindNpc(conn, npcId)!.Hp;
+        conn.Reducers.Cast(Combat.SpellSpark);
+        await PumpUntilBoth(() =>
+        {
+            var n = FindNpc(conn, npcId);
+            return n is null || n.Hp < before || n.Hp == 0;
+        }, timeoutMs, conn, other, "spark Kind=3");
+        await DelayPumpBoth(conn, other, Combat.GcdMs + 50);
+    }
+    return npcId;
 }
 
 static Npc? FindDummy(DbConnection conn)

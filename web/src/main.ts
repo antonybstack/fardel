@@ -171,7 +171,7 @@ function nearestLootInPickupRange(
   return best;
 }
 
-/** Tab cycle: in-range hostiles first, then dummy (still selectable), then the rest (#358). */
+/** Tab cycle: aggroed in-range hostiles first, then other in-range hostiles, then dummy (#484 / #358). */
 function tabTargetCycle(net: GameNet): NpcView[] {
   const alive = net.getNpcs().filter((n) => n.hp > 0);
   const pose = net.getLocalPose();
@@ -186,7 +186,11 @@ function tabTargetCycle(net: GameNet): NpcView[] {
     a.npcId < b.npcId ? -1 : a.npcId > b.npcId ? 1 : 0;
   const hostilesNear = alive
     .filter((n) => isHostileKind(n.kind) && inRange(n))
-    .sort(byId);
+    .sort((a, b) => {
+      const ag = Number(b.aggroed) - Number(a.aggroed);
+      if (ag !== 0) return ag;
+      return byId(a, b);
+    });
   const dummy = alive.filter((n) => n.kind === NPC_KIND_DUMMY);
   const hostilesFar = alive
     .filter((n) => isHostileKind(n.kind) && !inRange(n))
@@ -2254,8 +2258,12 @@ function clampRadiusVsTrunks(
     if (disc < 0) continue;
     const tHit = (-b - Math.sqrt(disc)) / (2 * a);
     if (tHit <= CAM_TRUNK_MIN_HIT || tHit >= best) continue;
-    const y = target.y + tHit * dy;
-    if (y < t.y0 - 0.4 || y > t.y1 + 0.4) continue;
+    // Hero/mid boles are infinite vertical cylinders. Finite y1 (short *_trunk
+    // AABB) misses the hop-cam ray, then land re-hits = punch (#483).
+    if (t.kind !== 'hero' && t.kind !== 'mid') {
+      const y = target.y + tHit * dy;
+      if (y < t.y0 - 0.4 || y > t.y1 + 0.4) continue;
+    }
     best = tHit;
     hit = t.name;
   }
@@ -3348,6 +3356,17 @@ function finishNpcLifeFx(mesh: NpcMesh, fx: NpcLifeFx): void {
   }
 }
 
+/** Ground-level look-at so an airborne remote reads as hop, not a centered stand. */
+function hopBodyLook(parts: HumanoidParts): { x: number; y: number; z: number } {
+  const p = parts.root.position;
+  return { x: p.x, y: 0.35, z: p.z };
+}
+
+function hideLocalForRemoteHop(player: Mesh, plate: { mesh: Mesh }): void {
+  player.setEnabled(false);
+  plate.mesh.setEnabled(false);
+}
+
 async function main(): Promise<void> {
   const canvas = document.getElementById('renderCanvas');
   if (!(canvas instanceof HTMLCanvasElement)) {
@@ -3383,6 +3402,8 @@ async function main(): Promise<void> {
   let camCollideThisFrame = false;
   /** Frozen mid bole for `?ve=cam-collision-mid` so walk-in does not retarget. */
   let camCollisionMidAimed: TrunkCollider | null = null;
+  /** Frozen hero bole for `?ve=cam-collision-hop`. */
+  let camCollisionHopAimed: TrunkCollider | null = null;
   const npcMeshes = new Map<string, NpcMesh>();
   scene.onBeforeRenderObservable.add(() => {
     if (!camCollideThisFrame) return;
@@ -3393,6 +3414,7 @@ async function main(): Promise<void> {
       veCam !== 'cam-collision' &&
       veCam !== 'cam-collision-mid' &&
       veCam !== 'cam-collision-dummy' &&
+      veCam !== 'cam-collision-hop' &&
       Math.abs(camera.radius - camAppliedRadius) > 0.08
     ) {
       camZoomRadius = camera.radius;
@@ -3551,6 +3573,9 @@ async function main(): Promise<void> {
   let fpsHudAccum = 0;
 
   const remoteMeshes = new Map<string, HumanoidParts>();
+  /** ?ve=remote-hop: living airborne hex so leftover remotes can be hidden. */
+  let remoteHopLatch: { hex: string; y: number } | null = null;
+  void remoteHopLatch;
   const remoteLastHp = new Map<string, number>();
   const remoteNameplates = new Map<string, Nameplate>();
   const remoteFx = new Map<string, RemoteFx>();
@@ -6402,45 +6427,57 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.7;
         camera.radius = 7;
       } else if (veFollow === 'remote-hop') {
+        // Hide You — falling back to player.position was 464/remote-hop-2.png
+        // (local on dirt, remote nameplate over empty grass).
+        hideLocalForRemoteHop(player, localNameplate);
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
         const tgt = camera.target;
-        let fx = player.position.x;
-        let fy = player.position.y + 1.2;
-        let fz = player.position.z;
+        // SecondClient hop-pad (0, −6). Hold the look-at on the grass so
+        // airborne feet read against the ground, not a centered stand.
+        let fx = 0;
+        let fy = 0.35;
+        let fz = -6;
         let best = -1;
         for (const [hex, parts] of remoteMeshes) {
           const ch = net?.getCharacterFor(hex);
           if (!ch || ch.hp <= 0) continue;
-          const y = parts.root.position.y;
           const pb = readHumanoidPlayback(parts);
           const clip = (pb.playing ?? '').replace(/^.*\|/, '');
           if (/death/i.test(clip)) continue;
+          const y = parts.root.position.y;
           const air =
-            y > 0.12 &&
+            y > 0.8 &&
             pb.skinned > 0 &&
             pb.height >= 1.0 &&
             /idle_weapon/i.test(clip) &&
             !/walk/i.test(clip);
-          if (!air) continue;
-          const d = Vector3.Distance(parts.root.position, player.position);
-          const rank = 1000 + y * 10 + d;
+          const nearPad =
+            Math.hypot(parts.root.position.x, parts.root.position.z + 6) < 2.5;
+          const rank = (air ? 2000 : 100) + (nearPad ? 500 : 0) + y * 10;
           if (rank > best) {
             best = rank;
-            fx = parts.root.position.x;
-            fy = parts.root.position.y + 1.1;
-            fz = parts.root.position.z;
+            const look = hopBodyLook(parts);
+            fx = look.x;
+            fy = look.y;
+            fz = look.z;
+            if (air) remoteHopLatch = { hex, y };
           }
         }
         tgt.x = fx;
         tgt.y = fy;
         tgt.z = fz;
-        camera.alpha = 0;
-        camera.beta = Math.PI / 2.35;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.02;
         camera.radius = 8;
-      } else if (veFollow === 'cam-collision' || veFollow === 'cam-collision-mid') {
-        // Orbit into a bole; collision keeps the camera in the open (hero E10.1, mid E10.24).
+      } else if (
+        veFollow === 'cam-collision' ||
+        veFollow === 'cam-collision-mid' ||
+        veFollow === 'cam-collision-hop'
+      ) {
+        // Orbit into a bole; collision keeps the camera in the open
+        // (hero E10.1, mid E10.24, hop E10.29). E1 Y-spring stays.
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
           camFollowY = targetY;
@@ -6459,6 +6496,7 @@ async function main(): Promise<void> {
         tgt.y = camFollowY;
         tgt.z = player.position.z;
         const wantMid = veFollow === 'cam-collision-mid';
+        const wantHop = veFollow === 'cam-collision-hop';
         if (wantMid && !camCollisionMidAimed) {
           camCollisionMidAimed = pickClearTrunk(
             player.position.x,
@@ -6467,13 +6505,24 @@ async function main(): Promise<void> {
             'mid',
           );
         }
+        if (wantHop && !camCollisionHopAimed) {
+          camCollisionHopAimed = pickClearTrunk(
+            player.position.x,
+            player.position.z,
+            trunks,
+            'hero',
+          );
+        }
         const aimed = wantMid
           ? camCollisionMidAimed
-          : nearestHeroTrunk(player.position.x, player.position.z, trunks);
+          : wantHop
+            ? camCollisionHopAimed
+            : nearestHeroTrunk(player.position.x, player.position.z, trunks);
         if (aimed) {
           camera.alpha = trunkAimAlpha(player.position.x, player.position.z, aimed);
-          if (wantMid) {
+          if (wantMid || wantHop) {
             // Zoom max 42 cannot reach the mid ring (~48m) from origin (#465).
+            // Hop VE walks in so the airborne pose reads against the bole.
             const dist = Math.hypot(
               aimed.x - player.position.x,
               aimed.z - player.position.z,
@@ -6544,6 +6593,7 @@ async function main(): Promise<void> {
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
         veFollow !== 'tab-hostile' &&
+        veFollow !== 'tab-aggro' &&
         veFollow !== 'hostile-read' &&
         veFollow !== 'hostile-types' &&
         veFollow !== 'brigand-plate' &&
@@ -8526,8 +8576,9 @@ async function main(): Promise<void> {
   // ?ve=remote-hop — E8.27 airborne Idle_Weapon, no Walk, no squash.
   if (ve === 'remote-hop') {
     camera.radius = 8;
-    camera.alpha = 0;
-    camera.beta = Math.PI / 2.35;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.02;
+    hideLocalForRemoteHop(player, localNameplate);
   }
   if (net && ve === 'remote-hop') {
     const mark = document.getElementById('persistMark');
@@ -8542,23 +8593,23 @@ async function main(): Promise<void> {
     const waitHop = () => {
       if (!net) return;
       ticks += 1;
+      hideLocalForRemoteHop(player, localNameplate);
       if (!nudged && latestStatus.state === 'connected') {
         nudged = true;
-        // Side-on hop cam is alpha=0 (east of the jumper at (0,-6)). Park
-        // local north so You is not between camera and remote.
-        for (let i = 0; i < 6; i++) net.sendMove(0, 0.7, false);
+        // Park local north of the hop-pad; mesh is already hidden.
+        for (let i = 0; i < 8; i++) net.sendMove(0, 0.75, false);
       }
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes);
       const n = remoteMeshes.size;
-      const preferred = remotes.find((r) => {
+      const hopCandidates = remotes.filter((r) => {
         const ch = net.getCharacterFor(r.identityHex);
         const p = remoteMeshes.get(r.identityHex);
-        if (!ch || ch.hp <= 0 || !p) return false;
+        if (!ch || ch.hp <= 0 || !p || !p.staff.isEnabled()) return false;
         const pb = readHumanoidPlayback(p);
         const clip = clipBare(pb.playing);
         return (
-          p.root.position.y > 0.12 &&
+          p.root.position.y > 0.8 &&
           pb.skinned > 0 &&
           pb.height >= 1.0 &&
           /idle_weapon/i.test(clip) &&
@@ -8566,33 +8617,57 @@ async function main(): Promise<void> {
           !/death/i.test(clip)
         );
       });
+      hopCandidates.sort((a, b) => {
+        const pa = remoteMeshes.get(a.identityHex);
+        const pbParts = remoteMeshes.get(b.identityHex);
+        const da = pa
+          ? Math.hypot(pa.root.position.x, pa.root.position.z + 6)
+          : 99;
+        const db = pbParts
+          ? Math.hypot(pbParts.root.position.x, pbParts.root.position.z + 6)
+          : 99;
+        return da - db;
+      });
+      const preferred = hopCandidates[0];
       const parts = preferred ? remoteMeshes.get(preferred.identityHex) : undefined;
       const pb = parts
         ? readHumanoidPlayback(parts)
         : { skinned: 0, playing: null, idle: null, height: 0 };
       const clip = clipBare(pb.playing);
-      const y = parts?.root.position.y ?? preferred?.y ?? 0;
+      const y = parts?.root.position.y ?? 0;
       const scaleY = parts?.root.scaling.y ?? 1;
-      const walkOn = /walk/i.test(clip);
       const hopOk =
         !!parts &&
         !!preferred &&
-        y > 0.12 &&
+        y > 0.8 &&
         pb.skinned > 0 &&
         pb.height >= 1.0 &&
         /idle_weapon/i.test(clip) &&
-        !walkOn &&
+        !/walk/i.test(clip) &&
         !/death/i.test(clip) &&
+        parts.staff.isEnabled() &&
         Math.abs(scaleY - 1) < 0.04;
+      if (hopOk && parts && preferred) {
+        remoteHopLatch = { hex: preferred.identityHex, y };
+        setHumanoidAirborne(parts, true);
+        parts.root.scaling.set(1, 1, 1);
+      }
+      const sampleParts = parts ?? [...remoteMeshes.values()][0];
+      const samplePb = sampleParts
+        ? readHumanoidPlayback(sampleParts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const sampleClip = clipBare(samplePb.playing);
+      const sampleY = sampleParts?.root.position.y ?? 0;
+      const sampleWalk = /walk/i.test(sampleClip);
       if (mark) {
         if (hopOk) {
           mark.textContent =
-            `Remote hop OK · ${clip} · skinned ${pb.skinned} · y=${y.toFixed(2)} · remotes ${n}`;
-        } else if (n > 0 && pb.skinned <= 0) {
-          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+            `Remote hop OK · ${clip} · skinned ${pb.skinned} · y=${y.toFixed(2)} · feet=${y.toFixed(2)} · remotes ${n}`;
+        } else if (n > 0 && samplePb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${samplePb.playing ?? 'none'} · skeleton=${samplePb.skinned}`;
         } else if (n > 0) {
           mark.textContent =
-            `VE remote-hop: remotes ${n} · ${clip} · y=${y.toFixed(2)} · walk ${walkOn ? 'on' : 'off'} · skinned ${pb.skinned} (FARDEL_SECOND_HOP=1)`;
+            `VE remote-hop: remotes ${n} · ${sampleClip} · y=${sampleY.toFixed(2)} · feet=${sampleY.toFixed(2)} · walk ${sampleWalk ? 'on' : 'off'} · skinned ${samplePb.skinned} (FARDEL_SECOND_HOP=1)`;
         } else {
           mark.textContent =
             'VE remote-hop: remotes 0 (start tools/SecondClient FARDEL_SECOND_HOP=1)…';
@@ -11254,6 +11329,179 @@ async function main(): Promise<void> {
     window.setTimeout(waitT, 500);
   }
 
+  // ?ve=tab-aggro — after a pull, Tab selects the aggroed NPC, not lowest id (#484).
+  // Kind=2 + Kind=3 both in CastRange; dummy stays in the cycle as trainer.
+  if (ve === 'tab-aggro') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'tab-aggro') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-aggro: waiting for Kind=2 + Brigand…';
+    let ticks = 0;
+    let phase: 'pull' | 'stand' | 'tab' | 'done' = 'pull';
+    let tabbed = false;
+    const padCx = 7;
+    const padCz = -3;
+    const waitA = () => {
+      if (!net) return;
+      ticks += 1;
+      const pose = net.getLocalPose();
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const padC =
+        brigands.find(
+          (n) => Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? brigands[0];
+      const hp = net.getCharacter()?.hp ?? 0;
+      if (latestStatus.state !== 'connected' || !pose || !padC || hostiles.length < 1 || !dummy) {
+        if (mark) {
+          mark.textContent =
+            `VE tab-aggro: ${latestStatus.state} · H ${hostiles.length} · B ${brigands.length}…`;
+        }
+        if (ticks < 280) window.setTimeout(waitA, 200);
+        return;
+      }
+      if (hp <= 0) {
+        if (phase === 'done') {
+          if (ticks < 280) window.setTimeout(waitA, 200);
+          return;
+        }
+        phase = 'pull';
+        tabbed = false;
+        if (mark) mark.textContent = 'VE tab-aggro: dead — waiting respawn…';
+        if (ticks < 280) window.setTimeout(waitA, 200);
+        return;
+      }
+      const inCast = (n: NpcView) => {
+        const dx = n.x - pose.x;
+        const dz = n.z - pose.z;
+        return dx * dx + dz * dz <= CAST_RANGE_METERS * CAST_RANGE_METERS;
+      };
+      const kind2Near = hostiles.some(inCast);
+      const kind3Near = brigands.some(inCast);
+      if (phase === 'pull') {
+        const dx = padC.x - pose.x;
+        const dz = padC.z - pose.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > HOSTILE_AGGRO_RADIUS - 0.4 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - (HOSTILE_AGGRO_RADIUS - 0.45));
+          const slid = slideAgainstTrunks(pose.x, pose.z, (dx / dist) * step, (dz / dist) * step);
+          if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+            net.sendMove(slid.dx, slid.dz, false);
+          }
+        }
+        if (padC.aggroed) {
+          phase = 'stand';
+          if (mark) mark.textContent = 'VE tab-aggro: pulled Brigand — standing for Tab…';
+        } else if (mark) {
+          mark.textContent = `VE tab-aggro: walking in · d=${dist.toFixed(1)}`;
+        }
+      } else if (phase === 'stand') {
+        const dx = 0 - pose.x;
+        const dz = 0 - pose.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.6 && (!kind2Near || !kind3Near)) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          const slid = slideAgainstTrunks(
+            pose.x,
+            pose.z,
+            (dx / dist) * step,
+            (dz / dist) * step,
+          );
+          if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+            net.sendMove(slid.dx, slid.dz, false);
+          }
+        }
+        if (padC.aggroed && kind2Near && kind3Near) {
+          phase = 'tab';
+        } else if (mark) {
+          mark.textContent =
+            `VE tab-aggro: stand · aggro=${padC.aggroed ? 'y' : 'n'} · H2 ${kind2Near ? 'y' : 'n'} · B ${kind3Near ? 'y' : 'n'}`;
+        }
+      }
+      if (phase === 'tab' || phase === 'done') {
+        if (!tabbed) {
+          const id = cyclePreferHostiles(net);
+          if (id != null) selectedTargetId = id;
+          tabbed = true;
+        }
+        const tgt = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
+        const cycle = tabTargetCycle(net);
+        const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY);
+        updateTargetFrame(tgt);
+        const mesh = tgt ? npcMeshes.get(tgt.npcId.toString()) : undefined;
+        const ringOn = !!(mesh && mesh.ring.isEnabled());
+        const frameName = document.getElementById('tfName')?.textContent ?? '';
+        const pulledKind =
+          tgt?.kind === NPC_KIND_BRIGAND
+            ? 'Brigand'
+            : tgt?.kind === NPC_KIND_HOSTILE
+              ? 'Hostile'
+              : '';
+        const cam = camera.target;
+        cam.x = (pose.x + padC.x) * 0.5;
+        cam.y = 1.25;
+        cam.z = (pose.z + padC.z) * 0.5;
+        camera.radius = 12;
+        camera.beta = Math.PI / 2.7;
+        const ok =
+          !!tgt &&
+          tgt.aggroed &&
+          isHostileKind(tgt.kind) &&
+          tgt.kind !== NPC_KIND_DUMMY &&
+          pulledKind.length > 0 &&
+          dummyInCycle &&
+          kind2Near &&
+          kind3Near &&
+          ringOn &&
+          new RegExp(pulledKind, 'i').test(frameName);
+        if (ok) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Tab-aggro OK · ${pulledKind} · pulled · dummy trainer`;
+          }
+        }
+        if (phase === 'done') {
+          const tx = -11;
+          const tz = 8;
+          const kdx = tx - pose.x;
+          const kdz = tz - pose.z;
+          const kd = Math.hypot(kdx, kdz);
+          if (kd > 0.6) {
+            const step = Math.min(MAX_STEP_METERS, kd);
+            const slid = slideAgainstTrunks(
+              pose.x,
+              pose.z,
+              (kdx / kd) * step,
+              (kdz / kd) * step,
+            );
+            if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+              net.sendMove(slid.dx, slid.dz, false);
+            }
+          }
+          if (ticks < 280) window.setTimeout(waitA, 200);
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE tab-aggro: Tab tgt ${tgt?.kind ?? 'none'} aggro=${tgt?.aggroed ? 'y' : 'n'} · ${frameName}`;
+        }
+      }
+      if (ticks > 280) {
+        if (mark) mark.textContent = `Tab-aggro FAIL · phase ${phase} · #484`;
+        return;
+      }
+      window.setTimeout(waitA, 200);
+    };
+    window.setTimeout(waitA, 500);
+  }
+
   // ?ve=hostile-read — Hostile coral plate vs Dummy parchment vs Vendor mint (#359).
   if (ve === 'hostile-read' || ve === 'hostile-types') {
     camera.radius = 18;
@@ -11712,16 +11960,16 @@ async function main(): Promise<void> {
     window.setTimeout(waitE, 500);
   }
 
-  // ?ve=hunt-loop — Tab, Spark hit, kill, corpse loot. Dummy trainer. Play cam (#422).
-  // Stay at origin (outside AggroRadius). Do not walk to the shard.
+  // ?ve=hunt-loop — Tab, Spark hit, kill, corpse loot on Kind=3 Brigand (#485 / #422).
+  // Stay at origin (outside AggroRadius). Do not walk to the shard. Dummy trainer.
   if (ve === 'hunt-loop') {
-    camera.radius = 10;
-    camera.alpha = Math.PI / 2.15;
+    camera.radius = 12;
+    camera.alpha = Math.atan2(-3, 7);
     camera.beta = Math.PI / 2.55;
   }
   if (net && ve === 'hunt-loop') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE hunt-loop: waiting for hostiles…';
+    if (mark) mark.textContent = 'VE hunt-loop: waiting for Brigand…';
     let ticks = 0;
     let phase: 'tab' | 'hit' | 'loot' | 'done' = 'tab';
     let lastCast = 0;
@@ -11730,33 +11978,40 @@ async function main(): Promise<void> {
     let hitSeen = false;
     let deathSeen = false;
     let okTicks = 0;
+    const padCx = 7;
+    const padCz = -3;
     const waitL = () => {
       if (!net) return;
       ticks += 1;
       const npcs = net.getNpcs();
       syncNpcMeshes(npcs);
-      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyOk = !!dummy;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = dummyOk && !!dMesh && !dMesh.humanoid;
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND);
       const hostiles = npcs.filter((n) => isHostileKind(n.kind));
       const selfHp = net.getCharacter()?.hp ?? 0;
       const items = net.getGroundItems();
       const tgt = camera.target;
       tgt.y = 1.05;
       if (phase === 'loot') {
-        tgt.x = 3.1;
-        tgt.z = 5.4;
+        tgt.x = 6.2;
+        tgt.z = -2.2;
       } else {
-        tgt.x = 2.2;
-        tgt.z = 3.4;
+        tgt.x = 4.2;
+        tgt.z = -1.4;
       }
-      if (latestStatus.state !== 'connected' || hostiles.length < 2 || !dummyOk) {
+      if (latestStatus.state !== 'connected' || hostiles.length < 2 || brigands.length < 1 || !dummyOk) {
         if (mark) {
-          mark.textContent = `VE hunt-loop: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+          mark.textContent =
+            `VE hunt-loop: ${latestStatus.state} · H ${hostiles.length} · B ${brigands.length}…`;
         }
         if (ticks < 360) window.setTimeout(waitL, 200);
         return;
       }
       if (selfHp <= 0) {
-        if (mark) mark.textContent = 'Hunt-loop FAIL · player died · #422';
+        if (mark) mark.textContent = 'Hunt-loop FAIL · player died · #485';
         return;
       }
       if (phase === 'tab') {
@@ -11764,14 +12019,14 @@ async function main(): Promise<void> {
         if (id != null) selectedTargetId = id;
         const picked = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
         updateTargetFrame(picked);
-        if (picked && isHostileKind(picked.kind) && picked.hp > 0) {
+        if (picked && picked.kind === NPC_KIND_BRIGAND && picked.hp > 0) {
           tabbedId = picked.npcId;
           hpAtTab = picked.hp;
           net.setTarget(picked.npcId);
           phase = 'hit';
-          if (mark) mark.textContent = `VE hunt-loop: Tab Hostile #${picked.npcId} · spark…`;
+          if (mark) mark.textContent = `VE hunt-loop: Tab Brigand #${picked.npcId} · spark…`;
         } else if (mark) {
-          mark.textContent = `VE hunt-loop: Tab… tgt ${picked?.kind ?? 'none'}`;
+          mark.textContent = `VE hunt-loop: Tab… tgt ${picked?.kind ?? 'none'} (want Brigand)`;
         }
       } else if (phase === 'hit') {
         const prey = npcs.find((n) => n.npcId === tabbedId);
@@ -11784,23 +12039,37 @@ async function main(): Promise<void> {
           }
           if (prey.hp < hpAtTab) hitSeen = true;
           if (mark) {
-            mark.textContent = `VE hunt-loop: hit ${hitSeen ? 'y' : 'n'} · hp ${prey.hp}/${prey.maxHp}`;
+            mark.textContent = `VE hunt-loop: Brigand hit ${hitSeen ? 'y' : 'n'} · hp ${prey.hp}/${prey.maxHp}`;
           }
         } else {
           deathSeen = true;
           phase = 'loot';
-          if (mark) mark.textContent = 'VE hunt-loop: dead — waiting shard…';
+          if (mark) mark.textContent = 'VE hunt-loop: Brigand dead — waiting shard…';
         }
       } else if (phase === 'loot') {
         const prey = npcs.find((n) => n.npcId === tabbedId);
-        const px = prey?.x ?? 3;
-        const pz = prey?.z ?? 7;
+        const px = prey?.x ?? padCx;
+        const pz = prey?.z ?? padCz;
         const shard = items.find((it) => Math.hypot(it.x - px, it.z - pz) < 2.5);
+        const bMesh = npcMeshes.get(tabbedId.toString());
+        const capsule = !!bMesh && !bMesh.humanoid;
+        if (capsule) {
+          if (mark) mark.textContent = 'Hunt-loop FAIL · capsule · #485';
+          return;
+        }
         const tabOk = tabbedId !== 0n;
-        if (tabOk && hitSeen && deathSeen && shard && dummyOk && selfHp > 0) {
+        if (
+          tabOk &&
+          hitSeen &&
+          deathSeen &&
+          shard &&
+          dummyTrainer &&
+          selfHp > 0
+        ) {
           okTicks += 1;
           if (mark) {
-            mark.textContent = 'Hunt-loop OK · Tab · hit · death · loot · dummy trainer · #422';
+            mark.textContent =
+              'Hunt-loop OK · Tab · hit · death · loot · Brigand · dummy trainer · #485';
           }
           if (okTicks >= 8) {
             phase = 'done';
@@ -11808,11 +12077,11 @@ async function main(): Promise<void> {
           }
         } else if (mark) {
           mark.textContent =
-            `VE hunt-loop: loot ${shard ? 'y' : 'n'} · death ${deathSeen ? 'y' : 'n'} · dummy ${dummyOk ? 'y' : 'n'}`;
+            `VE hunt-loop: loot ${shard ? 'y' : 'n'} · death ${deathSeen ? 'y' : 'n'} · dummy ${dummyTrainer ? 'y' : 'n'}`;
         }
       }
       if (ticks > 360) {
-        if (mark) mark.textContent = `Hunt-loop FAIL · phase ${phase} · #422`;
+        if (mark) mark.textContent = `Hunt-loop FAIL · phase ${phase} · #485`;
         return;
       }
       window.setTimeout(waitL, 200);
@@ -12183,6 +12452,94 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitDummy, 200);
     };
     window.setTimeout(waitDummy, 400);
+  }
+
+  // ?ve=cam-collision-hop — Space-hop while orbiting into a hero bole (#483).
+  // persistMark must name a trunk while Y is above ground. Grounded-only = fail.
+  // E1 Y-spring stays on the follow (no land punch). Dummy stays trainer.
+  if (net && ve === 'cam-collision-hop') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = 12;
+    camZoomRadius = 12;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision-hop: walking to hero trunk…';
+    let ticks = 0;
+    let hopped = false;
+    let bestHopY = 0;
+    const standOff = 13;
+    const GROUND_THRESHOLD = 0.08;
+    const AIR_OK = 0.35;
+    const waitHopCol = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cam-collision-hop: ${st.state}…`;
+        if (ticks < 280) window.setTimeout(waitHopCol, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE cam-collision-hop: waiting for pose…';
+        if (ticks < 280) window.setTimeout(waitHopCol, 200);
+        return;
+      }
+      if (!camCollisionHopAimed) {
+        camCollisionHopAimed = pickClearTrunk(pose.x, pose.z, trunks, 'hero');
+      }
+      const aimed = camCollisionHopAimed;
+      if (!aimed) {
+        if (mark) mark.textContent = 'VE cam-collision-hop FAIL · no heroTree';
+        return;
+      }
+      const dx = aimed.x - pose.x;
+      const dz = aimed.z - pose.z;
+      const d = Math.hypot(dx, dz);
+      if (d > standOff + 0.25) {
+        const step = Math.min(MAX_STEP_METERS, d - standOff);
+        const slid = slideAgainstTrunks(pose.x, pose.z, (dx / d) * step, (dz / d) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+        if (mark) {
+          mark.textContent = `VE cam-collision-hop: walk d=${d.toFixed(1)} → ${aimed.name}`;
+        }
+        if (ticks < 280) window.setTimeout(waitHopCol, 200);
+        return;
+      }
+      if (pose.y <= GROUND_THRESHOLD) {
+        hopped = true;
+        net.sendMove(0, 0, true);
+      } else {
+        net.sendMove(0, 0, false);
+      }
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const trunkHit =
+        !!hit && /^(heroTree|heroElder|heroSent|midTree_)/.test(hit);
+      const air = pose.y > AIR_OK;
+      const pulled = got + 0.5 < want;
+      const ok = trunkHit && air && pulled;
+      if (ok && pose.y >= bestHopY) {
+        bestHopY = pose.y;
+        if (mark) {
+          mark.textContent =
+            `Cam-collision OK · r=${got.toFixed(1)} < want=${want.toFixed(0)} · ${hit} · hop y=${pose.y.toFixed(2)}`;
+        }
+      }
+      if (bestHopY > 0) {
+        if (ticks < 360) window.setTimeout(waitHopCol, 80);
+        return;
+      }
+      if (mark) {
+        mark.textContent = hopped
+          ? `VE cam-collision-hop: y=${pose.y.toFixed(2)} r=${got.toFixed(1)} want=${want.toFixed(0)} hit=${hit ?? 'none'} · n=${trunks.length}`
+          : `VE cam-collision-hop: stand d=${d.toFixed(1)} → hop`;
+      }
+      if (ticks < 360) window.setTimeout(waitHopCol, hopped ? 80 : 200);
+    };
+    window.setTimeout(waitHopCol, 400);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
