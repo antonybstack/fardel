@@ -5,7 +5,8 @@ using SpacetimeDB;
 
 public static partial class Module
 {
-    public const int NpcKindDummy = 1;
+    public const int NpcKindDummy = Combat.NpcKindDummy;
+    public const int NpcKindHostile = Combat.NpcKindHostile;
 
     [SpacetimeDB.Table(Accessor = "PlayerPose", Public = true)]
     public partial struct PlayerPose
@@ -271,6 +272,7 @@ public static partial class Module
     {
         Log.Info($"Client connected: {ctx.Sender}");
         EnsureDummy(ctx);
+        EnsureHostiles(ctx);
         EnsureVendor(ctx);
         EnsureCharacter(ctx, ctx.Sender);
         EnsureSession(ctx, ctx.Sender);
@@ -1194,6 +1196,50 @@ public static partial class Module
         });
     }
 
+    static bool HasHostileNear(ReducerContext ctx, float x, float z)
+    {
+        foreach (var n in ctx.Db.Npc.Iter())
+        {
+            if (n.Kind != NpcKindHostile)
+            {
+                continue;
+            }
+            var dx = n.X - x;
+            var dz = n.Z - z;
+            if (dx * dx + dz * dz < 0.25f)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static void InsertHostile(ReducerContext ctx, float x, float y, float z)
+    {
+        ctx.Db.Npc.Insert(new Npc
+        {
+            Kind = NpcKindHostile,
+            X = x,
+            Y = y,
+            Z = z,
+            Hp = Combat.HostileMaxHp,
+            MaxHp = Combat.HostileMaxHp,
+        });
+    }
+
+    /// <summary>#354 — two yard hostiles (not origin, dummy stays trainer). No aggro yet.</summary>
+    static void EnsureHostiles(ReducerContext ctx)
+    {
+        if (!HasHostileNear(ctx, Combat.HostileSpawnAx, Combat.HostileSpawnAz))
+        {
+            InsertHostile(ctx, Combat.HostileSpawnAx, Combat.HostileSpawnAy, Combat.HostileSpawnAz);
+        }
+        if (!HasHostileNear(ctx, Combat.HostileSpawnBx, Combat.HostileSpawnBz))
+        {
+            InsertHostile(ctx, Combat.HostileSpawnBx, Combat.HostileSpawnBy, Combat.HostileSpawnBz);
+        }
+    }
+
     static void ApplyDamage(ReducerContext ctx, Identity caster, ulong npcId, int damage)
     {
         if (ctx.Db.Npc.NpcId.Find(npcId) is not { } row || row.Hp <= 0)
@@ -1208,14 +1254,17 @@ public static partial class Module
         {
             AddCharacterXp(ref character, Combat.XpPerKill);
             ctx.Db.Character.Identity.Update(character);
-            Log.Info($"Dummy killed by {caster}, xp={character.Xp} level={character.Level}");
+            Log.Info($"Npc {row.NpcId} kind={row.Kind} killed by {caster}, xp={character.Xp} level={character.Level}");
             SharePartyKillXp(ctx, caster);
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
             SharePartyLootDrop(ctx, caster, row.X, row.Y, row.Z);
         }
 
-        // Dummy thorns — light player HP proof without changing Cast targeting.
-        ApplyPlayerDamage(ctx, caster, Combat.DummyThornsDamage);
+        // Dummy thorns only — hostiles hit back in #356, not here.
+        if (row.Kind == NpcKindDummy)
+        {
+            ApplyPlayerDamage(ctx, caster, Combat.DummyThornsDamage);
+        }
     }
 
     /// <summary>Subtract player HP; on Hp≤0 clear target and schedule yard respawn.</summary>

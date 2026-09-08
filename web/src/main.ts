@@ -36,6 +36,7 @@ import {
   isTargetOutOfCastRange,
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
+  NPC_KIND_HOSTILE,
   CROWD_NEAR_COUNT,
   type ConnectionStatus,
   type CrowdProxyView,
@@ -291,7 +292,12 @@ function updateTargetFrame(target: NpcView | null | undefined): void {
   const idEl = document.getElementById('tfId');
   const fill = document.getElementById('tfHpFill');
   const label = document.getElementById('tfHpLabel');
-  const name = target.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC';
+  const name =
+    target.kind === NPC_KIND_DUMMY
+      ? 'Dummy'
+      : target.kind === NPC_KIND_HOSTILE
+        ? 'Hostile'
+        : 'NPC';
   if (nameEl) nameEl.textContent = name;
   if (idEl) idEl.textContent = `#${target.npcId.toString()}`;
   const frac = target.maxHp > 0 ? Math.max(0, Math.min(1, target.hp / target.maxHp)) : 0;
@@ -1861,7 +1867,13 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
               : 'rest: —';
     const tgt = s.targetNpc;
     const targetLine = tgt
-      ? `target: ${tgt.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC'} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
+      ? `target: ${
+          tgt.kind === NPC_KIND_DUMMY
+            ? 'Dummy'
+            : tgt.kind === NPC_KIND_HOSTILE
+              ? 'Hostile'
+              : 'NPC'
+        } #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
       : 'target: (none — Tab)';
     const gcd = gcdRemainingMs(s.combat, nowMs);
     const gcdLine = gcd > 0 ? `GCD cooldown: ${(gcd / 1000).toFixed(2)}s` : 'GCD idle';
@@ -2323,7 +2335,9 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     body.parent = root;
     body.position.y = 0.8;
     mat = new StandardMaterial(`npcMat_${npc.npcId}`, scene);
-    mat.diffuseColor = new Color3(0.7, 0.35, 0.35);
+    const hostile = npc.kind === NPC_KIND_HOSTILE;
+    mat.diffuseColor = hostile ? new Color3(0.72, 0.18, 0.16) : new Color3(0.7, 0.35, 0.35);
+    mat.emissiveColor = hostile ? new Color3(0.22, 0.04, 0.03) : new Color3(0, 0, 0);
     mat.specularColor = new Color3(0.1, 0.1, 0.1);
     body.material = mat;
   }
@@ -5631,6 +5645,18 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.15;
         camera.beta = Math.PI / 2.55;
         camera.radius = 8;
+      } else if (veFollow === 'hostile-spawn') {
+        // North of pad: dummy (5,0) + hostiles (3,7)/(-7,3) in one shot.
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = 0;
+        tgt.y = 1.4;
+        tgt.z = 3;
+        camera.alpha = Math.PI / 2.05;
+        camera.beta = Math.PI / 2.7;
+        camera.radius = 18;
       } else if (
         veFollow === 'walk' ||
         veFollow === 'run' ||
@@ -8821,6 +8847,43 @@ async function main(): Promise<void> {
       window.requestAnimationFrame(tick);
     };
     window.setTimeout(waitOrbit, 800);
+  }
+
+  // ?ve=hostile-spawn — two yard hostiles as capsules; dummy stays trainer (#354).
+  if (ve === 'hostile-spawn') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'hostile-spawn') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-spawn: waiting for hostiles…';
+    let ticks = 0;
+    const waitH = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY);
+      if (hostiles.length >= 2 && dummyOk) {
+        if (mark) {
+          mark.textContent = `Hostile spawn OK · n=${hostiles.length} · capsule · dummy trainer · #354`;
+        }
+        return;
+      }
+      if (ticks > 80) {
+        if (mark) {
+          mark.textContent =
+            `Hostile spawn FAIL · hostiles ${hostiles.length}/2 · dummy ${dummyOk ? 'y' : 'n'} · #354`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE hostile-spawn: hostiles ${hostiles.length}/2 · dummy ${dummyOk ? 'y' : 'n'}…`;
+      }
+      window.setTimeout(waitH, 250);
+    };
+    window.setTimeout(waitH, 400);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
