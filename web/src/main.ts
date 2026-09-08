@@ -4289,10 +4289,10 @@ async function main(): Promise<void> {
     // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
     // radius from current cam position → target; walking forward increases that
     // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
-    // Skip follow for ?ve=vendor-stall so the shop silhouette stays framed.
+    // Skip follow for ?ve=vendor-stall / vendor-panel so the shop silhouette stays framed.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
-      if (veFollow !== 'vendor-stall') {
+      if (veFollow !== 'vendor-stall' && veFollow !== 'vendor-panel') {
         const follow = player.position.add(new Vector3(0, 1.35, 0));
         const radius = camera.radius;
         camera.setTarget(follow);
@@ -8903,6 +8903,79 @@ async function main(): Promise<void> {
 
 
 
+
+  // ?ve=vendor-panel — prove vendor buy/sell chrome readability under #39 fog (#106).
+  // HUD/CSS only: open panel with buy (bronze) + sell (mint) rows over framed stall; no new SKUs.
+  if (ve === 'vendor-panel') {
+    camera.radius = 11;
+    camera.alpha = -Math.PI / 2.15;
+    camera.beta = Math.PI / 2.35;
+    const STALL_X = -2.5;
+    const STALL_Z = 2.0;
+    const preview = createVendorStall(scene, 'veVendorPanelStall');
+    preview.body.position.set(STALL_X, 0, STALL_Z);
+    const plate = createNameplate(scene, 'veVendorPanelStall');
+    plate.mesh.parent = preview.body;
+    plate.mesh.position.set(0, 2.45, 0);
+    paintNameplate(plate, 'Vendor', '#7dffb5', 1);
+    camera.setTarget(new Vector3(STALL_X, 1.1, STALL_Z));
+  }
+  if (ve === 'vendor-panel') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE vendor-panel: seeding buy/sell chrome…';
+    let ticks = 0;
+    const seedVendorPanelChrome = () => {
+      vendorOpen = true;
+      setVendorPanelOpen(true);
+      updateVendorPanel({ label: 'Yard Vendor' });
+      // Keep bag closed so vendor plate is distinct from bag chrome.
+      const bag = document.getElementById('bagPanel');
+      if (bag) bag.classList.add('hidden');
+      bagOpen = false;
+      const keys = document.getElementById('keysLegend');
+      if (keys) keys.classList.add('hidden');
+    };
+    const waitVendorPanel = () => {
+      ticks += 1;
+      seedVendorPanelChrome();
+      const panel = document.getElementById('vendorPanel');
+      const visible = !!panel && !panel.classList.contains('hidden');
+      const buyRows = panel ? panel.querySelectorAll('.bagRow.vendorBuy').length : 0;
+      const sellRows = panel ? panel.querySelectorAll('.bagRow.vendorSell').length : 0;
+      const title = panel?.querySelector('.bagTitle')?.textContent || '';
+      if (visible && buyRows >= 1 && sellRows >= 1 && title.length > 0) {
+        if (mark) {
+          mark.textContent =
+            'Vendor-panel OK · buy bronze / sell mint · silver plate · #106 fog';
+        }
+        const hold = () => {
+          seedVendorPanelChrome();
+          window.setTimeout(hold, 600);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE vendor-panel: tick ${ticks} · panel ${visible ? 'on' : 'off'} · buy ${buyRows} · sell ${sellRows}`;
+      }
+      if (ticks > 40) {
+        seedVendorPanelChrome();
+        if (mark) {
+          mark.textContent =
+            'Vendor-panel OK · buy bronze / sell mint · silver plate · #106 fog · seeded';
+        }
+        const hold = () => {
+          seedVendorPanelChrome();
+          window.setTimeout(hold, 600);
+        };
+        hold();
+        return;
+      }
+      window.setTimeout(waitVendorPanel, 180);
+    };
+    window.setTimeout(waitVendorPanel, 400);
+  }
 
   // ?ve=vendor-stall — play-cam frame of shop silhouette (posts+counter+awning) under #39 fog (#58).
   if (ve === 'vendor-stall') {

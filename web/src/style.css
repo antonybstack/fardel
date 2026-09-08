@@ -1635,17 +1635,86 @@ body {
 .clLine.loot .clTag { color: #c9a878; }
 
 
+/* Vendor panel — dark plate + cool silver chrome under #39 fog (#106).
+   Distinct from bag (warm gold) and world stall prop; buy bronze vs sell mint. */
 #vendorPanel {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  transform: translate(-50%, -50%);
+  z-index: 15;
   pointer-events: auto;
-  min-width: 220px;
-  max-width: min(280px, 90vw);
-  background: rgba(8, 18, 14, 0.86);
-  border: 1px solid rgba(80, 220, 160, 0.35);
-  border-radius: 8px;
-  padding: 8px 10px 10px;
-  color: #e8fcf4;
+  min-width: 240px;
+  max-width: min(300px, 90vw);
+  padding: 10px 12px 10px;
+  background: rgba(6, 10, 20, 0.94);
+  border: 1px solid rgba(168, 184, 208, 0.48);
+  border-radius: 10px;
+  box-shadow:
+    0 4px 18px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(220, 230, 245, 0.06);
+  color: #e4eaf4;
   font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
 }
+
+#vendorPanel.hidden {
+  display: none;
+}
+
+#vendorPanel .bagTitle {
+  color: #d8e2f0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+
+#vendorPanel .bagKey {
+  color: #e8f0fc;
+  font-size: 11px;
+  font-weight: 800;
+  border: 1px solid rgba(180, 198, 224, 0.58);
+  border-radius: 4px;
+  padding: 1px 7px;
+  background: rgba(14, 22, 38, 0.9);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.95);
+}
+
+#vendorPanel .bagFoot {
+  margin-top: 5px;
+  color: #8a9bb4;
+  font-size: 10px;
+  line-height: 1.35;
+  opacity: 0.88;
+}
+
+#vendorPanel .bagRow.vendorBuy {
+  color: #dcc4a4;
+  background: rgba(42, 28, 14, 0.42);
+  border: 1px solid rgba(168, 118, 62, 0.38);
+  border-radius: 5px;
+  padding: 4px 8px;
+}
+
+#vendorPanel .bagRow.vendorBuy span:last-child {
+  color: #c9a070;
+  font-weight: 700;
+}
+
+#vendorPanel .bagRow.vendorSell {
+  color: #b4c4c0;
+  background: rgba(12, 28, 26, 0.4);
+  border: 1px solid rgba(120, 160, 148, 0.36);
+  border-radius: 5px;
+  padding: 4px 8px;
+}
+
+#vendorPanel .bagRow.vendorSell span:last-child {
+  color: #9eb4ac;
+  font-weight: 700;
+}
+
 .vendorActions {
   display: flex;
   gap: 6px;
@@ -1657,15 +1726,15 @@ body {
   min-width: 64px;
   cursor: pointer;
   border-radius: 6px;
-  border: 1px solid rgba(80, 220, 160, 0.45);
-  background: rgba(20, 48, 36, 0.9);
-  color: #d8ffe8;
+  border: 1px solid rgba(168, 184, 208, 0.4);
+  background: rgba(16, 24, 40, 0.9);
+  color: #d4deee;
   padding: 6px 8px;
   font-size: 11px;
 }
 .vendorActions button:hover {
-  border-color: rgba(120, 255, 190, 0.7);
-  background: rgba(28, 70, 50, 0.95);
+  border-color: rgba(196, 210, 230, 0.65);
+  background: rgba(24, 34, 52, 0.95);
 }
 .sysToast.tonic {
   border-color: rgba(125, 255, 181, 0.55);
