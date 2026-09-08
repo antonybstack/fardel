@@ -462,6 +462,8 @@ export const COLLISION_VE_HERO = { x: 6, z: -40 } as const;
  * Receding path polyline (#342): pad → west of the north hero bole → bend →
  * a second clearing silhouette in fog. Not a second zone / biome.
  * Polar `a ∈ (0.15, 0.55)` was the old SE strip and hid this from `?ve=place-wow`.
+ * E9.12 lock vs hordes-place-ref: player tiny vs trunks, path into dusk-blue,
+ * sky=fogColor. Ignore characters.
  */
 const PATH_POINTS: ReadonlyArray<{ x: number; z: number }> = [
   { x: 0.4, z: 1.0 },
