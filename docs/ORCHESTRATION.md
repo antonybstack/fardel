@@ -183,7 +183,7 @@ Release decides cuts **without** Lead greenlight.
 
 1. **Cut when** (all true): (a) `develop` tip has Reviewer-cleared merges with meaningful delta since `main`, (b) QA Bugs smokes green on that tip (or Release documents a waive), (c) no open P0 blockers on the tip.
 2. Release **pins** a concrete `develop` SHA and opens / merges **develop → main** for that tip only (never silently include later develops mid-cut).
-3. **Bindings arity guard** (`./tools/scripts/check-move-bindings-arity.sh`) must pass on the pinned tip before Mac smoke / Pages (#119).
+3. **Bindings arity guard** (`./tools/scripts/check-move-bindings-arity.sh`) must pass on the pinned tip before Mac smoke / Pages (#119 / #166).
 4. Mac Studio smoke on `/Users/antbly/dev/fardel` (local Spacetime and/or tunnel `dev-db.sparkify.dev`); prefer `./tools/scripts/run-smoke-matrix.sh` (compile fail-fast, #130). **Gate on runner exit code and `results.tsv`** — not merely that the script finished (#148).
 5. If green: Vite production build + Cloudflare Pages → `https://play.sparkify.dev`.
 6. Post VE + short release beat to Lead / Fardel QA (FYI, not a gate).
@@ -272,7 +272,7 @@ Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as
 
 1. Diff `main`…`develop`; confirm Reviewer-cleared meaningful delta + green smokes + no P0s.
 2. Pin tip SHA; open PR `develop` → `main` (or fast-forward if policy allows) for that SHA only.
-3. **Bindings arity preflight (#119):** from repo root run `./tools/scripts/check-move-bindings-arity.sh` — must pass (server `Move(dx,dz,jump)` matches `web/src/module_bindings/move_reducer.ts` + C# `Move.g.cs`; PlayerPose `VelY`/`LastGroundedMicros` present). Fail the cut if this fails — do not ship a pin like #112.
+3. **Bindings arity preflight (#119 / #166):** from repo root run `./tools/scripts/check-move-bindings-arity.sh` — must pass (server `Move(dx,dz,jump)` matches `web/src/module_bindings/move_reducer.ts` + C# `Move.g.cs`; PlayerPose `VelY`/`LastGroundedMicros` in C# **and** web `player_pose_table.ts` `vel_y`/`last_grounded_micros`). Fail the cut if this fails — do not ship a pin like #112.
 4. On Mac: pull that tip at `/Users/antbly/dev/fardel`, publish local if needed, run critical smokes (prefer `./tools/scripts/run-smoke-matrix.sh` — compile fail-fast) + quick Vite playpass. **Require non-zero exit on FAIL** and inspect `results.tsv` — do not green the cut because the runner printed `MATRIX DONE` (#148).
 5. Build `web/` → deploy Pages project for `play.sparkify.dev`.
 6. Capture VE of live play (or Mac local if Pages lag).
@@ -305,7 +305,7 @@ Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specif
 | Local publish schema drift | `--delete-data=always` **local only** |
 | Stale C# `Move.g.cs` after schema change (#118) | After module Move/PlayerPose edits: `spacetime generate --lang csharp` and **commit** `client/.../Generated/` |
 | `Move.compat.cs` + 2-arg `Move.g.cs` → CS0111 matrix wipe (#130) | Generate **first**; only then optional 2-arg compat — or delete compat once 3-arg is committed; matrix runner refuses the bad combo / fail-fast on compile |
-| Cut ships web bindings behind server Move (#112/#119) | `./tools/scripts/check-move-bindings-arity.sh` on Release cut checklist |
+| Cut ships web bindings behind server Move/PlayerPose (#112/#119/#166) | `./tools/scripts/check-move-bindings-arity.sh` on Release cut checklist (Move + web/C# pose vertical fields) |
 | Matrix runner soft-green: TSV has FAIL but shell exit 0 (#148) | Runner aggregates `results.tsv` and exits 1 on FAIL (FLAKE too unless `FARDEL_MATRIX_ALLOW_FLAKE=1`); cut gates on exit code **and** TSV |
 
 ---

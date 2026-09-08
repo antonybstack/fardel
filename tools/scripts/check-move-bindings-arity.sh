@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fail if generated Move bindings (web TS + C#) do not match server Move arity/fields.
-# Also asserts PlayerPose VelY / LastGroundedMicros are present in C# generated types.
+# Also asserts PlayerPose VelY / LastGroundedMicros in C# and vel_y / last_grounded_micros
+# in web player_pose_table.ts (#166).
 # Usage (repo root): ./tools/scripts/check-move-bindings-arity.sh
 # Exit 0 = OK; non-zero = mismatch (print expected vs found).
 set -euo pipefail
@@ -10,6 +11,7 @@ cd "$root"
 
 server_lib="server/spacetimedb/Lib.cs"
 web_move="web/src/module_bindings/move_reducer.ts"
+web_pose="web/src/module_bindings/player_pose_table.ts"
 csharp_move="client/Assets/Scripts/Spacetime/Generated/Reducers/Move.g.cs"
 csharp_pose="client/Assets/Scripts/Spacetime/Generated/Types/PlayerPose.g.cs"
 
@@ -18,6 +20,7 @@ ok() { echo "OK: $*"; }
 
 [[ -f "$server_lib" ]] || fail "missing $server_lib"
 [[ -f "$web_move" ]] || fail "missing $web_move"
+[[ -f "$web_pose" ]] || fail "missing $web_pose"
 [[ -f "$csharp_move" ]] || fail "missing $csharp_move"
 [[ -f "$csharp_pose" ]] || fail "missing $csharp_pose"
 
@@ -94,7 +97,7 @@ if ! grep -q '\[DataMember(Name = "jump")\]' "$csharp_move"; then
   fail "C# Move.g.cs missing DataMember jump"
 fi
 
-# PlayerPose vertical fields (paired with #83 jump)
+# PlayerPose vertical fields (paired with #83 jump) — C# + web (#166)
 if ! grep -q '\[DataMember(Name = "vel_y")\]' "$csharp_pose"; then
   fail "C# PlayerPose.g.cs missing DataMember vel_y / VelY"
 fi
@@ -108,5 +111,20 @@ if ! grep -q 'public long LastGroundedMicros' "$csharp_pose"; then
   fail "C# PlayerPose.g.cs missing LastGroundedMicros property"
 fi
 
+# Web generated table must expose wire names matching server (#166 / #112 class)
+if ! grep -q '.name("vel_y")' "$web_pose"; then
+  fail "web player_pose_table.ts missing vel_y (.name(\"vel_y\"))"
+fi
+if ! grep -q '.name("last_grounded_micros")' "$web_pose"; then
+  fail "web player_pose_table.ts missing last_grounded_micros (.name(\"last_grounded_micros\"))"
+fi
+if ! grep -q 'velY:' "$web_pose"; then
+  fail "web player_pose_table.ts missing velY field"
+fi
+if ! grep -q 'lastGroundedMicros:' "$web_pose"; then
+  fail "web player_pose_table.ts missing lastGroundedMicros field"
+fi
+
 ok "server Move($server_sig) matches web + C# generated bindings"
 ok "PlayerPose VelY + LastGroundedMicros present in C# generated types"
+ok "web player_pose_table.ts has vel_y + last_grounded_micros"
