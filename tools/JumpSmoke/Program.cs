@@ -243,6 +243,139 @@ try
     }
     Console.WriteLine($"landed: Y={landY} lastGroundedMicros={landPose.LastGroundedMicros} (advanced from {spawnLastGroundedMicros})");
 
+    // Coyote (#121): jump allowed for CoyoteTimeMicros after leaving ground when VelY≤0.01
+    // (airborne apex). After the window, a falling jump must not re-boost. Distinct from
+    // #120 (VelY still high) and hold-Space (#157).
+    conn.Reducers.Move(0f, 0f, jump: false);
+    var coyoteGround = await WaitPoseTight(
+        conn, identity, p => p.LastGroundedMicros > landPose.LastGroundedMicros, 2000);
+    if (coyoteGround is null
+        || MathF.Abs(coyoteGround.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(coyoteGround.VelY) > 0.1f)
+    {
+        Fail($"coyote requires grounded refresh Y={coyoteGround?.Y} VelY={coyoteGround?.VelY} lg={coyoteGround?.LastGroundedMicros}");
+        return;
+    }
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var coyoteLeft = await WaitPoseTight(
+        conn, identity,
+        p => p.Y > Movement.GroundY + 0.05f || MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f,
+        2000);
+    if (coyoteLeft is null)
+    {
+        Fail("coyote: jump did not leave ground");
+        return;
+    }
+    var coyoteApex = coyoteLeft;
+    for (var i = 0; i < 16; i++)
+    {
+        if (coyoteApex.Y > Movement.GroundY + 0.05f && coyoteApex.VelY <= 0.01f)
+        {
+            break;
+        }
+        var velBefore = coyoteApex.VelY;
+        conn.Reducers.Move(0f, 0f, jump: false);
+        var stepped = await WaitPoseTight(conn, identity, p => p.VelY < velBefore - 0.1f, 500);
+        if (stepped is null)
+        {
+            Fail($"coyote: burst gravity timeout (Y={coyoteApex.Y} VelY={coyoteApex.VelY})");
+            return;
+        }
+        coyoteApex = stepped;
+    }
+    if (coyoteApex.Y <= Movement.GroundY + 0.05f || coyoteApex.VelY > 0.01f)
+    {
+        Fail($"coyote: never reached airborne apex Y={coyoteApex.Y} VelY={coyoteApex.VelY}");
+        return;
+    }
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var coyoteBoost = await WaitPoseTight(
+        conn, identity, p => MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f, 500);
+    if (coyoteBoost is null || MathF.Abs(coyoteBoost.VelY - Movement.JumpVelocity) > 1f)
+    {
+        Fail($"coyote within window did not boost VelY (Y={coyoteApex.Y} VelY={coyoteApex.VelY} -> {coyoteBoost?.VelY})");
+        return;
+    }
+    Console.WriteLine($"coyote jump: Y={coyoteApex.Y}->{coyoteBoost.Y} velY {coyoteApex.VelY}->{coyoteBoost.VelY}");
+
+    PlayerPose? coyoteFalling = coyoteBoost;
+    using (var expireCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!expireCts.IsCancellationRequested)
+        {
+            conn.Reducers.Move(0f, 0f, jump: false);
+            conn.FrameTick();
+            coyoteFalling = conn.Db.PlayerPose.Identity.Find(identity);
+            if (coyoteFalling is { } f && f.Y > Movement.GroundY + 0.08f && f.VelY < -0.5f)
+            {
+                break;
+            }
+            try
+            {
+                await Task.Delay(50, expireCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (coyoteFalling is null
+        || coyoteFalling.Y <= Movement.GroundY + 0.08f
+        || coyoteFalling.VelY >= -0.5f)
+    {
+        Fail($"coyote expire: not falling Y={coyoteFalling?.Y} VelY={coyoteFalling?.VelY}");
+        return;
+    }
+    var expireVelBefore = coyoteFalling.VelY;
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var afterExpire = await WaitPoseTight(
+        conn, identity, p => MathF.Abs(p.VelY - expireVelBefore) > 0.01f, timeoutMs);
+    if (afterExpire is null)
+    {
+        Fail("coyote expire: no pose after jump");
+        return;
+    }
+    if (MathF.Abs(afterExpire.VelY - Movement.JumpVelocity) < 0.5f)
+    {
+        Fail($"jump after coyote re-boosted VelY to {afterExpire.VelY} (was {expireVelBefore})");
+        return;
+    }
+    Console.WriteLine($"coyote expired: Y={coyoteFalling.Y}->{afterExpire.Y} velY {expireVelBefore}->{afterExpire.VelY} (no boost)");
+
+    using (var coyoteLandCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!coyoteLandCts.IsCancellationRequested)
+        {
+            conn.Reducers.Move(0f, 0f, jump: false);
+            conn.FrameTick();
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } air
+                && MathF.Abs(air.Y - Movement.GroundY) < 0.05f
+                && MathF.Abs(air.VelY) < 0.1f)
+            {
+                Console.WriteLine($"coyote landed: Y={air.Y} velY={air.VelY}");
+                break;
+            }
+            try
+            {
+                await Task.Delay(50, coyoteLandCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } coyoteLand
+        || MathF.Abs(coyoteLand.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(coyoteLand.VelY) > 0.1f)
+    {
+        Fail("coyote sequence did not land (Y/VelY)");
+        return;
+    }
+
     // Hold-Space air pump (#157): live client keeps jump:true while Space is held.
     // After rise, pump Move(0,0,true) until land — gravity must still integrate; VelY must
     // not reset to JumpVelocity mid-air.
@@ -486,6 +619,29 @@ static async Task<PlayerPose?> WaitPose(DbConnection conn, Identity identity, Fu
             }
             await Task.Delay(16, cts.Token).ConfigureAwait(false);
             conn.FrameTick();
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // timeout
+    }
+
+    return conn.Db.PlayerPose.Identity.Find(identity) is { } last && pred(last) ? last : null;
+}
+
+static async Task<PlayerPose?> WaitPoseTight(DbConnection conn, Identity identity, Func<PlayerPose, bool> pred, int timeoutMs)
+{
+    using var cts = new CancellationTokenSource(timeoutMs);
+    try
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } pose && pred(pose))
+            {
+                return pose;
+            }
+            await Task.Delay(1, cts.Token).ConfigureAwait(false);
         }
     }
     catch (OperationCanceledException)
