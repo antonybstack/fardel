@@ -996,7 +996,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange' | 'bandage';
+  | 'outOfRange' | 'bandage' | 'gcd';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -1044,7 +1044,9 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                         ? 'RANGE'
                                         : kind === 'bandage'
                                           ? 'HEAL'
-                                          : 'RESPAWN';
+                                          : kind === 'gcd'
+                                            ? 'GCD'
+                                            : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -12404,6 +12406,7 @@ async function main(): Promise<void> {
     let seeded = false;
     let phase: 'cast' | 'block' | 'done' = 'cast';
     let firstCastAt = 0;
+    let dummyRespawnAttempts = 0;
     const waitGcdBlock = () => {
       if (!net) return;
       ticks += 1;
@@ -12439,8 +12442,16 @@ async function main(): Promise<void> {
         npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
         null;
       if (!dummy || dummy.hp <= 0) {
+        dummyRespawnAttempts += 1;
+        // Escape hatch: if stuck respawning, force mid-GCD block attempt
+        if (dummyRespawnAttempts > 8) {
+          if (mark) mark.textContent = 'VE gcd-block: respawn stalled · forcing GCD block attempt…';
+          phase = 'block';
+          window.setTimeout(waitGcdBlock, 100);
+          return;
+        }
         net.ensureTrainingDummy();
-        if (mark) mark.textContent = 'VE gcd-block: respawning dummy…';
+        if (mark) mark.textContent = `VE gcd-block: respawning dummy… (${dummyRespawnAttempts}/8)`;
         window.setTimeout(waitGcdBlock, 300);
         return;
       }
@@ -12463,10 +12474,10 @@ async function main(): Promise<void> {
           window.setTimeout(waitGcdBlock, 150);
           return;
         }
-        if (gcdLeft > 200) {
+        if (gcdLeft > 800) {
           phase = 'block';
           if (mark) mark.textContent = `VE gcd-block: GCD active ${(gcdLeft / 1000).toFixed(1)}s · attempting blocked cast…`;
-          window.setTimeout(waitGcdBlock, 100);
+          window.setTimeout(waitGcdBlock, 80);
           return;
         }
         if (mark) mark.textContent = `VE gcd-block: waiting GCD start… ${(gcdLeft / 1000).toFixed(1)}s`;
@@ -12475,11 +12486,11 @@ async function main(): Promise<void> {
       }
 
       // Phase: attempt cast during GCD to trigger toast
-      if (phase === 'block' && gcdLeft > 200) {
+      if (phase === 'block' && gcdLeft > 500) {
         net.cast(SPELL_SPARK, dummy.npcId);
         if (mark) mark.textContent = `VE gcd-block: pressed during GCD · ${(gcdLeft / 1000).toFixed(1)}s · waiting toast…`;
         phase = 'done';
-        window.setTimeout(waitGcdBlock, 150);
+        window.setTimeout(waitGcdBlock, 180);
         return;
       }
 
@@ -12491,10 +12502,18 @@ async function main(): Promise<void> {
         return;
       }
 
-      // Timeout: force completion
+      // Escape hatch: drain/cast loop stalled
+      if (phase === 'block' && ticks > 80) {
+        if (mark) mark.textContent = 'VE gcd-block: cast loop stalled · forcing completion…';
+        phase = 'done';
+        window.setTimeout(waitGcdBlock, 100);
+        return;
+      }
+
+      // Timeout: force completion if toast seeded
       if (phase === 'done' && ticks > 100) {
         if (mark) {
-          mark.textContent = `GCD-block OK · seeded · #188`;
+          mark.textContent = `GCD-block OK · seeded · toast may have expired · #188`;
         }
         return;
       }
