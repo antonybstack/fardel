@@ -5707,11 +5707,12 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.48;
         camera.radius = 32;
       } else if (veFollow === 'place-wow') {
-        // Establishing: look north along the bent path toward the second silhouette.
-        camera.setTarget(player.position.add(new Vector3(-4, 5.5, -8)));
-        camera.alpha = Math.PI / 2 + 0.22;
-        camera.beta = Math.PI / 2.42;
-        camera.radius = 32;
+        // Establishing vs hordes-place-ref: player tiny vs trunks, path recedes
+        // into dusk-blue volume, canopy leaves the frame (#350). Ignore characters.
+        camera.setTarget(player.position.add(new Vector3(-3, 2.6, -22)));
+        camera.alpha = Math.PI / 2 + 0.1;
+        camera.beta = Math.PI / 2.52;
+        camera.radius = 24;
       } else if (veFollow === 'collision') {
         // Side-on: player pressed against the north hero bole.
         const hx = COLLISION_VE_HERO.x;
@@ -6377,7 +6378,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitPathGround, 600);
   }
 
-  // ?ve=place-wow — E3.7 establishing shot vs hordes place ref (scale/fog/path).
+  // ?ve=place-wow — E9.12 establishing shot vs hordes-place-ref (scale/fog/path).
   if (net && ve === 'place-wow') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE place-wow: waiting for Connected…';
@@ -6386,7 +6387,7 @@ async function main(): Promise<void> {
       if (latestStatus.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Place-wow OK · huge trees · receding path · blob shadows · fog · no capsules · Connected';
+            'Place-wow OK · huge trees · receding path · cool dusk · sky=fogColor · no capsules · Connected';
         }
         return;
       }
