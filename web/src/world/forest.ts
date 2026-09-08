@@ -383,140 +383,168 @@ function fogCss(c: Color3): string {
 }
 
 /**
- * Distant mountain silhouettes (#55): cool grey-blue layered ranges that read
- * through locked #39 cyan fog at play cam. Near/mid/far value steps — mood
- * backdrop only (low lit faces, no busy ridge noise). Procedural DIY.
+ * Distant mountain silhouettes (#273): farther / taller layered ranges.
+ * LINEAR fogEnd 200 would flatten anything past the forest into a cardboard
+ * wall, so ridges use applyFog=false and baked dusk-blue value steps.
+ * Procedural DIY — no packs.
  */
 function buildMountainBackdrop(scene: Scene): void {
-  // Near range — darkest cool grey-blue ridge (readable silhouette, not black cutout).
-  const nearRock = new StandardMaterial('mountainNearMat', scene);
-  nearRock.diffuseColor = new Color3(0.14, 0.18, 0.24);
-  nearRock.specularColor = new Color3(0.01, 0.012, 0.016);
-  nearRock.emissiveColor = new Color3(0.018, 0.028, 0.042);
+  const silMat = (name: string, glow: Color3): StandardMaterial => {
+    const m = new StandardMaterial(name, scene);
+    m.diffuseColor = Color3.Black();
+    m.specularColor = Color3.Black();
+    m.emissiveColor = glow;
+    m.disableLighting = true;
+    m.fogEnabled = false;
+    return m;
+  };
 
-  // Mid range — medium value step.
-  const midRock = new StandardMaterial('mountainMidMat', scene);
-  midRock.diffuseColor = new Color3(0.2, 0.26, 0.34);
-  midRock.specularColor = new Color3(0.012, 0.014, 0.018);
-  midRock.emissiveColor = new Color3(0.032, 0.045, 0.062);
+  // Darker near → paler far (atmospheric perspective into FOG_COLOR).
+  const nearRock = silMat('mountainNearMat', new Color3(0.13, 0.19, 0.26));
+  const midRock = silMat('mountainMidMat', new Color3(0.21, 0.34, 0.46));
+  const farRock = silMat('mountainFarMat', new Color3(0.30, 0.48, 0.62));
+  const snowMid = silMat('snowMidMat', new Color3(0.48, 0.58, 0.68));
+  const snowFar = silMat('snowFarMat', new Color3(0.38, 0.51, 0.64));
 
-  // Far range — softest, fog-blended cool blue (still a ridge line through haze).
-  const farRock = new StandardMaterial('mountainFarMat', scene);
-  farRock.diffuseColor = new Color3(0.26, 0.34, 0.44);
-  farRock.specularColor = new Color3(0.01, 0.012, 0.016);
-  farRock.emissiveColor = new Color3(0.055, 0.078, 0.11);
-
-  // Soft snow — readable through cyan fog, not neon white.
-  const snowNear = new StandardMaterial('snowNearMat', scene);
-  snowNear.diffuseColor = new Color3(0.58, 0.66, 0.74);
-  snowNear.specularColor = new Color3(0.06, 0.07, 0.09);
-  snowNear.emissiveColor = new Color3(0.1, 0.12, 0.14);
-
-  const snowFar = new StandardMaterial('snowFarMat', scene);
-  snowFar.diffuseColor = new Color3(0.52, 0.62, 0.72);
-  snowFar.specularColor = new Color3(0.04, 0.05, 0.07);
-  snowFar.emissiveColor = new Color3(0.12, 0.145, 0.17);
-
+  type Layer = 'near' | 'mid' | 'far';
   type Peak = {
-    x: number;
-    z: number;
+    r: number;
+    yaw: number;
     h: number;
     w: number;
-    yaw: number;
-    layer: 'near' | 'mid' | 'far';
+    layer: Layer;
     snow?: boolean;
   };
 
-  // Far layer — tall soft peaks deeper in haze.
+  const xz = (r: number, yaw: number): { x: number; z: number } => ({
+    x: r * Math.sin(yaw),
+    z: -r * Math.cos(yaw),
+  });
+
+  const dress = (mesh: Mesh, mat: StandardMaterial, yaw: number, sx: number, sz: number): void => {
+    mesh.rotation.y = yaw;
+    mesh.scaling.x = sx;
+    mesh.scaling.z = sz;
+    mesh.isPickable = false;
+    mesh.applyFog = false;
+    mesh.material = mat;
+  };
+
+  const sxFor = (layer: Layer): number =>
+    layer === 'far' ? 2.4 : layer === 'mid' ? 2.05 : 1.7;
+
+  const placePeak = (name: string, p: Peak, rock: StandardMaterial, snow: StandardMaterial | null, idx: number): void => {
+    const { x, z } = xz(p.r, p.yaw);
+    const tess = 7;
+    const sx = sxFor(p.layer);
+    const mtn = MeshBuilder.CreateCylinder(
+      name,
+      { height: p.h, diameterTop: p.w * 0.1, diameterBottom: p.w, tessellation: tess },
+      scene,
+    );
+    mtn.position.set(x, p.h * 0.34, z);
+    dress(mtn, rock, p.yaw, sx, 0.72);
+
+    const side = idx % 2 === 0 ? 1 : -1;
+    const sh = xz(p.r + 12, p.yaw + side * 0.07);
+    const shoulder = MeshBuilder.CreateCylinder(
+      `${name}_s`,
+      {
+        height: p.h * 0.55,
+        diameterTop: p.w * 0.12,
+        diameterBottom: p.w * 0.7,
+        tessellation: tess,
+      },
+      scene,
+    );
+    shoulder.position.set(sh.x, p.h * 0.24, sh.z);
+    dress(shoulder, rock, p.yaw + side * 0.35, sx * 0.85, 0.78);
+
+    if (snow) {
+      const cap = MeshBuilder.CreateCylinder(
+        `${name}_snow`,
+        {
+          height: p.h * 0.1,
+          diameterTop: p.w * 0.04,
+          diameterBottom: p.w * 0.18,
+          tessellation: tess,
+        },
+        scene,
+      );
+      cap.position.set(x, p.h * 0.72, z);
+      dress(cap, snow, p.yaw, sx, 0.72);
+    }
+  };
+
+  // Far range ~750–900 m, mid ~480–560 m, near foothills past the 175 m tree ring.
   const farPeaks: Peak[] = [
-    { x: -95, z: -175, h: 115, w: 78, yaw: 0.12, layer: 'far', snow: true },
-    { x: -15, z: -190, h: 138, w: 92, yaw: -0.18, layer: 'far', snow: true },
-    { x: 70, z: -180, h: 122, w: 82, yaw: 0.22, layer: 'far', snow: true },
-    { x: 145, z: -160, h: 98, w: 68, yaw: -0.28, layer: 'far', snow: true },
-    { x: -155, z: -150, h: 88, w: 62, yaw: 0.35, layer: 'far' },
+    { r: 820, yaw: -0.92, h: 300, w: 180, layer: 'far' },
+    { r: 870, yaw: -0.62, h: 380, w: 220, layer: 'far', snow: true },
+    { r: 900, yaw: -0.32, h: 440, w: 250, layer: 'far', snow: true },
+    { r: 880, yaw: -0.02, h: 460, w: 260, layer: 'far', snow: true },
+    { r: 850, yaw: 0.3, h: 400, w: 230, layer: 'far', snow: true },
+    { r: 800, yaw: 0.58, h: 340, w: 200, layer: 'far', snow: true },
+    { r: 760, yaw: 0.88, h: 280, w: 170, layer: 'far' },
   ];
-
-  // Mid layer — main readable silhouette ridge.
   const midPeaks: Peak[] = [
-    { x: -70, z: -138, h: 78, w: 58, yaw: 0.08, layer: 'mid', snow: true },
-    { x: 10, z: -150, h: 95, w: 68, yaw: -0.12, layer: 'mid', snow: true },
-    { x: 85, z: -142, h: 86, w: 60, yaw: 0.2, layer: 'mid', snow: true },
-    { x: -125, z: -120, h: 62, w: 48, yaw: 0.4, layer: 'mid' },
-    { x: 130, z: -125, h: 70, w: 52, yaw: -0.32, layer: 'mid' },
+    { r: 500, yaw: -0.85, h: 170, w: 140, layer: 'mid' },
+    { r: 540, yaw: -0.52, h: 210, w: 160, layer: 'mid', snow: true },
+    { r: 560, yaw: -0.18, h: 240, w: 175, layer: 'mid', snow: true },
+    { r: 545, yaw: 0.18, h: 220, w: 165, layer: 'mid', snow: true },
+    { r: 510, yaw: 0.5, h: 185, w: 150, layer: 'mid' },
+    { r: 485, yaw: 0.82, h: 155, w: 130, layer: 'mid' },
   ];
-
-  // Near foothills — darker foreground ridge steps (no snow clutter).
   const nearPeaks: Peak[] = [
-    { x: -90, z: -108, h: 36, w: 42, yaw: 0.15, layer: 'near' },
-    { x: -35, z: -115, h: 44, w: 48, yaw: -0.1, layer: 'near' },
-    { x: 25, z: -112, h: 40, w: 45, yaw: 0.18, layer: 'near' },
-    { x: 80, z: -105, h: 34, w: 40, yaw: -0.22, layer: 'near' },
-    { x: -140, z: -95, h: 30, w: 38, yaw: 0.45, layer: 'near' },
-    { x: 120, z: -98, h: 32, w: 36, yaw: -0.35, layer: 'near' },
+    { r: 345, yaw: -0.8, h: 48, w: 95, layer: 'near' },
+    { r: 360, yaw: -0.48, h: 58, w: 105, layer: 'near' },
+    { r: 375, yaw: -0.14, h: 64, w: 115, layer: 'near' },
+    { r: 365, yaw: 0.22, h: 60, w: 110, layer: 'near' },
+    { r: 350, yaw: 0.54, h: 52, w: 100, layer: 'near' },
+    { r: 335, yaw: 0.86, h: 46, w: 90, layer: 'near' },
   ];
 
   const allPeaks = [...farPeaks, ...midPeaks, ...nearPeaks];
   for (let i = 0; i < allPeaks.length; i++) {
     const p = allPeaks[i]!;
-    const rock =
-      p.layer === 'near' ? nearRock : p.layer === 'mid' ? midRock : farRock;
-    const mtn = MeshBuilder.CreateCylinder(
-      `mountain_${p.layer}_${i}`,
-      {
-        height: p.h,
-        diameterTop: 0.4,
-        diameterBottom: p.w,
-        tessellation: 5,
-      },
-      scene,
-    );
-    mtn.position.set(p.x, p.h * 0.4, p.z);
-    mtn.rotation.y = p.yaw;
-    mtn.scaling.x = 1.35 + (i % 3) * 0.12;
-    mtn.scaling.z = 1.05;
-    mtn.isPickable = false;
-    mtn.material = rock;
+    const rock = p.layer === 'near' ? nearRock : p.layer === 'mid' ? midRock : farRock;
+    const snow = !p.snow ? null : p.layer === 'far' ? snowFar : snowMid;
+    placePeak(`mountain_${p.layer}_${i}`, p, rock, snow, i);
+  }
 
-    if (p.snow) {
-      const snowMat = p.layer === 'far' ? snowFar : snowNear;
-      const cap = MeshBuilder.CreateCylinder(
-        `snow_${p.layer}_${i}`,
+  const placeRidge = (
+    prefix: string,
+    radius: number,
+    count: number,
+    hBase: number,
+    hVar: number,
+    wBase: number,
+    mat: StandardMaterial,
+    yaw0: number,
+    yaw1: number,
+  ): void => {
+    for (let i = 0; i < count; i++) {
+      const yaw = yaw0 + ((i + 0.5) / count) * (yaw1 - yaw0);
+      const r = radius + hash01(i + radius) * 22 - 11;
+      const h = hBase + hash01(i * 3 + radius) * hVar;
+      const { x, z } = xz(r, yaw);
+      const ridge = MeshBuilder.CreateCylinder(
+        `${prefix}_${i}`,
         {
-          height: p.h * 0.14,
-          diameterTop: 0.15,
-          diameterBottom: p.w * 0.22,
-          tessellation: 5,
+          height: h,
+          diameterTop: wBase * 0.18,
+          diameterBottom: wBase,
+          tessellation: 7,
         },
         scene,
       );
-      cap.position.set(p.x, p.h * 0.72, p.z);
-      cap.rotation.y = p.yaw;
-      cap.scaling.x = mtn.scaling.x;
-      cap.scaling.z = mtn.scaling.z;
-      cap.isPickable = false;
-      cap.material = snowMat;
+      ridge.position.set(x, h * 0.28, z);
+      dress(ridge, mat, yaw, 2.0, 0.7);
     }
-  }
+  };
 
-  // Soft near ridge band — darker value under mid peaks (layered read, low detail).
-  for (let i = 0; i < 7; i++) {
-    const x = -95 + i * 32 + hash01(i + 50) * 8;
-    const z = -96 - hash01(i + 70) * 12;
-    const h = 18 + hash01(i + 90) * 14;
-    const ridge = MeshBuilder.CreateCylinder(
-      `foothill_${i}`,
-      {
-        height: h,
-        diameterTop: 1.5,
-        diameterBottom: 32 + hash01(i) * 16,
-        tessellation: 5,
-      },
-      scene,
-    );
-    ridge.position.set(x, h * 0.32, z);
-    ridge.isPickable = false;
-    ridge.material = nearRock;
-  }
+  placeRidge('foothill', 310, 9, 28, 18, 80, nearRock, -0.95, 0.95);
+  placeRidge('midridge', 470, 8, 88, 36, 110, midRock, -0.9, 0.9);
+  placeRidge('farridge', 720, 8, 130, 50, 160, farRock, -0.95, 0.95);
 }
 
 /**
@@ -1058,7 +1086,7 @@ function buildClearingPath(scene: Scene): void {
 
 /**
  * Forest clearing: Quaternius Standard heroes + mid + understory (CC0),
- * procedural mountain silhouettes, #39 sun/hemi + #270 LINEAR fog/sky lock.
+ * procedural mountain silhouettes (#273), #39 sun/hemi + #270 LINEAR fog/sky lock.
  * Path/ground polish #44 via buildClearingPath; sky/horizon silhouette #55.
  * Procedural fallback uses post-#40 ThinInstance density + LOD.
  */
