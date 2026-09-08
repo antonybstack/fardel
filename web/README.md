@@ -68,6 +68,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | Query | Proof |
 |---|---|
 | `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
+| `?ve=remote-sheathed` | Remote without staff: unarmed Idle (not Idle_Weapon + hidden stick) (#448); HUD `Remote sheathed OK · Idle · skinned 1`. `FARDEL_SECOND_SHEATH=1` on `tools/SecondClient`. |
 | `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
 | `?ve=minimap-read` | Plate + blips + N vs #39 cyan fog at play cam (#103 / #61) |
 | `?ve=minimap-pip` | Self pip + north readable while WASDing (#164); pulse/halo/N on top of sliding blips |
