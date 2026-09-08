@@ -363,3 +363,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Cycle Tab until Kind=3. Frame pad C. persistMark names `Brigand`. Stay at origin (outside AggroRadius). Dummy trainer. Capsule = fail.
 - **Seen in:** #485 / #422
 
+### 2026-09-08 — npc,stun — stunned Kind=3 moonwalks on leftover Walk hold
+- **Cause:** `TickHostiles` already skips while `StunnedUntilMicros`. `npcWalkHold` kept Walk 0.22s after the last chase step, so the brigand slid in place (leash moonwalk).
+- **Do this:** If `stunnedUntilMicros` is in the future, drop `npcWalkHold` and `setHumanoidGroundWalk(false)`. `?ve=stun-hold` mid-chase; persistMark names `Brigand` + stun hold; drift / Walk = fail. Dummy trainer. Do not touch `humanoid.ts`.
+- **Seen in:** #487
+

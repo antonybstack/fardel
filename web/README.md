@@ -101,6 +101,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=brigand-plate` | Kind=2 Hostile coral vs Kind=3 Brigand violet nameplates + combat log names both (#454); HUD `Brigand-plate OK · Hostile coral · Brigand violet · Dummy parchment · log both · #454`. |
 | `?ve=kick` | KickNpc Kind=3 Brigand interrupt + dummy still kickable (#452); HUD `Kick OK · Brigand #… · interrupt · dummy kickable · #452`. |
 | `?ve=stun` | StunNpc Kind=3 Brigand lock + dummy still stunnable (#452); HUD `Stun OK · Brigand #… · lock · dummy stunnable · #452`. Walk to ~4m (StunRange 5, AggroRadius 3). |
+| `?ve=stun-hold` | StunNpc a chasing Kind=3 Brigand; it stands for the lock (no Walk moonwalk / leash slide) (#487); HUD `Stun-hold OK · Brigand · stun hold · dummy trainer · #487`. Dummy stays trainer. Drift / Walk during lock = fail. |
 | `?ve=respawn` | Kill pad A from origin (outside aggro), linger revive at home pad (#421); HUD `Respawn OK · pad A · dummy trainer · #421`. Do not walk into AggroRadius. Dummy stays trainer. |
 | `?ve=encounter` | Kind=2 Hostile + Kind=3 Brigand as people, dummy trainer, pad A fight (#456); HUD `Encounter OK · Hostile · Brigand · dummy trainer · fighting · skinned · #456`. capsule = fail. |
 | `?ve=hunt-loop` | Tab Kind=3 Brigand, Spark hit, kill, corpse loot at play cam (#485 / #422); HUD `Hunt-loop OK · Tab · hit · death · loot · Brigand · dummy trainer`. Stay outside AggroRadius. Dummy stays trainer. Capsule = fail |
