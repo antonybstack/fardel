@@ -1016,7 +1016,9 @@ type SystemToastKind =
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange' | 'bandage';
+  | 'outOfRange'
+  | 'bandage'
+  | 'canvasFocus';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1079,7 +1081,9 @@ function pushSystemToast(
                                             ? 'STUN'
                                             : kind === 'outOfRange'
                                               ? 'RANGE'
-                                              : 'SAY';
+                                              : kind === 'canvasFocus'
+                                                ? 'FOCUS'
+                                                : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1105,6 +1109,7 @@ function toastKindsPresent(): Set<string> {
 
 const CHAT_LOG_MAX = 10;
 let chatComposing = false;
+let lastCanvasFocusToastMs = 0;
 
 function setChatComposing(open: boolean): void {
   chatComposing = open;
@@ -1276,6 +1281,18 @@ function bindChatUi(opts: {
       setChatComposing(true);
       updateChatPrompt('say');
       return;
+    }
+
+    if (e.key === ' ') {
+      const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+      const shouldShowToast = chatComposing || (chatInput && document.activeElement === chatInput);
+      if (shouldShowToast && !e.repeat) {
+        const now = Date.now();
+        if (now - lastCanvasFocusToastMs > 1500) {
+          lastCanvasFocusToastMs = now;
+          pushSystemToast('canvasFocus', 'Click canvas for gameplay keys (Space, WASD…)');
+        }
+      }
     }
   };
 
@@ -1664,6 +1681,13 @@ async function createScene(engine: Engine): Promise<{
 
   if (canvas) {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('pointerdown', () => {
+      setChatComposing(false);
+      const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (chatInput && document.activeElement === chatInput) {
+        chatInput.blur();
+      }
+    });
   }
 
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
@@ -1934,11 +1958,30 @@ function bindInput(opts: {
 }): { keys: Set<string>; dispose: () => void } {
   const keys = new Set<string>();
   const down = (e: KeyboardEvent) => {
+    const k = e.key.toLowerCase();
+    
+    // Toast BEFORE chatComposing early-return so it can't miss
+    if (k === ' ' && !e.repeat) {
+      const chatInput = document.getElementById('chatInput') as HTMLInputElement | null;
+      const shouldShowToast = chatComposing || (chatInput && document.activeElement === chatInput);
+      if (shouldShowToast) {
+        const now = Date.now();
+        if (now - lastCanvasFocusToastMs > 1500) {
+          lastCanvasFocusToastMs = now;
+          pushSystemToast('canvasFocus', 'Click canvas for gameplay keys (Space, WASD…)');
+        }
+      }
+    }
+    
     if (chatComposing) return;
     if (e.repeat) return;
-    const k = e.key.toLowerCase();
     if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
       keys.add(k);
+      e.preventDefault();
+      return;
+    }
+    if (k === ' ') {
+      keys.add(' ');
       e.preventDefault();
       return;
     }
