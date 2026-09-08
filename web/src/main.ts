@@ -2932,21 +2932,24 @@ async function main(): Promise<void> {
     ttlMs: number;
     autoCloseMs: number;
   }): void => {
+    const veMode = bootParams.get('ve') || '';
+    if (veMode && veMode !== 'first-session') return;
     if (!opts.force && (firstSessionCueShown || firstSessionCueSeen())) return;
     const already = firstSessionCueShown;
+    const legendAlreadyOpen = keysLegendOpen;
     firstSessionCueShown = true;
     keysLegendOpen = true;
     if (firstSessionFlashTimer != null) {
       window.clearTimeout(firstSessionFlashTimer);
       firstSessionFlashTimer = null;
     }
-    firstSessionLegendFlash = opts.autoCloseMs > 0;
+    firstSessionLegendFlash = opts.autoCloseMs > 0 && !legendAlreadyOpen;
     setKeysLegendOpen(true);
     if (!already || !document.querySelector('.sysToast.keys')) {
       pushSystemToast('keys', FIRST_SESSION_TOAST, opts.ttlMs);
     }
     if (!opts.force) markFirstSessionCueSeen();
-    if (opts.autoCloseMs > 0) {
+    if (opts.autoCloseMs > 0 && !legendAlreadyOpen) {
       firstSessionFlashTimer = window.setTimeout(() => {
         firstSessionFlashTimer = null;
         if (!firstSessionLegendFlash) return;
@@ -7871,7 +7874,6 @@ async function main(): Promise<void> {
         if (mark) {
           mark.textContent = 'First-session OK · H legend · canvas focus · #134';
         }
-        if (ticks < 40) window.setTimeout(waitCue, 250);
         return;
       }
       if (!toastOk) {
