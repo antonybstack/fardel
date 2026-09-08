@@ -321,7 +321,47 @@ That document covers:
 
 ---
 
-## 12. Quick reference
+## 12. Token / chat hygiene (mandatory)
+
+These rules prevent waste loops, stale pings, and notification spam. **All seats must follow.**
+
+### Before merge/VE/status pings
+
+1. **Check PR state first:** Run `gh pr view <n>` before reporting "MERGE-READY" / "ready to merge" / "please review" to Lead or Reviewer. Never ping about already-merged PRs.
+2. **Check VE URL first:** `curl -I <ve-url>` before reporting "please upload" or "VE missing." If URL returns HTTP 200, VE is live — don't ask again.
+
+### VE upload discipline
+
+3. **One canonical key per Issue:** Use `N/name.png` naming (e.g. `123/chat-read.png` for Issue #123). On first publish, embed `https://ve.sparkify.dev/N/name.png?v=1` in PR (edge may 404 plain URL briefly; `?v=1` forces cache bypass).
+4. **Lead uploads once, acks once:** Seats capture + request upload; Lead uploads + acks. Seats do **not** re-ask after ack. If genuinely missing after ack, re-check URL first (rule 2).
+
+### Feel / QA coordination
+
+5. **Freeze one SHA for Feel/QA:** Comment the target SHA in the PR when sending to Feel or QA. Do **not** move the freeze until Feel/QA reports PASS/FAIL on that SHA. If tip moves mid-test, finish the frozen SHA first, then re-test new SHA if needed.
+6. **Feel: one box automation attempt:** If Feel harness on box is inconclusive (e.g. flaky setup), Feel verifies on Mac or play.sparkify.dev directly — no inconclusive retry loops. Report PASS/FAIL or INCONCLUSIVE + manual result.
+
+### Lead / parent economy
+
+7. **Stay silent on pure FYI acks:** Lead does not reply "ok" / "ack" / "noted" to FYI status reports. Silence = received. Speak only when action is needed (assign, nudge, merge, block).
+8. **Continuous-iterate: speak on deltas only:** Status messages only when tip moves, queue changes, or seat state changes (assign/merge/block). Do **not** restate roster, repeat idle facts, or echo unchanged state.
+
+### Broadcast economy
+
+9. **Prefer one status bus message per seat:** Post seat state changes (assign, PR up, merge, block) to the relevant channel once. Do **not** repeat the same fact in 1:1 DMs unless truly seat-specific context is needed.
+
+### Summary
+
+- Check before ping (`gh pr view`, `curl -I`)
+- One VE key per Issue; Lead uploads once
+- Freeze SHA for Feel/QA
+- Feel: one box attempt, then Mac/self-verify
+- Lead silent on FYI
+- Continuous-iterate: deltas only
+- One bus message per fact
+
+**Violating these rules burns Antony's notification budget.** Stay disciplined.
+
+---
 
 ### Merge gate
 
@@ -348,7 +388,7 @@ That document covers:
 
 ---
 
-## 13. Art sourcing (no purchases)
+## 14. Art sourcing (no purchases)
 
 **Hard rule (Antony):** we **cannot purchase** assets. Only **free open-source / CC0** (commercial-use free) packs, or **original/procedural** work we develop — see [ASSETS.md](ASSETS.md).
 
@@ -359,7 +399,7 @@ Flow:
 3. Import + credits ledger land in the same PR as any third-party free assets.
 4. Procedural / kitbash presentation Issues (`lane:art` + `lane:client`) are first-class, not a stopgap apology.
 
-## 14. Minimal assign template (copy/paste)
+## 15. Minimal assign template (copy/paste)
 
 ```text
 Assign: #<N> <title>
@@ -374,7 +414,7 @@ No invent past this Issue. Rebase if tip moves.
 
 ---
 
-## 15. Lead autonomy and Issue lifecycle
+## 16. Lead autonomy and Issue lifecycle
 
 Team Lead has Antony's mandate to reorganize seats, correct agents, use Cloud Agents, and change GitHub process to hit the product vision.
 
@@ -390,7 +430,7 @@ Team Lead has Antony's mandate to reorganize seats, correct agents, use Cloud Ag
 
 ---
 
-## 16. Visual evidence (VE) policy — canonical
+## 17. Visual evidence (VE) policy — canonical
 
 ### Host
 
@@ -442,7 +482,7 @@ All seats share Cloudflare credentials. If upload fails, ping Lead only — do n
 
 ---
 
-## 17. Jump / locomotion gating example
+## 18. Jump / locomotion gating example
 
 Feel Pages `?ve=jump` harness can PASS (jump physics OK) while manual Space input FAILS (focus-steal #127).
 

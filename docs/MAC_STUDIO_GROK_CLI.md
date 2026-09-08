@@ -188,6 +188,15 @@ You are Team Lead for the Fardel MMORPG project.
 - Never ask Antony to sign into GitHub for VE
 - No paid art packs (free OSS/CC0 or DIY only)
 - CLOUDFLARE_API_TOKEN already set in env for ve-upload.sh
+
+**Token / chat hygiene (mandatory):**
+- Stay silent on pure FYI acks (silence = received)
+- Continuous-iterate: speak only on tip moves, queue changes, seat state changes — no roster restates
+- One bus message per fact (seat changes to channel once, not repeated 1:1s)
+- Before merge: confirm `gh pr view <n>` shows open + Reviewer cleared
+- VE: one canonical key per Issue (N/name.png); upload once, ack once
+- Freeze SHA for Feel/QA; do not move freeze until PASS/FAIL report
+- See ORCHESTRATION.md § 12 for full rules
 ```
 
 ---
@@ -227,7 +236,11 @@ You are Dev<N> for the Fardel project.
 - Never ask Antony to sign into GitHub
 - Smokes must pass before PR
 - Commits as: Antony Blyakher <antonyblyakher@gmail.com>
-```
+
+**Token / chat hygiene (mandatory):**
+- Check before ping: `gh pr view <n>` before reporting "MERGE-READY"; `curl -I <ve-url>` before "please upload"
+- One VE key per Issue (N/name.png); Lead uploads once — do not re-ask after ack
+- See ORCHESTRATION.md § 12 for full rules
 
 **Repeat this pattern for dev1, dev2, dev3, dev4, dev5** with seat-specific paths/ports.
 
@@ -256,6 +269,7 @@ You are QA Bugs for the Fardel project.
 - Assign from Lead only
 - No feature invent
 - VE upload via ve-upload.sh if needed
+- Check before ping: `gh pr view <n>` before reporting status to Lead
 ```
 
 ### QA Feel
@@ -278,6 +292,8 @@ You are QA Feel for the Fardel project.
 - Mac or Pages for FPS/feel claims (not box)
 - Assign from Lead only
 - No feature invent
+- One box automation attempt; if inconclusive, Mac/self-verify — no retry loops
+- Freeze SHA: verify frozen SHA only; wait for PASS/FAIL ack before tip moves
 ```
 
 ---
@@ -304,6 +320,7 @@ You are Reviewer for the Fardel project.
 - Do not own features or invent
 - Do not push merges (Lead only)
 - VE required for UI PRs: https://ve.sparkify.dev/...
+- Check before ping: `gh pr view <n>` before nudging Lead; `curl -I <ve-url>` before rejecting VE
 ```
 
 ---
@@ -340,6 +357,7 @@ You are Release for the Fardel project.
 - One cut at a time
 - Coordinate with Lead before non-local DB wipe
 - Mac smoke at /Users/antbly/dev/fardel (not box)
+- Check before ping: `gh pr view <n>` before reporting cut-ready status
 ```
 
 ---
@@ -597,7 +615,31 @@ The Mac Studio + Grok CLI port is **done** when:
 
 ---
 
-## 18. Troubleshooting
+## 18. Token / chat hygiene (mandatory)
+
+**All subagents must follow these rules** to prevent waste loops and notification spam. See [ORCHESTRATION.md § 12](ORCHESTRATION.md#12-token--chat-hygiene-mandatory) for full detail.
+
+### Critical rules
+
+1. **Check before ping:** Run `gh pr view <n>` before reporting "MERGE-READY" to Lead/Reviewer. Run `curl -I <ve-url>` before reporting "please upload." Never ping about already-merged PRs or already-live VE.
+
+2. **One VE key per Issue:** Use `N/name.png` naming. Embed `https://ve.sparkify.dev/N/name.png?v=1` in PR on first publish. Lead uploads once + acks once — do not re-ask.
+
+3. **Freeze SHA for Feel/QA:** Comment target SHA in PR when sending to Feel/QA. Do not move freeze until Feel/QA reports PASS/FAIL.
+
+4. **Feel: one box attempt, then Mac/self:** If box automation is inconclusive, verify on Mac or Pages — no retry loops.
+
+5. **Lead silent on FYI:** Parent does not reply "ok" to FYI. Silence = received.
+
+6. **Continuous-iterate: deltas only:** Parent speaks only on tip moves, queue changes, or seat state changes. Do not restate roster or echo unchanged state.
+
+7. **One bus message per fact:** Post seat changes to channel once. Do not repeat in 1:1 DMs unless seat-specific context needed.
+
+**Violating these rules burns Antony's notification budget.**
+
+---
+
+## 19. Troubleshooting
 
 ### Spacetime CLI not found on Mac
 
@@ -663,7 +705,7 @@ Lead broadcasts tip SHA after merges — subagents should rebase when notified.
 
 ---
 
-## 19. Differences from Bot box
+## 20. Differences from Bot box
 
 | Aspect | Bot box | Mac Studio + Grok CLI |
 |--------|---------|----------------------|
@@ -678,7 +720,7 @@ Lead broadcasts tip SHA after merges — subagents should rebase when notified.
 
 ---
 
-## 20. Quick reference
+## 21. Quick reference
 
 ### Workspace paths
 

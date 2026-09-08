@@ -161,4 +161,4 @@ PR screenshots are **not** committed to git and **not** pasted via GitHub user-a
 - **Forbidden for new work:** committing `ve/*.png` to git, GitHub `user-attachments` paste, `raw.githubusercontent.com` VE embeds, relative `ve/` links in PR
 - **Reviewer bar:** URL must be `https://ve.sparkify.dev/…`, HTTP 200 `image/png`, renders in PR UI
 
-For full VE policy, see [ORCHESTRATION.md § 16](ORCHESTRATION.md#16-visual-evidence-ve-policy--canonical).
+For full VE policy, see [ORCHESTRATION.md § 17](ORCHESTRATION.md#17-visual-evidence-ve-policy--canonical).
