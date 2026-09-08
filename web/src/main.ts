@@ -222,7 +222,7 @@ function setGcdBar(
     if (cTotal > 0 && cMs > 0) {
       const pct = Math.min(100, ((cTotal - cMs) / cTotal) * 100);
       castFill.style.width = `${pct}%`;
-      castLabel.textContent = `${name}  ${(cMs / 1000).toFixed(1)}s`;
+      castLabel.textContent = `${name}  ${(cMs / 1000).toFixed(1)}s  ·  Esc cancel`;
       castFill.parentElement?.classList.remove('hidden');
     } else {
       castFill.style.width = '0%';
