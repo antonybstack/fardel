@@ -58,6 +58,8 @@ type HumanoidAnim = {
   dead: boolean;
   /** Emberbolt windup hold — not the Spark one-shot. */
   casting: boolean;
+  /** Stationary yaw — Idle held so feet stay planted. */
+  turning: boolean;
 };
 
 const animByRoot = new WeakMap<Mesh, HumanoidAnim>();
@@ -640,6 +642,7 @@ export function createPlayerHumanoid(
     airborne: false,
     dead: false,
     casting: false,
+    turning: false,
   });
 
   root.material = robeMat;
@@ -774,6 +777,29 @@ export function setHumanoidMoving(
   const ref = loc === a.run ? RUN_REF_MPS : WALK_REF_MPS;
   const mps = speedMps > 0.15 ? speedMps : ref;
   loc.speedRatio = Math.max(0.7, Math.min(1.85, mps / ref));
+}
+
+/**
+ * Stationary yaw: hold Idle_Weapon (speed 0) so feet stay planted.
+ * No-op while Walk/Run/#334 gait is playing.
+ */
+export function setHumanoidTurning(
+  parts: HumanoidParts,
+  turning: boolean,
+): void {
+  const a = animByRoot.get(parts.root);
+  if (!a) return;
+  if (a.dead || a.airborne || a.casting) {
+    a.turning = false;
+    return;
+  }
+  if (a.walk?.isPlaying || a.run?.isPlaying || a.flinch?.isPlaying || a.cast?.isPlaying) {
+    a.turning = false;
+    return;
+  }
+  a.turning = turning;
+  startLoop(a.idle);
+  if (a.idle) a.idle.speedRatio = turning ? 0 : 1;
 }
 
 /** Play Death once and hold the fallen pose. Respawn restores Idle_Weapon. */
