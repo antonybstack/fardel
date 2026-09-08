@@ -87,23 +87,47 @@ body {
     0 0 12px rgba(255, 160, 50, 0.55);
 }
 
-/* GCD bar — cool blue secondary chrome; distinct from warm cast / crimson lockout. */
+/* GCD bar — cool blue/silver secondary chrome under #39 fog; ≠ warm cast / crimson lockout / XP amber.
+   No neon bloom — matte plate + crisp fill so ready vs sweeping read at a glance. */
 #gcdBar {
   height: 18px;
   border-radius: 6px;
-  border: 1px solid rgba(120, 170, 255, 0.72);
-  background: rgba(6, 10, 22, 0.94);
+  border: 2px solid rgba(158, 188, 228, 0.94);
+  background: rgba(4, 9, 18, 0.97);
   box-shadow:
-    0 0 0 1px rgba(4, 6, 14, 0.92),
-    0 2px 10px rgba(0, 0, 0, 0.4),
-    inset 0 0 0 1px rgba(140, 190, 255, 0.18);
+    0 0 0 1px rgba(2, 4, 10, 0.96),
+    0 2px 12px rgba(0, 0, 0, 0.52),
+    inset 0 0 0 1px rgba(190, 210, 235, 0.28);
 }
 
 #gcdBar .barLabel {
   font-size: 11px;
-  font-weight: 650;
-  color: #dce8ff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  font-weight: 750;
+  letter-spacing: 0.025em;
+  line-height: 16px;
+  color: #f0f5ff;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 1px rgba(0, 0, 0, 0.85);
+}
+
+/* Sweeping fill: cool blue → silver edge (not cast amber, not toast XP). */
+#gcdBar .barFill {
+  background: linear-gradient(
+    90deg,
+    #243f6e 0%,
+    #3f6eae 52%,
+    #9bb6d8 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(220, 235, 255, 0.4);
+}
+
+/* Ready: cool mint-silver idle plate — distinct from sweep, never amber. */
+#gcdBar .barFill.ready {
+  background: linear-gradient(90deg, #2f5a64 0%, #6a9a9e 100%);
+  width: 100% !important;
+  opacity: 0.58;
+  box-shadow: inset 0 1px 0 rgba(200, 230, 232, 0.32);
 }
 
 .barFill {

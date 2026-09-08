@@ -62,6 +62,7 @@ Stylized **low/mid-poly** is fine (RS / hordes readable). We are **not** chasing
 - Chat / say panel readability (#88): dark silver-border plate; say/party/whisper channel tints distinct under #39 fog (no neon); `?ve=chat-read`
 - Keybind legend readability (#115): dark silver-border plate + light keycaps; Move/Combat/Social rows crisp under #39 fog; `?ve=keys-read`
 - Cast bar chrome readability (#74): Emberbolt/`#castBar` + CANCEL≠LOCKOUT toast chrome crisp vs #39 cyan fog; `?ve=castbar-read` (`ve/babylon-castbar-read.png`)
+- GCD bar chrome readability (#117): cool blue/silver `#gcdBar` distinct from warm cast / crimson lockout under #39 fog; `?ve=gcd-read`
 
 ### Path / ground targets (Issue #44)
 

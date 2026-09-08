@@ -11328,6 +11328,115 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 600);
   }
 
+  // ?ve=gcd-read — cool blue/silver #gcdBar mid-sweep (+ cast amber for contrast) under #39 fog (#117).
+  if (ve === 'gcd-read' || ve === 'gcdread') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.0;
+  }
+  if (net && (ve === 'gcd-read' || ve === 'gcdread')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE gcd-read: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitGcdRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE gcd-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitGcdRead, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE gcd-read: equipping staff…';
+        window.setTimeout(waitGcdRead, 280);
+        return;
+      }
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE gcd-read: seeding dummy…';
+        window.setTimeout(waitGcdRead, 320);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(
+          new Vector3(
+            (player.position.x + dummy.x) * 0.5,
+            1.15,
+            (player.position.z + dummy.z) * 0.5,
+          ),
+        );
+        camera.radius = 11;
+      }
+      const ch = net.getCharacter();
+      if (ch) updateSelfFrame(ch);
+
+      // Mid-GCD cool sweep + mid-Emberbolt cast for cool≠amber contrast (CSS/`?ve=` only).
+      const seedLeft = Math.round(EMBERBOLT_CAST_MS * 0.48);
+      const gcdSeed = 840;
+      veCastFeedbackPresent = {
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        spellName: 'Emberbolt',
+      };
+      veGcdPresent = {
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+      };
+      lastCastSpell = SPELL_EMBERBOLT;
+      castTotalMs = EMBERBOLT_CAST_MS;
+      castUntilMs = Date.now() + seedLeft;
+      setGcdBar(gcdSeed, seedLeft, EMBERBOLT_CAST_MS, 'Emberbolt');
+      updateSpellHotbar({
+        gcdMs: gcdSeed,
+        castingMs: seedLeft,
+        castingTotal: EMBERBOLT_CAST_MS,
+        castingSpell: SPELL_EMBERBOLT,
+        staffEquipped: true,
+        mana: ch?.mana ?? 999,
+        knowsSpark: true,
+        knowsEmberbolt: true,
+      });
+
+      // Keep toast stack quiet so GCD cool vs cast amber is the proof.
+      const stack = document.getElementById('toastStack');
+      if (stack) stack.replaceChildren();
+
+      const castBar = document.getElementById('castBar');
+      const gcdBar = document.getElementById('gcdBar');
+      const gcdFill = document.getElementById('gcdFill');
+      const barOk = !!castBar && !castBar.classList.contains('hidden');
+      const gcdOk = !!gcdBar;
+      const sweeping = !!gcdFill && !gcdFill.classList.contains('ready');
+      const sweepPct = Math.min(100, Math.round((gcdSeed / 1200) * 100));
+      if (mark) {
+        mark.textContent =
+          `GCD-read OK · sweep ${sweepPct}% · cast ${barOk ? 'on' : 'off'} · cool≠amber · fog chrome`;
+      }
+      if (!gcdOk || !sweeping) {
+        if (mark) {
+          mark.textContent =
+            `VE gcd-read: gcd ${gcdOk ? 'on' : 'off'} · sweep ${sweeping ? 'yes' : 'no'} (retry…)`;
+        }
+      }
+      if (ticks < 45) window.setTimeout(waitGcdRead, 400);
+    };
+    window.setTimeout(waitGcdRead, 600);
+  }
+
   // ?ve=cast-silence — hard interrupt → CastLockedUntil → Emberbolt Cast rejects (toast silenced).
   if (ve === 'cast-silence' || ve === 'castsilence') {
     camera.radius = 9.5;

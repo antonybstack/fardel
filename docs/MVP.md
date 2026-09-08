@@ -68,6 +68,7 @@ Exact numbers (damage, cast ms, GCD ms) are tunables in Shared data — start wi
 - Selection reticule polish: thicker gold ring + pulse + overhead marker (`?ve=reticule`)
 - Target frame / reticule contrast under cyan fog: gold select chrome (`?ve=target-contrast`)
 - Cast bar chrome readability under cyan fog: casting vs CANCEL vs LOCKOUT (`?ve=castbar-read`)
+- GCD bar chrome readability under cyan fog: cool secondary `#gcdBar` ≠ warm cast (`?ve=gcd-read`)
 - Cast cancel / move-interrupt: Move or Esc/`CancelCast` during Emberbolt windup refunds mana + clears cast bar (`CastCancelSmoke`, `?ve=cast-cancel`)
 - Cast pushback: dummy thorns (`DummyStrike`) during Emberbolt windup delays `CastEndsAt` without cancel/refund (`CastPushbackSmoke`, `?ve=cast-pushback`)
 - Hard interrupt threshold: after `CastPushbackHardAfter` pushbacks (or remain < `CastHardInterruptRemainMs`), next `DummyStrike` cancels windup with **no mana refund** (`HardInterruptSmoke`, `?ve=hard-interrupt`)
