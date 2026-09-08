@@ -3,6 +3,7 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Emberbolt cast cancel / move-interrupt: no damage + mana refund.
+// Jump-only Move(0,0,true) must not interrupt windup; jump+XZ must.
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
@@ -91,6 +92,73 @@ try
         return;
     }
     Console.WriteLine("Move interrupt no-damage OK");
+
+    // --- Jump-only must not interrupt windup; jump+XZ must ---
+    await DelayPump(conn, Combat.GcdMs + 80);
+    conn.Reducers.EnsureTrainingDummy();
+    await PumpUntil(() => FindDummy(conn) is { Hp: var h } && h == Combat.DummyMaxHp,
+        timeoutMs, conn, "dummy full jump");
+    dummy = FindDummy(conn)!;
+    conn.Reducers.SetTarget(dummy.NpcId);
+    await DelayPump(conn, 40);
+
+    await TopUpMana(conn, id);
+    var manaBeforeJump = conn.Db.Character.Identity.Find(id)!.Mana;
+    if (manaBeforeJump < Combat.EmberboltManaCost)
+    {
+        Fail($"expected mana for jump-interrupt ember, got {manaBeforeJump}");
+        return;
+    }
+    var hpBeforeJump = FindDummy(conn)!.Hp;
+
+    conn.Reducers.Cast(Combat.SpellEmberbolt);
+    await PumpUntil(() =>
+        conn.Db.PlayerCombat.Identity.Find(id) is { } pc && pc.CastingSpellId == Combat.SpellEmberbolt,
+        timeoutMs, conn, "ember casting jump");
+    await PumpUntil(() =>
+    {
+        var ch = conn.Db.Character.Identity.Find(id);
+        return ch is not null && ch.Mana < manaBeforeJump;
+    }, timeoutMs, conn, "ember mana spent jump");
+    var manaMidJump = conn.Db.Character.Identity.Find(id)!.Mana;
+
+    conn.Reducers.Move(0f, 0f, true);
+    await DelayPump(conn, 80);
+    if (conn.Db.PlayerCombat.Identity.Find(id) is not { CastingSpellId: Combat.SpellEmberbolt })
+    {
+        Fail("jump-only Move interrupted Emberbolt windup");
+        return;
+    }
+    var manaAfterJumpOnly = conn.Db.Character.Identity.Find(id)!.Mana;
+    if (manaAfterJumpOnly - manaMidJump > Combat.ManaRegenPerTick * 2)
+    {
+        Fail($"jump-only Move refunded mana ({manaMidJump}->{manaAfterJumpOnly})");
+        return;
+    }
+    Console.WriteLine($"jump-only no-interrupt OK mana {manaMidJump}->{manaAfterJumpOnly} still casting");
+
+    conn.Reducers.Move(0.1f, 0f, true);
+    await PumpUntil(() =>
+        conn.Db.PlayerCombat.Identity.Find(id) is { } pc && pc.CastingSpellId == 0,
+        timeoutMs, conn, "cast cleared by jump+XZ");
+    var manaAfterJumpXz = conn.Db.Character.Identity.Find(id)!.Mana;
+    var jumpXzRefund = manaAfterJumpXz - manaMidJump;
+    if (jumpXzRefund < Combat.EmberboltManaCost - Combat.ManaRegenPerTick * 2
+        || jumpXzRefund > Combat.EmberboltManaCost + Combat.ManaRegenPerTick * 2)
+    {
+        Fail($"jump+XZ interrupt refund expected ~{Combat.EmberboltManaCost}, got {jumpXzRefund} ({manaMidJump}->{manaAfterJumpXz})");
+        return;
+    }
+    Console.WriteLine($"jump+XZ interrupt refund OK {manaMidJump}->{manaAfterJumpXz} (+{jumpXzRefund})");
+
+    await DelayPump(conn, Combat.EmberboltCastMs + 200);
+    var hpAfterJump = FindDummy(conn)!.Hp;
+    if (hpAfterJump != hpBeforeJump)
+    {
+        Fail($"jump interrupt still damaged dummy ({hpBeforeJump}->{hpAfterJump})");
+        return;
+    }
+    Console.WriteLine("jump interrupt no-damage OK");
 
     // --- Explicit CancelCast during Emberbolt windup ---
     await DelayPump(conn, Combat.GcdMs + 80);
