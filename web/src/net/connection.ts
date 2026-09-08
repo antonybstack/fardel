@@ -35,6 +35,13 @@ export const STUN_DURATION_MS = 1500;
 export const NPC_KIND_DUMMY = 1;
 /** Match Combat.NpcKindHostile — yard hostiles (#354). Dummy stays trainer. */
 export const NPC_KIND_HOSTILE = 2;
+/** Match Combat.NpcKindBrigand — second hostile type (#418). Same AI as Kind=2. */
+export const NPC_KIND_BRIGAND = 3;
+
+/** Match Combat.IsHostileKind — Kind=2 and Kind=3 share hunt AI. */
+export function isHostileKind(kind: number): boolean {
+  return kind === NPC_KIND_HOSTILE || kind === NPC_KIND_BRIGAND;
+}
 /** Match Combat.HostileAggroRadius / HostileLeashRadius (#355). */
 export const HOSTILE_AGGRO_RADIUS = 3;
 export const HOSTILE_LEASH_RADIUS = 12;

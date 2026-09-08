@@ -35,6 +35,16 @@ public static class Combat
     public const int NpcKindDummy = 1;
     /// <summary>Hostile NPC kind. Two yard spawns, not origin. Dummy stays trainer.</summary>
     public const int NpcKindHostile = 2;
+    /// <summary>
+    /// Second hostile type (#418). Same aggro/leash/auto-attack/loot as Kind=2.
+    /// Distinct nameplate (Brigand). Dummy stays trainer.
+    /// </summary>
+    public const int NpcKindBrigand = 3;
+
+    /// <summary>Kind=2 and Kind=3 share hunt AI. Dummy (1) is the trainer.</summary>
+    public static bool IsHostileKind(int kind) =>
+        kind == NpcKindHostile || kind == NpcKindBrigand;
+
     public const int HostileMaxHp = 40;
     public const float HostileSpawnAx = 3f;
     public const float HostileSpawnAy = 0f;
@@ -42,6 +52,15 @@ public static class Combat
     public const float HostileSpawnBx = -7f;
     public const float HostileSpawnBy = 0f;
     public const float HostileSpawnBz = 3f;
+    /// <summary>
+    /// Kind=3 pad C. ~7.6m from origin (no connect pull). ~3.6m from dummy so
+    /// CombatSmoke at dummy stays outside AggroRadius (3.0). CastRangeSmoke
+    /// far-pose (−5,0) is ~12m — keep AggroRadius under 3.6.
+    /// Pads A/B stay Kind=2 so Hostile* smokes that pin Kind==2 stay green.
+    /// </summary>
+    public const float HostileSpawnCx = 7f;
+    public const float HostileSpawnCy = 0f;
+    public const float HostileSpawnCz = -3f;
 
     /// <summary>
     /// Proximity pull (#355). Must stay under CastRangeSmoke far-pose vs pad B

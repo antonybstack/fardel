@@ -7,6 +7,7 @@ public static partial class Module
 {
     public const int NpcKindDummy = Combat.NpcKindDummy;
     public const int NpcKindHostile = Combat.NpcKindHostile;
+    public const int NpcKindBrigand = Combat.NpcKindBrigand;
 
     [SpacetimeDB.Table(Accessor = "PlayerPose", Public = true)]
     public partial struct PlayerPose
@@ -1223,7 +1224,7 @@ public static partial class Module
     {
         foreach (var n in ctx.Db.Npc.Iter())
         {
-            if (n.Kind != NpcKindHostile)
+            if (!Combat.IsHostileKind(n.Kind))
             {
                 continue;
             }
@@ -1239,11 +1240,11 @@ public static partial class Module
         return false;
     }
 
-    static void InsertHostile(ReducerContext ctx, float x, float y, float z)
+    static void InsertHostile(ReducerContext ctx, float x, float y, float z, int kind)
     {
         ctx.Db.Npc.Insert(new Npc
         {
-            Kind = NpcKindHostile,
+            Kind = kind,
             X = x,
             Y = y,
             Z = z,
@@ -1256,22 +1257,26 @@ public static partial class Module
         });
     }
 
-    /// <summary>#354 — two yard hostiles (not origin, dummy stays trainer).</summary>
+    /// <summary>#354 Kind=2 pads A/B + #418 Kind=3 pad C (dummy stays trainer).</summary>
     static void EnsureHostiles(ReducerContext ctx)
     {
         if (!HasHostileForPad(ctx, Combat.HostileSpawnAx, Combat.HostileSpawnAz))
         {
-            InsertHostile(ctx, Combat.HostileSpawnAx, Combat.HostileSpawnAy, Combat.HostileSpawnAz);
+            InsertHostile(ctx, Combat.HostileSpawnAx, Combat.HostileSpawnAy, Combat.HostileSpawnAz, NpcKindHostile);
         }
         if (!HasHostileForPad(ctx, Combat.HostileSpawnBx, Combat.HostileSpawnBz))
         {
-            InsertHostile(ctx, Combat.HostileSpawnBx, Combat.HostileSpawnBy, Combat.HostileSpawnBz);
+            InsertHostile(ctx, Combat.HostileSpawnBx, Combat.HostileSpawnBy, Combat.HostileSpawnBz, NpcKindHostile);
+        }
+        if (!HasHostileForPad(ctx, Combat.HostileSpawnCx, Combat.HostileSpawnCz))
+        {
+            InsertHostile(ctx, Combat.HostileSpawnCx, Combat.HostileSpawnCy, Combat.HostileSpawnCz, NpcKindBrigand);
         }
 
         var backfill = new System.Collections.Generic.List<Npc>();
         foreach (var n in ctx.Db.Npc.Iter())
         {
-            if (n.Kind != NpcKindHostile)
+            if (!Combat.IsHostileKind(n.Kind))
             {
                 continue;
             }
@@ -1326,7 +1331,7 @@ public static partial class Module
 
         foreach (var n in snapshot)
         {
-            if (n.Kind != NpcKindHostile || n.Hp <= 0)
+            if (!Combat.IsHostileKind(n.Kind) || n.Hp <= 0)
             {
                 continue;
             }

@@ -232,3 +232,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Harness required `hp > 0` Idle. Dead Kind=2 still occupy pads and do not respawn; #404 corpse is still a skinned person. Seat VE after RecieveHit/Death then read 1/2 living.
 - **Do this:** Count Kind=2 skinned `Idle|Death`. Require ≥1 living Idle + dummy trainer (no humanoid). persistMark `Hostile body OK` + Idle_Weapon + `skinned` ≥ 1. `capsule` / `T-POSE` = fail. Do not add a respawn reducer from this lane.
 - **Seen in:** #405
+
+### 2026-09-08 — npc,smoke — Hostile* smokes pin Kind==2 on pads A/B
+- **Cause:** `CountHostiles` / `LivingHostiles` / `FindHostileNear` require `Kind == NpcKindHostile`. Flipping pad B to Kind=3 makes HostileSpawnSmoke `living.Count < 2`.
+- **Do this:** Keep pads A/B Kind=2. Second type is Kind=3 on pad C (`HostileSpawnC*`). `Combat.IsHostileKind` for aggro/leash/swing. Find Dummy by `Kind == 1`. Keep `HostileAggroRadius` under 3.6. `#423` asserts both types.
+- **Seen in:** #418
