@@ -2,7 +2,7 @@
 
 Operational runbook for the multi-agent development loop that lands work on `develop`, cuts `main`, and ships [play.sparkify.dev](https://play.sparkify.dev). Recreatable on Antony's Mac Studio via **Grok CLI** (parent agent + subagents).
 
-Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md](TEAM_SEATS.md) · [DEPLOY.md](DEPLOY.md) · [DEV_BOX.md](DEV_BOX.md) · [LEARNINGS.md](LEARNINGS.md) · [SCOPE.md](SCOPE.md) · [CAMPAIGN.md](CAMPAIGN.md)
+Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md](TEAM_SEATS.md) · [DEPLOY.md](DEPLOY.md) · [DEV_BOX.md](DEV_BOX.md) · [LEARNINGS.md](LEARNINGS.md) · [SCOPE.md](SCOPE.md) · [CAMPAIGN.md](CAMPAIGN.md) · [PARITY.md](PARITY.md)
 
 ---
 
@@ -20,7 +20,7 @@ A change **counts** when it is on **`main` + [play.sparkify.dev](https://play.sp
 **Unbound Team Lead** (parent) coordinates Devs, QA, Reviewer, Release, and **Art**. The Lead:
 
 - Assigns work **only from GitHub Issues** (not ad-hoc chat wishlists)
-- Assigns from the **active wave** in [CAMPAIGN.md](CAMPAIGN.md) — session Done-when, not an infinite P2 HUD pile
+- Assigns from the **active wave** in [CAMPAIGN.md](CAMPAIGN.md) / [PARITY.md](PARITY.md) — session Done-when, not an infinite P2 HUD pile
 - **Never leaves seats idle** while the **current wave** has open gaps — if the board is empty, file the next wave’s Issues (or have Art file visual ones) and assign. Do **not** invent toast/chrome to occupy seats
 - Merges to `develop` only after Reviewer feedback is addressed
 - Does **not** gate routine Release cuts (Release decides + deploys on its own criteria)
