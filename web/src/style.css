@@ -2347,3 +2347,5 @@ body[data-rmb-look="armed"] #status[data-conn] {
   border-color: rgba(150, 210, 255, 0.82);
 }
 .sysToast.jump .toastTag { color: #8ec8ff; }
+.sysToast.keys { border-color: rgba(100, 180, 255, 0.8); }
+.sysToast.keys .toastTag { color: #64b4ff; }

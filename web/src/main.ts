@@ -874,6 +874,26 @@ function setKeysLegendOpen(open: boolean): void {
   panel.classList.toggle('hidden', !open);
 }
 
+/** One-shot first-session H legend + canvas-focus cue (#134). sessionStorage only. */
+const FIRST_SESSION_CUE_KEY = 'fardel.firstSessionCue';
+const FIRST_SESSION_TOAST = 'H opens legend · click canvas for Space/WASD';
+
+function firstSessionCueSeen(): boolean {
+  try {
+    return sessionStorage.getItem(FIRST_SESSION_CUE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markFirstSessionCueSeen(): void {
+  try {
+    sessionStorage.setItem(FIRST_SESSION_CUE_KEY, '1');
+  } catch {
+    /* private mode / blocked storage */
+  }
+}
+
 /** Clarity cue: RMB-look armed vs idle via canvas cursor + legend chip + status line. */
 function setRmbLookArmed(armed: boolean): void {
   if (veRmbLookLock && !armed) return;
@@ -1166,6 +1186,7 @@ type SystemToastKind =
   | 'deadTarget'
   | 'canvasFocus'
   | 'jump'
+  | 'keys'
   | 'bag'
   | 'zoomLimit';
 
@@ -1253,7 +1274,9 @@ function pushSystemToast(
                                                             ? 'JUMP'
                                                           : kind === 'canvasFocus'
                                                             ? 'FOCUS'
-                                                            : kind === 'bag'
+                                                            : kind === 'keys'
+                                                              ? 'KEYS'
+                                                              : kind === 'bag'
                                                               ? 'BAG'
                                                               : kind === 'zoomLimit'
                                                                 ? 'ZOOM'
@@ -2900,6 +2923,39 @@ async function main(): Promise<void> {
   let jumpLandSquashUntil = 0;
   let jumpCamDipY = 0;
   const bootParams = new URLSearchParams(window.location.search);
+  const firstSessionVe = (bootParams.get('ve') || '') === 'first-session';
+  let firstSessionCueShown = false;
+  let firstSessionLegendFlash = false;
+  let firstSessionFlashTimer: number | null = null;
+  const showFirstSessionControlsCue = (opts: {
+    force: boolean;
+    ttlMs: number;
+    autoCloseMs: number;
+  }): void => {
+    if (!opts.force && (firstSessionCueShown || firstSessionCueSeen())) return;
+    const already = firstSessionCueShown;
+    firstSessionCueShown = true;
+    keysLegendOpen = true;
+    if (firstSessionFlashTimer != null) {
+      window.clearTimeout(firstSessionFlashTimer);
+      firstSessionFlashTimer = null;
+    }
+    firstSessionLegendFlash = opts.autoCloseMs > 0;
+    setKeysLegendOpen(true);
+    if (!already || !document.querySelector('.sysToast.keys')) {
+      pushSystemToast('keys', FIRST_SESSION_TOAST, opts.ttlMs);
+    }
+    if (!opts.force) markFirstSessionCueSeen();
+    if (opts.autoCloseMs > 0) {
+      firstSessionFlashTimer = window.setTimeout(() => {
+        firstSessionFlashTimer = null;
+        if (!firstSessionLegendFlash) return;
+        firstSessionLegendFlash = false;
+        keysLegendOpen = false;
+        setKeysLegendOpen(false);
+      }, opts.autoCloseMs);
+    }
+  };
   const debugParam = (bootParams.get('debug') || '').toLowerCase();
   let debugHudVisible = debugParam === '1' || debugParam === 'true';
   setDebugHudVisible(debugHudVisible);
@@ -3659,6 +3715,11 @@ async function main(): Promise<void> {
       setBagPanelOpen(bagOpen);
     },
     onToggleKeysLegend: () => {
+      firstSessionLegendFlash = false;
+      if (firstSessionFlashTimer != null) {
+        window.clearTimeout(firstSessionFlashTimer);
+        firstSessionFlashTimer = null;
+      }
       keysLegendOpen = !keysLegendOpen;
       setKeysLegendOpen(keysLegendOpen);
     },
@@ -5112,6 +5173,11 @@ async function main(): Promise<void> {
           ? `Identity restored · ${idShort}…`
           : `Connected · ${idShort}…`,
       );
+      showFirstSessionControlsCue({
+        force: firstSessionVe,
+        ttlMs: firstSessionVe ? TOAST_VE_TTL_MS : 4800,
+        autoCloseMs: firstSessionVe ? 0 : 5600,
+      });
     }
     setStatus(formatStatus(s, Date.now()), s.state);
   };
@@ -7768,6 +7834,63 @@ async function main(): Promise<void> {
       mark.textContent =
         `Keys-read OK · H toggles · ${chips} binds · ${groups || 'Move/Combat/Social'} · dark plate · #115 fog`;
     }
+  }
+
+  // ?ve=first-session — first-connect H legend flash + canvas-focus toast (#134).
+  if (ve === 'first-session') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    showFirstSessionControlsCue({
+      force: true,
+      ttlMs: TOAST_VE_TTL_MS,
+      autoCloseMs: 0,
+    });
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE first-session: waiting for H legend + canvas-focus cue…';
+    let ticks = 0;
+    const waitCue = () => {
+      ticks += 1;
+      keysLegendOpen = true;
+      setKeysLegendOpen(true);
+      const stack = document.getElementById('toastStack');
+      if (stack) {
+        for (const el of Array.from(stack.children)) {
+          if ((el as HTMLElement).getAttribute('data-kind') !== 'keys') el.remove();
+        }
+      }
+      const panel = document.getElementById('keysLegend');
+      const legendOpen = !!(panel && !panel.classList.contains('hidden'));
+      const toast = document.querySelector('.sysToast.keys');
+      const toastTxt = (toast?.textContent || '').trim();
+      const toastOk =
+        !!toast &&
+        /H/i.test(toastTxt) &&
+        (/canvas/i.test(toastTxt) || /WASD/i.test(toastTxt));
+      if (legendOpen && toastOk) {
+        if (mark) {
+          mark.textContent = 'First-session OK · H legend · canvas focus · #134';
+        }
+        if (ticks < 40) window.setTimeout(waitCue, 250);
+        return;
+      }
+      if (!toastOk) {
+        pushSystemToast('keys', FIRST_SESSION_TOAST, TOAST_VE_TTL_MS);
+      }
+      if (mark) {
+        mark.textContent =
+          `VE first-session: legend ${legendOpen ? 'on' : 'off'} · toast ${toastOk ? 'ok' : '…'} (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `First-session timeout · legend=${legendOpen} toast="${toastTxt.slice(0, 48)}"`;
+        }
+        return;
+      }
+      window.setTimeout(waitCue, 200);
+    };
+    window.setTimeout(waitCue, 300);
   }
 
   // ?ve=zoom-stop — wheel into lowerRadiusLimit (deltaY<0 zooms in / min).
