@@ -6637,7 +6637,7 @@ async function main(): Promise<void> {
         const dx = dummy.x - player.position.x;
         const dz = dummy.z - player.position.z;
         const dist = Math.hypot(dx, dz);
-        if (dist < 11 || dist > 16) {
+        if (dist > 0 && (dist < 11 || dist > 16)) {
           const targetDist = 13;
           const step = Math.min(MAX_STEP_METERS, Math.abs(dist - targetDist));
           if (dist < targetDist) {
@@ -6646,30 +6646,31 @@ async function main(): Promise<void> {
             net.sendMove((dx / dist) * step, (dz / dist) * step);
           }
         }
-        camera.setTarget(
-          new Vector3(
-            (player.position.x + dummy.x) * 0.5,
-            1.15,
-            (player.position.z + dummy.z) * 0.5,
-          ),
-        );
+        // Frame the dummy billboard (not the local player) so the HP bar is in shot.
+        camera.setTarget(new Vector3(dummy.x, 1.35, dummy.z));
+        camera.radius = 12;
+        camera.beta = Math.PI / 3.15;
+        if (dist > 0.05) {
+          camera.alpha = Math.atan2(dx, dz) + Math.PI;
+        }
       }
       const dummyMesh = dummy
         ? npcMeshes.get(dummy.npcId.toString())
         : undefined;
       const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
-      const goodDist =
-        !!dummy &&
-        Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z);
-      const inRange = goodDist >= 11 && goodDist <= 16;
+      const goodDist = dummy
+        ? Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z)
+        : 0;
+      const inRange = !!dummy && goodDist >= 11 && goodDist <= 16;
       if (
         st.state === 'connected' &&
         hasDummyPlate &&
         inRange
       ) {
         if (mark) {
-          mark.textContent = `Dummy HP bar OK · at ${goodDist.toFixed(1)}m · HP ${dummy.hp}/${dummy.maxHp} · bar legible under fog`;
+          mark.textContent = `Dummy HP bar OK · at ${goodDist.toFixed(1)}m · HP ${dummy!.hp}/${dummy!.maxHp} · bar legible under fog`;
         }
+        window.setTimeout(waitDummyHp, 280);
         return;
       }
       if (mark && st.state === 'connected') {
