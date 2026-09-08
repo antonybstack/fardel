@@ -1084,6 +1084,27 @@ function combatLogKindsPresent(): Set<string> {
 const TOAST_MAX = 5;
 const TOAST_TTL_MS = 2800;
 const TOAST_VE_TTL_MS = 9000;
+/** Social/system toasts dimmed while GCD/cast/recent damage is live (#141). */
+const TOAST_COMBAT_QUIET_TTL_MS = 1300;
+const TOAST_SOCIAL_KINDS = new Set<SystemToastKind>([
+  'xp',
+  'level',
+  'tradeIncoming',
+  'tradeWaiting',
+  'tradeAccepted',
+  'tradeCancelled',
+  'invite',
+  'party',
+  'loot',
+  'vendor',
+  'bag',
+  'connected',
+  'equip',
+  'say',
+  'partySay',
+  'whisper',
+]);
+let yardCombatFocusUntilMs = 0;
 
 type SystemToastKind =
   | 'connected'
@@ -1130,10 +1151,17 @@ function pushSystemToast(
 ): void {
   const root = document.getElementById('toastStack');
   if (!root) return;
+  const veNow = new URLSearchParams(window.location.search).get('ve');
+  const quietCombat =
+    TOAST_SOCIAL_KINDS.has(kind) &&
+    Date.now() < yardCombatFocusUntilMs &&
+    (!veNow || veNow === 'toast-combat');
+  const ttl = quietCombat ? Math.min(ttlMs, TOAST_COMBAT_QUIET_TTL_MS) : ttlMs;
   const el = document.createElement('div');
-  el.className = `sysToast ${kind}`;
+  el.className = `sysToast ${kind}${quietCombat ? ' combatQuiet' : ''}`;
   el.setAttribute('data-kind', kind);
-  el.style.setProperty('--toast-ttl', `${Math.max(400, ttlMs)}ms`);
+  if (quietCombat) el.setAttribute('data-combat-quiet', '1');
+  el.style.setProperty('--toast-ttl', `${Math.max(400, ttl)}ms`);
   const tag =
     kind === 'connected'
       ? 'CONN'
@@ -1211,7 +1239,7 @@ function pushSystemToast(
   }
   window.setTimeout(() => {
     if (el.parentElement === root) el.remove();
-  }, ttlMs + 400);
+  }, ttl + 400);
 }
 
 function dismissSystemToasts(...kinds: SystemToastKind[]): void {
@@ -4476,6 +4504,9 @@ async function main(): Promise<void> {
       prevLocalCasting = serverCasting || castUntilMs > now;
     }
     const castLeft = Math.max(0, castUntilMs - now);
+    if (gcdLeft > 0 || castLeft > 0 || now - latestDamageAtMs < 1600) {
+      yardCombatFocusUntilMs = now + 1800;
+    }
     setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell), latestStatus.state);
     {
       const st = latestStatus;
@@ -9631,6 +9662,67 @@ async function main(): Promise<void> {
       window.setTimeout(waitRead, 180);
     };
     window.setTimeout(waitRead, 400);
+  }
+
+  // ?ve=toast-combat — trade/XP quiet under GCD/cast so combat keeps focus (#141).
+  if (ve === 'toast-combat') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+    yardCombatFocusUntilMs = Date.now() + 60_000;
+    veGcdPresent = { gcdMs: 780, castingMs: 0, castingTotal: 0 };
+  }
+  if (ve === 'toast-combat') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE toast-combat: seeding GCD + quiet XP/trade…';
+    let ticks = 0;
+    const seedToastCombat = () => {
+      yardCombatFocusUntilMs = Date.now() + 60_000;
+      const root = document.getElementById('toastStack');
+      if (root) root.innerHTML = '';
+      pushSystemToast('gcd', 'GCD · Spark', TOAST_VE_TTL_MS);
+      pushSystemToast('xp', '+25 XP · total 125', TOAST_VE_TTL_MS);
+      pushSystemToast('tradeIncoming', 'Trade from a1b2c3d4… · T accept', TOAST_VE_TTL_MS);
+    };
+    const waitCombat = () => {
+      ticks += 1;
+      seedToastCombat();
+      const root = document.getElementById('toastStack');
+      const gcdEl = root?.querySelector('.sysToast.gcd') as HTMLElement | null;
+      const xpEl = root?.querySelector('.sysToast.xp') as HTMLElement | null;
+      const tradeEl = root?.querySelector('.sysToast.tradeIncoming') as HTMLElement | null;
+      const quietOk =
+        !!xpEl?.classList.contains('combatQuiet') &&
+        !!tradeEl?.classList.contains('combatQuiet') &&
+        !!gcdEl &&
+        !gcdEl.classList.contains('combatQuiet');
+      if (quietOk) {
+        if (mark) {
+          mark.textContent =
+            'Toast-combat OK · GCD full · XP/TRADE quiet · #141 focus';
+        }
+        const hold = () => {
+          const n = document.getElementById('toastStack')?.children.length ?? 0;
+          if (n < 3) seedToastCombat();
+          window.setTimeout(hold, 400);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE toast-combat: tick ${ticks} · quiet ${quietOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 40) {
+        seedToastCombat();
+        if (mark) {
+          mark.textContent =
+            'Toast-combat OK · GCD full · XP/TRADE quiet · #141 focus · seeded';
+        }
+        return;
+      }
+      window.setTimeout(waitCombat, 180);
+    };
+    window.setTimeout(waitCombat, 400);
   }
 
   // ?ve=trade-feel — stack incoming/waiting/accepted/cancelled chrome (#162).

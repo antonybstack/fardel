@@ -1531,6 +1531,20 @@ body[data-rmb-look="armed"] #status[data-conn] {
   to { opacity: 0; transform: translateY(-6px); }
 }
 
+/* #141 — social/system toasts yield to GCD/cast: quieter, no full-attention plate. */
+.sysToast.combatQuiet {
+  animation-name: toastInQuiet, toastOutQuiet;
+  filter: saturate(0.55) brightness(0.88);
+}
+@keyframes toastInQuiet {
+  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  to { opacity: 0.46; transform: translateY(0) scale(0.96); }
+}
+@keyframes toastOutQuiet {
+  from { opacity: 0.46; transform: translateY(0) scale(0.96); }
+  to { opacity: 0; transform: translateY(-5px) scale(0.96); }
+}
+
 
 /* Compact chat / say strip — top of bottom-left #hudBottomLeft column (server ChatMessage).
    #88 readability: classic MMO plate over cyan fog; say/party/whisper distinct, no neon. */
