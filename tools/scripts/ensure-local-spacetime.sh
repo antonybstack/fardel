@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
-# Keep local SpacetimeDB alive across agent shell aborts.
+# PROD / preview keepalive — the instance tunneled as dev-db.sparkify.dev
+# (play.sparkify.dev connects here). Listens on :3000 with the default data dir.
+#
+# Agents MUST NOT run this. Use ensure-seat-spacetime.sh / seat-up.sh so a
+# second instance binds 127.0.0.1:32xx with its own data dir and db name.
+#
 # Root cause of flakes: `spacetime start &` stayed in the agent shell process
 # group and died when that shell was aborted / pkilled. Use a new session.
 set -euo pipefail
-export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+export PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
+
+if [[ -n "${FARDEL_SEAT:-}" && "${FARDEL_SEAT}" != "lead" ]]; then
+  echo "REFUSE: FARDEL_SEAT=${FARDEL_SEAT} — agents use tools/scripts/ensure-seat-spacetime.sh (never :3000)." >&2
+  exit 2
+fi
+
+echo "note: ensure-local-spacetime.sh is the PROD/preview helper (:3000 / db fardel / play.sparkify.dev)"
 
 URI="${FARDEL_SPACETIME_URI:-http://127.0.0.1:3000}"
 PING_URL="${URI%/}/v1/ping"

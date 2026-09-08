@@ -2,6 +2,8 @@
 
 Self-contained local loop for this shared box agent environment. Paths assume the repo at `/workspace/fardel`.
 
+On the **Mac Studio that hosts `play.sparkify.dev` / `dev-db.sparkify.dev`**, do not use the old 3001–3005 seat ports. Use [TEAM_SEATS.md](TEAM_SEATS.md) (3200/5200 formula, never `:3000` / db `fardel`). Overlay `FARDEL_WT_ROOT=/workspace/wt` in `tools/scripts/seats.local.conf` if this box still wants `/workspace/wt`.
+
 ## Toolchain (as of box setup)
 
 | Tool | Location / version |

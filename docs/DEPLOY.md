@@ -123,6 +123,19 @@ Reuses the existing **`sparkify`** cloudflared LaunchDaemon (`com.cloudflare.spa
 
 `play.sparkify.dev` no longer needs tunnel ingress (DNS points at Pages). **Follow-up:** remove the `play.sparkify.dev` → `:8787` ingress block from the Mac cloudflared configs / LaunchDaemon when convenient (needs sudo on the Studio); interim Mac tunnel can drop play ingress without affecting Pages.
 
+### Mac Studio: prod vs agent seats
+
+This machine **is** the preview shard (`dev-db.sparkify.dev` → `127.0.0.1:3000`). Agent work must not collide with it.
+
+| Reserved | Agents |
+|----------|--------|
+| SpacetimeDB `:3000`, data `~/.local/share/spacetime/data`, db `fardel` | `127.0.0.1:3201–3212` / `3241–3248`, data `~/.local/share/fardel-wt/<slug>`, db `fardel-dev-N` / `fardel-qa-N` |
+| Human Vite `:5173` | Vite `5201–5212` / `5241–5248` |
+| cloudflared ingress for `dev-db.sparkify.dev` → `:3000` only | Never add agent ports to the tunnel |
+| Pages `play.sparkify.dev` | Playwright opens `127.0.0.1:<seat-vite>/?db=<seat-stdb>&module=<seat-db>` |
+
+Scripts: [TEAM_SEATS.md](TEAM_SEATS.md). `./tools/scripts/seat-selftest.sh` proves two extra instances can come up and down without changing the `:3000` pid.
+
 ### Active client (Vite / Babylon)
 
 Active browser client is **`web/`** (Vite + Babylon.js 9 + TypeScript):

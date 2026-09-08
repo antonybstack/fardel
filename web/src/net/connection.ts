@@ -305,20 +305,30 @@ function isLocalHost(): boolean {
 }
 
 /**
- * Mirror Unity ResolveEndpoint: ?db= / ?database= override always wins;
- * localhost → 127.0.0.1:3000; production Pages host → https://dev-db.sparkify.dev.
- * Live Connected on play.sparkify.dev still needs the Mac tunnel for dev-db.
+ * URI resolution (first match wins):
+ * 1. ?db= / ?database= — always, including agent seats
+ * 2. VITE_FARDEL_URI — seat Vite (.env.local / process env); never used on Pages
+ * 3. localhost → 127.0.0.1:3000 (lead / prod-preview)
+ * 4. production Pages host → https://dev-db.sparkify.dev
+ *
+ * Agent seats MUST pass (1) or (2) so they never share :3000 / db fardel.
  */
 function resolveUri(): string {
   const params = new URLSearchParams(window.location.search);
   const override = params.get('db') ?? params.get('database');
   if (override) return override;
+  const fromEnv = import.meta.env.VITE_FARDEL_URI;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
   return isLocalHost() ? DEFAULT_URI_LOCAL : DEFAULT_URI_REMOTE;
 }
 
 function resolveDatabaseName(): string {
   const params = new URLSearchParams(window.location.search);
-  return params.get('module') ?? params.get('name') ?? DEFAULT_DATABASE;
+  const override = params.get('module') ?? params.get('name');
+  if (override) return override;
+  const fromEnv = import.meta.env.VITE_FARDEL_DB;
+  if (fromEnv && fromEnv.length > 0) return fromEnv;
+  return DEFAULT_DATABASE;
 }
 
 export function loadAuthToken(): string | null {

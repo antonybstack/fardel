@@ -2,34 +2,27 @@
 # Source with a seat slug to export per-seat Fardel env vars.
 # Usage: source tools/scripts/wt-env.sh <slug>
 #        . tools/scripts/wt-env.sh <slug>
+#
+# Slugs: lead (prod/preview — read-only for agents) | dev-N | qa-N
+# Aliases: dev1 → dev-1, qa-bugs → qa-1, qa-feel → qa-2
 set -euo pipefail
 
-_slug="${1:-}"
-if [[ -z "$_slug" ]]; then
+_fardel_wtenv_slug="${1:-}"
+if [[ -z "$_fardel_wtenv_slug" ]]; then
   echo "usage: source tools/scripts/wt-env.sh <slug>" >&2
+  echo "  slugs: lead | dev-1..dev-12 | qa-1..qa-8" >&2
+  unset _fardel_wtenv_slug
   return 1 2>/dev/null || exit 1
 fi
 
-_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_map="${_script_dir}/fardel-seats.env"
-if [[ ! -f "$_map" ]]; then
-  echo "FAIL: missing seat map $_map" >&2
+_fardel_wtenv_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=seat-lib.sh
+source "${_fardel_wtenv_dir}/seat-lib.sh"
+
+if ! fardel_fill_env "$_fardel_wtenv_slug"; then
+  unset _fardel_wtenv_slug _fardel_wtenv_dir
   return 1 2>/dev/null || exit 1
 fi
 
-_line="$(grep -E "^${_slug}\|" "$_map" | head -n1 || true)"
-if [[ -z "$_line" ]]; then
-  echo "FAIL: unknown seat slug '$_slug' (see $_map)" >&2
-  return 1 2>/dev/null || exit 1
-fi
-
-IFS='|' read -r FARDEL_SEAT FARDEL_SPACETIME_PORT FARDEL_VITE_PORT FARDEL_DB FARDEL_WT <<<"$_line"
-export FARDEL_SEAT
-export FARDEL_SPACETIME_PORT
-export FARDEL_VITE_PORT
-export FARDEL_DB
-export FARDEL_WT
-export FARDEL_SPACETIME_URI="http://127.0.0.1:${FARDEL_SPACETIME_PORT}"
-export FARDEL_DATA_DIR="${HOME}/.local/share/fardel-wt/${FARDEL_SEAT}"
-
-unset _slug _script_dir _map _line
+unset _fardel_wtenv_slug _fardel_wtenv_dir
+# Leave FARDEL_* exported for the caller.
