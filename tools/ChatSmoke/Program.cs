@@ -3,7 +3,7 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Multi-client public Say: A inserts ChatMessage; B must observe it.
-// Also proves per-identity Say rate-limit rejects a second immediate Say.
+// Per-identity Say / PartySay / Whisper rate-limit rejects a second immediate send.
 // PartySay: A+B party, C outsider — B sees PartyChatMessage; C must not.
 // Whisper: A→B private; C outsider must not see WhisperMessage.
 var uri = GameConstants.ResolveLocalUri();
@@ -165,6 +165,47 @@ try
         return false;
     }, timeoutMs, connA, connB, connC, "B sees A party chat");
 
+    // Immediate second PartySay from A must fail rate-limit (before the RLS wait).
+    string? partyRateFail = null;
+    var partyRateFailed = new TaskCompletionSource();
+    void OnPartySay(ReducerEventContext ctx, string text)
+    {
+        if (text != "party too soon")
+        {
+            return;
+        }
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                partyRateFail = reason;
+                partyRateFailed.TrySetResult();
+                break;
+            case Status.Committed:
+                partyRateFailed.TrySetException(new Exception($"PartySay committed while rate-limited: {text}"));
+                break;
+            case Status.OutOfEnergy(_):
+                partyRateFailed.TrySetException(new Exception("PartySay out of energy"));
+                break;
+        }
+    }
+    connA.Reducers.OnPartySay += OnPartySay;
+    try
+    {
+        connA.Reducers.PartySay("party too soon");
+        await Pump(partyRateFailed.Task, timeoutMs, connA, "partysay rate-limit fail");
+    }
+    finally
+    {
+        connA.Reducers.OnPartySay -= OnPartySay;
+    }
+    if (string.IsNullOrEmpty(partyRateFail) ||
+        partyRateFail.IndexOf("rate-limited", StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected PartySay rate-limited failure, got: {partyRateFail ?? "(null)"}");
+        return;
+    }
+    Console.WriteLine($"OK: PartySay rate-limit rejected ({partyRateFail})");
+
     // Give C a moment to receive anything (should stay empty for this text).
     await DelayPump3(connA, connB, connC, 900);
 
@@ -215,6 +256,47 @@ try
         return false;
     }, timeoutMs, connA, connB, connC, "A sees own whisper");
 
+    // Immediate second Whisper from A must fail rate-limit (before the RLS wait).
+    string? whisperRateFail = null;
+    var whisperRateFailed = new TaskCompletionSource();
+    void OnWhisper(ReducerEventContext ctx, Identity recipient, string text)
+    {
+        if (text != "whisper too soon")
+        {
+            return;
+        }
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                whisperRateFail = reason;
+                whisperRateFailed.TrySetResult();
+                break;
+            case Status.Committed:
+                whisperRateFailed.TrySetException(new Exception($"Whisper committed while rate-limited: {text}"));
+                break;
+            case Status.OutOfEnergy(_):
+                whisperRateFailed.TrySetException(new Exception("Whisper out of energy"));
+                break;
+        }
+    }
+    connA.Reducers.OnWhisper += OnWhisper;
+    try
+    {
+        connA.Reducers.Whisper(idB, "whisper too soon");
+        await Pump(whisperRateFailed.Task, timeoutMs, connA, "whisper rate-limit fail");
+    }
+    finally
+    {
+        connA.Reducers.OnWhisper -= OnWhisper;
+    }
+    if (string.IsNullOrEmpty(whisperRateFail) ||
+        whisperRateFail.IndexOf("rate-limited", StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected Whisper rate-limited failure, got: {whisperRateFail ?? "(null)"}");
+        return;
+    }
+    Console.WriteLine($"OK: Whisper rate-limit rejected ({whisperRateFail})");
+
     await DelayPump3(connA, connB, connC, 900);
 
     foreach (var m in connC.Db.WhisperMessage.Iter())
@@ -232,7 +314,7 @@ try
     foreach (var _ in connB.Db.WhisperMessage.Iter()) bWhisper++;
     Console.WriteLine($"OK: Whisper RLS — B has {bWhisper} whisper(s), C has {cWhisper} (outsider hidden)");
 
-    Console.WriteLine("OK: ChatSmoke — A→B say + rate-limit + PartySay RLS + Whisper RLS");
+    Console.WriteLine("OK: ChatSmoke — A→B say + rate-limit + PartySay/Whisper rate-limit + PartySay RLS + Whisper RLS");
     Environment.ExitCode = 0;
 }
 catch (Exception e)
