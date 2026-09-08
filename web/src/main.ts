@@ -3180,6 +3180,7 @@ async function main(): Promise<void> {
     y: number,
     z: number,
     yaw: number,
+    opts?: { snapGroundedXz?: boolean },
   ) => {
     if (!i.seeded) {
       i.fx = i.tx = x;
@@ -3192,6 +3193,17 @@ async function main(): Promise<void> {
       return;
     }
     if (x === i.tx && y === i.ty && z === i.tz && yaw === i.tyaw) {
+      return;
+    }
+    // Local grounded WASD: snap XZ/yaw. 20 Hz lerp was up to 50 ms plus a slow
+    // frame, which read as input lag on the Place-scale pin (#315).
+    if (opts?.snapGroundedXz && y <= 0.05) {
+      i.fx = i.tx = x;
+      i.fy = i.ty = y;
+      i.fz = i.tz = z;
+      i.fyaw = i.tyaw = yaw;
+      i.u = 1;
+      i.vx = i.vy = i.vz = 0;
       return;
     }
     const s = clampU(i.u);
@@ -5302,10 +5314,15 @@ async function main(): Promise<void> {
           const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
           camFollowY += (targetY - camFollowY) * a;
         }
-        const follow = new Vector3(player.position.x, camFollowY, player.position.z);
-        const radius = camera.radius;
-        camera.setTarget(follow);
-        camera.radius = radius;
+        // Mutate target in place. setTarget() rebuilds alpha/beta/radius from
+        // the camera world position and feels like the view lags WASD (#315).
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
       }
     }
     scene.render();
@@ -5534,7 +5551,9 @@ async function main(): Promise<void> {
   net = await connectToSpacetime(
     onStatus,
     (pose) => {
-      retargetPoseInterp(localInterp, pose.x, pose.y, pose.z, pose.yaw);
+      retargetPoseInterp(localInterp, pose.x, pose.y, pose.z, pose.yaw, {
+        snapGroundedXz: true,
+      });
       const samp = samplePoseInterp(localInterp);
       player.position.x = samp.x;
       player.position.y = samp.y;
