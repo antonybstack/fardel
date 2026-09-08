@@ -1291,7 +1291,8 @@ body[data-rmb-look="armed"] #status[data-conn] {
 .clLine.kick,
 .clLine.stun,
 .clLine.outOfRange,
-.clLine.noTarget {
+.clLine.noTarget,
+.clLine.deadTarget {
   color: #c6ceda;
 }
 
@@ -2246,8 +2247,9 @@ body[data-rmb-look="armed"] #status[data-conn] {
 
 .clLine.castCancel .clTag { color: #b8c0cc; }
 
-/* No-target cast (#190) — CANCEL-class amber clarity; distinct from RANGE / MANA / LOCKOUT. */
-.sysToast.noTarget {
+/* No-target (#190) + dead/invalid target (#131) — CANCEL-class amber; distinct from RANGE / MANA / LOCKOUT. */
+.sysToast.noTarget,
+.sysToast.deadTarget {
   border: 2px solid rgba(255, 190, 90, 0.98);
   background: linear-gradient(180deg, rgba(48, 30, 8, 0.97), rgba(16, 10, 4, 0.96));
   box-shadow:
@@ -2255,7 +2257,8 @@ body[data-rmb-look="armed"] #status[data-conn] {
     0 4px 18px rgba(0, 0, 0, 0.5),
     0 0 16px rgba(255, 170, 60, 0.38);
 }
-.sysToast.noTarget .toastTag {
+.sysToast.noTarget .toastTag,
+.sysToast.deadTarget .toastTag {
   color: #ffe2a8;
   background: rgba(255, 160, 50, 0.28);
   padding: 2px 8px;
@@ -2263,7 +2266,8 @@ body[data-rmb-look="armed"] #status[data-conn] {
   border: 1px solid rgba(255, 200, 100, 0.7);
   font-weight: 750;
 }
-.clLine.noTarget .clTag { color: #b8c0cc; }
+.clLine.noTarget .clTag,
+.clLine.deadTarget .clTag { color: #b8c0cc; }
 
 .sysToast.castPushback {
   border-color: rgba(255, 120, 90, 0.55);
