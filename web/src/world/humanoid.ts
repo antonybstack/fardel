@@ -467,17 +467,6 @@ export function setHumanoidMoving(parts: HumanoidParts, moving: boolean): void {
   }
 }
 
-/** Client-only hop squash/stretch (#139). Does not change pose Y. */
-export function setHumanoidJumpSquash(
-  parts: HumanoidParts,
-  yScale: number,
-  xzScale?: number,
-): void {
-  const y = Math.max(0.55, yScale);
-  const xz = xzScale ?? 1 / Math.sqrt(y);
-  parts.root.scaling.set(xz, y, xz);
-}
-
 /** Play a one-shot cast clip (Spell1) then return to idle/walk. */
 export function playHumanoidCast(parts: HumanoidParts): void {
   const a = animByRoot.get(parts.root);
