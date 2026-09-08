@@ -359,17 +359,14 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
 }
 
 /**
- * Fog / sky lock (#270 E3.1). Sun/hemi stay on the #39 values (E3.8 may lift).
+ * Fog / sky (#270) + lighting (#277, lifts #39). Stylized dusk forest, not photoreal.
  *
- * | Param        | #39                         | #270                                      |
- * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 200 (#272 scale)    |
+ * | Param        | #39                         | now                                       |
+ * | fog mode     | EXP2 dens 0.015             | LINEAR start 16 / end 200 (#272)          |
  * | fog color    | (0.34, 0.55, 0.7)           | unchanged                                 |
- * | clearColor   | (0.24, 0.36, 0.46)          | matches fogColor (was a horizon halo)     |
- * | sky          | 420-dome, fog on, 64px tex  | fog off, horizon = fogColor, 256px clamp  |
- *
- * EXP2 + a fogged low-tess sky painted latitude bands and a color fight vs the
- * dome. LINEAR + an unfogged fog-matched dome is the hordes dusk-volume read
- * without the 8-bit halo. Density unused in LINEAR.
+ * | clearColor   | (0.24, 0.36, 0.46)          | matches fogColor                          |
+ * | hemi         | 0.78 cool (0.68,0.78,0.86)  | 0.88 cooler canopy fill (#277)            |
+ * | sun          | 0.98 warm (1.0,0.82,0.52)   | 0.48 cool-dusk key (#277)                 |
  */
 const FOG_COLOR = new Color3(0.34, 0.55, 0.7);
 const FOG_START = 16;
@@ -1097,27 +1094,24 @@ export async function buildForestClearing(scene: Scene): Promise<{
   hemi: HemisphericLight;
   sun: DirectionalLight;
 }> {
-  // Atmosphere: #39 sun/hemi kept. Fog/sky is the #270 lock (see FOG_COLOR).
-  // Mood > volumetric soup — StandardMaterial + LINEAR fog (web-cheap).
+  // Atmosphere: #270 fog/sky + #277 cool forest interior (lifts #39 midday key).
   scene.clearColor = new Color4(FOG_COLOR.r, FOG_COLOR.g, FOG_COLOR.b, 1);
   scene.fogMode = Scene.FOGMODE_LINEAR;
   scene.fogStart = FOG_START;
   scene.fogEnd = FOG_END;
   scene.fogColor = FOG_COLOR.clone();
 
-  const hemi = new HemisphericLight('hemiForest', new Vector3(0.12, 1, 0.22), scene);
-  hemi.intensity = 0.78;
-  // Cool canopy-filtered fill (stable for #33) + green ground bounce.
-  hemi.diffuse = new Color3(0.68, 0.78, 0.86);
-  hemi.groundColor = new Color3(0.16, 0.26, 0.14);
-  hemi.specular = new Color3(0.1, 0.12, 0.14);
+  const hemi = new HemisphericLight('hemiForest', new Vector3(0.08, 1, 0.18), scene);
+  hemi.intensity = 0.88;
+  hemi.diffuse = new Color3(0.48, 0.62, 0.78);
+  hemi.groundColor = new Color3(0.1, 0.18, 0.12);
+  hemi.specular = new Color3(0.06, 0.08, 0.1);
 
-  const sun = new DirectionalLight('sunForest', new Vector3(-0.5, -0.68, -0.4), scene);
-  sun.position = new Vector3(48, 55, 28);
-  sun.intensity = 0.98;
-  // Warmer golden-hour key for fantasy clearing readability.
-  sun.diffuse = new Color3(1.0, 0.82, 0.52);
-  sun.specular = new Color3(0.42, 0.32, 0.18);
+  const sun = new DirectionalLight('sunForest', new Vector3(-0.72, -0.38, -0.28), scene);
+  sun.position = new Vector3(62, 38, 22);
+  sun.intensity = 0.48;
+  sun.diffuse = new Color3(0.62, 0.72, 0.88);
+  sun.specular = new Color3(0.18, 0.2, 0.24);
 
   const ground = MeshBuilder.CreateGround(
     'clearing',
