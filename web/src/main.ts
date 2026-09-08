@@ -252,6 +252,9 @@ let veFrameHpLock = false;
 /** VE lock: hold seeded loadout strip + tonic buff chrome for ?ve=loadout-buff. */
 let veLoadoutBuffLock = false;
 
+/** VE lock: hold seeded bottom-left HUD layout chrome for ?ve=hud-layout (#104). */
+let veHudLayoutLock = false;
+
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
   gcdMs: number;
@@ -428,7 +431,7 @@ function updateSelfFrame(character: {
   maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
-  if (veFrameHpLock || veLoadoutBuffLock) return;
+  if (veFrameHpLock || veLoadoutBuffLock || veHudLayoutLock) return;
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
@@ -591,7 +594,7 @@ function updateLoadoutStrip(character: {
   hasYardTonic?: boolean;
   hasYardBandage?: boolean;
 } | null | undefined): void {
-  if (veLoadoutBuffLock) return;
+  if (veLoadoutBuffLock || veHudLayoutLock) return;
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
   if (!character) {
@@ -6779,6 +6782,167 @@ async function main(): Promise<void> {
     };
     window.setTimeout(waitLoadoutBuff, 700);
   }
+
+  // ?ve=hud-layout — non-overlapping chat / loadout / self+keybind / hotbar (#104).
+  if (ve === 'hud-layout') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.05;
+  }
+  if (ve === 'hud-layout') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hud-layout: seeding bottom-left stack…';
+    let ticks = 0;
+    const setChipState = (
+      chipId: string,
+      stateId: string,
+      on: boolean,
+      onLabel: string,
+      offLabel: string,
+    ) => {
+      const chip = document.getElementById(chipId);
+      const state = document.getElementById(stateId);
+      if (chip) {
+        chip.classList.toggle('on', on);
+        chip.classList.toggle('off', !on);
+      }
+      if (state) state.textContent = on ? onLabel : offLabel;
+    };
+    const rectsOverlap = (a: DOMRect, b: DOMRect, pad = 2): boolean =>
+      !(
+        a.right <= b.left + pad ||
+        b.right <= a.left + pad ||
+        a.bottom <= b.top + pad ||
+        b.bottom <= a.top + pad
+      );
+    const seedHudLayout = () => {
+      veHudLayoutLock = false;
+      updateSelfFrame({
+        xp: 12,
+        level: 1,
+        hp: 85,
+        maxHp: 100,
+        mana: 70,
+        maxMana: 100,
+        tonicExpiresAtMicros: BigInt(Date.now() + 12_000) * 1000n,
+      });
+      const frame = document.getElementById('selfFrame');
+      if (frame) frame.classList.remove('hidden');
+      const buffEl = document.getElementById('sfBuff');
+      if (buffEl) {
+        buffEl.classList.remove('hidden');
+        buffEl.classList.add('active');
+        buffEl.textContent = `Tonic 12.0s · ×${TONIC_MOVE_MULT} move`;
+      }
+      const strip = document.getElementById('loadoutStrip');
+      if (strip) strip.classList.remove('hidden');
+      setChipState('loStaff', 'loStaffState', true, 'equipped', 'unequipped');
+      setChipState('loRobes', 'loRobesState', true, 'equipped', 'unequipped');
+      setChipState('loSpark', 'loSparkState', true, 'known', 'unknown');
+      setChipState('loEmber', 'loEmberState', false, 'known', 'unknown');
+      setChipState('loShard', 'loShardState', true, 'held', 'empty');
+      setChipState('loTonic', 'loTonicState', false, 'held', 'empty');
+      setChipState('loBandage', 'loBandageState', true, 'held', 'empty');
+
+      const root = document.getElementById('chatLines');
+      if (root) root.innerHTML = '';
+      pushChatSay('You', 'Bottom-left stack should not overlap.', TOAST_VE_TTL_MS, {
+        local: true,
+        channel: 'say',
+        messageId: 've-hud-layout-say',
+      });
+      pushChatSay('Mira', 'Chat above loadout above You frame.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'say',
+        messageId: 've-hud-layout-say2',
+      });
+      pushChatSay('Kael', 'Hotbar stays bottom-center.', TOAST_VE_TTL_MS, {
+        local: false,
+        channel: 'party',
+        messageId: 've-hud-layout-party',
+      });
+      setChatComposing(true);
+      updateChatPrompt('say');
+      const input = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (input) input.value = 'Layout check…';
+
+      const bag = document.getElementById('bagPanel');
+      if (bag) bag.classList.add('hidden');
+      bagOpen = false;
+      veHudLayoutLock = true;
+    };
+    const layoutOk = (): { ok: boolean; detail: string } => {
+      const chat = document.getElementById('chatPanel');
+      const strip = document.getElementById('loadoutStrip');
+      const frame = document.getElementById('selfFrame');
+      const hotbar = document.getElementById('spellHotbar');
+      const hint = frame?.querySelector('.sfHint') as HTMLElement | null;
+      if (!chat || !strip || !frame || !hotbar || !hint) {
+        return { ok: false, detail: 'missing nodes' };
+      }
+      if (
+        chat.classList.contains('hidden') ||
+        strip.classList.contains('hidden') ||
+        frame.classList.contains('hidden')
+      ) {
+        return { ok: false, detail: 'hidden pieces' };
+      }
+      const rc = chat.getBoundingClientRect();
+      const rl = strip.getBoundingClientRect();
+      const rf = frame.getBoundingClientRect();
+      const rh = hotbar.getBoundingClientRect();
+      const rk = hint.getBoundingClientRect();
+      if (rc.height < 8 || rl.height < 8 || rf.height < 8 || rh.height < 8 || rk.height < 4) {
+        return { ok: false, detail: 'zero-size' };
+      }
+      if (rectsOverlap(rc, rl) || rectsOverlap(rc, rf) || rectsOverlap(rl, rf)) {
+        return { ok: false, detail: 'BL overlap' };
+      }
+      if (rectsOverlap(rc, rh) || rectsOverlap(rl, rh) || rectsOverlap(rf, rh)) {
+        return { ok: false, detail: 'hotbar overlap' };
+      }
+      // Keybind hint lives inside self-frame — must be fully within frame bounds.
+      if (
+        rk.left < rf.left - 1 ||
+        rk.right > rf.right + 1 ||
+        rk.top < rf.top - 1 ||
+        rk.bottom > rf.bottom + 1
+      ) {
+        return { ok: false, detail: 'hint outside frame' };
+      }
+      return { ok: true, detail: 'stacked' };
+    };
+    const waitHudLayout = () => {
+      ticks += 1;
+      seedHudLayout();
+      const { ok, detail } = layoutOk();
+      const lineCount = document.getElementById('chatLines')?.children.length ?? 0;
+      if (ok && lineCount >= 2) {
+        if (mark) {
+          mark.textContent =
+            `HUD-layout OK · chat/loadout/self/hotbar clear · ${detail} · #104`;
+        }
+        const hold = () => {
+          seedHudLayout();
+          window.setTimeout(hold, 320);
+        };
+        window.setTimeout(hold, 320);
+        return;
+      }
+      if (mark && ticks % 4 === 0) {
+        mark.textContent = `VE hud-layout: waiting… tick ${ticks} · ${detail}`;
+      }
+      if (ticks > 80) {
+        if (mark) {
+          mark.textContent = `VE hud-layout: timed out · ${detail}`;
+        }
+        return;
+      }
+      window.setTimeout(waitHudLayout, 200);
+    };
+    window.setTimeout(waitHudLayout, 600);
+  }
+
 
   // ?ve=party — wait for party size>=2 + far party mate visible (green tint).
   if (ve === 'party') {

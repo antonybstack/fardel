@@ -41,62 +41,75 @@
         <span class="slotEmptyMark" aria-hidden="true">+</span>
       </div>
     </div>
-    <div id="selfFrame" class="hidden" aria-label="Player self frame">
-      <div class="sfNameRow">
-        <span id="sfName">You</span>
-        <span id="sfLevel" class="sfLevel">Lv —</span>
-        <span id="sfXp" class="sfXp">XP —</span>
+    <div id="hudBottomLeft" aria-label="Bottom-left HUD cluster">
+      <div id="chatPanel" aria-label="Chat say">
+        <div class="chatHead">
+          <span class="chatTitle">Chat</span>
+          <span class="chatHint">Enter · say · /p party · /w hex</span>
+        </div>
+        <div id="chatLines" class="chatLines"></div>
+        <form id="chatForm" class="chatForm" autocomplete="off">
+          <span class="chatPrompt">Say</span>
+          <input id="chatInput" type="text" maxlength="120" spellcheck="false" placeholder="say… /p party… /w hex whisper…" />
+        </form>
       </div>
-      <div class="sfHpBar" aria-label="Player HP">
-        <div class="sfHpFill" id="sfHpFill"></div>
-        <span class="sfHpLabel" id="sfHpLabel">—</span>
+      <div id="loadoutStrip" class="hidden" aria-label="Loadout strip">
+        <div class="loChip" id="loStaff" data-kind="staff">
+          <span class="loIcon staff" aria-hidden="true">┃</span>
+          <span class="loLabel">Staff</span>
+          <span class="loState" id="loStaffState">—</span>
+        </div>
+        <div class="loChip" id="loRobes" data-kind="robes">
+          <span class="loIcon robes" aria-hidden="true">▣</span>
+          <span class="loLabel">Robes</span>
+          <span class="loState" id="loRobesState">—</span>
+        </div>
+        <div class="loChip" id="loSpark" data-kind="spark">
+          <span class="loIcon spark" aria-hidden="true">✦</span>
+          <span class="loLabel">Spark</span>
+          <span class="loState" id="loSparkState">—</span>
+        </div>
+        <div class="loChip" id="loEmber" data-kind="emberbolt">
+          <span class="loIcon ember" aria-hidden="true">✸</span>
+          <span class="loLabel">Emberbolt</span>
+          <span class="loState" id="loEmberState">—</span>
+        </div>
+        <div class="loChip" id="loShard" data-kind="shard">
+          <span class="loIcon shard" aria-hidden="true">◆</span>
+          <span class="loLabel">Shard</span>
+          <span class="loState" id="loShardState">—</span>
+        </div>
+        <div class="loChip" id="loTonic" data-kind="tonic">
+          <span class="loIcon tonic" aria-hidden="true">⚗</span>
+          <span class="loLabel">Tonic</span>
+          <span class="loState" id="loTonicState">—</span>
+        </div>
+        <div class="loChip" id="loBandage" data-kind="bandage">
+          <span class="loIcon bandage" aria-hidden="true">🩹</span>
+          <span class="loLabel">Bandage</span>
+          <span class="loState" id="loBandageState">—</span>
+        </div>
       </div>
-      <div class="sfManaBar" aria-label="Player mana">
-        <div class="sfManaFill" id="sfManaFill"></div>
-        <span class="sfManaLabel" id="sfManaLabel">—</span>
+      <div id="selfFrame" class="hidden" aria-label="Player self frame">
+        <div class="sfNameRow">
+          <span id="sfName">You</span>
+          <span id="sfLevel" class="sfLevel">Lv —</span>
+          <span id="sfXp" class="sfXp">XP —</span>
+        </div>
+        <div class="sfHpBar" aria-label="Player HP">
+          <div class="sfHpFill" id="sfHpFill"></div>
+          <span class="sfHpLabel" id="sfHpLabel">—</span>
+        </div>
+        <div class="sfManaBar" aria-label="Player mana">
+          <div class="sfManaFill" id="sfManaFill"></div>
+          <span class="sfManaLabel" id="sfManaLabel">—</span>
+        </div>
+        <div id="sfBuff" class="sfBuff hidden">Tonic —</div>
+        <div id="sfRest" class="sfRest hidden" aria-live="polite">Resting…</div>
+        <div class="sfHint">GCD on hotbar · B bag · V tonic · N bandage · R rest · mana pool</div>
       </div>
-      <div id="sfBuff" class="sfBuff hidden">Tonic —</div>
-      <div id="sfRest" class="sfRest hidden" aria-live="polite">Resting…</div>
-      <div class="sfHint">GCD on hotbar · B bag · V tonic · N bandage · R rest · mana pool</div>
     </div>
-    <div id="loadoutStrip" class="hidden" aria-label="Loadout strip">
-      <div class="loChip" id="loStaff" data-kind="staff">
-        <span class="loIcon staff" aria-hidden="true">┃</span>
-        <span class="loLabel">Staff</span>
-        <span class="loState" id="loStaffState">—</span>
-      </div>
-      <div class="loChip" id="loRobes" data-kind="robes">
-        <span class="loIcon robes" aria-hidden="true">▣</span>
-        <span class="loLabel">Robes</span>
-        <span class="loState" id="loRobesState">—</span>
-      </div>
-      <div class="loChip" id="loSpark" data-kind="spark">
-        <span class="loIcon spark" aria-hidden="true">✦</span>
-        <span class="loLabel">Spark</span>
-        <span class="loState" id="loSparkState">—</span>
-      </div>
-      <div class="loChip" id="loEmber" data-kind="emberbolt">
-        <span class="loIcon ember" aria-hidden="true">✸</span>
-        <span class="loLabel">Emberbolt</span>
-        <span class="loState" id="loEmberState">—</span>
-      </div>
-      <div class="loChip" id="loShard" data-kind="shard">
-        <span class="loIcon shard" aria-hidden="true">◆</span>
-        <span class="loLabel">Shard</span>
-        <span class="loState" id="loShardState">—</span>
-      </div>
-      <div class="loChip" id="loTonic" data-kind="tonic">
-        <span class="loIcon tonic" aria-hidden="true">⚗</span>
-        <span class="loLabel">Tonic</span>
-        <span class="loState" id="loTonicState">—</span>
-      </div>
-          <div class="loChip" id="loBandage" data-kind="bandage">
-        <span class="loIcon bandage" aria-hidden="true">🩹</span>
-        <span class="loLabel">Bandage</span>
-        <span class="loState" id="loBandageState">—</span>
-      </div>
-</div>
-    <div id="bagPanel" class="hidden" aria-label="Bag / loadout">
+<div id="bagPanel" class="hidden" aria-label="Bag / loadout">
       <div class="bagHead">
         <span class="bagTitle">Bag / loadout</span>
         <span class="bagKey">B</span>
@@ -176,17 +189,6 @@
         · remotes <span id="fpsRemotes">0</span>
         · npcs <span id="fpsNpcs">0</span>
       </div>
-    </div>
-    <div id="chatPanel" aria-label="Chat say">
-      <div class="chatHead">
-        <span class="chatTitle">Chat</span>
-        <span class="chatHint">Enter · say · /p party · /w hex</span>
-      </div>
-      <div id="chatLines" class="chatLines"></div>
-      <form id="chatForm" class="chatForm" autocomplete="off">
-        <span class="chatPrompt">Say</span>
-        <input id="chatInput" type="text" maxlength="120" spellcheck="false" placeholder="say… /p party… /w hex whisper…" />
-      </form>
     </div>
     <div id="deathGreyout" class="hidden" aria-hidden="true">
       <div class="deathGreyInner">
