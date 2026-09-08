@@ -171,7 +171,7 @@ function nearestLootInPickupRange(
   return best;
 }
 
-/** Tab cycle: in-range hostiles first, then dummy (still selectable), then the rest (#358). */
+/** Tab cycle: aggroed in-range hostiles first, then other in-range hostiles, then dummy (#484 / #358). */
 function tabTargetCycle(net: GameNet): NpcView[] {
   const alive = net.getNpcs().filter((n) => n.hp > 0);
   const pose = net.getLocalPose();
@@ -186,7 +186,11 @@ function tabTargetCycle(net: GameNet): NpcView[] {
     a.npcId < b.npcId ? -1 : a.npcId > b.npcId ? 1 : 0;
   const hostilesNear = alive
     .filter((n) => isHostileKind(n.kind) && inRange(n))
-    .sort(byId);
+    .sort((a, b) => {
+      const ag = Number(b.aggroed) - Number(a.aggroed);
+      if (ag !== 0) return ag;
+      return byId(a, b);
+    });
   const dummy = alive.filter((n) => n.kind === NPC_KIND_DUMMY);
   const hostilesFar = alive
     .filter((n) => isHostileKind(n.kind) && !inRange(n))
@@ -6568,6 +6572,7 @@ async function main(): Promise<void> {
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
         veFollow !== 'tab-hostile' &&
+        veFollow !== 'tab-aggro' &&
         veFollow !== 'hostile-read' &&
         veFollow !== 'hostile-types' &&
         veFollow !== 'brigand-plate' &&
@@ -11276,6 +11281,179 @@ async function main(): Promise<void> {
       window.setTimeout(waitT, 200);
     };
     window.setTimeout(waitT, 500);
+  }
+
+  // ?ve=tab-aggro — after a pull, Tab selects the aggroed NPC, not lowest id (#484).
+  // Kind=2 + Kind=3 both in CastRange; dummy stays in the cycle as trainer.
+  if (ve === 'tab-aggro') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'tab-aggro') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-aggro: waiting for Kind=2 + Brigand…';
+    let ticks = 0;
+    let phase: 'pull' | 'stand' | 'tab' | 'done' = 'pull';
+    let tabbed = false;
+    const padCx = 7;
+    const padCz = -3;
+    const waitA = () => {
+      if (!net) return;
+      ticks += 1;
+      const pose = net.getLocalPose();
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const padC =
+        brigands.find(
+          (n) => Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? brigands[0];
+      const hp = net.getCharacter()?.hp ?? 0;
+      if (latestStatus.state !== 'connected' || !pose || !padC || hostiles.length < 1 || !dummy) {
+        if (mark) {
+          mark.textContent =
+            `VE tab-aggro: ${latestStatus.state} · H ${hostiles.length} · B ${brigands.length}…`;
+        }
+        if (ticks < 280) window.setTimeout(waitA, 200);
+        return;
+      }
+      if (hp <= 0) {
+        if (phase === 'done') {
+          if (ticks < 280) window.setTimeout(waitA, 200);
+          return;
+        }
+        phase = 'pull';
+        tabbed = false;
+        if (mark) mark.textContent = 'VE tab-aggro: dead — waiting respawn…';
+        if (ticks < 280) window.setTimeout(waitA, 200);
+        return;
+      }
+      const inCast = (n: NpcView) => {
+        const dx = n.x - pose.x;
+        const dz = n.z - pose.z;
+        return dx * dx + dz * dz <= CAST_RANGE_METERS * CAST_RANGE_METERS;
+      };
+      const kind2Near = hostiles.some(inCast);
+      const kind3Near = brigands.some(inCast);
+      if (phase === 'pull') {
+        const dx = padC.x - pose.x;
+        const dz = padC.z - pose.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > HOSTILE_AGGRO_RADIUS - 0.4 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - (HOSTILE_AGGRO_RADIUS - 0.45));
+          const slid = slideAgainstTrunks(pose.x, pose.z, (dx / dist) * step, (dz / dist) * step);
+          if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+            net.sendMove(slid.dx, slid.dz, false);
+          }
+        }
+        if (padC.aggroed) {
+          phase = 'stand';
+          if (mark) mark.textContent = 'VE tab-aggro: pulled Brigand — standing for Tab…';
+        } else if (mark) {
+          mark.textContent = `VE tab-aggro: walking in · d=${dist.toFixed(1)}`;
+        }
+      } else if (phase === 'stand') {
+        const dx = 0 - pose.x;
+        const dz = 0 - pose.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.6 && (!kind2Near || !kind3Near)) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          const slid = slideAgainstTrunks(
+            pose.x,
+            pose.z,
+            (dx / dist) * step,
+            (dz / dist) * step,
+          );
+          if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+            net.sendMove(slid.dx, slid.dz, false);
+          }
+        }
+        if (padC.aggroed && kind2Near && kind3Near) {
+          phase = 'tab';
+        } else if (mark) {
+          mark.textContent =
+            `VE tab-aggro: stand · aggro=${padC.aggroed ? 'y' : 'n'} · H2 ${kind2Near ? 'y' : 'n'} · B ${kind3Near ? 'y' : 'n'}`;
+        }
+      }
+      if (phase === 'tab' || phase === 'done') {
+        if (!tabbed) {
+          const id = cyclePreferHostiles(net);
+          if (id != null) selectedTargetId = id;
+          tabbed = true;
+        }
+        const tgt = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
+        const cycle = tabTargetCycle(net);
+        const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY);
+        updateTargetFrame(tgt);
+        const mesh = tgt ? npcMeshes.get(tgt.npcId.toString()) : undefined;
+        const ringOn = !!(mesh && mesh.ring.isEnabled());
+        const frameName = document.getElementById('tfName')?.textContent ?? '';
+        const pulledKind =
+          tgt?.kind === NPC_KIND_BRIGAND
+            ? 'Brigand'
+            : tgt?.kind === NPC_KIND_HOSTILE
+              ? 'Hostile'
+              : '';
+        const cam = camera.target;
+        cam.x = (pose.x + padC.x) * 0.5;
+        cam.y = 1.25;
+        cam.z = (pose.z + padC.z) * 0.5;
+        camera.radius = 12;
+        camera.beta = Math.PI / 2.7;
+        const ok =
+          !!tgt &&
+          tgt.aggroed &&
+          isHostileKind(tgt.kind) &&
+          tgt.kind !== NPC_KIND_DUMMY &&
+          pulledKind.length > 0 &&
+          dummyInCycle &&
+          kind2Near &&
+          kind3Near &&
+          ringOn &&
+          new RegExp(pulledKind, 'i').test(frameName);
+        if (ok) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Tab-aggro OK · ${pulledKind} · pulled · dummy trainer`;
+          }
+        }
+        if (phase === 'done') {
+          const tx = -11;
+          const tz = 8;
+          const kdx = tx - pose.x;
+          const kdz = tz - pose.z;
+          const kd = Math.hypot(kdx, kdz);
+          if (kd > 0.6) {
+            const step = Math.min(MAX_STEP_METERS, kd);
+            const slid = slideAgainstTrunks(
+              pose.x,
+              pose.z,
+              (kdx / kd) * step,
+              (kdz / kd) * step,
+            );
+            if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+              net.sendMove(slid.dx, slid.dz, false);
+            }
+          }
+          if (ticks < 280) window.setTimeout(waitA, 200);
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE tab-aggro: Tab tgt ${tgt?.kind ?? 'none'} aggro=${tgt?.aggroed ? 'y' : 'n'} · ${frameName}`;
+        }
+      }
+      if (ticks > 280) {
+        if (mark) mark.textContent = `Tab-aggro FAIL · phase ${phase} · #484`;
+        return;
+      }
+      window.setTimeout(waitA, 200);
+    };
+    window.setTimeout(waitA, 500);
   }
 
   // ?ve=hostile-read — Hostile coral plate vs Dummy parchment vs Vendor mint (#359).

@@ -343,3 +343,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Treat hero/mid boles as infinite vertical cylinders (skip Y clip). Keep Y-spring; do not zero inertial on the play follow. persistMark `?ve=cam-collision-hop` must name a trunk while `y` is above ground. Grounded-only pass = fail.
 - **Seen in:** #483
 
+### 2026-09-08 — npc,tab — first Tab after a pull follows npcId, not aggro
+- **Cause:** `tabTargetCycle` sorted in-range hostiles by id. From origin both pads sit in CastRange 8, so Tab can land on pad B while pad A (or C) is the one swinging.
+- **Do this:** Sort in-range hostiles aggroed-first, then id. Dummy stays after hostiles (trainer, still in the cycle). persistMark `?ve=tab-aggro` names the pulled kind. Do not `net.cycleTarget()`.
+- **Seen in:** #484 / #358 / #361
+
