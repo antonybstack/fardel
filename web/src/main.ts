@@ -3741,6 +3741,8 @@ async function main(): Promise<void> {
    * 70–90 ms covers one 20 Hz interval without a leftover stride after stop. */
   const REMOTE_WALK_HOLD_S = 0.09;
   const REMOTE_WALK_SPD = 0.55;
+  /** Full wish is MOVE_SPEED 4.5; Walk stride ~2.2. Sprint remotes use Run. */
+  const REMOTE_RUN_SPD = 3.2;
   const remoteWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
   /** Last pose step that armed Walk. Re-sync with step=0 must not clear this. */
   const remoteWalkStepAt = new Map<string, number>();
@@ -5128,8 +5130,8 @@ async function main(): Promise<void> {
       } else {
         setHumanoidAirborne(parts, false);
         parts.root.scaling.set(1, 1, 1);
-        // Walk named (not Run); speedRatio from snap/hold m/s.
-        setHumanoidMoving(parts, moving, false, spd);
+        // Sprint wish → Run_Weapon (staffed) / Run (sheathed). Slow stay Walk.
+        setHumanoidMoving(parts, moving, spd >= REMOTE_RUN_SPD, spd);
       }
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
@@ -6476,6 +6478,57 @@ async function main(): Promise<void> {
         camera.alpha = 0.15;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-run') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = -4;
+        let fy = 1.0;
+        let fz = -5;
+        let best = -1;
+        let bestHex: string | null = null;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x + 4, parts.root.position.z + 5) <
+            3.5;
+          if (
+            /death/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.0 ||
+            !nearPad
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const running = /run/i.test(clip);
+          const rank = running ? 3000 : 100;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'remote-sheathed') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6754,7 +6807,8 @@ async function main(): Promise<void> {
         veFollow !== 'zoom-stop' &&
         veFollow !== 'remote-hop' &&
         veFollow !== 'remote-walk-stop' &&
-        veFollow !== 'remote-sheathed-walk'
+        veFollow !== 'remote-sheathed-walk' &&
+        veFollow !== 'remote-run'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -8687,6 +8741,91 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitSheathWalk, 80);
     };
     window.setTimeout(waitSheathWalk, 700);
+  }
+
+  // ?ve=remote-run — E8.32 other wizard Run_Weapon at sprint wish, not Walk.
+  if (ve === 'remote-run') {
+    camera.radius = 7;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-run') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-run: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const waitRun = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      let preferred: RemotePose | undefined;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        const runOkOne =
+          nearPad &&
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          /run/i.test(clip) &&
+          !/walk/i.test(clip) &&
+          !/death/i.test(clip) &&
+          (ch.staffEquipped
+            ? /run_weapon/i.test(clip) && p.staff.isEnabled()
+            : !/weapon/i.test(clip) && !p.staff.isEnabled());
+        p.root.setEnabled(runOkOne);
+        if (runOkOne) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const runOk =
+        !!preferred &&
+        pb.skinned > 0 &&
+        /run/i.test(clip) &&
+        !/walk/i.test(clip);
+      if (mark) {
+        if (runOk) {
+          mark.textContent = `Run OK · ${clip} · skinned ${pb.skinned}`;
+        } else if (remoteMeshes.size > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (remoteMeshes.size > 0) {
+          const any = [...remoteMeshes.values()][0];
+          const anyPb = any ? readHumanoidPlayback(any) : pb;
+          const anyClip = clipBare(anyPb.playing);
+          mark.textContent =
+            `VE remote-run: remotes ${remoteMeshes.size} · ${anyClip} · skinned ${anyPb.skinned} (FARDEL_SECOND_RUN=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-run: remotes 0 (start tools/SecondClient FARDEL_SECOND_RUN=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitRun, 80);
+    };
+    window.setTimeout(waitRun, 700);
   }
 
   // ?ve=remote-sheathed — E8.26 remote Character.staffEquipped=false plays unarmed Idle.
