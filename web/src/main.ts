@@ -835,6 +835,7 @@ function setBagPanelOpen(open: boolean): void {
   const panel = document.getElementById('bagPanel');
   if (!panel) return;
   panel.classList.toggle('hidden', !open);
+  pushSystemToast('bag', open ? 'Bag' : 'Bag closed', 1800);
 }
 
 function setKeysLegendOpen(open: boolean): void {
@@ -1102,7 +1103,8 @@ type SystemToastKind =
   | 'stun'
   | 'outOfRange'
   | 'bandage'
-  | 'canvasFocus';
+  | 'canvasFocus'
+  | 'bag';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1167,7 +1169,9 @@ function pushSystemToast(
                                               ? 'RANGE'
                                               : kind === 'canvasFocus'
                                                 ? 'FOCUS'
-                                                : 'SAY';
+                                                : kind === 'bag'
+                                                  ? 'BAG'
+                                                  : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -7012,6 +7016,69 @@ async function main(): Promise<void> {
       window.setTimeout(waitBag, 200);
     };
     window.setTimeout(waitBag, 700);
+  }
+
+  // ?ve=bag-feel — demo bag open/close transitions + toast (#152). HUD only.
+  if (ve === 'bag-feel') {
+    camera.radius = 11;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'bag-feel') {
+    const mark = document.getElementById('persistMark');
+    bagOpen = true;
+    setBagPanelOpen(true);
+    
+    // Seed bag rows so panel content is visible.
+    const seedBagRows = () => {
+      const rows = [
+        { label: 'Ember shards', value: '3', className: 'ok' },
+        { label: 'Yard tonic', value: '1', className: 'ok' },
+        { label: 'Yard bandage', value: '2', className: 'ok' },
+      ];
+      const bagPanel = document.getElementById('bagPanel');
+      if (!bagPanel) return;
+      
+      // Clear existing rows except head/foot
+      const existingRows = bagPanel.querySelectorAll('.bagRow');
+      existingRows.forEach(r => r.remove());
+      
+      const head = bagPanel.querySelector('.bagHead');
+      if (head) {
+        rows.forEach(({ label, value, className }) => {
+          const row = document.createElement('div');
+          row.className = 'bagRow';
+          row.innerHTML = `<span>${label}</span><span class="${className}">${value}</span>`;
+          head.insertAdjacentElement('afterend', row);
+        });
+      }
+    };
+    
+    // Force panel into safe viewport (above OS shelf clip).
+    const forceBagVisible = () => {
+      const panel = document.getElementById('bagPanel');
+      if (panel) {
+        panel.classList.remove('hidden');
+        panel.style.cssText = 'display:flex !important; position:absolute; right:12px; bottom:140px; top:auto; z-index:30; opacity:1; transform:none; visibility:visible;';
+        seedBagRows();
+      }
+    };
+    
+    forceBagVisible();
+    
+    // Re-apply every 250ms for 5 seconds to prevent re-hiding.
+    let ticks = 0;
+    const keepVisible = () => {
+      if (ticks >= 20) return;
+      forceBagVisible();
+      ticks += 1;
+      window.setTimeout(keepVisible, 250);
+    };
+    window.setTimeout(keepVisible, 250);
+    
+    if (mark) {
+      mark.textContent = 'Bag-feel OK · panel open + BAG toast';
+    }
   }
 
   // ?ve=loadout-buff — mixed equipped/missing chips + active tonic buff (#91). HUD only.

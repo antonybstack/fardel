@@ -854,10 +854,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 150ms ease, transform 150ms ease;
 }
 
 #bagPanel.hidden {
-  display: none;
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
 }
 
 .bagHead {
@@ -1873,6 +1878,12 @@ body[data-rmb-look="armed"] #status[data-conn] {
   border-color: rgba(120, 230, 170, 0.55);
 }
 .sysToast.bandage .toastTag { color: #7dffc0; }
+
+/* Bag open/close — muted cool silver tag (bag/chat family); not neon. */
+.sysToast.bag {
+  border-color: rgba(168, 180, 200, 0.42);
+}
+.sysToast.bag .toastTag { color: #a8b4d0; }
 
 .clLine.vendor {
   color: #c6ceda;
