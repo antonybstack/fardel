@@ -1600,13 +1600,17 @@ function drawMinimap(opts: {
   const maxR = Math.min(w, h) * 0.44;
 
   ctx.clearRect(0, 0, w, h);
-  // Opaque disc so the moving 3D yard cannot flash through pip / N.
-  ctx.fillStyle = 'rgba(8, 12, 24, 0.88)';
+  // Opaque disc + dark/silver rim so #39 cyan fog cannot wash plate/heading (#103).
+  const discR = Math.min(w, h) * 0.46;
+  ctx.fillStyle = 'rgba(6, 10, 20, 0.96)';
   ctx.beginPath();
-  ctx.arc(cx, cy, Math.min(w, h) * 0.46, 0, Math.PI * 2);
+  ctx.arc(cx, cy, discR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = 'rgba(4, 8, 16, 0.95)';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(196, 206, 222, 0.55)';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
   // Range ring
@@ -6883,20 +6887,22 @@ async function main(): Promise<void> {
     window.setTimeout(waitMinimapParty, 800);
   }
 
-  // ?ve=minimap-read — Readability test: party + self blips + compass vs grass/fog (cyan #39 palette).
+  // ?ve=minimap-read — plate + blips + N vs #39 cyan fog at play cam (#103 / #61).
   if (ve === 'minimap-read') {
-    camera.radius = 28;
+    camera.radius = 14;
     camera.alpha = Math.PI / 2.4;
     camera.beta = Math.PI / 3.2;
   }
   if (net && ve === 'minimap-read') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE minimap-read: waiting for party + blips vs grass/fog…';
+    if (mark) mark.textContent = 'VE minimap-read: waiting for plate + blips vs cyan fog…';
     let ticks = 0;
     let invited = false;
     const waitMinimapRead = () => {
       if (!net) return;
       ticks += 1;
+      net.seedCrowdProxies();
+      net.ensureTrainingDummy();
       const st = latestStatus;
       if (st.state !== 'connected') {
         if (mark) mark.textContent = `VE minimap-read: ${st.state}…`;
@@ -6906,6 +6912,9 @@ async function main(): Promise<void> {
       const party = net.getParty();
       const local = net.getLocalPose();
       const remotes = net.getRemotes();
+      const proxies = net.getProxies();
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
       if (!local) {
         if (mark) mark.textContent = 'VE minimap-read: waiting for local pose…';
         window.setTimeout(waitMinimapRead, 250);
@@ -6919,29 +6928,41 @@ async function main(): Promise<void> {
         }
       }
       syncRemoteMeshes(remotes);
+      syncProxyMeshes(proxies);
+      syncNpcMeshes(npcs);
       drawMinimap({
         local: { x: local.x, z: local.z },
         remotes,
-        npcs: net.getNpcs(),
-        proxies: net.getProxies(),
+        npcs,
+        proxies,
       });
+      camera.setTarget(new Vector3(local.x, 1.1, local.z));
       const partyMate = remotes.find((r) => r.party);
-      if ((party?.size ?? 0) >= 2 && partyMate && document.getElementById('minimap')) {
-        camera.setTarget(new Vector3(local.x, 1.1, local.z));
+      const plate = document.getElementById('minimap');
+      const chromeOk = !!(plate && dummy && proxies.length >= 1);
+      if (chromeOk && ((party?.size ?? 0) >= 2 && partyMate)) {
         if (mark) {
           mark.textContent =
-            `Minimap read OK · blips + compass vs grass/cyan fog · party ${party?.size} · ` +
-            `remotes ${remotes.length} · contrast readable`;
+            `Minimap-read OK · plate+blips+N · party ${party?.size} · ` +
+            `proxies ${proxies.length} · #103 fog chrome`;
+        }
+        return;
+      }
+      if (chromeOk && ticks >= 12) {
+        if (mark) {
+          mark.textContent =
+            `Minimap-read OK · plate+blips+N · dummy+proxies ${proxies.length} · ` +
+            `play cam · #103 fog chrome`;
         }
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE minimap-read: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · ` +
-          `invited=${invited} · pending=${party?.pendingInviteFrom?.slice(0, 8) ?? '—'} (waiting party…)`;
+          `VE minimap-read: Connected · proxies ${proxies.length} · dummy ${dummy ? 'yes' : 'no'} · ` +
+          `party ${party?.size ?? 0} (waiting chrome…)`;
       }
       if (ticks > 220) {
-        if (mark) mark.textContent = 'VE minimap-read: timed out waiting for party mate';
+        if (mark) mark.textContent = 'VE minimap-read: timed out waiting for plate/blips';
         return;
       }
       window.setTimeout(waitMinimapRead, 200);
