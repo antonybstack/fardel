@@ -9,7 +9,7 @@ Do not maintain a parallel markdown backlog. Open or update Issues for work; clo
 | Label | Meaning |
 |---|---|
 | `P0` / `P1` / `P2` | Priority |
-| `lane:server` / `lane:client` / `lane:qa` | Ownership lane |
+| `lane:server` / `lane:client` / `lane:qa` / `lane:release` / `lane:art` | Ownership lane |
 | `feel` | Feel / UX observation |
 | `flake` | Intermittent / flaky failure |
 | `wave` | Grouped into a delivery wave |
@@ -23,4 +23,6 @@ Issue templates live under `.github/ISSUE_TEMPLATE/` (bug, feature, feel).
 
 ## Waves
 
-**Team Lead** assigns waves from Issues (labels / milestones), not from ad-hoc chat lists.
+**Team Lead** assigns the **active wave** from [CAMPAIGN.md](CAMPAIGN.md). File 4–8 Issues for that wave only (labels / `wave`). Do not keep a parallel markdown ticket list here.
+
+Empty board → next wave from CAMPAIGN, not invented HUD chrome.

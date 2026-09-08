@@ -2,7 +2,7 @@
 
 Operational runbook for the multi-agent development loop that lands work on `develop`, cuts `main`, and ships [play.sparkify.dev](https://play.sparkify.dev). Recreatable on Antony's Mac Studio via **Grok CLI** (parent agent + subagents).
 
-Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md](TEAM_SEATS.md) · [DEPLOY.md](DEPLOY.md) · [DEV_BOX.md](DEV_BOX.md) · [LEARNINGS.md](LEARNINGS.md) · [SCOPE.md](SCOPE.md)
+Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md](TEAM_SEATS.md) · [DEPLOY.md](DEPLOY.md) · [DEV_BOX.md](DEV_BOX.md) · [LEARNINGS.md](LEARNINGS.md) · [SCOPE.md](SCOPE.md) · [CAMPAIGN.md](CAMPAIGN.md)
 
 ---
 
@@ -15,15 +15,18 @@ Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md
 - Headless C# smokes as first proof of Done-when
 - Visual evidence hosted on **Cloudflare R2** (`ve.sparkify.dev`) for every user-facing PR
 
+A change **counts** when it is on **`main` + [play.sparkify.dev](https://play.sparkify.dev)**. `develop` merges are integration, not the product.
+
 **Unbound Team Lead** (parent) coordinates Devs, QA, Reviewer, Release, and **Art**. The Lead:
 
 - Assigns work **only from GitHub Issues** (not ad-hoc chat wishlists)
-- **Never leaves seats idle** while the project has open gaps — if the board is thin, file Issues (or have Art file visual ones) and assign immediately
+- Assigns from the **active wave** in [CAMPAIGN.md](CAMPAIGN.md) — session Done-when, not an infinite P2 HUD pile
+- **Never leaves seats idle** while the **current wave** has open gaps — if the board is empty, file the next wave’s Issues (or have Art file visual ones) and assign. Do **not** invent toast/chrome to occupy seats
 - Merges to `develop` only after Reviewer feedback is addressed
 - Does **not** gate routine Release cuts (Release decides + deploys on its own criteria)
 - Does **not** solo-invent features on `main` while the team is live
 
-Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge when clear). Release owns cut/deploy without Lead greenlight. Surface Antony only for blockers or genuine human gates (non-local DB wipe, elevated approvals).
+Autonomy default: keep the **wave** moving (assign idle seats, review when a PR opens, merge when clear, cut when the wave’s session Done-when is true). Release owns cut/deploy without Lead greenlight. Surface Antony only for blockers or genuine human gates (non-local DB wipe, elevated approvals).
 
 ---
 
@@ -35,8 +38,8 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 | **Dev1–Dev5** | Implement one assigned Issue in their seat worktree; open PR → `develop` with VE | Invent without an Issue; PR to `main`; use another seat's ports/DB |
 | **QA Bugs** | Smoke matrix, flake repros, regression Issues; optional fix PRs as `qa/<slug>` | Feature invent |
 | **QA Feel** | Feel / UX playtests; `feel`-labeled Issues; Mac/Pages FPS truth (not box SwiftShader) | Feature invent |
-| **Reviewer** | Review PRs targeting `develop`: correctness, smoke coverage, schema-collision risk, lane conflicts; concrete feedback | Own features; push merges |
-| **Release** | **Self-sufficient:** decide cut timing; pin `develop` SHA → `main`; Mac smoke; Pages deploy; VE + release beat | Expand tip silently mid-cut; invent features; run two cuts at once; wipe non-local DBs without Lead |
+| **Reviewer** | Review PRs targeting `develop`: correctness, smoke coverage, schema-collision risk, lane conflicts; submit `event: COMMENT` (never PENDING) | Own features; push merges; leave PENDING reviews for a human Submit click |
+| **Release** | **Self-sufficient:** decide cut timing; freeze `release/<sha>` → `main`; Mac smoke; Pages deploy; VE + release beat | PR live `develop` → `main`; expand tip silently mid-cut; invent features; run two cuts at once; wipe non-local DBs without Lead |
 | **Art** | Visual north star vs [ASSETS.md](ASSETS.md); art-direction briefs; **free OSS/CC0 or original-only** shortlists; break visual work into Issues for Devs; look-language coherence | Invent gameplay; propose **paid** packs; **flip Issue open/close or Fix numbers** after Lead locked an assign; leave Devs idle |
 
 ### Seat map (shared computer)
@@ -176,8 +179,8 @@ Team Lead merges (not Reviewer, not Dev self-merge by default).
 
 Release decides cuts **without** Lead greenlight.
 
-1. **Cut when** (all true): (a) `develop` tip has Reviewer-cleared merges with meaningful delta since `main`, (b) QA Bugs smokes green on that tip (or Release documents a waive), (c) no open P0 blockers on the tip.
-2. Release **pins** a concrete `develop` SHA and opens / merges **develop → main** for that tip only (never silently include later develops mid-cut).
+1. **Cut when** (all true): (a) `develop` tip has Reviewer-cleared merges with meaningful delta since `main` (usually a [CAMPAIGN.md](CAMPAIGN.md) wave Done-when), (b) QA Bugs smokes green on that tip (or Release documents a waive), (c) no open P0 blockers on the tip.
+2. Release **pins** a concrete `develop` SHA onto a **frozen branch** `release/<shortsha>` and opens / merges **that branch → `main`**. Never use live `develop` as the PR head (it follows later merges — #224). Never silently include later develops mid-cut.
 3. **Bindings arity guard** (`./tools/scripts/check-move-bindings-arity.sh`) must pass on the pinned tip before Mac smoke / Pages (#119 / #166).
 4. Mac Studio smoke on `/Users/antbly/dev/fardel` (local Spacetime and/or tunnel `dev-db.sparkify.dev`); run `./tools/scripts/run-smoke-matrix.sh` (dynamic `tools/*Smoke` discovery — JumpSmoke must appear when present; #122). **Do not substitute ConnectSmoke-only or a fixed N.** Gate on runner exit code and `results.tsv` row count matching discovered dirs — not merely that the script finished (#148).
 5. If green: Vite production build + Cloudflare Pages → `https://play.sparkify.dev`.
@@ -238,26 +241,38 @@ flowchart LR
 
 ### Step-by-step
 
-1. **Lead** scans open Issues (priority, `lane:*`, open PRs, who is idle).
-2. **Assign** one non-colliding ticket per idle Dev; serialize `lane:server` schema work.
+1. **Lead** scans the **active wave** ([CAMPAIGN.md](CAMPAIGN.md)) then open Issues (priority, `lane:*`, open PRs, who is idle).
+2. **Assign** one non-colliding ticket per idle Dev; serialize `lane:server` schema work. Prefer one schema Dev + one client/feel Dev on **different files**.
 3. **Seat** fetches latest `develop`, branches, implements, runs seat-local smokes + Vite `?ve=…`.
 4. **Open PR** → `develop` with `Fixes #N` + VE screenshot embedded via `https://ve.sparkify.dev/…` (upload with `tools/scripts/ve-upload.sh`).
 5. **Reviewer** reviews; author pushes fixes.
 6. **Lead** merges, closes Issue, broadcasts tip SHA, asks open branches to rebase.
 7. **QA Feel / QA Bugs** pick follow-on Issues (`feel`, `flake`) as assigned — not invent.
 
-### Continuous iterate (Team Lead schedule)
+### Continuous iterate (Team Lead)
 
-Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as needed):
+**Wake on work. Do not poll an empty board.**
 
-1. Check open PRs into `develop`; nudge Reviewer if stalled; merge only when gate clears.
-2. Unblock idle Devs/QA from Issues (no invent).
-3. Prefer cloud coding agents for heavy edits when available; otherwise seat-local work.
-4. Tell Antony only on real merges / blockers / release candidates (with screenshot when VE lands).
-5. Stay quiet if nothing changed.
-6. Never wipe non-local DBs.
-7. **No idle seats:** if open Issues < idle Devs, file or ask Art to file the next visual/feel tickets and assign.
-8. **No paid art packs** — Art shortlists free/OSS only; otherwise Devs ship original/procedural polish.
+| Role | Wake when | Stay quiet when |
+|------|-----------|-----------------|
+| **Dev** | Assigned Issue, or lock idle **and** an unassigned **wave** Issue exists | No open wave Issues |
+| **Reviewer** | New non-draft `develop` PR, or head SHA moved | Queue empty |
+| **Lead** | PR Reviewer-clear, Dev idle with wave Issues, wave Done-when met | Nothing material |
+| **Release** | Wave session Done-when true, no P0, smokes green | Mid-wave |
+| **QA Feel** | After a user-facing merge, against **Pages** (not seat Vite) | No new VE on the live URL |
+| **Art** | Wave needs look-language Issues, or VE fails [ASSETS.md](ASSETS.md) #31 | Devs already have visual tickets |
+
+Do **not** run a 5-minute Reviewer or 30-minute Dev tick when the queue is empty (wastes turns restating “only #224, skip”).
+
+When iterating:
+
+1. Check open PRs into `develop`; Reviewer COMMENTs (never PENDING) when a SHA is new; Lead-merge when the gate clears.
+2. Unblock idle Devs from **wave** Issues (no invent past the wave).
+3. Stay quiet if nothing changed.
+4. Never wipe non-local DBs.
+5. **Empty board:** if the active wave’s session Done-when is not on Pages, unstick Release or file the missing wave Issue. If it **is** on Pages, file the **next** wave from [CAMPAIGN.md](CAMPAIGN.md). Never invent HUD chrome to occupy seats.
+6. **No paid art packs** — Art shortlists free/OSS only; otherwise Devs ship original/procedural polish.
+7. Cap 2 Devs until a wave has three non-overlapping lanes. Do not add Dev4 because the board is empty.
 
 ---
 
@@ -268,7 +283,7 @@ Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as
 **Release agent checklist:**
 
 1. Diff `main`…`develop`; confirm Reviewer-cleared meaningful delta + green smokes + no P0s.
-2. Pin tip SHA; open PR `develop` → `main` (or fast-forward if policy allows) for that SHA only.
+2. Pin tip SHA to `release/<shortsha>`; open PR **`release/<shortsha>` → `main`**. Never PR live `develop` → `main`.
 3. **Bindings arity preflight (#119 / #166):** from repo root run `./tools/scripts/check-move-bindings-arity.sh` — must pass (server `Move(dx,dz,jump)` matches `web/src/module_bindings/move_reducer.ts` + C# `Move.g.cs`; PlayerPose `VelY`/`LastGroundedMicros` in C# **and** web `player_pose_table.ts` `vel_y`/`last_grounded_micros`). Fail the cut if this fails — do not ship a pin like #112.
 4. On Mac: pull that tip at `/Users/antbly/dev/fardel`, publish local if needed, run `./tools/scripts/run-smoke-matrix.sh` (dynamic `tools/*Smoke` discovery — JumpSmoke must appear when present on the pin; #122). **Do not substitute a fixed "critical" list or ConnectSmoke-only.** Gate on runner exit code and `results.tsv` row count matching discovered dirs — not merely that the script printed `MATRIX DONE` (#148). Quick Vite playpass.
 5. Build `web/` → deploy Pages project for `play.sparkify.dev`.
@@ -289,7 +304,9 @@ Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specif
 | Agents re-ping already-merged PRs | Always `gh pr view` before nudge; Lead says STOP when looping |
 | Auto-review / approval blocks merges or elevated Shell | Escalate honestly to Antony; never credential workarounds |
 | Channel 6-member cap | Split **Fardel** vs **Fardel QA**; add **Fardel Art** when visuals need a standing room |
-| Idle Devs + empty Issues board | Lead/Art must file Issues and assign — never "wait for inspiration" |
+| Idle Devs + empty Issues board | File the **next campaign wave** ([CAMPAIGN.md](CAMPAIGN.md)) — never invent HUD chrome; never "wait for inspiration" |
+| Polling Reviewer/Dev on an empty queue | Wake on new PR SHA / unassigned wave Issue; quiet otherwise |
+| Release PR head is live `develop` | Frozen `release/<sha>` branch; refuse silent expansion (#224) |
 | Visual gap vs hordes/RS/WoW mood | Art owns north star (#31-style); Devs implement presentation Issues; **no paid packs** — free/OSS or DIY |
 | Tip moves mid-rebase | `git fetch origin develop` before rebase; Lead broadcasts SHA after every merge |
 | GitHub `CONFLICTING` / mergeable noise | Re-fetch base; rebase; reopen PR if GitHub lies |
@@ -384,12 +401,12 @@ For heavy edits or multi-turn work on the same tip, **launch a Cloud Agent** ins
 
 ### Branch prefixes
 
-`dev1/`…`dev5/` · `client/` · `qa/` · `art/` · `chore/` · Release: `develop`→`main`
+`dev1/`…`dev5/` · `client/` · `qa/` · `art/` · `chore/` · Release: `release/<sha>`→`main` (never live `develop`)
 
 ### Do not
 
 - Invent without an Issue assign
-- Leave Devs idle while the game still has open gaps (file Issues first)
+- Leave Devs idle while the **current wave** still has open gaps (file wave Issues first; not random chrome)
 - Open feature PRs to `main`
 - Wipe non-local DBs
 - Re-ping merged PRs
