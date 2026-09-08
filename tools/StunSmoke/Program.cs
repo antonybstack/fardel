@@ -293,6 +293,66 @@ try
     }
     Console.WriteLine($"StunNpc Kind=2 OK id={stunnedNpc.NpcId} lockLeft={lockLeft}us swingAt={stunnedNpc.NextSwingAtMicros}");
 
+    await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
+    await TopUpMana(connA, idA, connB);
+    await MoveTo(connA, idA, 0f, 0f, connB);
+    await PumpUntilBoth(() =>
+        FindKindNear(connA, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz) is { Hp: > 0 },
+        timeoutMs, connA, connB, "brigand pad C");
+    var padC = FindKindNear(connA, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz)!;
+    if (padC.Kind != Combat.NpcKindBrigand)
+    {
+        Fail($"pad C kind={padC.Kind} want Kind=3");
+        return;
+    }
+    var c0x = padC.X;
+    var c0z = padC.Z;
+    var toPadC = Dist(0f, 0f, c0x, c0z);
+    var standOffC = MathF.Min(Combat.StunRangeMeters - 0.8f, toPadC - Combat.HostileAggroRadius - 0.4f);
+    if (standOffC < 0.5f)
+    {
+        Fail($"cannot stand off pad C (dist={toPadC:0.##} stun={Combat.StunRangeMeters} aggro={Combat.HostileAggroRadius})");
+        return;
+    }
+    var ctx = c0x / toPadC * (toPadC - standOffC);
+    var ctz = c0z / toPadC * (toPadC - standOffC);
+    await MoveTo(connA, idA, ctx, ctz, connB);
+    await DelayPumpBoth(connA, connB, Combat.GcdMs + 80);
+    await TopUpMana(connA, idA, connB);
+    var dummyHpBeforeBrigand = FindDummy(connA)!.Hp;
+    var c0x2 = FindNpc(connA, padC.NpcId)!.X;
+    var c0z2 = FindNpc(connA, padC.NpcId)!.Z;
+    await ExpectStunNpcOk(connA, padC.NpcId, "Kind=3 StunNpc");
+    await PumpUntilBoth(() =>
+    {
+        var n = FindNpc(connA, padC.NpcId);
+        return n is { Hp: > 0, StunnedUntilMicros: > 0 };
+    }, timeoutMs, connA, connB, "pad C stunned");
+    var stunnedC = FindNpc(connA, padC.NpcId)!;
+    if (stunnedC.Kind != Combat.NpcKindBrigand)
+    {
+        Fail($"StunNpc changed pad C kind={stunnedC.Kind}");
+        return;
+    }
+    var lockLeftC = stunnedC.StunnedUntilMicros - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+    if (lockLeftC < (long)Combat.StunNpcLockMs * 1000L / 2)
+    {
+        Fail($"Kind=3 lock too short leftover={lockLeftC}us");
+        return;
+    }
+    var driftedC = Dist(stunnedC.X, stunnedC.Z, c0x2, c0z2);
+    if (driftedC > Combat.HostileStepMeters * 2f)
+    {
+        Fail($"StunNpc Kind=3 drifted {driftedC:0.##}m during lock");
+        return;
+    }
+    if (FindDummy(connA) is not { Hp: var dHpC } || dHpC != dummyHpBeforeBrigand)
+    {
+        Fail("dummy trainer HP changed during StunNpc brigand");
+        return;
+    }
+    Console.WriteLine($"StunNpc Kind=3 OK id={stunnedC.NpcId} lockLeft={lockLeftC}us swingAt={stunnedC.NextSwingAtMicros}");
+
     await MoveTo(connA, idA, Combat.StunRangeMeters * 3f, 0f, connB);
     await ExpectStunNpcFail(connA, padA.NpcId, "Out of range", "far StunNpc");
     Console.WriteLine("out-of-range StunNpc reject OK");
@@ -455,6 +515,18 @@ static Npc? FindHostileNear(DbConnection conn, float x, float z)
         if (d < bestD) { bestD = d; best = n; }
     }
     return best;
+}
+
+static Npc? FindKindNear(DbConnection conn, int kind, float x, float z)
+{
+    foreach (var n in conn.Db.Npc.Iter())
+    {
+        if (n.Kind != kind) continue;
+        var hx = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnX : n.X;
+        var hz = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnZ : n.Z;
+        if (Dist(hx, hz, x, z) < 0.5f) return n;
+    }
+    return null;
 }
 
 static float Dist(float ax, float az, float bx, float bz)
