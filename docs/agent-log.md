@@ -283,3 +283,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Pick `NPC_KIND_BRIGAND` and persistMark `Brigand`. Dummy stays trainer. Do not add a Kind==2 check in Lib.cs. FindHostileNear in Kick/StunSmoke still pins Kind==2 on pads A/B.
 - **Seen in:** #452
 
+### 2026-09-08 — ve,tab — ?ve=tab-hostile persistMark required Kind=2 Hostile
+- **Cause:** Harness waited for two `NPC_KIND_HOSTILE` and `tgt.kind === HOSTILE` + `/hostile/i` on the target frame. `tabTargetCycle` already uses `isHostileKind`, so Tab visits Kind=3, but VE never named Brigand.
+- **Do this:** Cycle until Kind=2, Kind=3, and Dummy have been selected. Hold on Brigand. persistMark names `Brigand` + dummy selectable. Dummy stays in the cycle.
+- **Seen in:** #453
+

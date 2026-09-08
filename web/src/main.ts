@@ -10346,43 +10346,68 @@ async function main(): Promise<void> {
     window.setTimeout(waitR, 500);
   }
 
-  // ?ve=tab-hostile — Tab prefers in-range hostiles; dummy stays selectable (#358).
+  // ?ve=tab-hostile — Tab visits Kind=2 + Kind=3; dummy stays selectable (#453).
   if (ve === 'tab-hostile') {
     camera.radius = 16;
-    camera.alpha = Math.PI / 2.05;
-    camera.beta = Math.PI / 2.7;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 2.65;
   }
   if (net && ve === 'tab-hostile') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE tab-hostile: waiting for hostiles…';
+    if (mark) mark.textContent = 'VE tab-hostile: waiting for dummy + brigand…';
     let ticks = 0;
-    let tabbed = false;
+    let lastTabMs = 0;
+    const seenKinds = new Set<number>();
+    let brigandId = 0n;
     let okTicks = 0;
     const waitT = () => {
       if (!net) return;
       ticks += 1;
       const npcs = net.getNpcs();
       const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
-      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
-      if (latestStatus.state !== 'connected' || hostiles.length < 2 || !dummyOk) {
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      if (
+        latestStatus.state !== 'connected' ||
+        hostiles.length < 1 ||
+        brigands.length < 1 ||
+        !dummy
+      ) {
         if (mark) {
-          mark.textContent = `VE tab-hostile: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+          mark.textContent =
+            `VE tab-hostile: ${latestStatus.state} · H ${hostiles.length} · B ${brigands.length} · D ${dummy ? 'y' : 'n'}…`;
         }
         if (ticks < 200) window.setTimeout(waitT, 200);
         return;
       }
-      if (!tabbed) {
+      syncNpcMeshes(npcs);
+      const visited =
+        seenKinds.has(NPC_KIND_HOSTILE) &&
+        seenKinds.has(NPC_KIND_BRIGAND) &&
+        seenKinds.has(NPC_KIND_DUMMY);
+      const tgtNow = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
+      const holdBrigand = visited && tgtNow?.kind === NPC_KIND_BRIGAND;
+      const now = Date.now();
+      const committed =
+        selectedTargetId === 0n ||
+        (net.getCombat()?.targetNpcId ?? 0n) === selectedTargetId;
+      if (!holdBrigand && committed && now - lastTabMs >= 280) {
         const id = cyclePreferHostiles(net);
         if (id != null) selectedTargetId = id;
-        tabbed = true;
+        lastTabMs = now;
       }
-      syncNpcMeshes(net.getNpcs());
       const cycle = tabTargetCycle(net);
       const tgt = npcs.find((n) => n.npcId === selectedTargetId) ?? null;
+      if (tgt) seenKinds.add(tgt.kind);
+      if (tgt?.kind === NPC_KIND_BRIGAND) brigandId = tgt.npcId;
       const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY);
+      const brigandInCycle = cycle.some((n) => n.kind === NPC_KIND_BRIGAND);
       updateTargetFrame(tgt);
-      if (tgt && tgt.kind === NPC_KIND_HOSTILE) {
-        camera.setTarget(new Vector3(tgt.x, 1.2, tgt.z));
+      if (tgt && (isHostileKind(tgt.kind) || tgt.kind === NPC_KIND_DUMMY)) {
+        const other = tgt.kind === NPC_KIND_BRIGAND ? dummy : tgt;
+        camera.setTarget(
+          new Vector3((tgt.x + other.x) / 2, 1.2, (tgt.z + other.z) / 2),
+        );
         camera.radius = 14;
         camera.beta = Math.PI / 3.1;
       }
@@ -10392,25 +10417,32 @@ async function main(): Promise<void> {
       const frameVisible = !!(frame && !frame.classList.contains('hidden'));
       const frameName = document.getElementById('tfName')?.textContent ?? '';
       if (
+        visited &&
         tgt &&
-        tgt.kind === NPC_KIND_HOSTILE &&
+        tgt.kind === NPC_KIND_BRIGAND &&
         dummyInCycle &&
+        brigandInCycle &&
         ringOn &&
         frameVisible &&
-        /hostile/i.test(frameName)
+        /brigand/i.test(frameName)
       ) {
         okTicks += 1;
         if (mark) {
-          mark.textContent = `Tab-hostile OK · Hostile #${tgt.npcId} · dummy selectable · #358`;
+          mark.textContent =
+            `Tab-hostile OK · Brigand #${brigandId} · dummy selectable · #453`;
         }
         if (okTicks < 8 && ticks < 180) window.setTimeout(waitT, 180);
         return;
       }
       if (mark) {
-        mark.textContent = `VE tab-hostile: tgt ${tgt ? tgt.kind : 'none'} · dummyCycle ${dummyInCycle ? 'y' : 'n'} · ring ${ringOn ? 'on' : 'off'} · frame ${frameName}`;
+        mark.textContent =
+          `VE tab-hostile: tgt ${tgt ? tgt.kind : 'none'} · seen ${[...seenKinds].join(',')} · dummyCycle ${dummyInCycle ? 'y' : 'n'} · frame ${frameName}`;
       }
       if (ticks > 180) {
-        if (mark) mark.textContent = `Tab-hostile FAIL · tgt ${tgt?.kind ?? 'none'} · #358`;
+        if (mark) {
+          mark.textContent =
+            `Tab-hostile FAIL · tgt ${tgt?.kind ?? 'none'} · seen ${[...seenKinds].join(',')} · #453`;
+        }
         return;
       }
       window.setTimeout(waitT, 200);
