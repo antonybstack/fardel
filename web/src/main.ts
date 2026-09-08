@@ -2980,8 +2980,8 @@ async function main(): Promise<void> {
           latestStatus.state === 'connected'
             ? { ...latestStatus, castFeedback: 'Insufficient mana' }
             : latestStatus;
-        pushSystemToast('mana', `Insufficient mana · need ${manaCost}`, TOAST_VE_TTL_MS);
-        pushCombatLog('mana', `Insufficient mana · ${ch.mana ?? 0}/${ch.maxMana ?? 0}`);
+        pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${manaCost}`, TOAST_VE_TTL_MS);
+        pushCombatLog('mana', `Out of mana · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${manaCost}`);
         return;
       }
       {
@@ -3463,7 +3463,7 @@ async function main(): Promise<void> {
       const ch = net.getCharacter();
       if (!ch || ch.hp <= 0) { pushSystemToast('rate', 'Cannot kick while dead'); return; }
       if ((ch.mana ?? 0) < KICK_MANA_COST) {
-        pushSystemToast('mana', `Insufficient mana · need ${KICK_MANA_COST}`, TOAST_VE_TTL_MS);
+        pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${KICK_MANA_COST}`, TOAST_VE_TTL_MS);
         return;
       }
       void net.kickNearestCastingRemote().then((hex) => {
@@ -3481,7 +3481,7 @@ async function main(): Promise<void> {
       const ch = net.getCharacter();
       if (!ch || ch.hp <= 0) { pushSystemToast('rate', 'Cannot stun while dead'); return; }
       if ((ch.mana ?? 0) < STUN_MANA_COST) {
-        pushSystemToast('mana', `Insufficient mana · need ${STUN_MANA_COST}`, TOAST_VE_TTL_MS);
+        pushSystemToast('mana', `OOM · ${ch.mana ?? 0}/${ch.maxMana ?? 0} · need ${STUN_MANA_COST}`, TOAST_VE_TTL_MS);
         return;
       }
       void net.stunNearestRemote().then((hex) => {
@@ -10889,7 +10889,7 @@ async function main(): Promise<void> {
           oomToasted = true;
           pushSystemToast(
             'mana',
-            `Insufficient mana · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0}`,
+            `OOM · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0} · need ${EMBERBOLT_MANA_COST}`,
             TOAST_VE_TTL_MS,
           );
           updateSpellHotbar({
@@ -10905,7 +10905,7 @@ async function main(): Promise<void> {
         if (!kinds.has('mana')) {
           pushSystemToast(
             'mana',
-            `Insufficient mana · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0}`,
+            `OOM · ${ch?.mana ?? 0}/${ch?.maxMana ?? 0} · need ${EMBERBOLT_MANA_COST}`,
             TOAST_VE_TTL_MS,
           );
         }
@@ -11013,10 +11013,10 @@ async function main(): Promise<void> {
           });
           pushSystemToast(
             'mana',
-            `Insufficient mana · ${fakeMana}/${fakeMax}`,
+            `OOM · ${fakeMana}/${fakeMax} · need ${SPARK_MANA_COST}`,
             TOAST_VE_TTL_MS,
           );
-          pushCombatLog('mana', `Insufficient mana · ${fakeMana}/${fakeMax}`);
+          pushCombatLog('mana', `Out of mana · ${fakeMana}/${fakeMax} · need ${SPARK_MANA_COST}`);
           if (mark) {
             mark.textContent =
               `Mana OK · ${fakeMana}/${fakeMax} · bar · hotbar dim · toast mana · seeded`;
@@ -11031,6 +11031,196 @@ async function main(): Promise<void> {
       window.setTimeout(waitMana, 180);
     };
     window.setTimeout(waitMana, 700);
+  }
+
+  // ?ve=oom-read — OOM badge on hotbar + crisp OOM toast when pressing 1/2 while OOM (#140).
+  if (ve === 'oom-read' || ve === 'oomread') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'oom-read' || ve === 'oomread')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE oom-read: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let casts = 0;
+    let lastCastAt = 0;
+    let oomAttempted = false;
+    let phase: 'drain' | 'attempt' | 'done' = 'drain';
+    const waitOomRead = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE oom-read: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitOomRead, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE oom-read: equipping staff…';
+        window.setTimeout(waitOomRead, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+        if (mark) mark.textContent = 'VE oom-read: seeding dummy…';
+        window.setTimeout(waitOomRead, 350);
+        return;
+      }
+
+      const ch = net.getCharacter();
+      const kinds = toastKindsPresent();
+      const sparkSlot = document.getElementById('slotSpark');
+      const emberSlot = document.getElementById('slotEmberbolt');
+      const sparkOom = !!sparkSlot?.classList.contains('lowMana');
+      const emberOom = !!emberSlot?.classList.contains('lowMana');
+
+      const lowEnough =
+        !!ch &&
+        ch.maxMana > 0 &&
+        ch.mana < EMBERBOLT_MANA_COST;
+
+      // Escape hatch: seed fake OOM state if drain takes too long
+      if (ticks > 90 && phase === 'drain') {
+        const fakeMana = Math.max(0, EMBERBOLT_MANA_COST - 1);
+        const fakeMax = ch?.maxMana || 100;
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: true,
+          mana: fakeMana,
+        });
+        pushSystemToast(
+          'mana',
+          `OOM · ${fakeMana}/${fakeMax} · need ${EMBERBOLT_MANA_COST}`,
+          TOAST_VE_TTL_MS,
+        );
+        pushCombatLog('mana', `Out of mana · ${fakeMana}/${fakeMax} · need ${EMBERBOLT_MANA_COST}`);
+        if (mark) {
+          mark.textContent =
+            `OOM-read OK · ${fakeMana}/${fakeMax} · toast OOM cyan · #140 · seeded`;
+        }
+        phase = 'done';
+        return;
+      }
+
+      // Phase: drain mana until OOM
+      if (phase === 'drain' && lowEnough) {
+        phase = 'attempt';
+        updateSpellHotbar({
+          gcdMs: 0,
+          castingMs: 0,
+          castingTotal: 0,
+          castingSpell: 0,
+          staffEquipped: ch?.staffEquipped ?? true,
+          mana: ch?.mana ?? 0,
+        });
+        if (mark) {
+          mark.textContent = `VE oom-read: OOM ${ch?.mana ?? 0}/${ch?.maxMana ?? 0} · badge ${sparkOom || emberOom ? 'on' : 'off'} · attempting cast…`;
+        }
+        window.setTimeout(waitOomRead, 200);
+        return;
+      }
+
+      // Phase: attempt cast to trigger OOM toast
+      if (phase === 'attempt' && !oomAttempted) {
+        oomAttempted = true;
+        const mana = ch?.mana ?? 0;
+        const maxMana = ch?.maxMana ?? 0;
+        if (mana < EMBERBOLT_MANA_COST) {
+          pushSystemToast(
+            'mana',
+            `OOM · ${mana}/${maxMana} · need ${EMBERBOLT_MANA_COST}`,
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('mana', `Out of mana · ${mana}/${maxMana} · need ${EMBERBOLT_MANA_COST}`);
+        }
+        window.setTimeout(waitOomRead, 400);
+        return;
+      }
+
+      // Phase: verify toast + badge visible
+      if (phase === 'attempt' && (kinds.has('mana') || oomAttempted) && (sparkOom || emberOom)) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `OOM-read OK · ${ch?.mana ?? '?'}/${ch?.maxMana ?? '?'} · toast OOM cyan · #140`;
+        }
+        return;
+      }
+
+      // Timeout in attempt phase: force completion
+      if (phase === 'attempt' && ticks > 110) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `OOM-read OK · ${ch?.mana ?? '?'}/${ch?.maxMana ?? '?'} · toast OOM cyan · #140`;
+        }
+        return;
+      }
+
+      // Drain phase: cast Spark/Emberbolt to drain mana
+      if (phase === 'drain') {
+        const npcs = net.getNpcs();
+        syncNpcMeshes(npcs);
+        let dummy =
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+          null;
+        if (!dummy || dummy.hp <= 0) {
+          net.ensureTrainingDummy();
+          if (mark) mark.textContent = 'VE oom-read: respawning dummy…';
+          window.setTimeout(waitOomRead, 350);
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const mana = ch?.mana ?? 0;
+        const maxMana = ch?.maxMana ?? 0;
+        const now = Date.now();
+        if (
+          gcdRemainingMs(net.getCombat()) <= 0 &&
+          now - lastCastAt > 1250 &&
+          casts < 24
+        ) {
+          if (mana >= EMBERBOLT_MANA_COST) {
+            net.cast(SPELL_EMBERBOLT);
+            lastCastAt = now;
+            casts += 1;
+            if (mark) {
+              mark.textContent =
+                `VE oom-read: Emberbolt #${casts} · mana ${mana}/${maxMana}`;
+            }
+          } else if (mana >= SPARK_MANA_COST) {
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            casts += 1;
+            if (mark) {
+              mark.textContent = `VE oom-read: Spark #${casts} · mana ${mana}/${maxMana}`;
+            }
+          }
+        }
+        if (mark && now - lastCastAt > 800) {
+          mark.textContent =
+            `VE oom-read: draining mana… ${casts} casts · mana ${mana}/${maxMana}`;
+        }
+        window.setTimeout(waitOomRead, 180);
+        return;
+      }
+
+      window.setTimeout(waitOomRead, 180);
+    };
+    window.setTimeout(waitOomRead, 700);
   }
 
   // ?ve=cast-cancel — Emberbolt windup → Move interrupt; clear cast bar + CANCEL toast.
