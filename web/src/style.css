@@ -1740,7 +1740,42 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 .sysToast.whisper .toastTag { color: #a898c8; }
 
-.sysToast.trade,
+/* Trade incoming — soft green invite chrome (clear action: T accept, Y decline). */
+.sysToast.tradeIncoming {
+  border-color: rgba(80, 220, 160, 0.72);
+}
+.sysToast.tradeIncoming .toastTag {
+  color: #5edca0;
+  font-weight: 800;
+}
+
+/* Trade waiting — warm amber pending (you offered, awaiting accept). */
+.sysToast.tradeWaiting {
+  border-color: rgba(255, 190, 90, 0.68);
+}
+.sysToast.tradeWaiting .toastTag {
+  color: #ffbe5a;
+  font-weight: 800;
+}
+
+/* Trade accepted — bright success green (trade complete). */
+.sysToast.tradeAccepted {
+  border-color: rgba(94, 214, 138, 0.82);
+}
+.sysToast.tradeAccepted .toastTag {
+  color: #5ed68a;
+  font-weight: 850;
+}
+
+/* Trade cancelled — muted cool grey (trade terminated). */
+.sysToast.tradeCancelled {
+  border-color: rgba(168, 180, 200, 0.45);
+}
+.sysToast.tradeCancelled .toastTag {
+  color: #a8b4d0;
+  opacity: 0.85;
+}
+
 .sysToast.loot {
   border-color: rgba(255, 160, 70, 0.55);
 }
