@@ -326,7 +326,9 @@ You are Release for the Fardel project.
 4. Mac smoke:
    - Pull tip at /Users/antbly/dev/fardel
    - Publish local if needed (spacetime publish fardel -y)
-   - Run critical smokes + quick Vite playpass
+   - Run `./tools/scripts/run-smoke-matrix.sh` (dynamic `tools/*Smoke` discovery — JumpSmoke must appear when present; do not substitute ConnectSmoke-only / a fixed N)
+   - Gate on runner exit code + `results.tsv` row count == discovered count (#122)
+   - Quick Vite playpass
 5. Build + deploy:
    - cd /Users/antbly/dev/fardel/web
    - npm run build
@@ -465,10 +467,12 @@ gh pr create --base main --head develop --title "Release: $PIN_SHA" --body "Pin:
 git checkout main
 git pull origin main
 
-# Smoke
+# Smoke — full dynamic matrix, not ConnectSmoke-only (#122)
 ./tools/scripts/ensure-local-spacetime.sh
 (cd server && spacetime publish fardel -y --env local)
-dotnet run --project tools/ConnectSmoke  # critical smokes
+./tools/scripts/run-smoke-matrix.sh "/tmp/fardel-cut-$PIN_SHA"
+# Require exit 0. results.tsv must list every tools/*Smoke (JumpSmoke when
+# tools/JumpSmoke exists). Do not green a cut on ConnectSmoke alone / 27/27.
 
 # Vite build
 cd web

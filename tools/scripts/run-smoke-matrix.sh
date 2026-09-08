@@ -42,10 +42,22 @@ if [[ -x tools/scripts/check-move-bindings-arity.sh ]]; then
   tools/scripts/check-move-bindings-arity.sh | tee -a "$LOGDIR/runner.log"
 fi
 
+# Dynamic discovery — never a hardcoded allowlist (#122). New tools/*Smoke
+# dirs (e.g. JumpSmoke) must appear in the run list and in results.tsv.
 mapfile -t SMOKES < <(ls -d tools/*Smoke 2>/dev/null | xargs -n1 basename | sort)
 if [[ ${#SMOKES[@]} -eq 0 ]]; then
   log "FAIL: no tools/*Smoke projects found"
   exit 1
+fi
+if [[ -d tools/JumpSmoke ]]; then
+  found_jump=0
+  for _n in "${SMOKES[@]}"; do
+    if [[ "$_n" == "JumpSmoke" ]]; then found_jump=1; break; fi
+  done
+  if [[ "$found_jump" -eq 0 ]]; then
+    log "FAIL: tools/JumpSmoke exists but was not discovered (#122)"
+    exit 1
+  fi
 fi
 
 is_compile_fail() {
@@ -74,6 +86,7 @@ classify() {
 }
 
 log "=== MATRIX START sha=$(git rev-parse --short HEAD) count=${#SMOKES[@]} $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+log "DISCOVERY: ${#SMOKES[@]} tools/*Smoke (JumpSmoke=$([[ -d tools/JumpSmoke ]] && echo present || echo absent))"
 log "SMOKES: ${SMOKES[*]}"
 log "FAIL_FAST=$FAIL_FAST RETRY=$RETRY LOGDIR=$LOGDIR"
 
@@ -157,7 +170,18 @@ while IFS=$'\t' read -r _name status _rest || [[ -n "${_name:-}" ]]; do
   esac
 done < "$LOGDIR/results.tsv"
 
-log "=== MATRIX GATE pass=$pass_n fail=$fail_n flake=$flake_n allow_flake=$ALLOW_FLAKE ==="
+# Every discovered tools/*Smoke must have a results.tsv row (#122).
+missing=()
+for name in "${SMOKES[@]}"; do
+  if ! grep -q $'^'"${name}"$'\t' "$LOGDIR/results.tsv"; then
+    missing+=("$name")
+  fi
+done
+if [[ ${#missing[@]} -gt 0 ]]; then
+  log "FAIL: results.tsv missing ${#missing[@]} discovered smoke(s): ${missing[*]} (#122)"
+  fail_n=$((fail_n + ${#missing[@]}))
+fi
+log "=== MATRIX GATE pass=$pass_n fail=$fail_n flake=$flake_n discovered=${#SMOKES[@]} allow_flake=$ALLOW_FLAKE ==="
 if [[ "$fail_n" -gt 0 ]]; then
   log "GATE: FAIL — $fail_n row(s) FAIL/COMPILE_FAIL in $LOGDIR/results.tsv (do not treat 'script completed' as green)"
   exit 1
