@@ -3265,7 +3265,10 @@ async function main(): Promise<void> {
   };
   const localInterp = makePoseInterp();
   const remoteInterps = new Map<string, PoseInterp>();
-  const remoteLastXz = new Map<string, { x: number; z: number }>();
+  /** Grounded interp parks at u=1 between 20Hz snaps; hold Walk across the gap. */
+  const REMOTE_WALK_HOLD_S = 0.15;
+  const REMOTE_WALK_SPD = 0.55;
+  const remoteWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
   const proxyInterps = new Map<string, PoseInterp>();
 
   const ensureRemoteFx = (key: string): RemoteFx => {
@@ -3515,7 +3518,7 @@ async function main(): Promise<void> {
         remoteMeshes.delete(key);
         remotePartyTint.delete(key);
         remoteInterps.delete(key);
-        remoteLastXz.delete(key);
+        remoteWalkHold.delete(key);
         disposeNameplate(remoteNameplates.get(key));
         remoteNameplates.delete(key);
       }
@@ -4412,22 +4415,27 @@ async function main(): Promise<void> {
       parts.root.position.x = samp.x;
       parts.root.position.y = samp.y;
       parts.root.position.z = samp.z;
-      const prev = remoteLastXz.get(key);
-      if (prev && dt > 1e-4) {
-        const dx = samp.x - prev.x;
-        const dz = samp.z - prev.z;
-        const spd = Math.hypot(dx, dz) / dt;
-        const moving = spd > 0.55;
-        setHumanoidMoving(parts, moving);
-        if (moving) {
-          const targetYaw = Math.atan2(dx, dz);
-          const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
-          parts.root.rotation.y = lerpYaw(parts.root.rotation.y, targetYaw, a);
-        }
-      } else {
-        setHumanoidMoving(parts, false);
+      let st = remoteWalkHold.get(key);
+      if (!st) {
+        st = { hold: 0, dx: 0, dz: 0 };
+        remoteWalkHold.set(key, st);
       }
-      remoteLastXz.set(key, { x: samp.x, z: samp.z });
+      const interpolating = ri.u < 1 - 1e-4;
+      const segSpd = Math.hypot(ri.vx, ri.vz);
+      if (interpolating && segSpd > REMOTE_WALK_SPD) {
+        st.hold = REMOTE_WALK_HOLD_S;
+        st.dx = ri.vx;
+        st.dz = ri.vz;
+      } else {
+        st.hold -= dt;
+      }
+      const moving = st.hold > 0 && samp.y <= 0.05;
+      setHumanoidMoving(parts, moving);
+      if (moving && (st.dx !== 0 || st.dz !== 0)) {
+        const targetYaw = Math.atan2(st.dx, st.dz);
+        const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
+        parts.root.rotation.y = lerpYaw(parts.root.rotation.y, targetYaw, a);
+      }
     }
     for (const [key, inst] of proxyInstances) {
       const pi = proxyInterps.get(key);
@@ -5328,10 +5336,12 @@ async function main(): Promise<void> {
         camera.inertialRadiusOffset = 0;
         let focus = player.position.add(new Vector3(0, 1.0, 0));
         let best = -1;
-        for (const parts of remoteMeshes.values()) {
+        for (const [key, parts] of remoteMeshes) {
+          const walking = (remoteWalkHold.get(key)?.hold ?? 0) > 0;
           const d = Vector3.Distance(parts.root.position, player.position);
-          if (d > best) {
-            best = d;
+          const rank = (walking ? 1000 : 0) + d;
+          if (rank > best) {
+            best = rank;
             focus = parts.root.position.add(new Vector3(0, 1.0, 0));
           }
         }
@@ -6328,17 +6338,19 @@ async function main(): Promise<void> {
       const n = remoteMeshes.size;
       const local = net.getLocalPose();
       const preferred =
+        remotes.find((r) => (remoteWalkHold.get(r.identityHex)?.hold ?? 0) > 0) ??
         remotes.find((r) => {
           if (!local) return true;
           return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
-        }) ?? remotes[0];
+        }) ??
+        remotes[0];
       if (mark) {
         if (walkOn && preferred) {
           mark.textContent = `Remote walk OK · remotes ${n} · Walk · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
         } else if (n > 0 && preferred) {
           mark.textContent = `VE remote-walk: remotes ${n} · ${playing || 'idle'} @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)}) (waiting pose delta)`;
         } else {
-          mark.textContent = 'VE remote-walk: remotes 0…';
+          mark.textContent = 'VE remote-walk: remotes 0 (start tools/SecondClient)…';
         }
       }
       if (ticks < 240) window.setTimeout(waitRemoteWalk, 200);
