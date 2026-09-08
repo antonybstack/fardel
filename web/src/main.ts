@@ -5247,6 +5247,12 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.55;
         camera.beta = Math.PI / 2.48;
         camera.radius = 32;
+      } else if (veFollow === 'place-wow') {
+        // Establishing: SW of pad, looking north — huge trees, path, dusk-blue range.
+        camera.setTarget(player.position.add(new Vector3(0, 7, 2)));
+        camera.alpha = Math.PI / 2 + 0.45;
+        camera.beta = Math.PI / 2.38;
+        camera.radius = 34;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -5755,6 +5761,24 @@ async function main(): Promise<void> {
       window.setTimeout(waitPathGround, 300);
     };
     window.setTimeout(waitPathGround, 600);
+  }
+
+  // ?ve=place-wow — E3.7 establishing shot vs hordes place ref (scale/fog/path).
+  if (net && ve === 'place-wow') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE place-wow: waiting for Connected…';
+    const waitPlaceWow = () => {
+      if (!net) return;
+      if (latestStatus.state === 'connected') {
+        if (mark) {
+          mark.textContent =
+            'Place-wow OK · huge trees · fog · no capsules · Connected';
+        }
+        return;
+      }
+      window.setTimeout(waitPlaceWow, 300);
+    };
+    window.setTimeout(waitPlaceWow, 600);
   }
 
   // ?ve=sky-horizon — establishing shot of layered mountain ranges (#55 / #273).
