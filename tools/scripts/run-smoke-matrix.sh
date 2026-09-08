@@ -43,22 +43,35 @@ if [[ -x tools/scripts/check-move-bindings-arity.sh ]]; then
 fi
 
 # Dynamic discovery — never a hardcoded allowlist (#122). New tools/*Smoke
-# dirs (e.g. JumpSmoke) must appear in the run list and in results.tsv.
+# dirs (e.g. JumpSmoke, IdleSmoke) must appear in the run list and in results.tsv.
+#
+# Node/Playwright smokes (#321 IdleSmoke): ship tools/<Name>Smoke/run.sh instead
+# of a csproj. `ls tools/*Smoke` still discovers the dir. `dotnet run` cannot
+# execute a node smoke — exec_smoke runs run.sh when present. IdleSmoke opens
+# seat Vite `?ve=idle` (--use-angle=metal) and FAILS on persistMark T-POSE /
+# empty / "Quaternius char OK". Source `wt-env.sh <slug>` + seat-up first.
+# Never :3000 / db fardel / :5173. HTTP 200 of a T-pose PNG is not Idle VE.
 mapfile -t SMOKES < <(ls -d tools/*Smoke 2>/dev/null | xargs -n1 basename | sort)
 if [[ ${#SMOKES[@]} -eq 0 ]]; then
   log "FAIL: no tools/*Smoke projects found"
   exit 1
 fi
-if [[ -d tools/JumpSmoke ]]; then
-  found_jump=0
+require_discovered() {
+  local want="$1"
+  if [[ ! -d "tools/$want" ]]; then
+    return 0
+  fi
+  local found=0 _n
   for _n in "${SMOKES[@]}"; do
-    if [[ "$_n" == "JumpSmoke" ]]; then found_jump=1; break; fi
+    if [[ "$_n" == "$want" ]]; then found=1; break; fi
   done
-  if [[ "$found_jump" -eq 0 ]]; then
-    log "FAIL: tools/JumpSmoke exists but was not discovered (#122)"
+  if [[ "$found" -eq 0 ]]; then
+    log "FAIL: tools/$want exists but was not discovered (#122/#321)"
     exit 1
   fi
-fi
+}
+require_discovered JumpSmoke
+require_discovered IdleSmoke
 
 is_compile_fail() {
   local logf="$1" ec="$2"
@@ -85,13 +98,37 @@ classify() {
   echo "$result"
 }
 
+# C# smokes: dotnet run. Node/Playwright smokes (#321): tools/$name/run.sh.
+exec_smoke() {
+  local name="$1"
+  if [[ -f "tools/$name/run.sh" ]]; then
+    bash "tools/$name/run.sh"
+    return $?
+  fi
+  if [[ ! -f "tools/$name/$name.csproj" ]]; then
+    echo "FAIL: $name has no $name.csproj and no run.sh (node smoke hook #321)"
+    return 1
+  fi
+  dotnet run --project "tools/$name" -c Release
+}
+
 log "=== MATRIX START sha=$(git rev-parse --short HEAD) count=${#SMOKES[@]} $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-log "DISCOVERY: ${#SMOKES[@]} tools/*Smoke (JumpSmoke=$([[ -d tools/JumpSmoke ]] && echo present || echo absent))"
+log "DISCOVERY: ${#SMOKES[@]} tools/*Smoke (JumpSmoke=$([[ -d tools/JumpSmoke ]] && echo present || echo absent) IdleSmoke=$([[ -d tools/IdleSmoke ]] && echo present || echo absent))"
 log "SMOKES: ${SMOKES[*]}"
 log "FAIL_FAST=$FAIL_FAST RETRY=$RETRY LOGDIR=$LOGDIR"
 
-# Preflight: compile first smoke once so CS0111 dies before the full loop
-first="${SMOKES[0]}"
+# Preflight: first C# smoke (skip run.sh-only dirs like IdleSmoke).
+first=""
+for _n in "${SMOKES[@]}"; do
+  if [[ -f "tools/$_n/$_n.csproj" ]]; then
+    first="$_n"
+    break
+  fi
+done
+if [[ -z "$first" ]]; then
+  log "FAIL: no C# tools/*Smoke csproj for preflight"
+  exit 1
+fi
 pre_log="$LOGDIR/preflight-${first}.build.log"
 log "=== PREFLIGHT dotnet build tools/$first ==="
 set +e
@@ -110,7 +147,7 @@ for name in "${SMOKES[@]}"; do
   log "=== RUN $name attempt 1 $(date -u +%H:%M:%S) ==="
   logf="$LOGDIR/${name}.a1.log"
   set +e
-  dotnet run --project "tools/$name" -c Release >"$logf" 2>&1
+  exec_smoke "$name" >"$logf" 2>&1
   ec=$?
   set -e
 
@@ -129,7 +166,7 @@ for name in "${SMOKES[@]}"; do
     log "=== RETRY $name attempt 2 $(date -u +%H:%M:%S) ==="
     log2="$LOGDIR/${name}.a2.log"
     set +e
-    dotnet run --project "tools/$name" -c Release >"$log2" 2>&1
+    exec_smoke "$name" >"$log2" 2>&1
     ec2=$?
     set -e
     if is_compile_fail "$log2" "$ec2"; then
