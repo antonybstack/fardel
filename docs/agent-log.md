@@ -368,3 +368,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** If `stunnedUntilMicros` is in the future, drop `npcWalkHold` and `setHumanoidGroundWalk(false)`. `?ve=stun-hold` mid-chase; persistMark names `Brigand` + stun hold; drift / Walk = fail. Dummy trainer. Do not touch `humanoid.ts`.
 - **Seen in:** #487
 
+### 2026-09-08 — humanoid,remote,gait — remote Walk hold skates 150ms after they stop
+- **Cause:** Grounded remotes snap XZ each 20 Hz pose. Walk is driven by a hold so it does not restart between snaps. A stopped snapshot still waited out 150 ms, so leftover Walk played at 0 wish. `syncRemoteMeshes` also runs every render frame with the same pose — treating `step==0` as stop plants Idle between snaps and Walk never reads.
+- **Do this:** Arm Walk only on `hypot(step)>0.04`. Leave `step==0` re-syncs alone. Expire hold ~80 ms after the last walking snapshot. `setHumanoidMoving(false)` is Idle-first (#450). `?ve=remote-walk-stop` persistMark `/^Idle OK/` + skinned, not Walk. Hide You; do not fall back to a dead remote.
+- **Seen in:** #478
+

@@ -70,6 +70,10 @@ try
         Environment.GetEnvironmentVariable("FARDEL_SECOND_DIE"),
         "1",
         StringComparison.OrdinalIgnoreCase);
+    var walkStop = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_WALK_STOP"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
 
     if (!sheath && conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
     {
@@ -144,6 +148,79 @@ try
                 conn.Reducers.UnequipStaff();
             }
             await Frame(conn, 400);
+        }
+    }
+    if (walkStop)
+    {
+        // ?ve=remote-walk-stop: walk then stand so the browser sees Walk then
+        // Idle_Weapon (no leftover stride). South-west of origin — outside
+        // AggroRadius 3 vs A/B/C + dummy, not stacked on hop (0, −6) or
+        // sheath (−2.5, 0). Keep staff on.
+        var aliveGuard = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuard)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("walk-stop: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+        {
+            conn.Reducers.EquipStaff();
+            await Frame(conn, 200);
+        }
+        var walkStopPlus = true;
+        while (true)
+        {
+            var ch0 = conn.Db.Character.Identity.Find(identity);
+            if (ch0 is { Hp: <= 0 })
+            {
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch0 is { StaffEquipped: false })
+            {
+                conn.Reducers.EquipStaff();
+                await Frame(conn, 150);
+            }
+            var destX = walkStopPlus ? -1.5f : -6.5f;
+            var destZ = -5f;
+            var walkGuard = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < walkGuard)
+            {
+                if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+                {
+                    await Frame(conn, 200);
+                    continue;
+                }
+                if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+                {
+                    await Frame(conn, 50);
+                    continue;
+                }
+                var dx = destX - cur.X;
+                var dz = destZ - cur.Z;
+                var dist = MathF.Sqrt(dx * dx + dz * dz);
+                if (dist < 0.4f)
+                {
+                    Console.WriteLine($"walk-stop pad ({cur.X:F1}, {cur.Z:F1})");
+                    break;
+                }
+                var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+                conn.Reducers.Move(dx * scale, dz * scale, false);
+                await Frame(conn, 50);
+            }
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } stopPose)
+            {
+                Console.WriteLine($"READY walk-stop ({stopPose.X:F2}, {stopPose.Z:F2}) identity={identity}");
+            }
+            var standUntil = DateTime.UtcNow.AddSeconds(3.2);
+            while (DateTime.UtcNow < standUntil)
+            {
+                conn.Reducers.Move(0f, 0f, jump: false);
+                await Frame(conn, 80);
+            }
+            walkStopPlus = !walkStopPlus;
         }
     }
     if (hop)

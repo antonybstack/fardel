@@ -821,6 +821,7 @@ const RUN_REF_MPS = 5.0;
 /**
  * Grounded Walk named (not Run). NPC chase/leash and remotes pass snap m/s
  * so speedRatio matches XZ. `running=true` is the local W sprint only.
+ * Remotes share this Idle-first stop — do not keep Walk at 0 wish (#450 / #478).
  */
 export function setHumanoidMoving(
   parts: HumanoidParts,
