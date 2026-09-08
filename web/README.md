@@ -113,7 +113,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=spell-vfx` | Spark cyan flash+bolt+impact + Emberbolt staff charge→projectile→impact (`ve/babylon-spell-vfx.png`) |
 | `?ve=path-ground` | Dirt/stone trail vs lush grass (#44) (`ve/babylon-path-ground.png`) |
 | `?ve=sky-horizon` | Distant layered mountain ranges + fog-matched sky (#55 / #273) (`ve/babylon-sky-horizon.png`) |
-| `?ve=place-wow` | Establishing shot vs hordes place ref (#276) (`https://ve.sparkify.dev/298/place-wow.png`) |
+| `?ve=place-wow` | Establishing shot vs hordes place ref (#276 / #342); path recedes to a second silhouette |
 | `?ve=collision` | Local WASD blocked/sliding on a hero bole (#339); HUD `Collision OK · blocked against a hero trunk` |
 | `?ve=fps` | Dense play-cam FPS HUD ≥30 (#341); persistMark `FPS OK · N fps (floor 30) · dense play-cam` |
 | `?ve=vendor-panel` | Vendor buy/sell panel chrome vs #39 fog (#106) — bronze buy / mint sell on silver plate; interim capture `/workspace/ve-capture/pr-vendor-panel.png` (no `ve/*.png` commit) |

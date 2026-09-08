@@ -5606,11 +5606,11 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.48;
         camera.radius = 32;
       } else if (veFollow === 'place-wow') {
-        // Establishing: SW of pad, looking north — huge trees, path, dusk-blue range.
-        camera.setTarget(player.position.add(new Vector3(0, 7, 2)));
-        camera.alpha = Math.PI / 2 + 0.45;
-        camera.beta = Math.PI / 2.38;
-        camera.radius = 34;
+        // Establishing: look north along the bent path toward the second silhouette.
+        camera.setTarget(player.position.add(new Vector3(-4, 5.5, -8)));
+        camera.alpha = Math.PI / 2 + 0.22;
+        camera.beta = Math.PI / 2.42;
+        camera.radius = 32;
       } else if (veFollow === 'collision') {
         // Side-on: player pressed against the north hero bole.
         const hx = COLLISION_VE_HERO.x;
@@ -6221,8 +6221,8 @@ async function main(): Promise<void> {
   // ?ve=path-ground — dirt trail vs lush grass, not a plastic disc (#44 / #274).
   if (ve === 'path-ground') {
     camera.radius = 16;
-    camera.alpha = Math.PI / 3.2;
-    camera.beta = Math.PI / 2.65;
+    camera.alpha = Math.PI / 2 + 0.35;
+    camera.beta = Math.PI / 2.55;
   }
 
   if (net && ve === 'path-ground') {
@@ -6232,10 +6232,10 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        camera.setTarget(player.position.add(new Vector3(7, 0.25, 10)));
+        camera.setTarget(player.position.add(new Vector3(-2, 0.25, -8)));
         camera.radius = 16;
-        camera.alpha = Math.PI / 3.2;
-        camera.beta = Math.PI / 2.65;
+        camera.alpha = Math.PI / 2 + 0.35;
+        camera.beta = Math.PI / 2.55;
         if (mark) {
           mark.textContent =
             'Path-ground OK · dirt trail vs lush grass · Connected';
@@ -6256,7 +6256,7 @@ async function main(): Promise<void> {
       if (latestStatus.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Place-wow OK · huge trees · fog · no capsules · Connected';
+            'Place-wow OK · huge trees · receding path · second silhouette · fog · no capsules · Connected';
         }
         return;
       }
