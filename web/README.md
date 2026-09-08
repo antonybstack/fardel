@@ -70,7 +70,8 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
 | `?ve=remote-sheathed` | Remote without staff: unarmed Idle (not Idle_Weapon + hidden stick) (#448); HUD `Remote sheathed OK · Idle · skinned 1`. `FARDEL_SECOND_SHEATH=1` on `tools/SecondClient`. |
 | `?ve=remote-hop` | Remote airborne Idle_Weapon hold, no Walk, no squash (#449); HUD `Remote hop OK · Idle_Weapon · skinned 1`. `FARDEL_SECOND_HOP=1` on `tools/SecondClient`. |
-| `?ve=walk-stop` | Walk then release WASD: Idle, no leftover Walk stride (#450); HUD `Idle OK · Idle_Weapon · skinned 1 · walk-stop`. || `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
+| `?ve=walk-stop` | Walk then release WASD: Idle, no leftover Walk stride (#450); HUD `Idle OK · Idle_Weapon · skinned 1 · walk-stop`. |
+| `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
 | `?ve=minimap-read` | Plate + blips + N vs #39 cyan fog at play cam (#103 / #61) |
 | `?ve=minimap-pip` | Self pip + north readable while WASDing (#164); pulse/halo/N on top of sliding blips |
 | `?ve=bag` | Prove You+XP self-frame, staff/Spark/Emberbolt loadout strip, B bag panel (`ve/babylon-bag.png`) |
@@ -136,6 +137,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=collision` | Local WASD blocked/sliding on a hero bole (#339); HUD `Collision OK · blocked against a hero trunk` |
 | `?ve=cam-collision` | Orbit into a **hero** bole; camera stays in the clearing (#351); HUD `Cam-collision OK · r=… · heroTree… · clearing` |
 | `?ve=cam-collision-mid` | Orbit into a **midTree_*** bole; camera stays in the open (#465); HUD `Cam-collision OK · r=… · midTree_… · mid`. Hero-only hit = fail |
+| `?ve=cam-collision-dummy` | Min-zoom orbit into **Dummy**; camera stays outside the scarecrow (#466); HUD `Cam-collision OK · Dummy · r=… · min-zoom`. Living Hostile/Brigand use the same cylinders; corpses ignored |
 | `?ve=fps` | Dense play-cam FPS HUD ≥30 (#341); persistMark `FPS OK · N fps (floor 30) · dense play-cam` |
 | `?ve=vendor-panel` | Vendor buy/sell panel chrome vs #39 fog (#106) — bronze buy / mint sell on silver plate; interim capture `/workspace/ve-capture/pr-vendor-panel.png` (no `ve/*.png` commit) |
 | `?ve=vendor-stall` | Shop silhouette posts+counter+awning under #39 fog (#58) (`ve/babylon-vendor-stall.png`) |
