@@ -101,6 +101,17 @@ export const PendingCast = __t.object("PendingCast", {
 });
 export type PendingCast = __Infer<typeof PendingCast>;
 
+export const PendingHostileRespawn = __t.object("PendingHostileRespawn", {
+  scheduleId: __t.u64(),
+  scheduledAt: __t.scheduleAt(),
+  npcId: __t.u64(),
+  kind: __t.i32(),
+  spawnX: __t.f32(),
+  spawnY: __t.f32(),
+  spawnZ: __t.f32(),
+});
+export type PendingHostileRespawn = __Infer<typeof PendingHostileRespawn>;
+
 export const PendingHostileTick = __t.object("PendingHostileTick", {
   scheduleId: __t.u64(),
   scheduledAt: __t.scheduleAt(),

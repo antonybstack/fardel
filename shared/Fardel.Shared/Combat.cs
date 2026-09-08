@@ -182,6 +182,13 @@ public static class Combat
     /// <summary>Delay before ResolvePlayerRespawn after Hp hits 0.</summary>
     public const int RespawnDelayMs = 2500;
 
+    /// <summary>
+    /// After a hostile dies, linger as a corpse then revive at home pad (#421).
+    /// Pickup of that corpse's WorldLoot also revives immediately. Dummy is not
+    /// scheduled and never changes Kind.
+    /// </summary>
+    public const int HostileCorpseLingerMs = 4000;
+
     public static bool TryGetSpell(int spellId, out int castMs, out int damage)
     {
         switch (spellId)

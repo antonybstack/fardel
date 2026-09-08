@@ -93,6 +93,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=hostile-types` | Kind=2 Hostile coral vs Kind=3 Brigand violet vs Dummy parchment vs Vendor mint (#418); HUD `Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418`. |
 | `?ve=kick` | KickNpc Kind=2 interrupt + dummy still kickable (#419); HUD `Kick OK · Hostile #… · interrupt · dummy kickable · #419`. |
 | `?ve=stun` | StunNpc Kind=2 lock + dummy still stunnable (#420); HUD `Stun OK · Hostile #… · lock · dummy stunnable · #420`. Walk to ~4m (StunRange 5, AggroRadius 3). |
+| `?ve=respawn` | Kill pad A from origin (outside aggro), linger revive at home pad (#421); HUD `Respawn OK · pad A · dummy trainer · #421`. Do not walk into AggroRadius. Dummy stays trainer. |
 | `?ve=encounter` | Pull pad A, Tab, take a swing among trees with nameplate on and cam out of trunks (#361); HUD `Encounter OK · fighting · plate · cam clear · #361`. |
 | `?ve=keys` | Open keybind legend overlay (H); HUD `Keys legend OK · …` (`ve/babylon-keys.png`) |
 | `?ve=keys-read` | Keybind legend chrome readability under #39 cyan fog (#115); HUD `Keys-read OK · …` |

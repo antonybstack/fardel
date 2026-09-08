@@ -287,6 +287,20 @@ public static partial class Module
         public Identity Player;
     }
 
+    /// <summary>#421 — corpse linger then revive Kind=2/3 at home pad. Dummy never queued.</summary>
+    [SpacetimeDB.Table(Accessor = "PendingHostileRespawn", Scheduled = nameof(ResolveHostileRespawn), ScheduledAt = nameof(ScheduledAt))]
+    public partial struct PendingHostileRespawn
+    {
+        [SpacetimeDB.PrimaryKey, SpacetimeDB.AutoInc]
+        public ulong ScheduleId;
+        public ScheduleAt ScheduledAt;
+        public ulong NpcId;
+        public int Kind;
+        public float SpawnX;
+        public float SpawnY;
+        public float SpawnZ;
+    }
+
     /// <summary>#355 — repeating proximity aggro / leash tick. Not public (clients watch Npc XZ).</summary>
     [SpacetimeDB.Table(Accessor = "PendingHostileTick", Scheduled = nameof(TickHostiles), ScheduledAt = nameof(ScheduledAt))]
     public partial struct PendingHostileTick
@@ -1688,6 +1702,10 @@ public static partial class Module
             // Dummy + hostiles both drop ember_shard WorldLoot. Pickup is F. (#357)
             SpawnEmberShardAt(ctx, row.X + Loot.DeathDropOffsetX, row.Y + Loot.SeedY, row.Z + Loot.DeathDropOffsetZ);
             SharePartyLootDrop(ctx, caster, row.X, row.Y, row.Z);
+            if (Combat.IsHostileKind(row.Kind))
+            {
+                ScheduleHostileRespawn(ctx, row);
+            }
         }
 
         // Dummy thorns only — hostiles hit back in #356, not here.
@@ -1788,6 +1806,115 @@ public static partial class Module
         }
 
         Log.Info($"Player {pending.Player} respawned at yard origin");
+    }
+
+    static void HostileHomePad(Npc row, out float x, out float y, out float z)
+    {
+        var hasHome = MathF.Abs(row.SpawnX) > 0.01f || MathF.Abs(row.SpawnZ) > 0.01f;
+        x = hasHome ? row.SpawnX : row.X;
+        y = hasHome ? row.SpawnY : row.Y;
+        z = hasHome ? row.SpawnZ : row.Z;
+    }
+
+    static void ScheduleHostileRespawn(ReducerContext ctx, Npc row)
+    {
+        if (!Combat.IsHostileKind(row.Kind))
+        {
+            return;
+        }
+
+        HostileHomePad(row, out var sx, out var sy, out var sz);
+        ctx.Db.PendingHostileRespawn.Insert(new PendingHostileRespawn
+        {
+            ScheduledAt = new ScheduleAt.Time(ctx.Timestamp + Ms(Combat.HostileCorpseLingerMs)),
+            NpcId = row.NpcId,
+            Kind = row.Kind,
+            SpawnX = sx,
+            SpawnY = sy,
+            SpawnZ = sz,
+        });
+        Log.Info($"Npc {row.NpcId} kind={row.Kind} corpse linger {Combat.HostileCorpseLingerMs}ms");
+    }
+
+    /// <summary>Revive Kind=2/3 at home pad. No-op if already living or Dummy.</summary>
+    [SpacetimeDB.Reducer]
+    public static void ResolveHostileRespawn(ReducerContext ctx, PendingHostileRespawn pending)
+    {
+        ReviveHostile(ctx, pending.NpcId, pending.Kind, pending.SpawnX, pending.SpawnY, pending.SpawnZ);
+    }
+
+    static void MaybeRespawnHostileNearLoot(ReducerContext ctx, float x, float z)
+    {
+        const float radius = 3f;
+        var radiusSq = radius * radius;
+        Npc? best = null;
+        var bestDistSq = float.MaxValue;
+        foreach (var n in ctx.Db.Npc.Iter())
+        {
+            if (!Combat.IsHostileKind(n.Kind) || n.Hp > 0)
+            {
+                continue;
+            }
+
+            var dx = n.X - x;
+            var dz = n.Z - z;
+            var distSq = dx * dx + dz * dz;
+            if (distSq > radiusSq || distSq >= bestDistSq)
+            {
+                continue;
+            }
+
+            bestDistSq = distSq;
+            best = n;
+        }
+
+        if (best is not { } dead)
+        {
+            return;
+        }
+
+        HostileHomePad(dead, out var sx, out var sy, out var sz);
+        ReviveHostile(ctx, dead.NpcId, dead.Kind, sx, sy, sz);
+    }
+
+    static void ReviveHostile(ReducerContext ctx, ulong npcId, int kind, float spawnX, float spawnY, float spawnZ)
+    {
+        if (!Combat.IsHostileKind(kind))
+        {
+            return;
+        }
+
+        if (ctx.Db.Npc.NpcId.Find(npcId) is { } row)
+        {
+            if (row.Kind == NpcKindDummy || !Combat.IsHostileKind(row.Kind) || row.Hp > 0)
+            {
+                return;
+            }
+
+            row.Hp = row.MaxHp > 0 ? row.MaxHp : Combat.HostileMaxHp;
+            if (row.MaxHp <= 0)
+            {
+                row.MaxHp = Combat.HostileMaxHp;
+            }
+            row.X = spawnX;
+            row.Y = spawnY;
+            row.Z = spawnZ;
+            row.SpawnX = spawnX;
+            row.SpawnY = spawnY;
+            row.SpawnZ = spawnZ;
+            row.Aggroed = false;
+            row.NextSwingAtMicros = 0;
+            row.StunnedUntilMicros = 0;
+            ctx.Db.Npc.NpcId.Update(row);
+            Log.Info($"Npc {row.NpcId} kind={row.Kind} respawned at pad ({spawnX:0.##},{spawnZ:0.##})");
+            return;
+        }
+
+        if (!HasHostileForPad(ctx, spawnX, spawnZ))
+        {
+            InsertHostile(ctx, spawnX, spawnY, spawnZ, kind);
+            Log.Info($"Npc kind={kind} inserted at pad ({spawnX:0.##},{spawnZ:0.##}) after missing corpse");
+        }
     }
 
 
@@ -2376,6 +2503,7 @@ public static partial class Module
 
         ctx.Db.WorldLoot.LootId.Delete(item.LootId);
         Log.Info($"Pickup {item.ItemId} id={item.LootId} by {ctx.Sender} xp={character.Xp}");
+        MaybeRespawnHostileNearLoot(ctx, item.X, item.Z);
     }
 
     static void ClearWorldLoot(ReducerContext ctx)
