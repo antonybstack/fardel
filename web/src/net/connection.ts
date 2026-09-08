@@ -1101,11 +1101,6 @@ export async function connectToSpacetime(
                     /* ignore */
                   }
                 }
-                try {
-                  void conn.reducers.seedCrowdProxies({});
-                } catch {
-                  /* ignore */
-                }
                 if (!latestPose) {
                   emitStatus(identityHex);
                 }

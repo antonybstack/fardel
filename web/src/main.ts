@@ -952,6 +952,24 @@ function setDebugHudVisible(open: boolean): void {
   if (fps) fps.classList.toggle('hidden', !open);
 }
 
+/**
+ * CrowdProxy amber capsules are AOI/perf debug — hidden in default play (#271).
+ * Visible only with F3/?debug=1 or AOI/minimap/fps VE hooks.
+ */
+function showCrowdDebugCapsules(ve: string | null, debugHud: boolean): boolean {
+  if (debugHud) return true;
+  switch (ve) {
+    case 'aoi':
+    case 'minimap':
+    case 'minimap-read':
+    case 'minimap-pip':
+    case 'fps':
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** Compact party member frames: hex + leader tag + distance / pose hint. */
 function setVendorPanelOpen(open: boolean): void {
   const panel = document.getElementById('vendorPanel');
@@ -1998,7 +2016,7 @@ async function createScene(engine: Engine): Promise<{
   // North-star yard: Quaternius Standard forest + procedural mountains (#41).
   await buildForestClearing(scene);
 
-  // Local player: Quaternius CC0 wizard (crowd proxies stay capsules).
+  // Local player: Quaternius CC0 wizard (crowd proxies are debug-only, #271).
   await preloadPlayerHumanoid(scene);
   const humanoid = createPlayerHumanoid(scene);
   const player = humanoid.root;
@@ -2022,7 +2040,8 @@ async function createScene(engine: Engine): Promise<{
   };
   player.position = new Vector3(0, 0, 0);
 
-  // CrowdProxy source mesh (hidden) — instances are amber, distinct from local blue player.
+  // CrowdProxy source mesh (hidden). Instances are amber AOI debug — default play
+  // does not enable them (#271). Visible only via F3/?debug=1 or aoi/minimap/fps VE.
   const proxySource = MeshBuilder.CreateCapsule(
     'crowdProxySource',
     { height: 1.5, radius: 0.28 },
@@ -2966,7 +2985,8 @@ async function main(): Promise<void> {
   let jumpApexToasted = false;
   let jumpPeakY = 0;
   const bootParams = new URLSearchParams(window.location.search);
-  const firstSessionVe = (bootParams.get('ve') || '') === 'first-session';
+  const ve = bootParams.get('ve') || '';
+  const firstSessionVe = ve === 'first-session';
   let firstSessionCueShown = false;
   let firstSessionLegendFlash = false;
   let firstSessionFlashTimer: number | null = null;
@@ -3333,6 +3353,14 @@ async function main(): Promise<void> {
   };
 
   const syncProxyMeshes = (proxies: CrowdProxyView[]) => {
+    if (!showCrowdDebugCapsules(ve, debugHudVisible)) {
+      for (const [key, inst] of proxyInstances) {
+        inst.dispose();
+        proxyInstances.delete(key);
+        proxyInterps.delete(key);
+      }
+      return;
+    }
     const seen = new Set<string>();
     for (const p of proxies) {
       // Neighborhood SQL should exclude far proxies; skip any that leak.
@@ -5075,7 +5103,9 @@ async function main(): Promise<void> {
       },
       remotes: net?.getRemotes() ?? [],
       npcs: net?.getNpcs() ?? [],
-      proxies: net?.getProxies() ?? [],
+      proxies: showCrowdDebugCapsules(ve, debugHudVisible)
+        ? (net?.getProxies() ?? [])
+        : [],
     });
 
     // FPS / AOI overlay ~4Hz (Babylon engine.getFps).
@@ -5482,9 +5512,7 @@ async function main(): Promise<void> {
     },
   );
 
-  // Optional VE / autotest hooks.
-  const params = new URLSearchParams(window.location.search);
-  const ve = params.get('ve');
+  // Optional VE / autotest hooks. `ve` is parsed from bootParams at main() start.
 
   // ?ve=persist — kill dummy for XP, then soft-reload with token so HUD proves restore.
   if (net && ve === 'persist') {
@@ -5610,15 +5638,12 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        net.seedCrowdProxies();
-        syncProxyMeshes(net.getProxies());
         if (mark) {
-          const aoi = net.getAoi();
           const ok =
             ve === 'quaternius-env'
               ? 'Quaternius env OK · Standard CC0 heroes+mid+understory · mountains procedural'
               : 'Forest OK · density+LOD · Connected';
-          mark.textContent = aoi ? `${ok} · AOI near ${aoi.nearCount}` : ok;
+          mark.textContent = ok;
         }
         return;
       }
@@ -5641,8 +5666,6 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        net.seedCrowdProxies();
-        syncProxyMeshes(net.getProxies());
         if (mark) {
           mark.textContent =
             'Atmosphere OK · fog+warm sun+ground · Connected · yard mood';
@@ -5730,7 +5753,7 @@ async function main(): Promise<void> {
       if (st.state === 'connected') {
         if (mark) {
           mark.textContent =
-            'Humanoid OK · body+head+limbs+staff · Connected · crowd capsules OK';
+            'Humanoid OK · body+head+limbs+staff · Connected';
         }
         return;
       }
