@@ -108,14 +108,50 @@ try
         return;
     }
 
-    // Wait for landing
-    if (!await WaitTick(landed.Task, timeoutMs, conn, "landing"))
+    // Air-phase: server gravity / ground-clamp only run inside Move — pump until land.
+    // (Merged #96 WaitTick only FrameTick'd; never advanced physics.)
+    var airTick = 0;
+    using (var landCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!landed.Task.IsCompleted && !landCts.IsCancellationRequested)
+        {
+            conn.Reducers.Move(0f, 0f, jump: false);
+            conn.FrameTick();
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } air)
+            {
+                Console.WriteLine($"air tick {airTick} Y={air.Y} VelY={air.VelY}");
+            }
+            airTick++;
+            try
+            {
+                await Task.Delay(50, landCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+
+    if (!landed.Task.IsCompleted)
     {
         Fail("landing timeout — player did not return to ground");
         return;
     }
 
     var landY = await landed.Task;
+    if (MathF.Abs(landY - Movement.GroundY) > 0.05f)
+    {
+        Fail($"landed Y={landY} not at GroundY={Movement.GroundY}");
+        return;
+    }
+    if (conn.Db.PlayerPose.Identity.Find(identity) is { } landPose
+        && MathF.Abs(landPose.VelY) > 0.1f)
+    {
+        Fail($"landed VelY={landPose.VelY} not ≈0");
+        return;
+    }
     Console.WriteLine($"landed: Y={landY}");
 
     // Second jump while airborne should not re-boost (anti multi-jump)
@@ -130,7 +166,7 @@ try
 
     // Try immediate second jump
     conn.Reducers.Move(0f, 0f, jump: true);
-    await Task.Delay(200); // Brief wait for update
+    await PumpFrames(conn, 200);
 
     if (conn.Db.PlayerPose.Identity.Find(identity) is { } poseAfterSecond)
     {
@@ -149,7 +185,7 @@ try
     // Small XZ move with jump=false still works
     var beforeX = poseBeforeSecond.X;
     conn.Reducers.Move(0.1f, 0f, jump: false);
-    await Task.Delay(200);
+    await PumpFrames(conn, 200);
 
     if (conn.Db.PlayerPose.Identity.Find(identity) is { } finalPose)
     {
@@ -177,6 +213,25 @@ static void Fail(string msg)
 {
     Console.Error.WriteLine("FAIL: " + msg);
     Environment.ExitCode = 1;
+}
+
+
+static async Task PumpFrames(DbConnection conn, int ms)
+{
+    using var cts = new CancellationTokenSource(ms + 100);
+    var end = DateTime.UtcNow.AddMilliseconds(ms);
+    try
+    {
+        while (DateTime.UtcNow < end && !cts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            await Task.Delay(16, cts.Token).ConfigureAwait(false);
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // ignore
+    }
 }
 
 static async Task<bool> WaitTick(Task task, int timeoutMs, DbConnection conn, string label)
