@@ -781,18 +781,7 @@ public static partial class Module
             throw new Exception("Dead");
         }
 
-        if (ctx.Db.Npc.NpcId.Find(npcId) is not { } npc)
-        {
-            throw new Exception("Target missing");
-        }
-        if (npc.Hp <= 0)
-        {
-            throw new Exception("Target dead");
-        }
-        if (npc.Kind != NpcKindDummy && !Combat.IsHostileKind(npc.Kind))
-        {
-            throw new Exception("Invalid target");
-        }
+        var npc = RequireKickStunNpc(ctx, npcId);
 
         var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
@@ -984,18 +973,7 @@ public static partial class Module
             throw new Exception("Dead");
         }
 
-        if (ctx.Db.Npc.NpcId.Find(npcId) is not { } npc)
-        {
-            throw new Exception("Target missing");
-        }
-        if (npc.Hp <= 0)
-        {
-            throw new Exception("Target dead");
-        }
-        if (npc.Kind != NpcKindDummy && !Combat.IsHostileKind(npc.Kind))
-        {
-            throw new Exception("Invalid target");
-        }
+        var npc = RequireKickStunNpc(ctx, npcId);
 
         var selfPose = ctx.Db.PlayerPose.Identity.Find(ctx.Sender)
             ?? throw new Exception("PlayerPose missing");
@@ -3001,22 +2979,66 @@ public static partial class Module
         return best;
     }
 
+    /// <summary>
+    /// Dummy / hostile KickNpc+StunNpc target. Hp=0 is Target dead (Kind=3 corpse).
+    /// YardVendor is not an Npc — Invalid target even if AutoInc would collide.
+    /// </summary>
+    static Npc RequireKickStunNpc(ReducerContext ctx, ulong npcId)
+    {
+        if (ctx.Db.Npc.NpcId.Find(npcId) is { } npc)
+        {
+            if (npc.Hp <= 0)
+            {
+                throw new Exception("Target dead");
+            }
+            if (npc.Kind != NpcKindDummy && !Combat.IsHostileKind(npc.Kind))
+            {
+                throw new Exception("Invalid target");
+            }
+            return npc;
+        }
+        if (ctx.Db.YardVendor.VendorId.Find(npcId) is not null)
+        {
+            throw new Exception("Invalid target");
+        }
+        throw new Exception("Target missing");
+    }
+
     /// <summary>Idempotent YardVendor seed (also called on ClientConnected).</summary>
     static void EnsureVendor(ReducerContext ctx)
     {
-        foreach (var _ in ctx.Db.YardVendor.Iter())
+        var seed = Fardel.Shared.Vendor.SeedId;
+        ulong? stale = null;
+        var hasSeed = false;
+        foreach (var v in ctx.Db.YardVendor.Iter())
+        {
+            if (v.VendorId == seed)
+            {
+                hasSeed = true;
+            }
+            else
+            {
+                stale = v.VendorId;
+            }
+        }
+        if (stale is ulong sid)
+        {
+            ctx.Db.YardVendor.VendorId.Delete(sid);
+        }
+        if (hasSeed)
         {
             return;
         }
 
         ctx.Db.YardVendor.Insert(new YardVendor
         {
+            VendorId = seed,
             X = Fardel.Shared.Vendor.SpawnX,
             Y = Fardel.Shared.Vendor.SpawnY,
             Z = Fardel.Shared.Vendor.SpawnZ,
             Label = Fardel.Shared.Vendor.DefaultLabel,
         });
-        Log.Info($"Seeded YardVendor at ({Fardel.Shared.Vendor.SpawnX},{Fardel.Shared.Vendor.SpawnZ})");
+        Log.Info($"Seeded YardVendor id={seed} at ({Fardel.Shared.Vendor.SpawnX},{Fardel.Shared.Vendor.SpawnZ})");
     }
 
     static ulong PartyIdFrom(Identity leader, Timestamp ts)
