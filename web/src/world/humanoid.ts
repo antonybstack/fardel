@@ -47,6 +47,7 @@ export type HumanoidOptions = {
 type HumanoidAnim = {
   idle: AnimationGroup | null;
   walk: AnimationGroup | null;
+  run: AnimationGroup | null;
   cast: AnimationGroup | null;
 };
 
@@ -425,8 +426,9 @@ export function createPlayerHumanoid(
   const idle =
     findAnim(animGroups, 'Idle_Weapon', 'Idle') ??
     (animGroups.length > 0 ? animGroups[0]! : null);
-  // E2.3: locomotion clip. Prefer Walk; weapon-run is the GLB fallback (no Walk_Weapon).
-  const walk = findAnim(animGroups, 'Walk', 'Run_Weapon', 'Run');
+  // E8.2: Run_Weapon for fast/forward; Walk for slow/strafe. Do not alias Run as Walk.
+  const run = findAnim(animGroups, 'Run_Weapon', 'Run');
+  const walk = findAnim(animGroups, 'Walk') ?? run;
   const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Staff_Attack');
   for (const g of animGroups) {
     g.stop();
@@ -434,7 +436,7 @@ export function createPlayerHumanoid(
   if (idle) {
     idle.start(true, 1.0, idle.from, idle.to, false);
   }
-  animByRoot.set(root, { idle, walk, cast });
+  animByRoot.set(root, { idle, walk, run, cast });
 
   root.material = robeMat;
   root.position = new Vector3(0, 0, 0);
@@ -464,30 +466,51 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
   }
   const playing = a?.cast?.isPlaying
     ? a.cast.name
-    : a?.walk?.isPlaying
-      ? a.walk.name
-      : a?.idle?.isPlaying
-        ? a.idle.name
-        : null;
+    : a?.run?.isPlaying
+      ? a.run.name
+      : a?.walk?.isPlaying
+        ? a.walk.name
+        : a?.idle?.isPlaying
+          ? a.idle.name
+          : null;
   return { skinned, playing, idle: a?.idle?.name ?? null };
 }
 
-/** Switch Idle ↔ Walk for yard locomotion (no-op if clips missing). */
-export function setHumanoidMoving(parts: HumanoidParts, moving: boolean): void {
+function stopIfPlaying(
+  g: AnimationGroup | null,
+  except?: AnimationGroup | null,
+): void {
+  if (g && g !== except && g.isPlaying) g.stop();
+}
+
+function startLoop(g: AnimationGroup | null): void {
+  if (g && !g.isPlaying) g.start(true, 1.0, g.from, g.to, false);
+}
+
+/** Switch Idle ↔ Walk/Run. `running` is fast/forward gait (no-op if clips missing). */
+export function setHumanoidMoving(
+  parts: HumanoidParts,
+  moving: boolean,
+  running = false,
+): void {
   const a = animByRoot.get(parts.root);
   if (!a) return;
   if (a.cast?.isPlaying) return;
-  if (moving && a.walk) {
-    if (a.idle && a.idle.isPlaying) a.idle.stop();
-    if (!a.walk.isPlaying) {
-      a.walk.start(true, 1.0, a.walk.from, a.walk.to, false);
-    }
-  } else if (a.idle) {
-    if (a.walk && a.walk.isPlaying) a.walk.stop();
-    if (!a.idle.isPlaying) {
-      a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
-    }
+  if (!moving) {
+    stopIfPlaying(a.walk);
+    stopIfPlaying(a.run);
+    startLoop(a.idle);
+    return;
   }
+  const loc = running && a.run ? a.run : (a.walk ?? a.run);
+  if (!loc) {
+    startLoop(a.idle);
+    return;
+  }
+  stopIfPlaying(a.idle, loc);
+  stopIfPlaying(a.walk, loc);
+  stopIfPlaying(a.run, loc);
+  startLoop(loc);
 }
 
 /** Play a one-shot cast clip (Spell1) then return to idle/walk. */
@@ -496,6 +519,7 @@ export function playHumanoidCast(parts: HumanoidParts): void {
   if (!a?.cast) return;
   if (a.idle?.isPlaying) a.idle.stop();
   if (a.walk?.isPlaying) a.walk.stop();
+  if (a.run?.isPlaying) a.run.stop();
   a.cast.onAnimationGroupEndObservable.addOnce(() => {
     setHumanoidMoving(parts, false);
   });

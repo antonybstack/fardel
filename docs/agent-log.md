@@ -97,3 +97,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Release/Pages VE treated persistMark `Quaternius char OK` / empty + PNG HTTP 200 as Done. Bind-pose T still GATE PASS 28/28 because the matrix had no client Idle check.
 - **Do this:** Screenshot `?ve=idle` on a *seat* Vite (never `:3000` / db `fardel`). Quote persistMark: must match `/^Idle OK/` and contain `Idle_Weapon` + `skinned` ≥ 1. `T-POSE` / empty / `Quaternius char OK` = fail. IdleSmoke (`tools/IdleSmoke/run.sh` → `tools/qa/idle-smoke.mjs`) is the matrix gate.
 - **Seen in:** #321 / Pages pin `3b7968d3`
+
+### 2026-09-08 — humanoid,ve — forward W is Run so ?ve=walk would persistMark Run
+- **Cause:** E8.2 maps camera-forward W to `Run_Weapon`. `?ve=walk` holds W, and the render-loop gait would override the Walk clip.
+- **Do this:** Keep `ve === 'walk'` on Walk. `?ve=run` holds W and requests running. Do not `findAnim(Walk, Run_Weapon)` — Run must not alias as Walk.
+- **Seen in:** #327
