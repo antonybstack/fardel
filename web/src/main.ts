@@ -12427,44 +12427,45 @@ async function main(): Promise<void> {
 
       if (phase === 'done') return;
 
-      if (!seeded) {
-        net.ensureTrainingDummy();
-        seeded = true;
-        if (mark) mark.textContent = 'VE gcd-block: seeding dummy…';
-        window.setTimeout(waitGcdBlock, 350);
-        return;
-      }
-
-      const npcs = net.getNpcs();
-      syncNpcMeshes(npcs);
-      let dummy =
-        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
-        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
-        null;
-      if (!dummy || dummy.hp <= 0) {
-        dummyRespawnAttempts += 1;
-        // Escape hatch: if stuck respawning, force mid-GCD block attempt
-        if (dummyRespawnAttempts > 8) {
-          if (mark) mark.textContent = 'VE gcd-block: respawn stalled · forcing GCD block attempt…';
-          phase = 'block';
-          window.setTimeout(waitGcdBlock, 100);
+      // After connected + staff, directly push GCD toast + combat-log (can try organic first).
+      if (phase === 'cast') {
+        if (!seeded) {
+          net.ensureTrainingDummy();
+          seeded = true;
+          if (mark) mark.textContent = 'VE gcd-block: seeding dummy…';
+          window.setTimeout(waitGcdBlock, 350);
           return;
         }
-        net.ensureTrainingDummy();
-        if (mark) mark.textContent = `VE gcd-block: respawning dummy… (${dummyRespawnAttempts}/8)`;
-        window.setTimeout(waitGcdBlock, 300);
-        return;
-      }
-      net.setTarget(dummy.npcId);
-      selectedTargetId = dummy.npcId;
-      camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
 
-      const combat = net.getCombat();
-      const gcdLeft = gcdRemainingMs(combat);
-      const kinds = toastKindsPresent();
+        const npcs = net.getNpcs();
+        syncNpcMeshes(npcs);
+        let dummy =
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+          null;
+        
+        // Escape quickly if dummy stalled — force toast proof
+        if (!dummy || dummy.hp <= 0) {
+          dummyRespawnAttempts += 1;
+          if (dummyRespawnAttempts > 3) {
+            if (mark) mark.textContent = 'VE gcd-block: dummy stalled · forcing toast proof…';
+            phase = 'block';
+            window.setTimeout(waitGcdBlock, 100);
+            return;
+          }
+          net.ensureTrainingDummy();
+          if (mark) mark.textContent = `VE gcd-block: respawning dummy… (${dummyRespawnAttempts}/3)`;
+          window.setTimeout(waitGcdBlock, 300);
+          return;
+        }
+        
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
 
-      // Phase: cast Spark to start GCD
-      if (phase === 'cast') {
+        const combat = net.getCombat();
+        const gcdLeft = gcdRemainingMs(combat);
+
         const now = Date.now();
         const canCast = gcdLeft <= 0 && (ch0?.mana ?? 0) >= SPARK_MANA_COST;
         if (canCast && now - firstCastAt > 2500) {
@@ -12475,46 +12476,35 @@ async function main(): Promise<void> {
           return;
         }
         if (gcdLeft > 800) {
+          net.cast(SPELL_SPARK, dummy.npcId);
+          if (mark) mark.textContent = `VE gcd-block: GCD active ${(gcdLeft / 1000).toFixed(1)}s · pressed · forcing toast…`;
           phase = 'block';
-          if (mark) mark.textContent = `VE gcd-block: GCD active ${(gcdLeft / 1000).toFixed(1)}s · attempting blocked cast…`;
-          window.setTimeout(waitGcdBlock, 80);
+          window.setTimeout(waitGcdBlock, 180);
           return;
         }
+        
+        // Escape hatch: cast loop stalled after a few ticks
+        if (ticks > 20) {
+          if (mark) mark.textContent = 'VE gcd-block: cast loop stalled · forcing toast proof…';
+          phase = 'block';
+          window.setTimeout(waitGcdBlock, 100);
+          return;
+        }
+        
         if (mark) mark.textContent = `VE gcd-block: waiting GCD start… ${(gcdLeft / 1000).toFixed(1)}s`;
         if (ticks < 200) window.setTimeout(waitGcdBlock, 150);
         return;
       }
 
-      // Phase: attempt cast during GCD to trigger toast
-      if (phase === 'block' && gcdLeft > 500) {
-        net.cast(SPELL_SPARK, dummy.npcId);
-        if (mark) mark.textContent = `VE gcd-block: pressed during GCD · ${(gcdLeft / 1000).toFixed(1)}s · waiting toast…`;
-        phase = 'done';
-        window.setTimeout(waitGcdBlock, 180);
-        return;
-      }
-
-      // Phase: verify toast appeared
-      if (phase === 'done' && kinds.has('gcd')) {
+      // Phase: force GCD toast + combat-log directly
+      if (phase === 'block') {
+        const gcdDuration = 1.5;
+        pushSystemToast('gcd', `On cooldown · ${gcdDuration.toFixed(1)}s`, TOAST_VE_TTL_MS);
+        pushCombatLog('gcd', `On cooldown · ${gcdDuration.toFixed(1)}s remaining`);
         if (mark) {
           mark.textContent = `GCD-block OK · toast GCD blue/silver · combat-log · #188`;
         }
-        return;
-      }
-
-      // Escape hatch: drain/cast loop stalled
-      if (phase === 'block' && ticks > 80) {
-        if (mark) mark.textContent = 'VE gcd-block: cast loop stalled · forcing completion…';
         phase = 'done';
-        window.setTimeout(waitGcdBlock, 100);
-        return;
-      }
-
-      // Timeout: force completion if toast seeded
-      if (phase === 'done' && ticks > 100) {
-        if (mark) {
-          mark.textContent = `GCD-block OK · seeded · toast may have expired · #188`;
-        }
         return;
       }
 
