@@ -93,6 +93,7 @@ export type NpcView = {
   spawnY: number;
   spawnZ: number;
   aggroed: boolean;
+  nextSwingAtMicros: bigint;
 };
 
 export type CrowdProxyView = {
@@ -256,6 +257,8 @@ export type GameNet = {
   /** Opt-in dummy thorns poke — delays windup CastEndsAt if casting. */
   dummyStrike: () => Promise<void>;
   kick: (target: Identity) => Promise<void>;
+  /** Kick vs Dummy / hostile NPC (#419). PvP Kick stays Identity. */
+  kickNpc: (npcId: bigint) => Promise<void>;
   kickNearestCastingRemote: () => Promise<string | null>;
   stun: (target: Identity) => Promise<void>;
   stunNearestRemote: () => Promise<string | null>;
@@ -478,6 +481,7 @@ type NpcRow = {
   spawnY?: number;
   spawnZ?: number;
   aggroed?: boolean;
+  nextSwingAtMicros?: bigint | number;
 };
 
 type CharacterRow = {
@@ -581,6 +585,7 @@ function npcView(row: NpcRow): NpcView {
     spawnY: row.spawnY ?? 0,
     spawnZ: row.spawnZ ?? 0,
     aggroed: !!row.aggroed,
+    nextSwingAtMicros: asBigInt(row.nextSwingAtMicros ?? 0),
   };
 }
 
@@ -1621,6 +1626,11 @@ export async function connectToSpacetime(
               cancelCast: () => conn.reducers.cancelCast({}),
               dummyStrike: () => conn.reducers.dummyStrike({}),
               kick: (target: Identity) => conn.reducers.kick({ target }),
+              kickNpc: (npcId: bigint) => {
+                castFeedback = `KickNpc → ${npcId}`;
+                emitStatus(identityHex);
+                return conn.reducers.kickNpc({ npcId });
+              },
               kickNearestCastingRemote: async () => {
                 const local = latestPose;
                 if (!local) return null;

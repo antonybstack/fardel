@@ -151,6 +151,16 @@ public static class Combat
     public const float KickRangeMeters = 8f;
     /// <summary>Mana spent by the kicker (instant; not refunded).</summary>
     public const int KickManaCost = 10;
+    /// <summary>
+    /// KickNpc delays the next hostile swing by this many ms (#419). Same window
+    /// as PvP Kick silence so the interrupt reads. Dummy does not swing.
+    /// </summary>
+    public const int KickNpcInterruptMs = CastSilenceMs;
+    /// <summary>
+    /// Shove a living hostile away from the kicker. Dummy stays planted (trainer).
+    /// Sized so origin KickNpc on pad A (~7.6m) does not enter AggroRadius.
+    /// </summary>
+    public const float KickNpcShoveMeters = 1.2f;
 
     /// <summary>
     /// Stun / Bash — short hard-CC. Breaks target windup (no mana refund) and

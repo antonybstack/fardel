@@ -237,3 +237,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** `CountHostiles` / `LivingHostiles` / `FindHostileNear` require `Kind == NpcKindHostile`. Flipping pad B to Kind=3 makes HostileSpawnSmoke `living.Count < 2`.
 - **Do this:** Keep pads A/B Kind=2. Second type is Kind=3 on pad C (`HostileSpawnC*`). `Combat.IsHostileKind` for aggro/leash/swing. Find Dummy by `Kind == 1`. Keep `HostileAggroRadius` under 3.6. `#423` asserts both types.
 - **Seen in:** #418
+
+### 2026-09-08 — npc,kick — Kick(Identity) is PvP; Dummy is not a Kick target
+- **Cause:** Kick looks up Character + PlayerCombat on Identity. NPCs have ulong NpcId. Hostiles do not cast. Origin is ~7.6m from pads A/B/C — inside KickRange 8, outside AggroRadius 3.
+- **Do this:** KickNpc(ulong) for living Dummy + IsHostileKind. Dummy stays planted (no shove, no thorns). Hostiles: delay NextSwingAtMicros + shove away. Keep Kick(Identity) for KickSmoke PvP. FindHostileNear pins Kind==2.
+- **Seen in:** #419
