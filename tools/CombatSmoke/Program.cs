@@ -36,7 +36,20 @@ try
 
     var dummy = FindDummy(conn) ?? throw new Exception("no dummy");
     var chReady = conn.Db.Character.Identity.Find(identity)!;
-    Console.WriteLine($"dummy id={dummy.NpcId} hp={dummy.Hp}/{dummy.MaxHp} mana={chReady.Mana}/{chReady.MaxMana} staff={chReady.StaffEquipped}");
+    Console.WriteLine($"dummy id={dummy.NpcId} hp={dummy.Hp}/{dummy.MaxHp} caster={chReady.Hp}/{chReady.MaxHp} mana={chReady.Mana}/{chReady.MaxMana} staff={chReady.StaffEquipped}");
+
+    // Prefer HP > DummyThornsDamage so the caster drop is exact, not clamped to 0.
+    if (chReady.Hp <= 0)
+    {
+        await PumpUntil(() => conn.Db.Character.Identity.Find(identity) is { Hp: > 0 },
+            timeoutMs, conn, "caster alive");
+    }
+    if (conn.Db.Character.Identity.Find(identity) is { Hp: var seedHp } && seedHp <= Combat.DummyThornsDamage)
+    {
+        await DelayPump(conn, Rest.CombatLockMs + Rest.CooldownMs + 150);
+        try { conn.Reducers.Rest(); } catch { /* ignore */ }
+        await DelayPump(conn, 200);
+    }
 
     conn.Reducers.SetTarget(dummy.NpcId);
     await PumpUntil(() =>
@@ -45,15 +58,34 @@ try
 
     var startXp = conn.Db.Character.Identity.Find(identity) is { } c0 ? c0.Xp : 0;
 
+    var thornsChecked = false;
     while (FindDummy(conn) is { Hp: > 0 })
     {
         var before = FindDummy(conn)!.Hp;
+        var casterHpBefore = conn.Db.Character.Identity.Find(identity)!.Hp;
         conn.Reducers.Cast(Combat.SpellSpark);
         await PumpUntil(() =>
         {
             var n = FindDummy(conn);
             return n is null || n.Hp < before || n.Hp == 0;
         }, timeoutMs, conn, "spark tick");
+        if (!thornsChecked)
+        {
+            var expectedCasterHp = Math.Max(0, casterHpBefore - Combat.DummyThornsDamage);
+            await PumpUntil(() =>
+            {
+                var ch = conn.Db.Character.Identity.Find(identity);
+                return ch is not null && ch.Hp != casterHpBefore;
+            }, timeoutMs, conn, "caster thorns");
+            var casterHpAfter = conn.Db.Character.Identity.Find(identity)!.Hp;
+            if (casterHpAfter != expectedCasterHp)
+            {
+                Fail($"DummyThornsDamage expected {Combat.DummyThornsDamage}, caster hp {casterHpBefore}->{casterHpAfter}");
+                return;
+            }
+            Console.WriteLine($"thorns OK caster hp {casterHpBefore}->{casterHpAfter}");
+            thornsChecked = true;
+        }
         await DelayPump(conn, Combat.GcdMs + 50);
     }
 
