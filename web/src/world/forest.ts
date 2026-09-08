@@ -967,54 +967,47 @@ function placeProceduralForest(scene: Scene): void {
 
 
 /**
- * Procedural clearing path (#44): warm grey-brown dirt/stone + soft moss/dirt
- * edge + trail strip + cheap stone flecks. Readable vs lush grass under cyan
- * fog without fighting #39 lighting lock. FPS-friendly (few discs/boxes).
+ * Clearing path (#274): dirt vs grass, not a shiny disc. Small worn hollow
+ * plus a trail that recedes SE into fog. Matte, procedural DIY.
  */
 function buildClearingPath(scene: Scene): void {
-  // Soft moss/dirt blend ring — subtle edge vs lush grass (not a hard dark rim).
-  const edge = MeshBuilder.CreateDisc('pathEdge', { radius: 9.6, tessellation: 28 }, scene);
-  edge.rotation.x = Math.PI / 2;
-  edge.position.y = 0.022;
-  const edgeMat = new StandardMaterial('pathEdgeMat', scene);
-  edgeMat.diffuseColor = new Color3(0.34, 0.32, 0.18);
-  edgeMat.specularColor = new Color3(0.012, 0.014, 0.01);
-  edgeMat.emissiveColor = new Color3(0.02, 0.022, 0.012);
-  edge.material = edgeMat;
+  const matteDirt = (name: string, diff: Color3, emit: Color3): StandardMaterial => {
+    const m = new StandardMaterial(name, scene);
+    m.diffuseColor = diff;
+    m.specularColor = new Color3(0.006, 0.005, 0.004);
+    m.emissiveColor = emit;
+    return m;
+  };
 
-  // Main packed path — Art #44 warm grey-brown (not chalky cool / not neon).
-  const dirt = MeshBuilder.CreateDisc('dirtPatch', { radius: 8.4, tessellation: 28 }, scene);
-  dirt.rotation.x = Math.PI / 2;
-  dirt.position.y = 0.03;
-  const dirtMat = new StandardMaterial('dirtMat', scene);
-  dirtMat.diffuseColor = new Color3(0.48, 0.36, 0.26);
-  dirtMat.specularColor = new Color3(0.02, 0.016, 0.012);
-  dirtMat.emissiveColor = new Color3(0.022, 0.016, 0.01);
-  dirt.material = dirtMat;
+  // Small irregular worn hollows at spawn — not a concentric disc pad.
+  const hollowMat = matteDirt('dirtMat', new Color3(0.46, 0.34, 0.24), new Color3(0.012, 0.009, 0.006));
+  const hollows: Array<{ x: number; z: number; r: number; sx: number; sz: number }> = [
+    { x: 0.4, z: 0.2, r: 3.4, sx: 1.35, sz: 0.72 },
+    { x: 2.6, z: 2.8, r: 2.2, sx: 1.4, sz: 0.65 },
+    { x: -2.2, z: -1.4, r: 1.8, sx: 0.9, sz: 1.2 },
+    { x: 1.2, z: -2.6, r: 1.5, sx: 1.5, sz: 0.7 },
+  ];
+  for (let i = 0; i < hollows.length; i++) {
+    const h = hollows[i]!;
+    const d = MeshBuilder.CreateDisc(`dirtHollow_${i}`, { radius: h.r, tessellation: 16 }, scene);
+    d.rotation.x = Math.PI / 2;
+    d.position.set(h.x, 0.028, h.z);
+    d.scaling.x = h.sx;
+    d.scaling.z = h.sz;
+    d.material = hollowMat;
+  }
 
-  // Inner worn center — slightly richer warm tone for multi-tone read at play cam.
-  const worn = MeshBuilder.CreateDisc('pathWorn', { radius: 4.2, tessellation: 22 }, scene);
-  worn.rotation.x = Math.PI / 2;
-  worn.position.y = 0.036;
-  const wornMat = new StandardMaterial('pathWornMat', scene);
-  wornMat.diffuseColor = new Color3(0.5, 0.38, 0.28);
-  wornMat.specularColor = new Color3(0.022, 0.018, 0.014);
-  wornMat.emissiveColor = new Color3(0.024, 0.018, 0.012);
-  worn.material = wornMat;
-
-  // Elongated trail strip toward the mid-tree gap (SE) — readable from play cam.
-  const trail = MeshBuilder.CreateGround(
-    'pathTrail',
-    { width: 3.4, height: 18, subdivisions: 1 },
-    scene,
-  );
-  trail.position.set(5.5, 0.034, 6.5);
-  trail.rotation.y = -0.55;
-  const trailMat = new StandardMaterial('pathTrailMat', scene);
-  trailMat.diffuseColor = new Color3(0.46, 0.34, 0.24);
-  trailMat.specularColor = new Color3(0.018, 0.014, 0.01);
-  trailMat.emissiveColor = new Color3(0.02, 0.014, 0.01);
-  trail.material = trailMat;
+  const trailMat = matteDirt('pathTrailMat', new Color3(0.45, 0.33, 0.23), new Color3(0.011, 0.008, 0.005));
+  const placeTrail = (name: string, x: number, z: number, w: number, len: number, yaw: number, y: number): void => {
+    const t = MeshBuilder.CreateGround(name, { width: w, height: len, subdivisions: 2 }, scene);
+    t.position.set(x, y, z);
+    t.rotation.y = yaw;
+    t.material = trailMat;
+  };
+  // Recedes SE through the tree gap, then a second beat further into fog.
+  placeTrail('pathTrail', 7.2, 10, 3.1, 28, -0.52, 0.03);
+  placeTrail('pathTrailFar', 18, 32, 2.5, 36, -0.38, 0.028);
+  placeTrail('pathTrailFar2', 28, 58, 2.1, 28, -0.22, 0.026);
 
   // Faint moss patches near path — soft grass→dirt value variation (no terrain system).
   const mossPatchMat = new StandardMaterial('pathMossPatchMat', scene);
@@ -1038,17 +1031,17 @@ function buildClearingPath(scene: Scene): void {
   // Cobble-ish worn patches along trail (cheap discs, shared mat) — warm stone.
   const cobbleMat = new StandardMaterial('pathCobbleMat', scene);
   cobbleMat.diffuseColor = new Color3(0.46, 0.4, 0.32);
-  cobbleMat.specularColor = new Color3(0.03, 0.026, 0.022);
-  cobbleMat.emissiveColor = new Color3(0.02, 0.016, 0.012);
+  cobbleMat.specularColor = new Color3(0.012, 0.01, 0.008);
+  cobbleMat.emissiveColor = new Color3(0.01, 0.008, 0.006);
   const cobbleSpots: Array<{ x: number; z: number; r: number }> = [
-    { x: 0.8, z: 1.2, r: 0.55 },
-    { x: -1.4, z: -0.6, r: 0.42 },
-    { x: 2.2, z: -2.1, r: 0.48 },
-    { x: -2.6, z: 2.4, r: 0.38 },
-    { x: 4.6, z: 4.0, r: 0.5 },
-    { x: 6.8, z: 7.2, r: 0.44 },
-    { x: 8.4, z: 9.6, r: 0.4 },
-    { x: 3.1, z: 5.5, r: 0.36 },
+    { x: 0.6, z: 0.8, r: 0.5 },
+    { x: 4.2, z: 5.5, r: 0.42 },
+    { x: 8.0, z: 11.5, r: 0.4 },
+    { x: 12.5, z: 20, r: 0.38 },
+    { x: 17, z: 30, r: 0.44 },
+    { x: 22, z: 40, r: 0.36 },
+    { x: 26, z: 52, r: 0.4 },
+    { x: 30, z: 64, r: 0.34 },
   ];
   for (let i = 0; i < cobbleSpots.length; i++) {
     const s = cobbleSpots[i]!;
@@ -1061,8 +1054,8 @@ function buildClearingPath(scene: Scene): void {
   // Tiny stone flecks — shared mat, few instances, web-cheap, warm grey.
   const stoneMat = new StandardMaterial('pathStoneMat', scene);
   stoneMat.diffuseColor = new Color3(0.5, 0.44, 0.36);
-  stoneMat.specularColor = new Color3(0.035, 0.03, 0.026);
-  stoneMat.emissiveColor = new Color3(0.02, 0.017, 0.014);
+  stoneMat.specularColor = new Color3(0.014, 0.012, 0.01);
+  stoneMat.emissiveColor = new Color3(0.01, 0.008, 0.006);
   const stoneProto = MeshBuilder.CreateBox(
     'pathStoneProto',
     { width: 0.28, height: 0.06, depth: 0.22 },
@@ -1074,9 +1067,10 @@ function buildClearingPath(scene: Scene): void {
   stoneProto.material = stoneMat;
   for (let i = 0; i < 16; i++) {
     const inst = stoneProto.createInstance(`pathStone_${i}`);
-    const a = hash01(i * 41) * Math.PI * 2;
-    const r = 1.2 + hash01(i * 47) * 6.5;
-    inst.position.set(Math.cos(a) * r, 0.045, Math.sin(a) * r);
+    const t = i / 15;
+    const x = 1.2 + t * 28 + (hash01(i * 41) - 0.5) * 2.4;
+    const z = 0.8 + t * 62 + (hash01(i * 47) - 0.5) * 2.2;
+    inst.position.set(x, 0.045, z);
     inst.rotation.y = hash01(i * 53) * Math.PI;
     const s = 0.55 + hash01(i * 59) * 0.9;
     inst.scaling.set(s, 0.7 + hash01(i * 61) * 0.5, s * (0.7 + hash01(i * 67) * 0.5));
@@ -1123,21 +1117,34 @@ export async function buildForestClearing(scene: Scene): Promise<{
     scene,
   );
   const groundMat = new StandardMaterial('clearingMat', scene);
-  // Richer saturated grass albedo vs cyan fog (#44 keeps this lush).
-  groundMat.diffuseColor = new Color3(0.26, 0.52, 0.18);
-  groundMat.specularColor = new Color3(0.012, 0.018, 0.01);
-  groundMat.emissiveColor = new Color3(0.035, 0.07, 0.022);
+  // Lush grass, matte — the old emissive made a plastic pad (#274).
+  groundMat.diffuseColor = new Color3(0.24, 0.48, 0.17);
+  groundMat.specularColor = new Color3(0.006, 0.01, 0.005);
+  groundMat.emissiveColor = new Color3(0.018, 0.038, 0.012);
   ground.material = groundMat;
 
-  // Soft moss ring around the dirt clearing — dirt/grass transition without new packs.
-  const moss = MeshBuilder.CreateDisc('mossRing', { radius: 14, tessellation: 32 }, scene);
-  moss.rotation.x = Math.PI / 2;
-  moss.position.y = 0.015;
+  // Scattered moss clumps — grass variation, not a ring-pad.
   const mossMat = new StandardMaterial('mossMat', scene);
-  mossMat.diffuseColor = new Color3(0.22, 0.48, 0.16);
-  mossMat.specularColor = new Color3(0.01, 0.016, 0.008);
-  mossMat.emissiveColor = new Color3(0.03, 0.065, 0.02);
-  moss.material = mossMat;
+  mossMat.diffuseColor = new Color3(0.2, 0.44, 0.15);
+  mossMat.specularColor = new Color3(0.006, 0.01, 0.005);
+  mossMat.emissiveColor = new Color3(0.016, 0.036, 0.012);
+  const mossClumps: Array<{ x: number; z: number; r: number }> = [
+    { x: -5.5, z: 4.2, r: 2.4 },
+    { x: 6.5, z: -3.8, r: 2.0 },
+    { x: -3.2, z: -6.5, r: 1.7 },
+    { x: 8.5, z: 5.0, r: 1.9 },
+    { x: 14, z: 16, r: 2.2 },
+    { x: 22, z: 36, r: 1.8 },
+  ];
+  for (let i = 0; i < mossClumps.length; i++) {
+    const c = mossClumps[i]!;
+    const moss = MeshBuilder.CreateDisc(`mossClump_${i}`, { radius: c.r, tessellation: 14 }, scene);
+    moss.rotation.x = Math.PI / 2;
+    moss.position.set(c.x, 0.014, c.z);
+    moss.scaling.x = 1.2 + hash01(i * 3) * 0.4;
+    moss.scaling.z = 0.75 + hash01(i * 7) * 0.35;
+    moss.material = mossMat;
+  }
 
   // #44 path/ground polish — readable trail vs lush grass under locked #39 fog/sun.
   // Art warm grey-brown multi-tone dirt (not chalky) + cheap procedural detail.
