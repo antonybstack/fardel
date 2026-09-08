@@ -41,6 +41,7 @@ import {
   NPC_KIND_BRIGAND,
   isHostileKind,
   HOSTILE_AGGRO_RADIUS,
+  HOSTILE_MELEE_RANGE,
   CROWD_NEAR_COUNT,
   type ConnectionStatus,
   type CrowdProxyView,
@@ -76,6 +77,7 @@ import {
   setHumanoidAirborne,
   setHumanoidCasting,
   setHumanoidDead,
+  setHumanoidGroundWalk,
   setHumanoidMoving,
   setHumanoidStaffEquipped,
   setHumanoidTurning,
@@ -3617,6 +3619,13 @@ async function main(): Promise<void> {
   const REMOTE_WALK_HOLD_S = 0.15;
   const REMOTE_WALK_SPD = 0.55;
   const remoteWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
+  /** HostileTickMs 100 — hold Walk across 10 Hz NPC snaps (same trap as remotes). */
+  const NPC_WALK_HOLD_S = 0.22;
+  const NPC_WALK_STEP = 0.04;
+  const NPC_WALK_SNAP = 2.0;
+  const NPC_TICK_HZ = 10;
+  const npcWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
+  const npcLastXz = new Map<string, { x: number; z: number }>();
   const proxyInterps = new Map<string, PoseInterp>();
 
   const ensureRemoteFx = (key: string): RemoteFx => {
@@ -4745,10 +4754,35 @@ async function main(): Promise<void> {
         pushSystemToast('respawn', line, TOAST_VE_TTL_MS);
       }
 
+      const prevXz = npcLastXz.get(key);
+      if (prevXz) {
+        const stepX = npc.x - prevXz.x;
+        const stepZ = npc.z - prevXz.z;
+        const step = Math.hypot(stepX, stepZ);
+        if (
+          mesh.humanoid &&
+          isHostileKind(npc.kind) &&
+          isAlive &&
+          step > NPC_WALK_STEP &&
+          step < NPC_WALK_SNAP
+        ) {
+          let st = npcWalkHold.get(key);
+          if (!st) {
+            st = { hold: 0, dx: 0, dz: 0 };
+            npcWalkHold.set(key, st);
+          }
+          st.hold = NPC_WALK_HOLD_S;
+          st.dx = stepX * NPC_TICK_HZ;
+          st.dz = stepZ * NPC_TICK_HZ;
+        }
+      }
+      npcLastXz.set(key, { x: npc.x, z: npc.z });
+
       mesh.root.position.x = npc.x;
       mesh.root.position.z = npc.z;
       if (mesh.humanoid && isHostileKind(npc.kind)) {
         setHumanoidDead(mesh.humanoid, !isAlive);
+        if (!isAlive) npcWalkHold.delete(key);
       }
 
       const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
@@ -4846,6 +4880,8 @@ async function main(): Promise<void> {
         mesh.root.dispose();
         npcMeshes.delete(key);
         npcLastHp.delete(key);
+        npcWalkHold.delete(key);
+        npcLastXz.delete(key);
       }
     }
   };
@@ -4943,6 +4979,28 @@ async function main(): Promise<void> {
         // Walk named (not Run); speedRatio from snap/hold m/s.
         setHumanoidMoving(parts, moving, false, spd);
       }
+      if (moving && (st.dx !== 0 || st.dz !== 0)) {
+        const targetYaw = Math.atan2(st.dx, st.dz);
+        const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
+        parts.root.rotation.y = lerpYaw(parts.root.rotation.y, targetYaw, a);
+      }
+    }
+    for (const [npcKey, mesh] of npcMeshes) {
+      const parts = mesh.humanoid;
+      if (!parts) continue;
+      const npcRow = (net?.getNpcs() ?? []).find(
+        (n) => n.npcId.toString() === npcKey,
+      );
+      if (!npcRow || !isHostileKind(npcRow.kind) || npcRow.hp <= 0) continue;
+      let st = npcWalkHold.get(npcKey);
+      if (!st) {
+        st = { hold: 0, dx: 0, dz: 0 };
+        npcWalkHold.set(npcKey, st);
+      }
+      st.hold -= dt;
+      const moving = st.hold > 0;
+      const spd = Math.hypot(st.dx, st.dz);
+      setHumanoidGroundWalk(parts, moving, spd);
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
         const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
@@ -5268,6 +5326,20 @@ async function main(): Promise<void> {
       const c = net.getCombat();
       if (c) selectedTargetId = c.targetNpcId;
       syncNpcMeshes(net.getNpcs());
+      for (const [npcKey, mesh] of npcMeshes) {
+        const parts = mesh.humanoid;
+        if (!parts) continue;
+        const npcRow = net.getNpcs().find((n) => n.npcId.toString() === npcKey);
+        if (!npcRow || !isHostileKind(npcRow.kind) || npcRow.hp <= 0) continue;
+        let st = npcWalkHold.get(npcKey);
+        if (!st) {
+          st = { hold: 0, dx: 0, dz: 0 };
+          npcWalkHold.set(npcKey, st);
+        }
+        const moving = st.hold > 0;
+        const spd = Math.hypot(st.dx, st.dz);
+        setHumanoidGroundWalk(parts, moving, spd);
+      }
       syncVendorMeshes(net.getVendors());
       syncProxyMeshes(net.getProxies());
       syncRemoteMeshes(net.getRemotes());
@@ -6008,6 +6080,43 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 8;
+      } else if (veFollow === 'hostile-chase') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = 3;
+        let fy = 1.05;
+        let fz = 7;
+        let best = -1;
+        const npcRows = net?.getNpcs() ?? [];
+        for (const [npcKey, mesh] of npcMeshes) {
+          if (!mesh.humanoid) continue;
+          const row = npcRows.find((n) => n.npcId.toString() === npcKey);
+          if (!row || row.hp <= 0 || !isHostileKind(row.kind)) continue;
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          const walking =
+            pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
+          if (!walking) continue;
+          const d = Math.hypot(
+            mesh.root.position.x - player.position.x,
+            mesh.root.position.z - player.position.z,
+          );
+          const rank = 2000 - d + mesh.root.position.z * 0.05;
+          if (rank > best) {
+            best = rank;
+            fx = mesh.root.position.x;
+            fy = mesh.root.position.y + 0.95;
+            fz = mesh.root.position.z;
+          }
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        // North of pad A looking south — vendor stays behind the walker.
+        camera.alpha = 0.55;
+        camera.beta = Math.PI / 2.28;
+        camera.radius = 7;
       } else if (veFollow === 'face-target-walk') {
         // Camera on -X so W walks +X toward Dummy (5,0). Mutate target in place.
         camera.inertialAlphaOffset = 0;
@@ -6198,6 +6307,7 @@ async function main(): Promise<void> {
         veFollow !== 'hostile-types' &&
         veFollow !== 'brigand-plate' &&
         veFollow !== 'brigand-body' &&
+        veFollow !== 'hostile-chase' &&
         veFollow !== 'kick' &&
         veFollow !== 'stun' &&
         veFollow !== 'loot-f' &&
@@ -10064,6 +10174,148 @@ async function main(): Promise<void> {
       window.setTimeout(waitL, 200);
     };
     window.setTimeout(waitL, 500);
+  }
+
+  // ?ve=hostile-chase — Kind=2/3 Walk while chasing / leash return (#447). Dummy scarecrow.
+  if (ve === 'hostile-chase') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'hostile-chase') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hostile-chase: waiting for hostiles…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let sawChase = false;
+    let sawLeash = false;
+    let latchedOk: string | null = null;
+    const padAx = 3;
+    const padAz = 7;
+    const kiteDist = (HOSTILE_AGGRO_RADIUS + HOSTILE_MELEE_RANGE) * 0.5;
+    const waitChase = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE hostile-chase: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitChase, 200);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummyRow = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyMesh = dummyRow
+        ? npcMeshes.get(dummyRow.npcId.toString())
+        : undefined;
+      const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
+      const hostiles = npcs.filter((n) => isHostileKind(n.kind) && n.hp > 0);
+      let capsuleLeft = false;
+      let walkPb: HumanoidPlayback | null = null;
+      let walkNpc: (typeof hostiles)[number] | null = null;
+      for (const n of hostiles) {
+        const mesh = npcMeshes.get(n.npcId.toString());
+        if (mesh?.humanoid) {
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          const clip = clipBare(pb.playing);
+          if (pb.skinned > 0 && /^walk$/i.test(clip)) {
+            walkPb = pb;
+            walkNpc = n;
+          }
+        } else if (mesh) {
+          capsuleLeft = true;
+        }
+      }
+      const padA =
+        hostiles.find(
+          (n) =>
+            Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) <
+            0.6,
+        ) ?? hostiles[0];
+      if (padA) {
+        const hx = padA.x - player.position.x;
+        const hz = padA.z - player.position.z;
+        const dist = Math.hypot(hx, hz);
+        if (walkNpc) {
+          const wHome = Math.hypot(
+            walkNpc.x - (walkNpc.spawnX || padAx),
+            walkNpc.z - (walkNpc.spawnZ || padAz),
+          );
+          if (walkNpc.aggroed && wHome > 0.35 && walkNpc.z > 4.5) sawChase = true;
+          if (!walkNpc.aggroed && wHome > 0.45 && walkNpc.z > 4.5) sawLeash = true;
+        }
+        if (latchedOk) {
+          // Leave the 7m close-up so the local wizard is not a foreground head.
+          const tx = padAx + 18;
+          const tz = padAz;
+          const kx = tx - player.position.x;
+          const kz = tz - player.position.z;
+          const kd = Math.hypot(kx, kz);
+          if (kd > 0.5) {
+            const step = Math.min(MAX_STEP_METERS, kd);
+            net.sendMove((kx / kd) * step, (kz / kd) * step, false);
+          }
+        } else if (!padA.aggroed && dist > HOSTILE_AGGRO_RADIUS - 0.25 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((hx / dist) * step, (hz / dist) * step, false);
+        } else {
+          // North of pad A so the Walk close-up is not the vendor stall.
+          const tx = padAx;
+          const tz = padAz + 2.4;
+          const kx = tx - player.position.x;
+          const kz = tz - player.position.z;
+          const kd = Math.hypot(kx, kz);
+          const want = kiteDist;
+          if (dist < want - 0.08 && kd > 0.2) {
+            const step = Math.min(MAX_STEP_METERS, kd);
+            net.sendMove((kx / kd) * step, (kz / kd) * step, false);
+          } else if (dist > want + 0.2 && dist > 0.2) {
+            const step = Math.min(MAX_STEP_METERS, dist - want);
+            net.sendMove((hx / dist) * step, (hz / dist) * step, false);
+          } else if (kd > 0.35) {
+            const step = Math.min(MAX_STEP_METERS * 0.7, kd);
+            net.sendMove((kx / kd) * step, (kz / kd) * step, false);
+          }
+        }
+      }
+      const chaseOk =
+        dummyTrainer &&
+        !capsuleLeft &&
+        walkPb != null &&
+        walkPb.skinned > 0 &&
+        sawChase;
+      if (chaseOk && walkPb) {
+        const extra = sawLeash ? ' · leash Walk' : '';
+        latchedOk =
+          `Hostile chase OK · ${clipBare(walkPb.playing)} · skinned ${walkPb.skinned} · dummy trainer${extra}`;
+      }
+      if (mark) {
+        if (latchedOk) {
+          mark.textContent = latchedOk;
+        } else if (capsuleLeft) {
+          mark.textContent = 'capsule · hostile not a person';
+        } else if (walkPb && walkPb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${walkPb.playing ?? 'none'} · skeleton=${walkPb.skinned}`;
+        } else if (ticks > 260) {
+          const clip = walkPb ? clipBare(walkPb.playing) : 'none';
+          mark.textContent =
+            `Hostile chase FAIL · clip=${clip} · dummy ${dummyTrainer ? 'trainer' : 'n'} · chase ${sawChase ? 'y' : 'n'}`;
+        } else {
+          const clip = walkPb ? clipBare(walkPb.playing) : 'idle';
+          const id = walkNpc ? `#${walkNpc.npcId}` : '';
+          mark.textContent =
+            `VE hostile-chase: ${clip} ${id} · dummy ${dummyTrainer ? 'y' : 'n'} · chase ${sawChase ? 'y' : 'n'}…`;
+        }
+      }
+      if (ticks < 400 && !(capsuleLeft && ticks > 40)) {
+        window.setTimeout(waitChase, 50);
+      }
+    };
+    window.setTimeout(waitChase, 700);
   }
 
   // ?ve=auto-attack — HP drops in melee, stops after leash (#356).
