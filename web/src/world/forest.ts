@@ -588,29 +588,36 @@ function buildSkyDome(scene: Scene): void {
   sky.material = skyMat;
 }
 
-/** Matte foliage/bark — keep specular low; kill emissive so cyan fog wins. */
+/** Matte foliage/bark (#275): fog on, alpha-test leaf cards so they dissolve not pop. */
 function mattePackMaterials(meshes: AbstractMesh[]): void {
   const seen = new Set<Material>();
   for (const mesh of meshes) {
+    mesh.applyFog = true;
     const mat = mesh.material;
     if (!mat || seen.has(mat)) continue;
     seen.add(mat);
     const leafish = /leaf|leaves|grass|fern|bush|plant/i.test(mat.name || mesh.name || '');
     if (mat instanceof PBRMaterial) {
       mat.metallic = 0;
-      mat.roughness = 0.92;
+      mat.roughness = 0.94;
       mat.emissiveColor = new Color3(0, 0, 0);
-      mat.environmentIntensity = 0.3;
-      mat.specularIntensity = 0.12;
+      mat.environmentIntensity = 0.22;
+      mat.specularIntensity = 0.08;
       if (leafish) {
-        // Bias toward lush green under cyan fog (pack _C leaf cards can read warm/red).
         mat.albedoColor = new Color3(0.55, 0.85, 0.42);
+        mat.useAlphaFromAlbedoTexture = true;
+        mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHATEST;
+        mat.alphaCutOff = 0.42;
       }
     } else if (mat instanceof StandardMaterial) {
-      mat.specularColor = new Color3(0.03, 0.03, 0.02);
+      mat.specularColor = new Color3(0.02, 0.02, 0.015);
       mat.emissiveColor = new Color3(0, 0, 0);
+      mat.fogEnabled = true;
       if (leafish) {
         mat.diffuseColor = new Color3(0.45, 0.7, 0.32);
+        mat.useAlphaFromDiffuseTexture = true;
+        mat.transparencyMode = Material.MATERIAL_ALPHATEST;
+        mat.alphaCutOff = 0.42;
       }
     }
   }
@@ -679,6 +686,7 @@ function placeClone(
   clone.getChildMeshes(true).forEach((m) => {
     m.isVisible = true;
     m.isPickable = false;
+    m.applyFog = true;
   });
   clone.position.set(x, 0, z);
   clone.rotation.y = yaw;

@@ -5254,7 +5254,8 @@ async function main(): Promise<void> {
         veFollow !== 'dummy-hp' &&
         veFollow !== 'tab-target' &&
         veFollow !== 'loot-f' &&
-        veFollow !== 'rest-exit'
+        veFollow !== 'rest-exit' &&
+        veFollow !== 'path-ground'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -5727,11 +5728,11 @@ async function main(): Promise<void> {
     window.setTimeout(waitAtmosphere, 600);
   }
 
-  // ?ve=path-ground — play-cam frame of polished dirt/stone trail vs lush grass (#44).
+  // ?ve=path-ground — dirt trail vs lush grass, not a plastic disc (#44 / #274).
   if (ve === 'path-ground') {
-    camera.radius = 15;
-    camera.alpha = Math.PI / 3.1;
-    camera.beta = Math.PI / 2.75;
+    camera.radius = 16;
+    camera.alpha = Math.PI / 3.2;
+    camera.beta = Math.PI / 2.65;
   }
 
   if (net && ve === 'path-ground') {
@@ -5741,14 +5742,13 @@ async function main(): Promise<void> {
       if (!net) return;
       const st = latestStatus;
       if (st.state === 'connected') {
-        // Bias toward SE trail strip + soft path/grass edge under cyan fog.
-        camera.setTarget(player.position.add(new Vector3(4.2, 0.15, 5.2)));
-        camera.radius = 15;
-        camera.alpha = Math.PI / 3.1;
-        camera.beta = Math.PI / 2.75;
+        camera.setTarget(player.position.add(new Vector3(7, 0.25, 10)));
+        camera.radius = 16;
+        camera.alpha = Math.PI / 3.2;
+        camera.beta = Math.PI / 2.65;
         if (mark) {
           mark.textContent =
-            'Path-ground OK · dirt/stone trail vs lush grass · Connected';
+            'Path-ground OK · dirt trail vs lush grass · Connected';
         }
         return;
       }
