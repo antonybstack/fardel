@@ -74,6 +74,7 @@ import {
   setHumanoidCasting,
   setHumanoidDead,
   setHumanoidMoving,
+  setHumanoidStaffEquipped,
   setHumanoidTurning,
   type HumanoidParts,
 } from './world/humanoid';
@@ -5302,6 +5303,7 @@ async function main(): Promise<void> {
           const staffMsg = ch.staffEquipped ? 'Staff equipped' : 'Staff unequipped';
           pushCombatLog('equip', staffMsg);
           pushSystemToast('equip', staffMsg);
+          setHumanoidStaffEquipped(humanoid, ch.staffEquipped);
           prevStaffEquipped = ch.staffEquipped;
         }
         if (prevRobesEquipped === null) {
@@ -7926,7 +7928,7 @@ async function main(): Promise<void> {
       }
       const unequippedOk = ch && !ch.staffEquipped;
       if (unequippedOk) {
-        setStaffMeshVisible(humanoid.staff, false);
+        setHumanoidStaffEquipped(humanoid, false);
       }
       if (unequippedOk && !castAttempted) {
         net.ensureTrainingDummy();
@@ -11669,6 +11671,13 @@ async function main(): Promise<void> {
         return;
       }
       setHumanoidMoving(humanoid, false);
+      const chIdle = net.getCharacter();
+      if (chIdle && !chIdle.staffEquipped) {
+        net.equipStaff();
+        if (ticks < 200) window.setTimeout(waitIdle, 200);
+        return;
+      }
+      setHumanoidStaffEquipped(humanoid, true);
       const pb = readHumanoidPlayback(humanoid);
       const idleOk =
         pb.skinned > 0 &&
