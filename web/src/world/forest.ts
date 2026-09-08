@@ -463,12 +463,12 @@ export const COLLISION_VE_HERO = { x: 6, z: -40 } as const;
 const PATH_POINTS: ReadonlyArray<{ x: number; z: number }> = [
   { x: 0.4, z: 1.0 },
   { x: -3.5, z: -12 },
-  { x: -10, z: -36 },
-  { x: -2, z: -62 },
-  { x: 14, z: -88 },
-  { x: 20, z: -114 },
+  { x: -10, z: -32 },
+  { x: 2, z: -50 },
+  { x: 12, z: -68 },
+  { x: 16, z: -88 },
 ];
-const SECOND_CLEARING = { x: 14, z: -88 } as const;
+const SECOND_CLEARING = { x: 12, z: -68 } as const;
 const PATH_TREE_KEEP = 7.5;
 const PATH_UNDER_KEEP = 5.5;
 const SECOND_CLEARING_R = 11;
@@ -1426,6 +1426,22 @@ function buildClearingPath(scene: Scene): void {
     t.rotation.y = Math.atan2(dx, dz);
     t.material = trailMat;
     t.isPickable = false;
+  }
+  for (let i = 1; i < PATH_POINTS.length - 1; i++) {
+    const p = PATH_POINTS[i]!;
+    const t = i / (PATH_POINTS.length - 1);
+    placeGroundDisc(
+      scene,
+      `pathBend_${i}`,
+      p.x,
+      p.z,
+      0.032,
+      2.4 - t * 0.6,
+      14,
+      1,
+      1,
+      trailMat,
+    );
   }
 
   // Second clearing — a worn hollow in fog, same dirt language as the pad.
