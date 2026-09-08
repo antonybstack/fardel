@@ -2254,8 +2254,12 @@ function clampRadiusVsTrunks(
     if (disc < 0) continue;
     const tHit = (-b - Math.sqrt(disc)) / (2 * a);
     if (tHit <= CAM_TRUNK_MIN_HIT || tHit >= best) continue;
-    const y = target.y + tHit * dy;
-    if (y < t.y0 - 0.4 || y > t.y1 + 0.4) continue;
+    // Hero/mid boles are infinite vertical cylinders. Finite y1 (short *_trunk
+    // AABB) misses the hop-cam ray, then land re-hits = punch (#483).
+    if (t.kind !== 'hero' && t.kind !== 'mid') {
+      const y = target.y + tHit * dy;
+      if (y < t.y0 - 0.4 || y > t.y1 + 0.4) continue;
+    }
     best = tHit;
     hit = t.name;
   }
@@ -3383,6 +3387,8 @@ async function main(): Promise<void> {
   let camCollideThisFrame = false;
   /** Frozen mid bole for `?ve=cam-collision-mid` so walk-in does not retarget. */
   let camCollisionMidAimed: TrunkCollider | null = null;
+  /** Frozen hero bole for `?ve=cam-collision-hop`. */
+  let camCollisionHopAimed: TrunkCollider | null = null;
   const npcMeshes = new Map<string, NpcMesh>();
   scene.onBeforeRenderObservable.add(() => {
     if (!camCollideThisFrame) return;
@@ -3393,6 +3399,7 @@ async function main(): Promise<void> {
       veCam !== 'cam-collision' &&
       veCam !== 'cam-collision-mid' &&
       veCam !== 'cam-collision-dummy' &&
+      veCam !== 'cam-collision-hop' &&
       Math.abs(camera.radius - camAppliedRadius) > 0.08
     ) {
       camZoomRadius = camera.radius;
@@ -6439,8 +6446,13 @@ async function main(): Promise<void> {
         camera.alpha = 0;
         camera.beta = Math.PI / 2.35;
         camera.radius = 8;
-      } else if (veFollow === 'cam-collision' || veFollow === 'cam-collision-mid') {
-        // Orbit into a bole; collision keeps the camera in the open (hero E10.1, mid E10.24).
+      } else if (
+        veFollow === 'cam-collision' ||
+        veFollow === 'cam-collision-mid' ||
+        veFollow === 'cam-collision-hop'
+      ) {
+        // Orbit into a bole; collision keeps the camera in the open
+        // (hero E10.1, mid E10.24, hop E10.29). E1 Y-spring stays.
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
           camFollowY = targetY;
@@ -6459,6 +6471,7 @@ async function main(): Promise<void> {
         tgt.y = camFollowY;
         tgt.z = player.position.z;
         const wantMid = veFollow === 'cam-collision-mid';
+        const wantHop = veFollow === 'cam-collision-hop';
         if (wantMid && !camCollisionMidAimed) {
           camCollisionMidAimed = pickClearTrunk(
             player.position.x,
@@ -6467,13 +6480,24 @@ async function main(): Promise<void> {
             'mid',
           );
         }
+        if (wantHop && !camCollisionHopAimed) {
+          camCollisionHopAimed = pickClearTrunk(
+            player.position.x,
+            player.position.z,
+            trunks,
+            'hero',
+          );
+        }
         const aimed = wantMid
           ? camCollisionMidAimed
-          : nearestHeroTrunk(player.position.x, player.position.z, trunks);
+          : wantHop
+            ? camCollisionHopAimed
+            : nearestHeroTrunk(player.position.x, player.position.z, trunks);
         if (aimed) {
           camera.alpha = trunkAimAlpha(player.position.x, player.position.z, aimed);
-          if (wantMid) {
+          if (wantMid || wantHop) {
             // Zoom max 42 cannot reach the mid ring (~48m) from origin (#465).
+            // Hop VE walks in so the airborne pose reads against the bole.
             const dist = Math.hypot(
               aimed.x - player.position.x,
               aimed.z - player.position.z,
@@ -12183,6 +12207,94 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitDummy, 200);
     };
     window.setTimeout(waitDummy, 400);
+  }
+
+  // ?ve=cam-collision-hop — Space-hop while orbiting into a hero bole (#483).
+  // persistMark must name a trunk while Y is above ground. Grounded-only = fail.
+  // E1 Y-spring stays on the follow (no land punch). Dummy stays trainer.
+  if (net && ve === 'cam-collision-hop') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = 12;
+    camZoomRadius = 12;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision-hop: walking to hero trunk…';
+    let ticks = 0;
+    let hopped = false;
+    let bestHopY = 0;
+    const standOff = 13;
+    const GROUND_THRESHOLD = 0.08;
+    const AIR_OK = 0.35;
+    const waitHopCol = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cam-collision-hop: ${st.state}…`;
+        if (ticks < 280) window.setTimeout(waitHopCol, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE cam-collision-hop: waiting for pose…';
+        if (ticks < 280) window.setTimeout(waitHopCol, 200);
+        return;
+      }
+      if (!camCollisionHopAimed) {
+        camCollisionHopAimed = pickClearTrunk(pose.x, pose.z, trunks, 'hero');
+      }
+      const aimed = camCollisionHopAimed;
+      if (!aimed) {
+        if (mark) mark.textContent = 'VE cam-collision-hop FAIL · no heroTree';
+        return;
+      }
+      const dx = aimed.x - pose.x;
+      const dz = aimed.z - pose.z;
+      const d = Math.hypot(dx, dz);
+      if (d > standOff + 0.25) {
+        const step = Math.min(MAX_STEP_METERS, d - standOff);
+        const slid = slideAgainstTrunks(pose.x, pose.z, (dx / d) * step, (dz / d) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+        if (mark) {
+          mark.textContent = `VE cam-collision-hop: walk d=${d.toFixed(1)} → ${aimed.name}`;
+        }
+        if (ticks < 280) window.setTimeout(waitHopCol, 200);
+        return;
+      }
+      if (pose.y <= GROUND_THRESHOLD) {
+        hopped = true;
+        net.sendMove(0, 0, true);
+      } else {
+        net.sendMove(0, 0, false);
+      }
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const trunkHit =
+        !!hit && /^(heroTree|heroElder|heroSent|midTree_)/.test(hit);
+      const air = pose.y > AIR_OK;
+      const pulled = got + 0.5 < want;
+      const ok = trunkHit && air && pulled;
+      if (ok && pose.y >= bestHopY) {
+        bestHopY = pose.y;
+        if (mark) {
+          mark.textContent =
+            `Cam-collision OK · r=${got.toFixed(1)} < want=${want.toFixed(0)} · ${hit} · hop y=${pose.y.toFixed(2)}`;
+        }
+      }
+      if (bestHopY > 0) {
+        if (ticks < 360) window.setTimeout(waitHopCol, 80);
+        return;
+      }
+      if (mark) {
+        mark.textContent = hopped
+          ? `VE cam-collision-hop: y=${pose.y.toFixed(2)} r=${got.toFixed(1)} want=${want.toFixed(0)} hit=${hit ?? 'none'} · n=${trunks.length}`
+          : `VE cam-collision-hop: stand d=${d.toFixed(1)} → hop`;
+      }
+      if (ticks < 360) window.setTimeout(waitHopCol, hopped ? 80 : 200);
+    };
+    window.setTimeout(waitHopCol, 400);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
