@@ -88,7 +88,8 @@ try
         return;
     }
 
-    Console.WriteLine($"spawn pose ({pose.X}, {pose.Y}, {pose.Z}) velY={pose.VelY}");
+    var spawnLastGroundedMicros = pose.LastGroundedMicros;
+    Console.WriteLine($"spawn pose ({pose.X}, {pose.Y}, {pose.Z}) velY={pose.VelY} lastGroundedMicros={spawnLastGroundedMicros}");
 
     // Jump while grounded
     conn.Reducers.Move(0f, 0f, jump: true);
@@ -107,6 +108,83 @@ try
         Fail("jump did not raise Y or set VelY");
         return;
     }
+
+    // Airborne anti multi-jump (#120): after VelY has decayed, a discrete second
+    // Move(0,0,jump:true) must not snap VelY back to JumpVelocity. Distinct from
+    // hold-Space continuous jump:true (#157).
+    PlayerPose? decayPose = conn.Db.PlayerPose.Identity.Find(identity);
+    using (var decayCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!decayCts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            decayPose = conn.Db.PlayerPose.Identity.Find(identity);
+            if (decayPose is { } d
+                && d.Y > Movement.GroundY + 0.08f
+                && d.VelY < Movement.JumpVelocity - 1f)
+            {
+                break;
+            }
+            conn.Reducers.Move(0f, 0f, jump: false);
+            try
+            {
+                await Task.Delay(50, decayCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (decayPose is null
+        || decayPose.Y <= Movement.GroundY + 0.08f
+        || decayPose.VelY >= Movement.JumpVelocity - 1f)
+    {
+        Fail($"airborne decay timeout before anti multi-jump (Y={decayPose?.Y} VelY={decayPose?.VelY})");
+        return;
+    }
+    var airVelBefore = decayPose.VelY;
+    var airYBefore = decayPose.Y;
+    conn.Reducers.Move(0f, 0f, jump: true);
+    PlayerPose? airAfterJump = null;
+    using (var airJumpCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!airJumpCts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            airAfterJump = conn.Db.PlayerPose.Identity.Find(identity);
+            if (airAfterJump is { } a && MathF.Abs(a.VelY - airVelBefore) > 0.01f)
+            {
+                break;
+            }
+            try
+            {
+                await Task.Delay(16, airJumpCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }
+    if (airAfterJump is null)
+    {
+        Fail("PlayerPose missing after airborne second jump");
+        return;
+    }
+    if (MathF.Abs(airAfterJump.VelY - Movement.JumpVelocity) < 0.5f)
+    {
+        Fail($"airborne second jump re-boosted VelY to {airAfterJump.VelY} (was {airVelBefore})");
+        return;
+    }
+    if (airAfterJump.Y <= Movement.GroundY + 0.05f)
+    {
+        Fail($"airborne second jump not airborne after (Y={airAfterJump.Y})");
+        return;
+    }
+    Console.WriteLine(
+        $"airborne second jump: Y={airYBefore}->{airAfterJump.Y} velY {airVelBefore}->{airAfterJump.VelY} (no re-boost)");
 
     // Air-phase: server gravity / ground-clamp only run inside Move — pump until land.
     // (Merged #96 WaitTick only FrameTick'd; never advanced physics.)
@@ -146,41 +224,352 @@ try
         Fail($"landed Y={landY} not at GroundY={Movement.GroundY}");
         return;
     }
-    if (conn.Db.PlayerPose.Identity.Find(identity) is { } landPose
-        && MathF.Abs(landPose.VelY) > 0.1f)
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } landPose)
+    {
+        Fail("PlayerPose missing after land");
+        return;
+    }
+    if (MathF.Abs(landPose.VelY) > 0.1f)
     {
         Fail($"landed VelY={landPose.VelY} not ≈0");
         return;
     }
-    Console.WriteLine($"landed: Y={landY}");
+    
+    // Assert LastGroundedMicros advanced (strictly greater than pre-jump)
+    if (landPose.LastGroundedMicros <= spawnLastGroundedMicros)
+    {
+        Fail($"landed LastGroundedMicros={landPose.LastGroundedMicros} not > spawn={spawnLastGroundedMicros}");
+        return;
+    }
+    Console.WriteLine($"landed: Y={landY} lastGroundedMicros={landPose.LastGroundedMicros} (advanced from {spawnLastGroundedMicros})");
 
-    // Second jump while airborne should not re-boost (anti multi-jump)
-    // Get current pose
+    // Coyote (#121): jump allowed for CoyoteTimeMicros after leaving ground when VelY≤0.01
+    // (airborne apex). After the window, a falling jump must not re-boost. Distinct from
+    // #120 (VelY still high) and hold-Space (#157).
+    conn.Reducers.Move(0f, 0f, jump: false);
+    var coyoteGround = await WaitPoseTight(
+        conn, identity, p => p.LastGroundedMicros > landPose.LastGroundedMicros, 2000);
+    if (coyoteGround is null
+        || MathF.Abs(coyoteGround.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(coyoteGround.VelY) > 0.1f)
+    {
+        Fail($"coyote requires grounded refresh Y={coyoteGround?.Y} VelY={coyoteGround?.VelY} lg={coyoteGround?.LastGroundedMicros}");
+        return;
+    }
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var coyoteLeft = await WaitPoseTight(
+        conn, identity,
+        p => p.Y > Movement.GroundY + 0.05f || MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f,
+        2000);
+    if (coyoteLeft is null)
+    {
+        Fail("coyote: jump did not leave ground");
+        return;
+    }
+    var coyoteApex = coyoteLeft;
+    for (var i = 0; i < 16; i++)
+    {
+        if (coyoteApex.Y > Movement.GroundY + 0.05f && coyoteApex.VelY <= 0.01f)
+        {
+            break;
+        }
+        var velBefore = coyoteApex.VelY;
+        conn.Reducers.Move(0f, 0f, jump: false);
+        var stepped = await WaitPoseTight(conn, identity, p => p.VelY < velBefore - 0.1f, 500);
+        if (stepped is null)
+        {
+            Fail($"coyote: burst gravity timeout (Y={coyoteApex.Y} VelY={coyoteApex.VelY})");
+            return;
+        }
+        coyoteApex = stepped;
+    }
+    if (coyoteApex.Y <= Movement.GroundY + 0.05f || coyoteApex.VelY > 0.01f)
+    {
+        Fail($"coyote: never reached airborne apex Y={coyoteApex.Y} VelY={coyoteApex.VelY}");
+        return;
+    }
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var coyoteBoost = await WaitPoseTight(
+        conn, identity, p => MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f, 500);
+    if (coyoteBoost is null || MathF.Abs(coyoteBoost.VelY - Movement.JumpVelocity) > 1f)
+    {
+        Fail($"coyote within window did not boost VelY (Y={coyoteApex.Y} VelY={coyoteApex.VelY} -> {coyoteBoost?.VelY})");
+        return;
+    }
+    Console.WriteLine($"coyote jump: Y={coyoteApex.Y}->{coyoteBoost.Y} velY {coyoteApex.VelY}->{coyoteBoost.VelY}");
+
+    PlayerPose? coyoteFalling = coyoteBoost;
+    using (var expireCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!expireCts.IsCancellationRequested)
+        {
+            conn.Reducers.Move(0f, 0f, jump: false);
+            conn.FrameTick();
+            coyoteFalling = conn.Db.PlayerPose.Identity.Find(identity);
+            if (coyoteFalling is { } f && f.Y > Movement.GroundY + 0.08f && f.VelY < -0.5f)
+            {
+                break;
+            }
+            try
+            {
+                await Task.Delay(50, expireCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (coyoteFalling is null
+        || coyoteFalling.Y <= Movement.GroundY + 0.08f
+        || coyoteFalling.VelY >= -0.5f)
+    {
+        Fail($"coyote expire: not falling Y={coyoteFalling?.Y} VelY={coyoteFalling?.VelY}");
+        return;
+    }
+    var expireVelBefore = coyoteFalling.VelY;
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var afterExpire = await WaitPoseTight(
+        conn, identity, p => MathF.Abs(p.VelY - expireVelBefore) > 0.01f, timeoutMs);
+    if (afterExpire is null)
+    {
+        Fail("coyote expire: no pose after jump");
+        return;
+    }
+    if (MathF.Abs(afterExpire.VelY - Movement.JumpVelocity) < 0.5f)
+    {
+        Fail($"jump after coyote re-boosted VelY to {afterExpire.VelY} (was {expireVelBefore})");
+        return;
+    }
+    Console.WriteLine($"coyote expired: Y={coyoteFalling.Y}->{afterExpire.Y} velY {expireVelBefore}->{afterExpire.VelY} (no boost)");
+
+    using (var coyoteLandCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!coyoteLandCts.IsCancellationRequested)
+        {
+            conn.Reducers.Move(0f, 0f, jump: false);
+            conn.FrameTick();
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } air
+                && MathF.Abs(air.Y - Movement.GroundY) < 0.05f
+                && MathF.Abs(air.VelY) < 0.1f)
+            {
+                Console.WriteLine($"coyote landed: Y={air.Y} velY={air.VelY}");
+                break;
+            }
+            try
+            {
+                await Task.Delay(50, coyoteLandCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } coyoteLand
+        || MathF.Abs(coyoteLand.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(coyoteLand.VelY) > 0.1f)
+    {
+        Fail("coyote sequence did not land (Y/VelY)");
+        return;
+    }
+
+    // Hold-Space air pump (#157): live client keeps jump:true while Space is held.
+    // After rise, pump Move(0,0,true) until land — gravity must still integrate; VelY must
+    // not reset to JumpVelocity mid-air.
+    conn.Reducers.Move(0f, 0f, jump: true);
+    var holdRose = false;
+    float holdPeakVelY = 0f;
+    using (var holdCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!holdCts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            var air = conn.Db.PlayerPose.Identity.Find(identity);
+            if (air is null)
+            {
+                Fail("PlayerPose missing during hold-Space jump");
+                return;
+            }
+            if (!holdRose)
+            {
+                if (air.Y > Movement.GroundY + 0.05f
+                    || MathF.Abs(air.VelY - Movement.JumpVelocity) < 1f)
+                {
+                    holdRose = true;
+                    holdPeakVelY = air.VelY;
+                    Console.WriteLine($"hold-Space jumped: Y={air.Y} velY={air.VelY}");
+                }
+            }
+            else
+            {
+                // Mid-air re-boost: VelY snaps back to JumpVelocity after it had fallen.
+                if (air.Y > Movement.GroundY + 0.08f
+                    && MathF.Abs(air.VelY - Movement.JumpVelocity) < 0.5f
+                    && holdPeakVelY < Movement.JumpVelocity - 1f)
+                {
+                    Fail($"hold-Space air pump re-boosted VelY to {air.VelY} (was {holdPeakVelY})");
+                    return;
+                }
+                if (air.VelY < holdPeakVelY)
+                {
+                    holdPeakVelY = air.VelY;
+                }
+                if (MathF.Abs(air.Y - Movement.GroundY) < 0.05f && MathF.Abs(air.VelY) < 0.1f)
+                {
+                    Console.WriteLine($"hold-Space landed: Y={air.Y} velY={air.VelY}");
+                    break;
+                }
+            }
+            conn.Reducers.Move(0f, 0f, jump: true);
+            try
+            {
+                await Task.Delay(50, holdCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (!holdRose)
+    {
+        Fail("hold-Space jump timeout — no pose update with rising Y");
+        return;
+    }
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } holdLand
+        || MathF.Abs(holdLand.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(holdLand.VelY) > 0.1f)
+    {
+        Fail("hold-Space air pump did not land (Y/VelY)");
+        return;
+    }
+    Console.WriteLine("hold-Space Move(0,0,true) air pump land OK (no VelY re-boost)");
+
+    // Same-tick jump+XZ (#158): live client sendMove(dx, dz, wish.jump) in one reducer.
+    // Oversized wish proves clamp + VelY together (gap (c) on the issue).
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } xzBefore)
+    {
+        Fail("PlayerPose missing before jump+XZ");
+        return;
+    }
+    if (MathF.Abs(xzBefore.Y - Movement.GroundY) > 0.05f || MathF.Abs(xzBefore.VelY) > 0.1f)
+    {
+        Fail($"jump+XZ requires grounded start Y={xzBefore.Y} VelY={xzBefore.VelY}");
+        return;
+    }
+    var xzBeforeX = xzBefore.X;
+    var xzWish = 10f;
+    var xzExpected = Movement.MaxStepMeters;
+    conn.Reducers.Move(xzWish, 0f, jump: true);
+    var xzJump = await WaitPose(conn, identity, p => MathF.Abs(p.X - xzBeforeX) > 0.01f, timeoutMs);
+    if (xzJump is null)
+    {
+        Fail("jump+XZ timeout — no X change");
+        return;
+    }
+    var xzDx = xzJump.X - xzBeforeX;
+    if (MathF.Abs(xzDx - xzExpected) > 0.05f)
+    {
+        Fail($"jump+XZ X delta={xzDx} expected clamped {xzExpected} (jump dropped XZ or clamp mishandled)");
+        return;
+    }
+    if (xzJump.Y <= Movement.GroundY + 0.01f && MathF.Abs(xzJump.VelY - Movement.JumpVelocity) > 1f)
+    {
+        Fail($"jump+XZ did not raise Y or set VelY (Y={xzJump.Y} VelY={xzJump.VelY})");
+        return;
+    }
+    Console.WriteLine($"jump+XZ: X {xzBeforeX}->{xzJump.X} (d={xzDx:F3} clamped {xzExpected}) Y={xzJump.Y} velY={xzJump.VelY}");
+
+    // Air-phase strafe: Move(dx,0,jump:false) still integrates gravity.
+    var airBeforeX = xzJump.X;
+    var airBeforeY = xzJump.Y;
+    var airBeforeVelY = xzJump.VelY;
+    var airStrafe = 0.4f;
+    conn.Reducers.Move(airStrafe, 0f, jump: false);
+    var xzAir = await WaitPose(conn, identity, p => MathF.Abs(p.X - airBeforeX) > 0.01f, timeoutMs);
+    if (xzAir is null)
+    {
+        Fail("air strafe timeout — no X change");
+        return;
+    }
+    if (MathF.Abs(xzAir.X - airBeforeX - airStrafe) > 0.05f)
+    {
+        Fail($"air strafe X delta={xzAir.X - airBeforeX} expected ~{airStrafe}");
+        return;
+    }
+    if (xzAir.VelY > airBeforeVelY + 0.01f)
+    {
+        Fail($"air strafe VelY rose {airBeforeVelY} -> {xzAir.VelY} (gravity not integrated)");
+        return;
+    }
+    Console.WriteLine($"air strafe: X {airBeforeX}->{xzAir.X} Y {airBeforeY}->{xzAir.Y} velY {airBeforeVelY}->{xzAir.VelY}");
+
+    using (var xzLandCts = new CancellationTokenSource(timeoutMs))
+    {
+        while (!xzLandCts.IsCancellationRequested)
+        {
+            conn.Reducers.Move(0f, 0f, jump: false);
+            conn.FrameTick();
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } air
+                && MathF.Abs(air.Y - Movement.GroundY) < 0.05f
+                && MathF.Abs(air.VelY) < 0.1f)
+            {
+                Console.WriteLine($"jump+XZ landed: Y={air.Y} velY={air.VelY}");
+                break;
+            }
+            try
+            {
+                await Task.Delay(50, xzLandCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            conn.FrameTick();
+        }
+    }
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } xzLand
+        || MathF.Abs(xzLand.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(xzLand.VelY) > 0.1f)
+    {
+        Fail("jump+XZ did not land (Y/VelY)");
+        return;
+    }
+
+    // Grounded second jump after land is still allowed (#120).
     if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseBeforeSecond)
     {
-        Fail("PlayerPose missing before second jump");
+        Fail("PlayerPose missing before grounded second jump");
+        return;
+    }
+    if (MathF.Abs(poseBeforeSecond.Y - Movement.GroundY) > 0.05f
+        || MathF.Abs(poseBeforeSecond.VelY) > 0.1f)
+    {
+        Fail($"grounded second jump requires land Y={poseBeforeSecond.Y} VelY={poseBeforeSecond.VelY}");
         return;
     }
 
     var beforeVelY = poseBeforeSecond.VelY;
-
-    // Try immediate second jump
     conn.Reducers.Move(0f, 0f, jump: true);
     await PumpFrames(conn, 200);
+    conn.FrameTick();
 
-    if (conn.Db.PlayerPose.Identity.Find(identity) is { } poseAfterSecond)
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } poseAfterSecond)
     {
-        // VelY should not jump back to JumpVelocity if already landed/grounded
-        if (MathF.Abs(poseAfterSecond.VelY - Movement.JumpVelocity) < 0.5f && MathF.Abs(beforeVelY) < 0.1f)
-        {
-            // This is fine - we jumped again from ground
-            Console.WriteLine($"second jump from ground: velY {beforeVelY} -> {poseAfterSecond.VelY}");
-        }
-        else
-        {
-            Console.WriteLine($"second jump check: velY {beforeVelY} -> {poseAfterSecond.VelY}");
-        }
+        Fail("PlayerPose missing after grounded second jump");
+        return;
     }
+    if (MathF.Abs(poseAfterSecond.VelY - Movement.JumpVelocity) > 1f
+        && poseAfterSecond.Y <= Movement.GroundY + 0.01f)
+    {
+        Fail($"grounded second jump did not raise Y or set VelY (Y={poseAfterSecond.Y} VelY={poseAfterSecond.VelY})");
+        return;
+    }
+    Console.WriteLine($"grounded second jump: velY {beforeVelY} -> {poseAfterSecond.VelY} Y={poseAfterSecond.Y}");
 
     // Small XZ move with jump=false still works
     var beforeX = poseBeforeSecond.X;
@@ -215,6 +604,53 @@ static void Fail(string msg)
     Environment.ExitCode = 1;
 }
 
+
+static async Task<PlayerPose?> WaitPose(DbConnection conn, Identity identity, Func<PlayerPose, bool> pred, int timeoutMs)
+{
+    using var cts = new CancellationTokenSource(timeoutMs);
+    try
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } pose && pred(pose))
+            {
+                return pose;
+            }
+            await Task.Delay(16, cts.Token).ConfigureAwait(false);
+            conn.FrameTick();
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // timeout
+    }
+
+    return conn.Db.PlayerPose.Identity.Find(identity) is { } last && pred(last) ? last : null;
+}
+
+static async Task<PlayerPose?> WaitPoseTight(DbConnection conn, Identity identity, Func<PlayerPose, bool> pred, int timeoutMs)
+{
+    using var cts = new CancellationTokenSource(timeoutMs);
+    try
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            conn.FrameTick();
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } pose && pred(pose))
+            {
+                return pose;
+            }
+            await Task.Delay(1, cts.Token).ConfigureAwait(false);
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // timeout
+    }
+
+    return conn.Db.PlayerPose.Identity.Find(identity) is { } last && pred(last) ? last : null;
+}
 
 static async Task PumpFrames(DbConnection conn, int ms)
 {

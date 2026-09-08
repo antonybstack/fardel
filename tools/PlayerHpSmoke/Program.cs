@@ -116,7 +116,58 @@ try
     }
     Console.WriteLine("dead Move reject OK");
 
-    // Wait for scheduled respawn: full HP + yard origin pose.
+    // Dead jump:true (Space on corpse) also rejects; Y/VelY unchanged.
+    var poseBeforeJump = conn.Db.PlayerPose.Identity.Find(id)!;
+    string? jumpFail = null;
+    var jumpFailed = new TaskCompletionSource();
+    void OnDeadJump(ReducerEventContext ctx, float dx, float dz, bool jump)
+    {
+        if (!jump || dx != 0f || dz != 0f)
+        {
+            return;
+        }
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                jumpFail = reason;
+                jumpFailed.TrySetResult();
+                break;
+            case Status.Committed:
+                jumpFailed.TrySetException(new Exception("Move jump:true committed while dead"));
+                break;
+            case Status.OutOfEnergy(_):
+                jumpFailed.TrySetException(new Exception("Move jump:true out of energy"));
+                break;
+        }
+    }
+    conn.Reducers.OnMove += OnDeadJump;
+    try
+    {
+        conn.Reducers.Move(0f, 0f, true);
+        await Pump(jumpFailed.Task, timeoutMs, conn, "jump while dead");
+    }
+    finally
+    {
+        conn.Reducers.OnMove -= OnDeadJump;
+    }
+    if (string.IsNullOrEmpty(jumpFail) ||
+        jumpFail.IndexOf("Dead", StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected Dead on Move jump:true, got: {jumpFail ?? "(null)"}");
+        return;
+    }
+    var poseAfterJump = conn.Db.PlayerPose.Identity.Find(id)!;
+    if (MathF.Abs(poseAfterJump.Y - poseBeforeJump.Y) > 0.01f ||
+        MathF.Abs(poseAfterJump.VelY - poseBeforeJump.VelY) > 0.01f)
+    {
+        Fail($"dead jump changed pose Y/VelY ({poseBeforeJump.Y},{poseBeforeJump.VelY})->({poseAfterJump.Y},{poseAfterJump.VelY})");
+        return;
+    }
+    Console.WriteLine($"dead jump reject OK (Y={poseAfterJump.Y} VelY={poseAfterJump.VelY} unchanged)");
+
+    var groundedAtDeath = conn.Db.PlayerPose.Identity.Find(id)!.LastGroundedMicros;
+
+    // Wait for scheduled respawn: full HP + yard origin pose (including vertical).
     await PumpUntil(() =>
     {
         var ch = conn.Db.Character.Identity.Find(id);
@@ -124,12 +175,29 @@ try
         return ch is { Hp: var h, MaxHp: var m } && m > 0 && h == m
             && pose is { } p
             && MathF.Abs(p.X - Movement.SpawnX) < 0.05f
-            && MathF.Abs(p.Z - Movement.SpawnZ) < 0.05f;
+            && MathF.Abs(p.Z - Movement.SpawnZ) < 0.05f
+            && MathF.Abs(p.Y - Movement.SpawnY) < 0.05f
+            && p.LastGroundedMicros > groundedAtDeath;
     }, timeoutMs, conn, "respawn full HP at spawn");
 
     var alive = conn.Db.Character.Identity.Find(id)!;
     var poseAlive = conn.Db.PlayerPose.Identity.Find(id)!;
-    Console.WriteLine($"respawn OK hp={alive.Hp}/{alive.MaxHp} pose=({poseAlive.X},{poseAlive.Z})");
+    if (MathF.Abs(poseAlive.Y - Movement.SpawnY) > 0.05f)
+    {
+        Fail($"respawn Y={poseAlive.Y} expected ≈ {Movement.SpawnY}");
+        return;
+    }
+    if (MathF.Abs(poseAlive.VelY) > 0.05f)
+    {
+        Fail($"respawn VelY={poseAlive.VelY} not ≈ 0");
+        return;
+    }
+    if (poseAlive.LastGroundedMicros <= groundedAtDeath)
+    {
+        Fail($"respawn LastGroundedMicros={poseAlive.LastGroundedMicros} not > death={groundedAtDeath}");
+        return;
+    }
+    Console.WriteLine($"respawn OK hp={alive.Hp}/{alive.MaxHp} pose=({poseAlive.X},{poseAlive.Y},{poseAlive.Z}) VelY={poseAlive.VelY} LastGroundedMicros={poseAlive.LastGroundedMicros}");
 
     // Can cast again after respawn.
     conn.Reducers.EnsureTrainingDummy();

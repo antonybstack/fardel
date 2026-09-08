@@ -198,7 +198,31 @@ try
     }
     await ExpectUseFail(conn, "Already full", "full");
 
-    // Dead reject
+    // Dead reject — hold bandage while alive (buy if empty), then die. Dead cannot buy.
+    if (conn.Db.Character.Identity.Find(id) is not { HasYardBandage: true })
+    {
+        if (conn.Db.Character.Identity.Find(id) is not { Hp: > 0 })
+        {
+            Fail("cannot buy bandage while dead; expected bandage held before death");
+            return;
+        }
+        await MoveTo(conn, id, vendor.X + 0.8f, vendor.Z + 0.4f);
+        await EnsureXp(conn, id, vendor, Bandage.BuyXpCost);
+        if (conn.Db.Character.Identity.Find(id) is not { Hp: > 0 })
+        {
+            Fail("died farming XP for Dead-gate bandage; cannot buy while dead");
+            return;
+        }
+        conn.Reducers.BuyYardBandage();
+        await PumpUntil(() => conn.Db.Character.Identity.Find(id) is { HasYardBandage: true },
+            timeoutMs, conn, "buy bandage for Dead gate");
+    }
+    if (conn.Db.Character.Identity.Find(id) is not { HasYardBandage: true, Hp: > 0 })
+    {
+        Fail("expected to hold a bandage while alive before Dead UseBandage reject");
+        return;
+    }
+
     var casts = 0;
     while (conn.Db.Character.Identity.Find(id) is { Hp: > 0 } && casts < 40)
     {
@@ -223,17 +247,13 @@ try
         Fail("expected death for Dead UseBandage reject");
         return;
     }
-    // May still hold bandage from full-gate buy
     if (conn.Db.Character.Identity.Find(id) is not { HasYardBandage: true })
     {
-        // Dead cannot buy; skip dead gate if bag empty — but buy happened before death.
-        Console.WriteLine("note: no bandage held at death; skipping Dead reject assert");
+        Fail("expected HasYardBandage held at death for Dead UseBandage reject");
+        return;
     }
-    else
-    {
-        await ExpectUseFail(conn, "Dead", "dead");
-        Console.WriteLine("dead UseBandage reject OK");
-    }
+    await ExpectUseFail(conn, "Dead", "dead");
+    Console.WriteLine("dead UseBandage reject OK");
 
     await PumpUntil(() =>
         conn.Db.Character.Identity.Find(id) is { Hp: var h, MaxHp: var m } && m > 0 && h == m,

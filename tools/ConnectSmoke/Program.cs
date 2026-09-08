@@ -5,8 +5,9 @@ using SpacetimeDB.Types;
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 15000;
+var startedMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
 
-var tcs = new TaskCompletionSource<(bool ok, string detail)>();
+var tcs = new TaskCompletionSource<(bool ok, Identity identity, string detail)>();
 
 DbConnection? conn = null;
 try
@@ -16,17 +17,17 @@ try
         .WithDatabaseName(db)
         .OnConnect((_, identity, _) =>
         {
-            tcs.TrySetResult((true, identity.ToString()));
+            tcs.TrySetResult((true, identity, identity.ToString()));
         })
         .OnConnectError(e =>
         {
-            tcs.TrySetResult((false, e.ToString()));
+            tcs.TrySetResult((false, default, e.ToString()));
         })
         .OnDisconnect((_, e) =>
         {
             if (!tcs.Task.IsCompleted)
             {
-                tcs.TrySetResult((false, e?.ToString() ?? "disconnected before connect"));
+                tcs.TrySetResult((false, default, e?.ToString() ?? "disconnected before connect"));
             }
         })
         .Build();
@@ -45,7 +46,7 @@ try
         return;
     }
 
-    var (ok, detail) = await tcs.Task.ConfigureAwait(false);
+    var (ok, identity, detail) = await tcs.Task.ConfigureAwait(false);
     if (!ok)
     {
         Console.Error.WriteLine("FAIL: " + detail);
@@ -83,8 +84,7 @@ try
     {
         while (pose is null && !cts3.IsCancellationRequested)
         {
-            var parsed = Identity.TryParse(detail, out var id);
-            pose = parsed ? conn.Db.PlayerPose.Identity.Find(id) : null;
+            pose = conn.Db.PlayerPose.Identity.Find(identity);
             if (pose is null)
             {
                 conn.FrameTick();
@@ -100,7 +100,7 @@ try
         return;
     }
 
-    // Assert vertical spawn defaults (#168)
+    // Assert EnsureSession spawn verticals (#168): Y≈SpawnY, VelY≈0, LastGroundedMicros set/recent.
     if (MathF.Abs(pose.Y - Movement.SpawnY) > 0.05f)
     {
         Console.Error.WriteLine($"FAIL: Y={pose.Y} not ≈ SpawnY={Movement.SpawnY}");
@@ -113,9 +113,15 @@ try
         Environment.ExitCode = 1;
         return;
     }
-    if (pose.LastGroundedMicros == 0)
+    var nowMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+    var ageMicros = nowMicros - pose.LastGroundedMicros;
+    // Nonzero and within the connect window (5s clock skew). Stale coyote fuel still PASSed #183.
+    if (pose.LastGroundedMicros == 0
+        || pose.LastGroundedMicros < startedMicros - 5_000_000
+        || ageMicros > timeoutMs * 1000L)
     {
-        Console.Error.WriteLine("FAIL: LastGroundedMicros not set (zero)");
+        Console.Error.WriteLine(
+            $"FAIL: LastGroundedMicros={pose.LastGroundedMicros} not set/recent (start={startedMicros} now={nowMicros})");
         Environment.ExitCode = 1;
         return;
     }

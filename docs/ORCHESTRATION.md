@@ -1,8 +1,8 @@
 # Fardel team orchestration
 
-Operational runbook for the multi-agent development loop that lands work on `develop`, cuts `main`, and ships [play.sparkify.dev](https://play.sparkify.dev). Written so the same loop can be recreated on Antony’s Mac Studio via **Grok CLI** (parent agent creates subagents; the Mac is the shared computer instead of the Grok Bot Linux box).
+Operational runbook for the multi-agent development loop that lands work on `develop`, cuts `main`, and ships [play.sparkify.dev](https://play.sparkify.dev). Recreatable on Antony's Mac Studio via **Grok CLI** (parent agent + subagents).
 
-Related docs: [TEAM_SEATS.md](TEAM_SEATS.md) · [BACKLOG.md](BACKLOG.md) · [DEV_BOX.md](DEV_BOX.md) · [DEPLOY.md](DEPLOY.md) · [LEARNINGS.md](LEARNINGS.md) · [SCOPE.md](SCOPE.md)
+Related docs: [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md) · [TEAM_SEATS.md](TEAM_SEATS.md) · [DEPLOY.md](DEPLOY.md) · [DEV_BOX.md](DEV_BOX.md) · [LEARNINGS.md](LEARNINGS.md) · [SCOPE.md](SCOPE.md)
 
 ---
 
@@ -12,8 +12,8 @@ Related docs: [TEAM_SEATS.md](TEAM_SEATS.md) · [BACKLOG.md](BACKLOG.md) · [DEV
 
 - SpacetimeDB **C#** module as authority
 - **Babylon.js + TypeScript / Vite** client (`web/`)
-- Headless C# smokes as the first proof of Done-when
-- Visual evidence hosted on **sparkify/Cloudflare** (`ve.sparkify.dev`) on every user-facing PR (no routine `ve/*.png` commits; never ask Antony for GitHub sign-in)
+- Headless C# smokes as first proof of Done-when
+- Visual evidence hosted on **Cloudflare R2** (`ve.sparkify.dev`) for every user-facing PR
 
 **Unbound Team Lead** (parent) coordinates Devs, QA, Reviewer, Release, and **Art**. The Lead:
 
@@ -32,7 +32,7 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 | Role | Job | Must NOT |
 |------|-----|----------|
 | **Team Lead** | Pick Issues; assign seats; broadcast `develop` tip SHAs; merge after Reviewer; run continuous-iterate; unstick Release only on P0 / wipe | Solo invent on `main`; wipe non-local DBs; fan-out spam; micromanage routine cuts |
-| **Dev1–Dev5** | Implement one assigned Issue in their seat worktree; open PR → `develop` with VE | Invent without an Issue; PR to `main`; use another seat’s ports/DB |
+| **Dev1–Dev5** | Implement one assigned Issue in their seat worktree; open PR → `develop` with VE | Invent without an Issue; PR to `main`; use another seat's ports/DB |
 | **QA Bugs** | Smoke matrix, flake repros, regression Issues; optional fix PRs as `qa/<slug>` | Feature invent |
 | **QA Feel** | Feel / UX playtests; `feel`-labeled Issues; Mac/Pages FPS truth (not box SwiftShader) | Feature invent |
 | **Reviewer** | Review PRs targeting `develop`: correctness, smoke coverage, schema-collision risk, lane conflicts; concrete feedback | Own features; push merges |
@@ -41,18 +41,15 @@ Autonomy default: keep the loop moving (assign idle seats, nudge reviews, merge 
 
 ### Seat map (shared computer)
 
-Canonical file: [`tools/scripts/fardel-seats.env`](../tools/scripts/fardel-seats.env). Narrative: [TEAM_SEATS.md](TEAM_SEATS.md).
+Canonical file: [`tools/scripts/seats.conf`](../tools/scripts/seats.conf). Narrative: [TEAM_SEATS.md](TEAM_SEATS.md). `fardel-seats.env` is a pointer only (3001–3005 retired — too close to prod `:3000`).
 
-| Seat | Spacetime | Vite | DB name | Worktree (box today) |
-|------|-----------|------|---------|----------------------|
-| `dev1` | 3001 | 5174 | `fardel-dev1` | `/workspace/wt/dev1` |
-| `dev2` | 3002 | 5175 | `fardel-dev2` | `/workspace/wt/dev2` |
-| `dev3` | 3003 | 5176 | `fardel-dev3` | `/workspace/wt/dev3` |
-| `dev4` | 3004 | 5177 | `fardel-dev4` | `/workspace/wt/dev4` |
-| `dev5` | 3005 | 5178 | `fardel-dev5` | `/workspace/wt/dev5` |
-| `qa-bugs` | 3011 | 5184 | `fardel-qa-bugs` | `/workspace/wt/qa-bugs` |
-| `qa-feel` | 3012 | 5185 | `fardel-qa-feel` | `/workspace/wt/qa-feel` |
-| `lead` | 3000 | 5173 | `fardel` | `/workspace/fardel` |
+| Seat | Spacetime | Vite | DB name | Worktree |
+|------|-----------|------|---------|----------|
+| `lead` | 3000 | 5173 | `fardel` | `/Users/antbly/dev/fardel` (box: `/workspace/fardel`) |
+| `dev-1` … `dev-12` | 3201–3212 | 5201–5212 | `fardel-dev-N` | `$HOME/dev/wt/dev-N` (box: `/workspace/wt/dev-N`) |
+| `qa-1` … `qa-8` | 3241–3248 | 5241–5248 | `fardel-qa-N` | `$HOME/dev/wt/qa-N` (box: `/workspace/wt/qa-N`) |
+
+Aliases: `dev1` → `dev-1`, `qa-bugs` → `qa-1`, `qa-feel` → `qa-2`. Claim with `./tools/scripts/seat-claim.sh --role dev`. Never bind `:3000` / db `fardel`.
 
 Per-seat Spacetime data: `$HOME/.local/share/fardel-wt/<slug>`.
 
@@ -76,10 +73,10 @@ Grok Bot / Grok CLI agents talk through channels and 1:1 messages. Hard constrai
 2. Branch name (`dev1/bandage`)
 3. Base tip SHA of `develop` at assign time
 4. Done-when (smokes + `?ve=…` name)
-5. VE expectation (upload PNG to Cloudflare VE host → embed `https://ve.sparkify.dev/...` in PR; **no** new `ve/*.png` commits; **never** ask Antony to sign into GitHub for VE)
-6. Explicit “do not invent past this Issue”
+5. VE expectation (upload PNG to Cloudflare R2 → embed `https://ve.sparkify.dev/...` in PR)
+6. Explicit "do not invent past this Issue"
 
-Prefer **GitHub Issues as source of truth** over maintaining parallel markdown backlogs ([BACKLOG.md](BACKLOG.md)).
+Prefer **GitHub Issues as source of truth** over maintaining parallel markdown backlogs.
 
 Do not re-ping Reviewer or Lead about a PR that is already merged — check `gh pr view` / merge state first.
 
@@ -93,24 +90,22 @@ Do not re-ping Reviewer or Lead about a PR that is already merged — check `gh 
 | `develop` | **Integration** — every day-to-day PR targets this. |
 | `seats/<slug>` | Long-lived worktree tips (optional); feature work still ships on short-lived branches. |
 | `devN/<slug>`, `client/<slug>`, `qa/<slug>`, `art/<slug>`, `chore/<slug>` | Feature / fix / art / docs branches. |
-| `checkpoint/unity-webgl` | Frozen Unity client (not active). Active client is Babylon. |
 
 ### PR rules
 
-- Target **`develop`**, never `main` (except Release’s promote PR).
+- Target **`develop`**, never `main` (except Release's promote PR).
 - Body includes `Fixes #N` (or `Closes #N`) so merge closes the Issue.
-- **VE required** for user-visible changes: embed a real screenshot in the PR body (or sticky comment) hosted on **Cloudflare / sparkify** at `https://ve.sparkify.dev/<pr-or-slug>/<name>.png`.
+- **VE required** for user-visible changes: embed a real screenshot in the PR body (or sticky comment) hosted on **Cloudflare R2** at `https://ve.sparkify.dev/<pr-or-slug>/<name>.png`.
   Example: `![chat-read](https://ve.sparkify.dev/98/chat-read.png)` or `<img src="https://ve.sparkify.dev/98/chat-read.png" />`.
-- **Do not** commit routine `ve/*.png` into the git repo (bloat). Do **not** use GitHub `user-attachments` / browser paste (does not scale — each agent desktop has its own login).
-- **Never ask Antony to sign into GitHub** for VE. All seats share box Cloudflare credentials (`CLOUDFLARE_API_TOKEN`) and upload via `tools/scripts/ve-upload.sh`.
-- How to upload:
+- **Do not** commit routine `ve/*.png` into the git repo (bloat).
+- **Do not** use GitHub `user-attachments` / browser paste for new VE (does not scale — each agent needs its own login).
+- **Never ask Antony to sign into GitHub** for VE. All seats share Cloudflare credentials (`CLOUDFLARE_API_TOKEN`) and upload via `tools/scripts/ve-upload.sh`.
+- How to upload VE:
   1. Capture a real PNG (seat browser / `?ve=…`).
   2. `tools/scripts/ve-upload.sh <local.png> <pr-or-slug>/<name>.png`
   3. Embed the printed `https://ve.sparkify.dev/…` URL in the PR.
-- Interim if CF upload is down: drop PNG at `/workspace/ve-capture/<pr>-<name>.png` and ping **Lead only** (Lead uploads). Never ping Antony for a login wall.
 - Reviewer bar: image URL must be `https://ve.sparkify.dev/…` (HTTP 200 `image/png`) and render in the PR UI. Reject relative `ve/` links, GitHub `user-attachments` for new work, `raw.githubusercontent.com` VE embeds for new work, and text placeholders.
-- Optional Cursor/local paths are never enough alone — the GitHub PR must show the image.
-- Serialize **schema / reducer / Spacetime module** edits to **one Dev at a time**. Client-only Cosmetics can parallel.
+- Serialize **schema / reducer / Spacetime module** edits to **one Dev at a time**. Client-only cosmetics can parallel.
 - After merge: Lead broadcasts new `develop` tip SHA; open branches rebase onto it before next push.
 
 ### Attribution
@@ -121,16 +116,16 @@ Commits as: `Antony Blyakher <antonyblyakher@gmail.com>` (GitHub: `antonybstack`
 
 ## 5. Shared-computer isolation (worktrees + ports)
 
-Agents share **one filesystem** (the Grok Bot box today; Mac Studio in the Grok CLI port). Isolation is not “separate VMs” — it is:
+Agents share **one filesystem** (the Grok Bot box today; Mac Studio in the Grok CLI port). Isolation is not "separate VMs" — it is:
 
-1. **Git worktrees** so concurrent checkouts don’t fight
+1. **Git worktrees** so concurrent checkouts don't fight
 2. **Unique Spacetime ports + data dirs + DB names**
 3. **Unique Vite ports**
 
 ### Seat bootstrap
 
 ```bash
-# From repo root of the seat worktree’s sibling scripts (lead clone or any wt that has tools/)
+# From repo root of the seat worktree's sibling scripts (lead clone or any wt that has tools/)
 source tools/scripts/wt-env.sh <slug>          # exports FARDEL_*
 tools/scripts/ensure-seat-spacetime.sh <slug>  # detached start + ping
 
@@ -161,7 +156,7 @@ Lead defaults match historical single-instance docs in [DEV_BOX.md](DEV_BOX.md) 
 ### Backlog
 
 - Board: https://github.com/antonybstack/fardel/issues
-- Labels: `P0` / `P1` / `P2`, `lane:server` | `lane:client` | `lane:qa` | `lane:release` | `lane:art`, `feel`, `flake`, `wave`
+- Labels: `P0` / `P1` / `P2`, `lane:server` | `lane:client` | `lane:qa` | `lane:release` | `lane:art`, `feel`, `flake`, `wave`, `bug`, `enhancement`
 - Templates: `.github/ISSUE_TEMPLATE/` (bug, feature, feel)
 - Team Lead assigns waves from Issues / milestones, not chat lists
 
@@ -171,7 +166,7 @@ A PR is merge-ready when **all** of:
 
 1. Reviewer has reviewed (approve or feedback addressed)
 2. Relevant headless smokes green on the seat (or Lead/QA Bugs verification)
-3. VE present (`https://ve.sparkify.dev/…` embed in PR) when UI/feel changed — **no** new `ve/*.png` commits; never ask Antony for GitHub sign-in
+3. VE present (`https://ve.sparkify.dev/…` embed in PR) when UI/feel changed
 4. `Fixes #N` present
 5. No open schema collision with another in-flight server PR
 
@@ -184,7 +179,7 @@ Release decides cuts **without** Lead greenlight.
 1. **Cut when** (all true): (a) `develop` tip has Reviewer-cleared merges with meaningful delta since `main`, (b) QA Bugs smokes green on that tip (or Release documents a waive), (c) no open P0 blockers on the tip.
 2. Release **pins** a concrete `develop` SHA and opens / merges **develop → main** for that tip only (never silently include later develops mid-cut).
 3. **Bindings arity guard** (`./tools/scripts/check-move-bindings-arity.sh`) must pass on the pinned tip before Mac smoke / Pages (#119 / #166).
-4. Mac Studio smoke on `/Users/antbly/dev/fardel` (local Spacetime and/or tunnel `dev-db.sparkify.dev`); prefer `./tools/scripts/run-smoke-matrix.sh` (compile fail-fast, #130). **Gate on runner exit code and `results.tsv`** — not merely that the script finished (#148).
+4. Mac Studio smoke on `/Users/antbly/dev/fardel` (local Spacetime and/or tunnel `dev-db.sparkify.dev`); run `./tools/scripts/run-smoke-matrix.sh` (dynamic `tools/*Smoke` discovery — JumpSmoke must appear when present; #122). **Do not substitute ConnectSmoke-only or a fixed N.** Gate on runner exit code and `results.tsv` row count matching discovered dirs — not merely that the script finished (#148).
 5. If green: Vite production build + Cloudflare Pages → `https://play.sparkify.dev`.
 6. Post VE + short release beat to Lead / Fardel QA (FYI, not a gate).
 7. Later commits on `develop` wait for the next cut.
@@ -218,6 +213,8 @@ Do **not** use bare `spacetime start &` in agent shells — the process dies whe
 - Tunnel: `cloudflared` → `dev-db.sparkify.dev` → local `:3000` ([DEPLOY.md](DEPLOY.md))
 - Feel / FPS claims: verify on Mac or Pages, **not** box SwiftShader
 
+For portable Mac Studio + Grok CLI runbook, see [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md).
+
 ### Client note
 
 Unity WebGL is frozen on `checkpoint/unity-webgl`. Active client is Babylon under `web/`.
@@ -244,7 +241,7 @@ flowchart LR
 1. **Lead** scans open Issues (priority, `lane:*`, open PRs, who is idle).
 2. **Assign** one non-colliding ticket per idle Dev; serialize `lane:server` schema work.
 3. **Seat** fetches latest `develop`, branches, implements, runs seat-local smokes + Vite `?ve=…`.
-4. **Open PR** → `develop` with `Fixes #N` + VE screenshot embedded via `https://ve.sparkify.dev/…` (upload with `tools/scripts/ve-upload.sh` — **no** force-add `ve/*.png`, **no** GitHub browser paste).
+4. **Open PR** → `develop` with `Fixes #N` + VE screenshot embedded via `https://ve.sparkify.dev/…` (upload with `tools/scripts/ve-upload.sh`).
 5. **Reviewer** reviews; author pushes fixes.
 6. **Lead** merges, closes Issue, broadcasts tip SHA, asks open branches to rebase.
 7. **QA Feel / QA Bugs** pick follow-on Issues (`feel`, `flake`) as assigned — not invent.
@@ -273,7 +270,7 @@ Intent of the live `@every 15m` routine (conceptual; recreate on Mac/Grok CLI as
 1. Diff `main`…`develop`; confirm Reviewer-cleared meaningful delta + green smokes + no P0s.
 2. Pin tip SHA; open PR `develop` → `main` (or fast-forward if policy allows) for that SHA only.
 3. **Bindings arity preflight (#119 / #166):** from repo root run `./tools/scripts/check-move-bindings-arity.sh` — must pass (server `Move(dx,dz,jump)` matches `web/src/module_bindings/move_reducer.ts` + C# `Move.g.cs`; PlayerPose `VelY`/`LastGroundedMicros` in C# **and** web `player_pose_table.ts` `vel_y`/`last_grounded_micros`). Fail the cut if this fails — do not ship a pin like #112.
-4. On Mac: pull that tip at `/Users/antbly/dev/fardel`, publish local if needed, run critical smokes (prefer `./tools/scripts/run-smoke-matrix.sh` — compile fail-fast) + quick Vite playpass. **Require non-zero exit on FAIL** and inspect `results.tsv` — do not green the cut because the runner printed `MATRIX DONE` (#148).
+4. On Mac: pull that tip at `/Users/antbly/dev/fardel`, publish local if needed, run `./tools/scripts/run-smoke-matrix.sh` (dynamic `tools/*Smoke` discovery — JumpSmoke must appear when present on the pin; #122). **Do not substitute a fixed "critical" list or ConnectSmoke-only.** Gate on runner exit code and `results.tsv` row count matching discovered dirs — not merely that the script printed `MATRIX DONE` (#148). Quick Vite playpass.
 5. Build `web/` → deploy Pages project for `play.sparkify.dev`.
 6. Capture VE of live play (or Mac local if Pages lag).
 7. Report: main SHA, Pages URL, smoke result, VE path, anything deferred to next cut (FYI to Lead / Fardel QA).
@@ -292,16 +289,15 @@ Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specif
 | Agents re-ping already-merged PRs | Always `gh pr view` before nudge; Lead says STOP when looping |
 | Auto-review / approval blocks merges or elevated Shell | Escalate honestly to Antony; never credential workarounds |
 | Channel 6-member cap | Split **Fardel** vs **Fardel QA**; add **Fardel Art** when visuals need a standing room |
-| Idle Devs + empty Issues board | Lead/Art must file Issues and assign — never “wait for inspiration” |
+| Idle Devs + empty Issues board | Lead/Art must file Issues and assign — never "wait for inspiration" |
 | Visual gap vs hordes/RS/WoW mood | Art owns north star (#31-style); Devs implement presentation Issues; **no paid packs** — free/OSS or DIY |
 | Tip moves mid-rebase | `git fetch origin develop` before rebase; Lead broadcasts SHA after every merge |
-| VE missing from PR (gitignore) | `git add -f ve/...` + embed in body as Done-when |
-| Stale GitHub `CONFLICTING` / mergeable noise | Re-fetch base; rebase; reopen PR if GitHub lies |
+| GitHub `CONFLICTING` / mergeable noise | Re-fetch base; rebase; reopen PR if GitHub lies |
 | Parallel schema PRs | Serialize `lane:server` module edits |
 | Release cut expands past pinned tip | Release pins SHA at cut start; refuses silent expansion |
 | Box FPS used as feel truth | QA Feel verifies on Mac / Pages |
 | Spacetime dies with agent shell abort | `ensure-*-spacetime.sh` + detached/`setsid` |
-| Fish can’t find `spacetime` on Mac | `fish_add_path ~/.local/bin` |
+| Fish can't find `spacetime` on Mac | `fish_add_path ~/.local/bin` |
 | Local publish schema drift | `--delete-data=always` **local only** |
 | Stale C# `Move.g.cs` after schema change (#118) | After module Move/PlayerPose edits: `spacetime generate --lang csharp` and **commit** `client/.../Generated/` |
 | `Move.compat.cs` + 2-arg `Move.g.cs` → CS0111 matrix wipe (#130) | Generate **first**; only then optional 2-arg compat — or delete compat once 3-arg is committed; matrix runner refuses the bad combo / fail-fast on compile |
@@ -314,55 +310,69 @@ Game-design learnings stay in [LEARNINGS.md](LEARNINGS.md). Orchestration-specif
 
 Goal: same loop, **no Grok Bot box**. Parent agent + subagents; Mac Studio filesystem is the shared computer.
 
-### Mapping
+**See the comprehensive portable runbook:** [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md)
 
-| Bot world | Mac / Grok CLI world |
-|-----------|----------------------|
-| Unbound Team Lead chat | Parent Grok CLI agent (Team Lead persona) |
-| CreateAgent teammates | Parent-created **subagents** (Dev1–5, QA Bugs, QA Feel, Reviewer, Release, Art) with the same charters as §2 |
-| Shared Linux box `/workspace` | Mac Studio disk (e.g. under `/Users/antbly/dev/`) |
-| `/workspace/fardel` | `/Users/antbly/dev/fardel` |
-| `/workspace/wt/<seat>` | `/Users/antbly/dev/fardel-wt/<seat>` (suggested) |
-| Channels Fardel / Fardel QA / Fardel Art | Parent group threads or CLI-equivalent rooms (respect 6-member style caps if any) |
-| `@every 15m` Bot routine | Parent schedule / cron tick with the continuous-iterate prompt |
-| Box VE / SwiftShader | Mac screenshots + Pages VEs |
-
-### One-time Mac setup
-
-1. Clone `antonybstack/fardel` to `/Users/antbly/dev/fardel` if missing.
-2. Install toolchain: .NET 8+10, SpacetimeDB CLI 2.10, Node 22, `gh` authed as `antonybstack`, `cloudflared` for `dev-db` if needed.
-3. Copy/adapt `tools/scripts/fardel-seats.env` so worktree paths point at `fardel-wt/<seat>` (keep **ports and DB names** identical for doc portability).
-4. Create worktrees:
-
-```bash
-cd /Users/antbly/dev/fardel
-git fetch origin
-for s in dev1 dev2 dev3 dev4 dev5 qa-bugs qa-feel; do
-  git worktree add "/Users/antbly/dev/fardel-wt/$s" -b "seats/$s" origin/develop || \
-    git worktree add "/Users/antbly/dev/fardel-wt/$s" "seats/$s"
-done
-```
-
-5. Parent creates subagents with descriptions copied from §2 (include seat path + ports + “wait for assign; no invent”).
-6. Wire a 15-minute orchestration tick on the parent (same intent as §8 continuous iterate).
-
-### Runtime rules on Mac
-
-- Parent assigns from Issues; subagents work only in their worktree.
-- Source `wt-env.sh` / ensure-seat scripts after path rewrite.
-- Human / Lead still confirms: any non-local DB wipe, force-push, payment/secrets. Routine Pages deploys are Release-owned.
-- Prefer Issues + PR links over long chat dumps when waking Antony.
-- When Cloud Agents / remote coders are unavailable, seats edit locally on the Mac — same Done-when (smokes + VE).
-
-### What “done” looks like after a port
-
-- Idle Dev can receive `#N`, land a PR to `develop` with VE, get Reviewer + Lead merge, without touching the Bot box.
-- Release self-decides cuts and updates `play.sparkify.dev` from the Mac when criteria are met.
-- Continuous tick stays quiet when the board is idle.
+That document covers:
+- One-time Mac setup (toolchain, worktrees, credentials)
+- How parent agent creates and coordinates subagents
+- Mapping Bot roles → Mac/Grok CLI equivalents
+- Issue assign → PR → Reviewer → merge flow without Bot
+- VE upload with shared Cloudflare token
+- Release cut to play.sparkify.dev from Mac
+- What human gates remain
+- Jump/locomotion gating example (harness `?ve=` vs real input)
 
 ---
 
-## 12. Quick reference
+## 12. Token budget / chat hygiene (hard)
+
+Antony is under **severe token spend pressure**. Every message burns budget. All seats follow these rules or stop.
+
+### Banned responses
+
+- **"Ack"** / "Copy" / "On it" / "Standing by" / "Understood" / "Will do"
+- Roster restates ("Dev1 on #20, Dev2 idle, …")
+- Any reply to Lead corrections — seats fix silently
+
+### Before any PR status ping
+
+Run `gh pr view <n>`. If state = **MERGED** or **CLOSED**: **silence forever** on that PR. Never ping "ready to merge" / "please review" / "VE missing" on dead PRs.
+
+### Max one outbound status per open PR tip SHA
+
+Once you report "PR #N up @ SHA" or "MERGE-READY @ SHA", do **not** send another status on that same SHA unless the PR is blocked or Lead asks. Silence = no change.
+
+### Lead corrections
+
+When Lead says "rebase" / "fix X" / "wrong lane": seat fixes silently. **No** "got it" / "fixing now" reply. Next speak = "PR #N rebased @ new-SHA" when done (if material).
+
+### Spend self-estimate (required)
+
+End every status or PR comment with:
+
+```
+spend: light   # short update, no churn
+spend: med     # multi-step or moderate detail
+spend: heavy   # long explanation or multi-turn needed
+```
+
+Agents lack exact token meters; this is the monitor signal for Antony.
+
+### Continuous-iterate cadence
+
+- **~30 minutes** between ticks (not 15m unless crisis)
+- Speak only on tip moves, new assigns, merges, or blockers
+- Quiet tick = no message at all
+
+### Prefer Cloud Agents over chat
+
+For heavy edits or multi-turn work on the same tip, **launch a Cloud Agent** instead of burning parent context with long back-and-forth. Cloud Agents are cheaper for deep work.
+
+---
+
+**Summary:** Check `gh pr view` first. Silence on MERGED/CLOSED. One status per SHA. No acks. Self-estimate spend. ~30m iterate. Use Cloud Agents for heavy work. **Violating these rules exhausts Antony's budget.**
+
+---
 
 ### Merge gate
 
@@ -370,7 +380,7 @@ done
 
 ### Labels
 
-`P0` `P1` `P2` · `lane:server` `lane:client` `lane:qa` `lane:release` `lane:art` · `feel` · `flake` · `wave`
+`P0` `P1` `P2` · `lane:server` `lane:client` `lane:qa` `lane:release` `lane:art` · `feel` · `flake` · `wave` · `bug` · `enhancement`
 
 ### Branch prefixes
 
@@ -389,7 +399,7 @@ done
 
 ---
 
-## 13. Art sourcing (no purchases)
+## 14. Art sourcing (no purchases)
 
 **Hard rule (Antony):** we **cannot purchase** assets. Only **free open-source / CC0** (commercial-use free) packs, or **original/procedural** work we develop — see [ASSETS.md](ASSETS.md).
 
@@ -400,8 +410,7 @@ Flow:
 3. Import + credits ledger land in the same PR as any third-party free assets.
 4. Procedural / kitbash presentation Issues (`lane:art` + `lane:client`) are first-class, not a stopgap apology.
 
-## 14. Minimal assign template (copy/paste)
-
+## 15. Minimal assign template (copy/paste)
 
 ```text
 Assign: #<N> <title>
@@ -409,17 +418,16 @@ Branch: <seat>/<slug> off develop @ <sha>
 Seat: <slug> (ports/DB per TEAM_SEATS)
 Done-when:
   - headless: <Smoke> green
-  - VE: ?ve=<name> → `ve-upload.sh` → embed `https://ve.sparkify.dev/…` (do **not** `git add -f` ve/*.png; never ask Antony to sign into GitHub)
+  - VE: ?ve=<name> → `ve-upload.sh` → embed `https://ve.sparkify.dev/…`
   - PR → develop with Fixes #<N>
 No invent past this Issue. Rebase if tip moves.
 ```
 
 ---
 
+## 16. Lead autonomy and Issue lifecycle
 
-## 15. Lead autonomy and Issue lifecycle
-
-Team Lead has Antony’s mandate to reorganize seats, correct agents, use Cloud Agents, and change GitHub process to hit the product vision.
+Team Lead has Antony's mandate to reorganize seats, correct agents, use Cloud Agents, and change GitHub process to hit the product vision.
 
 **Issue lifecycle (hard):**
 
@@ -429,7 +437,72 @@ Team Lead has Antony’s mandate to reorganize seats, correct agents, use Cloud 
 4. Devs ship `Fixes #N` for the locked N; stop ack-pinging Lead once confirmed.
 5. Prefer one Issue per PR; if a duplicate appears, Lead picks the survivor and comments the lock on both.
 
-**Noise control:** seats report when blocked or when a PR is up — not every “still shipping” beat.
+**Noise control:** seats report when blocked or when a PR is up — not every "still shipping" beat.
 
+---
 
-*This document describes the live Bot team loop as of 2026-09-07 (includes Fardel Art + no-idle rule) and the intended Mac Studio / Grok CLI recreation. When process drifts, update this file in the same PR as the process change.*
+## 17. Visual evidence (VE) policy — canonical
+
+### Host
+
+- **Cloudflare R2 bucket:** `fardel-ve`
+- **Public domain:** `https://ve.sparkify.dev`
+
+### Upload
+
+```bash
+tools/scripts/ve-upload.sh <local.png> <key>
+# Example: tools/scripts/ve-upload.sh /tmp/chat.png 98/chat-read.png
+```
+
+- Requires `CLOUDFLARE_API_TOKEN` environment variable
+- Account ID: `6ea5db25020bce6cbefd6c1cc999bef3` (default in script)
+- On Grok Bot box: token may live in box secrets; export into shell for wrangler
+- On Mac Studio: set token in parent/env once for all seats
+- Optional interim: capture to shared folder; Lead uploads if seat lacks token (fallback only)
+
+### Embed in PR
+
+```markdown
+![description](https://ve.sparkify.dev/<key>)
+```
+
+or
+
+```html
+<img src="https://ve.sparkify.dev/<key>" alt="description" />
+```
+
+### Forbidden for new work
+
+- Committing `ve/*.png` to git repo
+- GitHub `user-attachments` paste
+- `raw.githubusercontent.com` VE embeds
+- Relative `ve/` links in PR
+- Disk paths alone as VE
+
+### Never ask Antony to sign into GitHub for VE
+
+All seats share Cloudflare credentials. If upload fails, ping Lead only — do not ask for GitHub login.
+
+### Reviewer bar
+
+- URL must be `https://ve.sparkify.dev/…`
+- Must return HTTP 200 `image/png`
+- Must render in PR UI
+
+---
+
+## 18. Jump / locomotion gating example
+
+Feel Pages `?ve=jump` harness can PASS (jump physics OK) while manual Space input FAILS (focus-steal #127).
+
+Pattern: harness/`?ve=` automated checks vs real input UX can diverge.
+
+Locomotion-done waits for:
+1. Feel harness pass (automated)
+2. Post-#127 manual Space recheck (real input)
+
+---
+
+*This document describes the live Bot team loop as of 2026-09-08 and the portable Mac Studio / Grok CLI recreation. When process drifts, update this file in the same PR as the process change.*

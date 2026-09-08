@@ -224,6 +224,7 @@ body {
 }
 
 
+/* Minimap plate — dark + cool silver rim so cyan #39 fog cannot wash blips/N (#103). */
 #minimap {
   position: absolute;
   right: 12px;
@@ -233,9 +234,12 @@ body {
   height: 160px;
   pointer-events: none;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(6, 10, 20, 0.72);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(168, 178, 196, 0.48);
+  background: rgba(6, 10, 20, 0.94);
+  box-shadow:
+    0 0 0 2px rgba(4, 8, 16, 0.92),
+    0 4px 20px rgba(0, 0, 0, 0.58),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
 /* Selected-target frame — gold select chrome; crisp vs #39 cyan fog / grass. */
@@ -649,6 +653,14 @@ body {
     0 2px 12px rgba(0, 0, 0, 0.35),
     inset 0 0 0 1px rgba(100, 200, 185, 0.24);
 }
+/* Left-rest transition (#133) — dimmer than enter mint; not a new chrome language. */
+#selfFrame.rest-exit {
+  border-color: rgba(170, 200, 190, 0.72);
+  box-shadow:
+    0 0 8px rgba(90, 130, 120, 0.2),
+    0 2px 12px rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(200, 220, 210, 0.22);
+}
 
 .sfRest {
   margin-top: 4px;
@@ -661,9 +673,9 @@ body {
 }
 .sfRest.hidden { display: none; }
 .sfRest.exiting {
-  color: #b0cec8;
-  text-shadow: none;
-  opacity: 0.85;
+  color: #e8f6f1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  opacity: 1;
 }
 
 /* Sticky CC chrome on self-frame — CastLockedUntil / StunnedUntilMicros (#153). */
@@ -799,11 +811,26 @@ body {
 }
 
 .loIcon.tonic {
-  color: #c9a060;
+  color: #e0b878;
 }
 
 .loIcon.bandage {
-  color: #c8b8a0;
+  color: #6ecf8a;
+}
+
+/* Held chips: tonic speed-amber vs bandage heal-green (#163). */
+.loChip[data-kind="tonic"].on {
+  border-color: rgba(224, 176, 96, 0.88);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.48),
+    inset 0 0 0 1px rgba(224, 176, 96, 0.22);
+}
+
+.loChip[data-kind="bandage"].on {
+  border-color: rgba(80, 200, 130, 0.82);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.48),
+    inset 0 0 0 1px rgba(80, 200, 130, 0.22);
 }
 
 .loChip.off .loIcon {
@@ -1194,7 +1221,7 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 
 /* Scrolling combat log — right column under minimap (client-only).
-   #78 readability: dark plate over cyan fog; damage/heal/kill/system distinct, no neon. */
+   #78/#102: opaque dark plate vs #39 cyan fog; hit/heal/kill/system distinct, no neon. */
 #combatLog {
   position: absolute;
   right: 12px;
@@ -1205,24 +1232,26 @@ body[data-rmb-look="armed"] #status[data-conn] {
   max-height: min(300px, 44vh);
   display: flex;
   flex-direction: column;
-  background: rgba(6, 10, 20, 0.88);
-  border: 1px solid rgba(150, 168, 196, 0.34);
+  background: rgba(4, 8, 16, 0.94);
+  border: 1px solid rgba(168, 180, 200, 0.48);
   border-radius: 8px;
   box-shadow:
-    0 2px 14px rgba(0, 0, 0, 0.52),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.045);
+    0 3px 16px rgba(0, 0, 0, 0.62),
+    inset 0 0 0 1px rgba(220, 230, 245, 0.07);
   overflow: hidden;
 }
 
 .clHead {
   padding: 5px 9px 3px;
-  color: #d2dae8;
+  color: #e6ecf6;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 750;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-bottom: 1px solid rgba(150, 168, 196, 0.22);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+  border-bottom: 1px solid rgba(168, 180, 200, 0.32);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 0 1px #000;
 }
 
 .clLines {
@@ -1235,12 +1264,12 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 
 .clLine {
-  color: #c6ceda;
+  color: #d8e0ec;
   font-size: 12px;
   line-height: 1.38;
   font-variant-numeric: tabular-nums;
   text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.92),
+    0 1px 2px rgba(0, 0, 0, 0.95),
     0 0 1px #000;
   white-space: nowrap;
   overflow: hidden;
@@ -1275,39 +1304,47 @@ body[data-rmb-look="armed"] #status[data-conn] {
 .clLine.silenced,
 .clLine.kick,
 .clLine.stun,
-.clLine.outOfRange {
+.clLine.outOfRange,
+.clLine.noTarget,
+.clLine.deadTarget {
   color: #c6ceda;
 }
 
-/* Damage — warm orange→red, not neon. */
+/* Hit — warm orange→red, not neon (#102). */
 .clLine.damage {
-  color: #e89048;
-  font-weight: 650;
+  color: #f09a50;
+  font-weight: 700;
 }
 .clLine.damage .clTag {
-  color: #e07038;
+  color: #ff7a38;
 }
 
-/* Heal — clear green (bandage / rest / tonic). */
+/* Heal — bandage HP green; rest stays mint. Tonic is speed-amber, not a heal (#163). */
 .clLine.bandage,
-.clLine.rest,
-.clLine.tonic {
+.clLine.rest {
   color: #3ecf78;
   font-weight: 650;
 }
 .clLine.bandage .clTag,
-.clLine.rest .clTag,
-.clLine.tonic .clTag {
+.clLine.rest .clTag {
   color: #34c06c;
 }
 
-/* Critical / kill — brighter weight, no glow soup. */
+.clLine.tonic {
+  color: #e0b878;
+  font-weight: 650;
+}
+.clLine.tonic .clTag {
+  color: #d4a05c;
+}
+
+/* Kill — brighter crimson, no glow soup (#102). */
 .clLine.death {
-  color: #f07870;
-  font-weight: 750;
+  color: #ff8a82;
+  font-weight: 800;
 }
 .clLine.death .clTag {
-  color: #ee6860;
+  color: #ff6a60;
 }
 
 .clLine.respawn {
@@ -1506,6 +1543,20 @@ body[data-rmb-look="armed"] #status[data-conn] {
 @keyframes toastOut {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-6px); }
+}
+
+/* #141 — social/system toasts yield to GCD/cast: quieter, no full-attention plate. */
+.sysToast.combatQuiet {
+  animation-name: toastInQuiet, toastOutQuiet;
+  filter: saturate(0.55) brightness(0.88);
+}
+@keyframes toastInQuiet {
+  from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+  to { opacity: 0.46; transform: translateY(0) scale(0.96); }
+}
+@keyframes toastOutQuiet {
+  from { opacity: 0.46; transform: translateY(0) scale(0.96); }
+  to { opacity: 0; transform: translateY(-5px) scale(0.96); }
 }
 
 
@@ -1739,7 +1790,42 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 .sysToast.whisper .toastTag { color: #a898c8; }
 
-.sysToast.trade,
+/* Trade incoming — soft green invite chrome (clear action: T accept, Y decline). */
+.sysToast.tradeIncoming {
+  border-color: rgba(80, 220, 160, 0.72);
+}
+.sysToast.tradeIncoming .toastTag {
+  color: #5edca0;
+  font-weight: 800;
+}
+
+/* Trade waiting — warm amber pending (you offered, awaiting accept). */
+.sysToast.tradeWaiting {
+  border-color: rgba(255, 190, 90, 0.68);
+}
+.sysToast.tradeWaiting .toastTag {
+  color: #ffbe5a;
+  font-weight: 800;
+}
+
+/* Trade accepted — bright success green (trade complete). */
+.sysToast.tradeAccepted {
+  border-color: rgba(94, 214, 138, 0.82);
+}
+.sysToast.tradeAccepted .toastTag {
+  color: #5ed68a;
+  font-weight: 850;
+}
+
+/* Trade cancelled — muted cool grey (trade terminated). */
+.sysToast.tradeCancelled {
+  border-color: rgba(168, 180, 200, 0.45);
+}
+.sysToast.tradeCancelled .toastTag {
+  color: #a8b4d0;
+  opacity: 0.85;
+}
+
 .sysToast.loot {
   border-color: rgba(255, 160, 70, 0.55);
 }
@@ -1854,10 +1940,18 @@ body[data-rmb-look="armed"] #status[data-conn] {
   border-color: rgba(196, 210, 230, 0.65);
   background: rgba(24, 34, 52, 0.95);
 }
+/* Tonic — warm amber speed buff (#91 / #163); not heal green. */
 .sysToast.tonic {
-  border-color: rgba(125, 255, 181, 0.55);
+  border-color: rgba(224, 176, 96, 0.72);
+  background: linear-gradient(180deg, rgba(42, 26, 10, 0.94), rgba(10, 8, 6, 0.9));
 }
-.sysToast.tonic .toastTag { color: #7dffb5; }
+.sysToast.tonic .toastTag {
+  color: #e0b878;
+  background: rgba(180, 120, 50, 0.16);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(224, 176, 96, 0.4);
+}
 
 .sysToast.rest {
   border-color: rgba(90, 220, 140, 0.75);
@@ -1874,16 +1968,30 @@ body[data-rmb-look="armed"] #status[data-conn] {
   border: 1px solid rgba(125, 255, 181, 0.4);
 }
 
+/* Bandage — HP heal green; distinct from tonic amber (#163). */
 .sysToast.bandage {
-  border-color: rgba(120, 230, 170, 0.55);
+  border-color: rgba(80, 200, 130, 0.72);
+  background: linear-gradient(180deg, rgba(8, 32, 20, 0.94), rgba(8, 14, 12, 0.9));
 }
-.sysToast.bandage .toastTag { color: #7dffc0; }
+.sysToast.bandage .toastTag {
+  color: #7dffb5;
+  background: rgba(50, 160, 100, 0.16);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(80, 200, 130, 0.4);
+}
 
 /* Bag open/close — muted cool silver tag (bag/chat family); not neon. */
 .sysToast.bag {
   border-color: rgba(168, 180, 200, 0.42);
 }
 .sysToast.bag .toastTag { color: #a8b4d0; }
+
+/* Zoom limit — muted cool silver (bag/chat family); not neon (#192). */
+.sysToast.zoomLimit {
+  border-color: rgba(168, 180, 200, 0.42);
+}
+.sysToast.zoomLimit .toastTag { color: #a8b4d0; }
 
 .clLine.vendor {
   color: #c6ceda;
@@ -2127,6 +2235,26 @@ body[data-rmb-look="armed"] #status[data-conn] {
   font-weight: 750;
 }
 
+/* GCD = cool blue/silver cooldown block. Matches #gcdBar family (#117); ≠ OOM cyan / CANCEL amber / LOCKOUT crimson. */
+.sysToast.gcd {
+  border: 2px solid rgba(158, 188, 228, 0.96);
+  background: linear-gradient(180deg, rgba(18, 30, 48, 0.97), rgba(6, 10, 18, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(2, 4, 10, 0.92),
+    0 4px 18px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(100, 140, 200, 0.38);
+}
+.sysToast.gcd .toastTag {
+  color: #e0ecff;
+  background: rgba(100, 140, 200, 0.28);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(140, 170, 210, 0.7);
+  font-weight: 750;
+}
+
+.clLine.gcd .clTag { color: #b8c0cc; }
+
 /* CANCEL = soft amber refund. LOCKOUT = harsh crimson hard-interrupt. Fog-immune fills. */
 .sysToast.castCancel {
   border: 2px solid rgba(255, 190, 90, 0.98);
@@ -2146,6 +2274,28 @@ body[data-rmb-look="armed"] #status[data-conn] {
 }
 
 .clLine.castCancel .clTag { color: #b8c0cc; }
+
+/* No-target (#190) + dead/invalid target (#131) — CANCEL-class amber; distinct from RANGE / MANA / LOCKOUT. */
+.sysToast.noTarget,
+.sysToast.deadTarget {
+  border: 2px solid rgba(255, 190, 90, 0.98);
+  background: linear-gradient(180deg, rgba(48, 30, 8, 0.97), rgba(16, 10, 4, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(8, 5, 2, 0.9),
+    0 4px 18px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(255, 170, 60, 0.38);
+}
+.sysToast.noTarget .toastTag,
+.sysToast.deadTarget .toastTag {
+  color: #ffe2a8;
+  background: rgba(255, 160, 50, 0.28);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 200, 100, 0.7);
+  font-weight: 750;
+}
+.clLine.noTarget .clTag,
+.clLine.deadTarget .clTag { color: #b8c0cc; }
 
 .sysToast.castPushback {
   border-color: rgba(255, 120, 90, 0.55);
@@ -2205,3 +2355,11 @@ body[data-rmb-look="armed"] #status[data-conn] {
 
 .sysToast.canvasFocus { border-color: rgba(100, 180, 255, 0.8); }
 .sysToast.canvasFocus .toastTag { color: #64b4ff; }
+
+/* Jump apex presence — cool hop chrome, distinct from FOCUS (#139). */
+.sysToast.jump {
+  border-color: rgba(150, 210, 255, 0.82);
+}
+.sysToast.jump .toastTag { color: #8ec8ff; }
+.sysToast.keys { border-color: rgba(100, 180, 255, 0.8); }
+.sysToast.keys .toastTag { color: #64b4ff; }

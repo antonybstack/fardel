@@ -1,56 +1,107 @@
 # Team seats (agent worktrees)
 
-Parallel agent seats on the shared Linux box. Each seat has its own **git worktree**, **SpacetimeDB port + data dir**, **Vite port**, and **database name** so agents do not stomp each other.
+Parallel coding + QA agents on the **Mac Studio** (or the Linux box) without colliding with each other **or with production**.
+
+For Mac Studio + Grok CLI setup, see [MAC_STUDIO_GROK_CLI.md](MAC_STUDIO_GROK_CLI.md). Historical 3001–3005 ports are **retired** — they sat next to prod `:3000`.
+
+Production on this Studio is live:
+
+| Surface | Binding | Who uses it |
+|---------|---------|-------------|
+| SpacetimeDB preview/prod | `0.0.0.0:3000` · data `~/.local/share/spacetime/data` · db **`fardel`** | `dev-db.sparkify.dev` tunnel · [play.sparkify.dev](https://play.sparkify.dev) |
+| Cloudflare Pages | `play.sparkify.dev` | Players (not local Vite) |
+| Human lead Vite | `127.0.0.1:5173` | You, on this checkout |
+
+**Agents never bind 3000 or 5173, never publish db `fardel`, never use the prod data dir, never add ports to cloudflared.**
+
+Scale: **2 seats** (1 dev + 1 QA) up to **12 developers + 8 QA** (`tools/scripts/seats.conf`). Formula ports sit far from prod:
+
+| Role | Slug | Spacetime | Vite | Database |
+|------|------|-----------|------|----------|
+| lead (prod) | `lead` | 3000 | 5173 | `fardel` |
+| developer | `dev-1` … `dev-12` | 3201–3212 | 5201–5212 | `fardel-dev-1` … |
+| QA | `qa-1` … `qa-8` | 3241–3248 | 5241–5248 | `fardel-qa-1` … |
+
+Aliases: `dev1` → `dev-1`, `qa-bugs` → `qa-1`, `qa-feel` → `qa-2`. `lead` is **read-only** for agent scripts (they refuse it).
 
 ## Git workflow
 
 | Branch | Role |
 |--------|------|
 | `main` | **Release** / production tip. Do not open feature PRs against `main`. |
-| `develop` | **PR target** for day-to-day work. Land features here first. |
+| `develop` | **PR target** for day-to-day work. |
+| `seats/<slug>` | Per-seat worktree branch created by `seat-claim.sh`. |
 
-Seat worktrees live under `/workspace/wt/<slug>` on branches `seats/<slug>` (except **lead**, which is `/workspace/fardel` on `develop` / `main`).
+Worktrees: `$HOME/dev/wt/<slug>` (override `FARDEL_WT_ROOT` in `tools/scripts/seats.local.conf`). This path is **not** derived from the script checkout — running from `~/dev/wt/dev-1` still uses `~/dev/wt`, never `~/dev/wt/wt`. The release clone stays at `/Users/antbly/dev/fardel` (`FARDEL_LEAD_ROOT`). Grok Bot box: `FARDEL_WT_ROOT=/workspace/wt`.
 
-Do **not** delete existing worktrees under `/workspace/wt/`.
+Do **not** delete existing worktrees.
 
-## Roster
-
-| Seat | Spacetime port | Vite port | DB name | Worktree |
-|------|----------------|-----------|---------|----------|
-| `dev1` | 3001 | 5174 | `fardel-dev1` | `/workspace/wt/dev1` |
-| `dev2` | 3002 | 5175 | `fardel-dev2` | `/workspace/wt/dev2` |
-| `dev3` | 3003 | 5176 | `fardel-dev3` | `/workspace/wt/dev3` |
-| `dev4` | 3004 | 5177 | `fardel-dev4` | `/workspace/wt/dev4` |
-| `dev5` | 3005 | 5178 | `fardel-dev5` | `/workspace/wt/dev5` |
-| `qa-bugs` | 3011 | 5184 | `fardel-qa-bugs` | `/workspace/wt/qa-bugs` |
-| `qa-feel` | 3012 | 5185 | `fardel-qa-feel` | `/workspace/wt/qa-feel` |
-| `lead` | 3000 | 5173 | `fardel` | `/workspace/fardel` |
-
-Canonical map file: [`tools/scripts/fardel-seats.env`](../tools/scripts/fardel-seats.env) (`slug|spacetime_port|vite_port|db_name|worktree_path`).
-
-Per-seat Spacetime data: `$HOME/.local/share/fardel-wt/<slug>`.
+Claims: `$HOME/.local/share/fardel-seats/claims/<slug>`.  
+Agent Spacetime data: `$HOME/.local/share/fardel-wt/<slug>` — **not** `~/.local/share/spacetime/data`.
 
 ## Commands
 
-1. Load seat env: `tools/scripts/wt-env.sh` — pass the seat slug as the first argument and **source** the script. Exports `FARDEL_SEAT`, `FARDEL_SPACETIME_PORT`, `FARDEL_SPACETIME_URI`, `FARDEL_DB`, `FARDEL_VITE_PORT`, `FARDEL_DATA_DIR`, and `FARDEL_WT`.
-
-2. Ensure SpacetimeDB for that seat: run `tools/scripts/ensure-seat-spacetime.sh` with the same slug. It sources `wt-env.sh`, starts a detached instance listening on `127.0.0.1:$FARDEL_SPACETIME_PORT` with `--data-dir $FARDEL_DATA_DIR` and `--non-interactive`, then polls `$FARDEL_SPACETIME_URI/v1/ping` until ready.
-
-3. Publish module (env loaded): from `$FARDEL_WT/server`:
-
 ```bash
-spacetime publish "$FARDEL_DB" -y --env local -s "$FARDEL_SPACETIME_URI"
-```
+# 1 developer + 1 QA  (or loop 6× --role dev and 4× --role qa)
+./tools/scripts/seat-claim.sh --role dev
+./tools/scripts/seat-claim.sh --role qa
 
-The Spacetime CLI takes the server as `-s` / `--server` (nickname, domain, or URL). Prefer `$FARDEL_SPACETIME_URI` from `wt-env.sh` over the `local` nickname so each seat publishes to its own port.
+./tools/scripts/seat-list.sh
 
-4. Vite client: from `$FARDEL_WT/web`, start the Vite dev server on port `$FARDEL_VITE_PORT` bound to `127.0.0.1`.
+# Start isolated stdb + publish module + Vite (prod :3000 stays up)
+./tools/scripts/seat-up.sh dev-1
+./tools/scripts/seat-up.sh qa-1
 
-5. Smoke / mate harnesses (`tools/*Smoke`, `PartyMate`, `TradeMate`, `PartyFramesMate`, `SecondClient`): after sourcing `wt-env.sh`, they honor `FARDEL_SPACETIME_URI` and `FARDEL_DB` via `GameConstants.ResolveLocalUri()` / `ResolveDatabaseName()` (fallback: lead defaults `http://127.0.0.1:3000` / `fardel`). Example:
+# Client URL always carries db+module so the tab cannot hit prod
+./tools/scripts/seat-url.sh qa-1
+# → http://127.0.0.1:5241/?db=http://127.0.0.1:3241&module=fardel-qa-1
 
-```bash
-source tools/scripts/wt-env.sh qa-bugs
+source tools/scripts/wt-env.sh qa-1
 dotnet run --project tools/ConnectSmoke
+
+# Playwright (QA seats) — Metal, unique profile, refuses prod URL
+(cd tools/qa && npm ci && npx playwright install chromium)
+node tools/qa/play.mjs --seat qa-1 screenshot
+node tools/qa/play.mjs --seat qa-1 move --key w --ms 800
+
+./tools/scripts/seat-down.sh qa-1          # stop processes, keep claim
+./tools/scripts/seat-release.sh qa-1       # free the slot
 ```
 
-Lead seat (`lead` / ports 3000 + 5173) matches the historical single-instance defaults documented in [DEV_BOX.md](DEV_BOX.md).
+`seat-up.sh` pings prod before and after; if `:3000` dies, it exits 3 and does **not** restart prod.
+
+Headless smokes honor `FARDEL_SPACETIME_URI` / `FARDEL_DB` via `GameConstants.ResolveLocalUri()` / `ResolveDatabaseName()`.
+
+## Prod safety (non-negotiable)
+
+1. `ensure-local-spacetime.sh` is the **human prod/preview** helper. Agents that have `FARDEL_SEAT` set are refused.
+2. `ensure-seat-spacetime.sh` / `seat-up` / `seat-down` / `seat-release` / `tools/qa/play.mjs` refuse `lead`, port 3000, port 5173, db `fardel`, `dev-db.sparkify.dev`, and the prod data dir.
+3. Agent SpacetimeDB listens on **`127.0.0.1:32xx` only** (not `0.0.0.0`). The tunnel stays pointed at `:3000`.
+4. Do not add `5200`/`3200` hostnames to `~/.cloudflared/config.yml`.
+5. Do not `pkill spacetime` / `killall node`. `seat-down` kills **that seat’s listen port** after checking it is not prod.
+6. Do not write `web/.env.local` in the lead checkout. `--no-worktree` uses `?db=` / `?module=` instead.
+7. Playwright never opens `play.sparkify.dev`.
+8. `window.__qa` exists in **Vite dev** only (not the Pages build).
+
+## Isolation vs share
+
+| Share on the host | Isolate per seat |
+|-------------------|------------------|
+| OS, Homebrew, .NET, Node, `spacetime` CLI, Playwright browsers, GPU | git worktree (`seats/<slug>`) |
+| Model API keys | SpacetimeDB `--listen-addr` + `--data-dir` + **db name** |
+| `web/node_modules` (symlinked from lead if missing) | Vite port + `.env.local` in the worktree |
+| | Playwright `userDataDir` + artifact folder |
+
+Do **not** isolate by moving the real macOS mouse. Drive the game with Playwright + `window.__qa` (`holdMove`, `lookDelta`, `screenshotScene`). Authority proof stays `tools/*Smoke`.
+
+## Proof
+
+```bash
+./tools/scripts/seat-selftest.sh
+```
+
+Claims one `dev-*` and one `qa-*`, starts extra SpacetimeDBs, asserts unique ports/db names, downs them, asserts the original `:3000` pid is unchanged.
+
+## Linux box
+
+Historical `/workspace/wt/dev1` + ports 3001–3005 are **retired** — they sat next to prod 3000. Use this formula everywhere. Overlay paths with `tools/scripts/seats.local.conf` (`FARDEL_WT_ROOT=/workspace/wt`).

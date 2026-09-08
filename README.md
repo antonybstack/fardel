@@ -12,6 +12,8 @@ Browser-first, classless MMORPG: **your pack is your build**.
 
 ## Docs
 
+### Core design
+
 | Doc | What it covers |
 |---|---|
 | [docs/SCOPE.md](docs/SCOPE.md) | Focus contract: north-star, now/not-now |
@@ -19,17 +21,28 @@ Browser-first, classless MMORPG: **your pack is your build**.
 | [docs/STACK.md](docs/STACK.md) | Locked tech choices and why |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Netcode, AOI, sim authority, perf laws |
 | [docs/MVP.md](docs/MVP.md) | Slice plan to a playable yard |
-| [docs/PLAN_BABYLON.md](docs/PLAN_BABYLON.md) | Babylon.js client plan + env |
 | [docs/ASSETS.md](docs/ASSETS.md) | POC art: forest, mountains, RS-like humanoid |
 | [docs/LEARNINGS.md](docs/LEARNINGS.md) | What we take from prior POCs + hordes/dek |
+
+### Technical
+
+| Doc | What it covers |
+|---|---|
+| [docs/PLAN_BABYLON.md](docs/PLAN_BABYLON.md) | Babylon.js client plan + env |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Cloudflare / sparkify.dev / Mac tunnel |
+| [docs/DEV_BOX.md](docs/DEV_BOX.md) | Linux box self-reliant loop (no Mac) |
 | [docs/adr/0001-aoi-interest.md](docs/adr/0001-aoi-interest.md) | AOI: chunk neighborhood, hysteresis, load shed |
 | [docs/adr/0002-client-host-webgpu.md](docs/adr/0002-client-host-webgpu.md) | Historical Unity host (superseded for active host) |
 | [docs/adr/0003-babylon-web-client.md](docs/adr/0003-babylon-web-client.md) | Active client: Babylon.js + TypeScript |
-| [docs/DEV_BOX.md](docs/DEV_BOX.md) | Linux box self-reliant loop (no Mac) |
+
+### Team orchestration
+
+| Doc | What it covers |
+|---|---|
+| [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | **Process bible:** Multi-agent team loop, roles, Git/PR flow, VE policy |
+| [docs/MAC_STUDIO_GROK_CLI.md](docs/MAC_STUDIO_GROK_CLI.md) | **Portable runbook:** Recreate orchestration on Mac Studio with Grok CLI/Build |
 | [docs/TEAM_SEATS.md](docs/TEAM_SEATS.md) | Agent seat worktrees, ports, develop workflow |
 | [docs/BACKLOG.md](docs/BACKLOG.md) | Backlog: GitHub Issues as source of truth |
-| [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | Multi-agent team loop, GitHub flow, Mac/Grok CLI recreation |
 
 ## Quick start (local)
 

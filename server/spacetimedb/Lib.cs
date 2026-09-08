@@ -2346,12 +2346,19 @@ public static partial class Module
         Log.Info($"BuyYardTonic {ctx.Sender} vendor={vendor.VendorId} xp={character.Xp}");
     }
 
-    /// <summary>Consume HasYardTonic for a short move-speed buff (TonicExpiresAt).</summary>
+    /// <summary>
+    /// Consume HasYardTonic for a short move-speed buff (TonicExpiresAt).
+    /// Rejects while dead (align UseBandage/Rest).
+    /// </summary>
     [SpacetimeDB.Reducer]
     public static void UseYardTonic(ReducerContext ctx)
     {
         var character = ctx.Db.Character.Identity.Find(ctx.Sender)
             ?? throw new Exception("Character missing");
+        if (character.Hp <= 0)
+        {
+            throw new Exception("Dead");
+        }
 
         if (!character.HasYardTonic)
         {

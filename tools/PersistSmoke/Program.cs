@@ -12,6 +12,7 @@ AuthToken.Init("fardel-persist-smoke", "settings.ini", tokenDir);
 
 Identity identity1 = default;
 int xpAfterKill = 0;
+long lastGroundedPass1 = 0;
 string? savedToken = null;
 
 try
@@ -73,6 +74,11 @@ try
                 timeoutMs, conn, "xp after kill");
             xpAfterKill = conn.Db.Character.Identity.Find(identity1)!.Xp;
             Console.WriteLine($"pass1 xpAfterKill={xpAfterKill}");
+
+            await PumpUntil(() => conn.Db.PlayerPose.Identity.Find(identity1) is not null, timeoutMs, conn, "pose1");
+            var pose1 = conn.Db.PlayerPose.Identity.Find(identity1)!;
+            lastGroundedPass1 = pose1.LastGroundedMicros;
+            Console.WriteLine($"pass1 pose Y={pose1.Y} VelY={pose1.VelY} LastGroundedMicros={lastGroundedPass1}");
         }
         finally
         {
@@ -134,7 +140,7 @@ try
             await PumpUntil(() => conn.Db.PlayerCombat.Identity.Find(identity2) is not null, timeoutMs, conn, "combat session");
             Console.WriteLine("pass2 session rows OK");
 
-            // Assert vertical pose defaults after reconnect (#169)
+            // Recreated pose must match EnsureSession defaults, not a stale mid-air copy (#169).
             var pose = conn.Db.PlayerPose.Identity.Find(identity2)!;
             if (MathF.Abs(pose.Y - Movement.SpawnY) > 0.05f)
             {
@@ -146,12 +152,12 @@ try
                 Fail($"pass2 VelY={pose.VelY} not ≈ 0");
                 return;
             }
-            if (pose.LastGroundedMicros == 0)
+            if (pose.LastGroundedMicros == 0 || pose.LastGroundedMicros <= lastGroundedPass1)
             {
-                Fail("pass2 LastGroundedMicros not set (zero)");
+                Fail($"pass2 LastGroundedMicros={pose.LastGroundedMicros} not updated (was {lastGroundedPass1})");
                 return;
             }
-            Console.WriteLine($"pass2 pose Y={pose.Y} VelY={pose.VelY} LastGroundedMicros={pose.LastGroundedMicros} OK");
+            Console.WriteLine($"pass2 pose Y={pose.Y} VelY={pose.VelY} LastGroundedMicros={pose.LastGroundedMicros} (was {lastGroundedPass1}) OK");
         }
         finally
         {

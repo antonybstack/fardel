@@ -3,7 +3,7 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // Multi-client public Say: A inserts ChatMessage; B must observe it.
-// Also proves per-identity Say rate-limit rejects a second immediate Say.
+// Also proves per-identity Say / PartySay / Whisper rate-limit rejects a second immediate send.
 // PartySay: A+B party, C outsider — B sees PartyChatMessage; C must not.
 // Whisper: A→B private; C outsider must not see WhisperMessage.
 var uri = GameConstants.ResolveLocalUri();
@@ -165,6 +165,9 @@ try
         return false;
     }, timeoutMs, connA, connB, connC, "B sees A party chat");
 
+    // Immediate second PartySay from A must fail rate-limit (per-channel, not only public Say).
+    await ExpectPartySayFail(connA, "too soon party", "PartySay rate-limited", "party rate");
+
     // Give C a moment to receive anything (should stay empty for this text).
     await DelayPump3(connA, connB, connC, 900);
 
@@ -215,6 +218,9 @@ try
         return false;
     }, timeoutMs, connA, connB, connC, "A sees own whisper");
 
+    // Immediate second Whisper from A must fail rate-limit.
+    await ExpectWhisperFail(connA, idB, "too soon whisper", "Whisper rate-limited", "whisper rate");
+
     await DelayPump3(connA, connB, connC, 900);
 
     foreach (var m in connC.Db.WhisperMessage.Iter())
@@ -232,7 +238,7 @@ try
     foreach (var _ in connB.Db.WhisperMessage.Iter()) bWhisper++;
     Console.WriteLine($"OK: Whisper RLS — B has {bWhisper} whisper(s), C has {cWhisper} (outsider hidden)");
 
-    Console.WriteLine("OK: ChatSmoke — A→B say + rate-limit + PartySay RLS + Whisper RLS");
+    Console.WriteLine("OK: ChatSmoke — A→B say + rate-limit + PartySay RLS + Whisper RLS + Party/Whisper rate-limit");
     Environment.ExitCode = 0;
 }
 catch (Exception e)
@@ -269,6 +275,97 @@ static async Task<SubscriptionHandle> SubscribeAll(DbConnection conn, string lab
         .SubscribeToAllTables();
     await Pump(tcs.Task, timeoutMs, conn, label);
     return handle;
+}
+
+static async Task ExpectPartySayFail(DbConnection conn, string text, string needle, string label)
+{
+    string? fail = null;
+    var tcs = new TaskCompletionSource();
+    void OnPartySay(ReducerEventContext ctx, string said)
+    {
+        if (said != text)
+        {
+            return;
+        }
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                fail = reason;
+                tcs.TrySetResult();
+                break;
+            case Status.Committed:
+                tcs.TrySetException(new Exception($"PartySay committed while rate-limited: {said}"));
+                break;
+            case Status.OutOfEnergy(_):
+                tcs.TrySetException(new Exception("PartySay out of energy"));
+                break;
+        }
+    }
+    conn.Reducers.OnPartySay += OnPartySay;
+    try
+    {
+        conn.Reducers.PartySay(text);
+        await Pump(tcs.Task, timeoutMs, conn, "partysay fail " + label);
+    }
+    finally
+    {
+        conn.Reducers.OnPartySay -= OnPartySay;
+    }
+    if (string.IsNullOrEmpty(fail) ||
+        fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected '{needle}' on PartySay ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("partysay fail mismatch");
+    }
+    Console.WriteLine($"OK: PartySay rate-limit rejected ({fail})");
+}
+
+static async Task ExpectWhisperFail(
+    DbConnection conn,
+    Identity recipient,
+    string text,
+    string needle,
+    string label)
+{
+    string? fail = null;
+    var tcs = new TaskCompletionSource();
+    void OnWhisper(ReducerEventContext ctx, Identity to, string said)
+    {
+        if (said != text)
+        {
+            return;
+        }
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                fail = reason;
+                tcs.TrySetResult();
+                break;
+            case Status.Committed:
+                tcs.TrySetException(new Exception($"Whisper committed while rate-limited: {said}"));
+                break;
+            case Status.OutOfEnergy(_):
+                tcs.TrySetException(new Exception("Whisper out of energy"));
+                break;
+        }
+    }
+    conn.Reducers.OnWhisper += OnWhisper;
+    try
+    {
+        conn.Reducers.Whisper(recipient, text);
+        await Pump(tcs.Task, timeoutMs, conn, "whisper fail " + label);
+    }
+    finally
+    {
+        conn.Reducers.OnWhisper -= OnWhisper;
+    }
+    if (string.IsNullOrEmpty(fail) ||
+        fail.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected '{needle}' on Whisper ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("whisper fail mismatch");
+    }
+    Console.WriteLine($"OK: Whisper rate-limit rejected ({fail})");
 }
 
 static void Fail(string msg)

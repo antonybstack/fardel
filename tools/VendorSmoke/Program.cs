@@ -2,7 +2,7 @@ using Fardel.Shared;
 using SpacetimeDB;
 using SpacetimeDB.Types;
 
-// YardVendor BuyFromVendor / SellToVendor — range, XP↔ember_shard.
+// YardVendor BuyFromVendor / SellToVendor — buy+sell range, XP↔ember_shard.
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 45000;
@@ -13,7 +13,7 @@ try
 {
     var (c, id) = await ConnectAsync();
     conn = c;
-    Console.WriteLine("connected " + id);
+    Console.WriteLine($"connected {id} uri={uri} db={db}");
 
     _ = await SubscribeAll(conn, "all");
 
@@ -113,6 +113,64 @@ try
         return ch is { HasEmberShard: true } && ch.Xp == xpBeforeBuy - Vendor.BuyPriceXp;
     }, timeoutMs, conn, "buy shard");
     Console.WriteLine($"BuyFromVendor OK shard + XP {xpBeforeBuy}→{conn.Db.Character.Identity.Find(id)!.Xp}");
+
+    var chHeld = conn.Db.Character.Identity.Find(id)!;
+    if (!chHeld.HasEmberShard)
+    {
+        Fail("expected shard held before far SellToVendor");
+        return;
+    }
+    var xpHeld = chHeld.Xp;
+    await MoveTo(conn, id, Vendor.RangeMeters * 4f, 0f);
+
+    string? sellRangeFail = null;
+    var sellRangeFailed = new TaskCompletionSource();
+    void OnSellFar(ReducerEventContext ctx)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                sellRangeFail = reason;
+                sellRangeFailed.TrySetResult();
+                break;
+            case Status.Committed:
+                sellRangeFailed.TrySetException(new Exception("SellToVendor committed while out of range"));
+                break;
+            case Status.OutOfEnergy(_):
+                sellRangeFailed.TrySetException(new Exception("SellToVendor out of energy"));
+                break;
+        }
+    }
+    conn.Reducers.OnSellToVendor += OnSellFar;
+    try
+    {
+        conn.Reducers.SellToVendor();
+        await Pump(sellRangeFailed.Task, timeoutMs, conn, "sell out of range");
+    }
+    finally
+    {
+        conn.Reducers.OnSellToVendor -= OnSellFar;
+    }
+    if (string.IsNullOrEmpty(sellRangeFail) ||
+        sellRangeFail.IndexOf("Out of range", StringComparison.OrdinalIgnoreCase) < 0)
+    {
+        Fail($"expected Out of range on SellToVendor, got: {sellRangeFail ?? "(null)"}");
+        return;
+    }
+    var chAfterFar = conn.Db.Character.Identity.Find(id)!;
+    if (!chAfterFar.HasEmberShard)
+    {
+        Fail("out-of-range SellToVendor dropped shard");
+        return;
+    }
+    if (chAfterFar.Xp != xpHeld)
+    {
+        Fail($"out-of-range SellToVendor changed XP {xpHeld}→{chAfterFar.Xp}");
+        return;
+    }
+    Console.WriteLine("out-of-range SellToVendor reject OK (shard+XP unchanged)");
+
+    await MoveTo(conn, id, vendor.X + 0.8f, vendor.Z + 0.4f);
 
     var xpBeforeSell = conn.Db.Character.Identity.Find(id)!.Xp;
     conn.Reducers.SellToVendor();

@@ -33,6 +33,8 @@ body:
         - server
         - client
         - qa
+        - art
+        - release
       default: 0
     validations:
       required: true
@@ -51,6 +53,10 @@ body:
     id: notes
     attributes:
       label: Notes / links
-      description: Related issues, ADRs, or design notes.
+      description: |
+        Related issues, ADRs, design notes, or VE links.
+        
+        For screenshots/mockups: use https://ve.sparkify.dev (upload via tools/scripts/ve-upload.sh).
+        Lead or assigned seat will host VE for user-visible features.
     validations:
       required: false

@@ -55,6 +55,7 @@ import {
   preloadPlayerHumanoid,
   remoteRobeColor,
   ROBE_EMISSIVE_SCALE,
+  setHumanoidJumpSquash,
   setHumanoidMoving,
   type HumanoidParts,
 } from './world/humanoid';
@@ -104,6 +105,30 @@ const REST_HEAL_AMOUNT = 25;
 const BANDAGE_HEAL_AMOUNT = 40;
 /** Client wish speed (m/s); each reducer call is clamped server-side. */
 const MOVE_SPEED = 4.5;
+/** Match shared/Fardel.Shared Loot.PickupRangeMeters. */
+const PICKUP_RANGE_METERS = 3;
+
+/** Nearest WorldLoot within pickup range (XZ), or null. */
+function nearestLootInPickupRange(
+  items: GroundItemView[],
+  pose: { x: number; z: number } | null,
+  rangeMeters = PICKUP_RANGE_METERS,
+): GroundItemView | null {
+  if (!pose || items.length === 0) return null;
+  const r2 = rangeMeters * rangeMeters;
+  let best: GroundItemView | null = null;
+  let bestD = Number.POSITIVE_INFINITY;
+  for (const it of items) {
+    const dx = it.x - pose.x;
+    const dz = it.z - pose.z;
+    const d = dx * dx + dz * dz;
+    if (d <= r2 && d < bestD) {
+      bestD = d;
+      best = it;
+    }
+  }
+  return best;
+}
 
 type NpcMesh = {
   root: Mesh;
@@ -166,6 +191,8 @@ type Nameplate = {
   label: string;
   /** <0 = no HP pip; else 0..1 fill. */
   hpFrac: number;
+  /** Local Tab-target gold chrome (#142). */
+  selected: boolean;
 };
 
 function setStatus(text: string, connState?: ConnectionStatus['state']): void {
@@ -222,7 +249,7 @@ function setGcdBar(
     if (cTotal > 0 && cMs > 0) {
       const pct = Math.min(100, ((cTotal - cMs) / cTotal) * 100);
       castFill.style.width = `${pct}%`;
-      castLabel.textContent = `${name}  ${(cMs / 1000).toFixed(1)}s`;
+      castLabel.textContent = `${name}  ${(cMs / 1000).toFixed(1)}s  ·  Esc cancel`;
       castFill.parentElement?.classList.remove('hidden');
     } else {
       castFill.style.width = '0%';
@@ -274,11 +301,22 @@ let veFrameHpLock = false;
 /** VE lock: hold seeded loadout strip + tonic buff chrome for ?ve=loadout-buff. */
 let veLoadoutBuffLock = false;
 
+/** VE lock: hold bandage vs tonic toast/log/buff chrome for ?ve=bandage-tonic (#163). */
+let veBandageTonicLock = false;
+
 /** VE lock: hold seeded bottom-left HUD layout chrome for ?ve=hud-layout (#104). */
 let veHudLayoutLock = false;
 
 /** VE lock: hold resting chrome for ?ve=rest-chrome (freeze enter state, no auto-exit). */
 let veRestChromeLock = false;
+
+/** VE lock: hold left-rest chrome for ?ve=rest-exit (freeze exit badge + toast). */
+let veRestExitLock = false;
+
+/** Client rest chrome mode — enter persists until WASD/cast (#133). */
+let restChromeMode: 'off' | 'enter' | 'exit' = 'off';
+/** Why the last rest exit happened (status / badge). */
+let restLeaveReason: 'move' | 'cast' | null = null;
 
 /** VE presentation override: seed readable GCD sweep + Emberbolt cast fill. */
 let veGcdPresent: null | {
@@ -308,7 +346,7 @@ let veRmbLookLock = false;
 /** Client-only Rest enter/exit chrome on #selfFrame (not a server channel). */
 let restExitTimer: number | null = null;
 
-function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
+function setRestingState(mode: 'off' | 'enter' | 'exit', reason?: 'move' | 'cast'): void {
   const frame = document.getElementById('selfFrame');
   const badge = document.getElementById('sfRest');
   if (!frame || !badge) return;
@@ -316,8 +354,10 @@ function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
     window.clearTimeout(restExitTimer);
     restExitTimer = null;
   }
+  restChromeMode = mode;
+  restLeaveReason = mode === 'exit' ? (reason ?? null) : null;
   if (mode === 'off') {
-    frame.classList.remove('resting');
+    frame.classList.remove('resting', 'rest-exit');
     badge.classList.add('hidden');
     badge.classList.remove('exiting');
     badge.textContent = 'Resting…';
@@ -325,21 +365,40 @@ function setRestingState(mode: 'off' | 'enter' | 'exit'): void {
   }
   if (mode === 'enter') {
     frame.classList.add('resting');
+    frame.classList.remove('rest-exit');
     badge.classList.remove('hidden', 'exiting');
     badge.textContent = 'Resting…';
-    // Auto-exit chrome after a short settle so enter vs exit is readable.
-    // Skip auto-exit if VE rest-chrome lock is active (freeze for screenshot).
-    if (!veRestChromeLock) {
-      restExitTimer = window.setTimeout(() => setRestingState('exit'), 2200);
-    }
+    // Stay in enter until WASD/cast actually leaves rest (#133). No timer auto-exit.
     return;
   }
-  // exit
+  // exit — move/cast interrupt vs already-full complete.
   frame.classList.remove('resting');
+  frame.classList.add('rest-exit');
   badge.classList.remove('hidden');
   badge.classList.add('exiting');
-  badge.textContent = 'Rest complete';
-  restExitTimer = window.setTimeout(() => setRestingState('off'), 1600);
+  badge.textContent =
+    reason === 'move'
+      ? 'Left rest · move'
+      : reason === 'cast'
+        ? 'Left rest · cast'
+        : 'Rest complete';
+  // Existing exit-badge fade only (not a new rest timer). Freeze for VE locks.
+  if (!veRestChromeLock && !veRestExitLock) {
+    restExitTimer = window.setTimeout(() => setRestingState('off'), 1600);
+  }
+}
+
+/** Drop rest chrome when locomotion or a real cast starts. Idempotent. */
+function leaveRestIfActive(reason: 'move' | 'cast'): void {
+  if (veRestChromeLock) return;
+  if (restChromeMode !== 'enter') return;
+  const bit = reason === 'move' ? 'Left rest · moved' : 'Left rest · cast';
+  const veNow = new URLSearchParams(window.location.search).get('ve');
+  const ttl = veNow === 'rest-exit' ? TOAST_VE_TTL_MS : TOAST_TTL_MS;
+  dismissSystemToasts('rest');
+  pushSystemToast('rest', bit, ttl);
+  pushCombatLog('rest', bit);
+  setRestingState('exit', reason);
 }
 
 /** Bottom-center Spark/Emberbolt hotbar: GCD sweep + Emberbolt cast + staff/mana/empty affordances. */
@@ -470,7 +529,7 @@ function updateSelfFrame(character: {
   maxMana?: number;
   tonicExpiresAtMicros?: bigint;
 } | null | undefined): void {
-  if (veFrameHpLock || veLoadoutBuffLock || veHudLayoutLock) return;
+  if (veFrameHpLock || veLoadoutBuffLock || veHudLayoutLock || veBandageTonicLock) return;
   const frame = document.getElementById('selfFrame');
   if (!frame) return;
   if (!character) {
@@ -689,7 +748,7 @@ function updateLoadoutStrip(character: {
   hasYardTonic?: boolean;
   hasYardBandage?: boolean;
 } | null | undefined): void {
-  if (veLoadoutBuffLock || veHudLayoutLock) return;
+  if (veLoadoutBuffLock || veHudLayoutLock || veBandageTonicLock) return;
   const strip = document.getElementById('loadoutStrip');
   if (!strip) return;
   if (!character) {
@@ -844,6 +903,26 @@ function setKeysLegendOpen(open: boolean): void {
   panel.classList.toggle('hidden', !open);
 }
 
+/** One-shot first-session H legend + canvas-focus cue (#134). sessionStorage only. */
+const FIRST_SESSION_CUE_KEY = 'fardel.firstSessionCue';
+const FIRST_SESSION_TOAST = 'H opens legend · click canvas for Space/WASD';
+
+function firstSessionCueSeen(): boolean {
+  try {
+    return sessionStorage.getItem(FIRST_SESSION_CUE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markFirstSessionCueSeen(): void {
+  try {
+    sessionStorage.setItem(FIRST_SESSION_CUE_KEY, '1');
+  } catch {
+    /* private mode / blocked storage */
+  }
+}
+
 /** Clarity cue: RMB-look armed vs idle via canvas cursor + legend chip + status line. */
 function setRmbLookArmed(armed: boolean): void {
   if (veRmbLookLock && !armed) return;
@@ -996,7 +1075,7 @@ type CombatLogKind = 'cast' | 'damage' | 'equip' | 'party' | 'death' | 'respawn'
   | 'silenced'
   | 'kick'
   | 'stun'
-  | 'outOfRange' | 'bandage';
+  | 'outOfRange' | 'bandage' | 'gcd' | 'noTarget' | 'deadTarget';
 
 /** Client-only scrolling combat log (cast start, HP delta, equip, party join, death/respawn). */
 function pushCombatLog(kind: CombatLogKind, text: string): void {
@@ -1043,8 +1122,12 @@ function pushCombatLog(kind: CombatLogKind, text: string): void {
                                       : kind === 'outOfRange'
                                         ? 'RANGE'
                                         : kind === 'bandage'
-                                          ? 'HEAL'
-                                          : 'RESPAWN';
+                                          ? 'BANDAGE'
+                                          : kind === 'gcd'
+                                            ? 'GCD'
+                                            : kind === 'noTarget' || kind === 'deadTarget'
+                                              ? 'CANCEL ↩'
+                                            : 'RESPAWN';
   const time = new Date();
   const hh = String(time.getHours()).padStart(2, '0');
   const mm = String(time.getMinutes()).padStart(2, '0');
@@ -1075,6 +1158,27 @@ function combatLogKindsPresent(): Set<string> {
 const TOAST_MAX = 5;
 const TOAST_TTL_MS = 2800;
 const TOAST_VE_TTL_MS = 9000;
+/** Social/system toasts dimmed while GCD/cast/recent damage is live (#141). */
+const TOAST_COMBAT_QUIET_TTL_MS = 1300;
+const TOAST_SOCIAL_KINDS = new Set<SystemToastKind>([
+  'xp',
+  'level',
+  'tradeIncoming',
+  'tradeWaiting',
+  'tradeAccepted',
+  'tradeCancelled',
+  'invite',
+  'party',
+  'loot',
+  'vendor',
+  'bag',
+  'connected',
+  'equip',
+  'say',
+  'partySay',
+  'whisper',
+]);
+let yardCombatFocusUntilMs = 0;
 
 type SystemToastKind =
   | 'connected'
@@ -1090,11 +1194,15 @@ type SystemToastKind =
   | 'whisper'
   | 'rate'
   | 'loot'
-  | 'trade'
+  | 'tradeIncoming'
+  | 'tradeWaiting'
+  | 'tradeAccepted'
+  | 'tradeCancelled'
   | 'vendor'
   | 'tonic'
   | 'rest'
   | 'mana'
+  | 'gcd'
   | 'castCancel'
   | 'castPushback'
   | 'castHardInterrupt'
@@ -1103,8 +1211,13 @@ type SystemToastKind =
   | 'stun'
   | 'outOfRange'
   | 'bandage'
+  | 'noTarget'
+  | 'deadTarget'
   | 'canvasFocus'
-  | 'bag';
+  | 'jump'
+  | 'keys'
+  | 'bag'
+  | 'zoomLimit';
 
 /** Client-only transient top-center system toasts. */
 function pushSystemToast(
@@ -1114,10 +1227,17 @@ function pushSystemToast(
 ): void {
   const root = document.getElementById('toastStack');
   if (!root) return;
+  const veNow = new URLSearchParams(window.location.search).get('ve');
+  const quietCombat =
+    TOAST_SOCIAL_KINDS.has(kind) &&
+    Date.now() < yardCombatFocusUntilMs &&
+    (!veNow || veNow === 'toast-combat');
+  const ttl = quietCombat ? Math.min(ttlMs, TOAST_COMBAT_QUIET_TTL_MS) : ttlMs;
   const el = document.createElement('div');
-  el.className = `sysToast ${kind}`;
+  el.className = `sysToast ${kind}${quietCombat ? ' combatQuiet' : ''}`;
   el.setAttribute('data-kind', kind);
-  el.style.setProperty('--toast-ttl', `${Math.max(400, ttlMs)}ms`);
+  if (quietCombat) el.setAttribute('data-combat-quiet', '1');
+  el.style.setProperty('--toast-ttl', `${Math.max(400, ttl)}ms`);
   const tag =
     kind === 'connected'
       ? 'CONN'
@@ -1143,35 +1263,53 @@ function pushSystemToast(
                         ? 'WHISPER'
                         : kind === 'loot'
                           ? 'LOOT'
-                          : kind === 'trade'
-                            ? 'TRADE'
-                            : kind === 'vendor'
-                              ? 'VENDOR'
-                              : kind === 'tonic'
-                                ? 'TONIC'
-                                : kind === 'rest'
-                                  ? 'REST'
-                                  : kind === 'mana'
-                                    ? 'MANA'
-                                    : kind === 'castCancel'
-                                      ? 'CANCEL ↩'
-                                      : kind === 'castPushback'
-                                        ? 'PUSH'
-                                        : kind === 'castHardInterrupt'
-                                          ? 'LOCKOUT ⊘'
-                                          : kind === 'silenced'
-                                            ? 'SILENCE'
-                                            : kind === 'kick'
-                                            ? 'KICK'
-                                            : kind === 'stun'
-                                            ? 'STUN'
-                                            : kind === 'outOfRange'
-                                              ? 'RANGE'
-                                              : kind === 'canvasFocus'
-                                                ? 'FOCUS'
-                                                : kind === 'bag'
-                                                  ? 'BAG'
-                                                  : 'SAY';
+                          : kind === 'tradeIncoming'
+                            ? 'TRADE ▼'
+                            : kind === 'tradeWaiting'
+                              ? 'TRADE ▲'
+                              : kind === 'tradeAccepted'
+                                ? 'TRADE ✓'
+                                : kind === 'tradeCancelled'
+                                  ? 'TRADE ✕'
+                                  : kind === 'vendor'
+                                    ? 'VENDOR'
+                                    : kind === 'tonic'
+                                      ? 'TONIC'
+                                      : kind === 'rest'
+                                        ? 'REST'
+                                        : kind === 'mana'
+                                          ? 'MANA'
+                                          : kind === 'gcd'
+                                            ? 'GCD'
+                                            : kind === 'castCancel'
+                                              ? 'CANCEL ↩'
+                                              : kind === 'castPushback'
+                                                ? 'PUSH'
+                                                : kind === 'castHardInterrupt'
+                                                  ? 'LOCKOUT ⊘'
+                                                  : kind === 'silenced'
+                                                    ? 'SILENCE'
+                                                    : kind === 'kick'
+                                                    ? 'KICK'
+                                                    : kind === 'stun'
+                                                    ? 'STUN'
+                                                    : kind === 'outOfRange'
+                                                      ? 'RANGE'
+                                                      : kind === 'bandage'
+                                                        ? 'BANDAGE'
+                                                        : kind === 'noTarget' || kind === 'deadTarget'
+                                                          ? 'CANCEL ↩'
+                                                          : kind === 'jump'
+                                                            ? 'JUMP'
+                                                          : kind === 'canvasFocus'
+                                                            ? 'FOCUS'
+                                                            : kind === 'keys'
+                                                              ? 'KEYS'
+                                                              : kind === 'bag'
+                                                              ? 'BAG'
+                                                              : kind === 'zoomLimit'
+                                                                ? 'ZOOM'
+                                                                : 'SAY';
   el.innerHTML =
     `<span class="toastTag">${tag}</span>` +
     `<span class="toastMsg">${text.replace(/</g, '&lt;')}</span>`;
@@ -1181,7 +1319,17 @@ function pushSystemToast(
   }
   window.setTimeout(() => {
     if (el.parentElement === root) el.remove();
-  }, ttlMs + 400);
+  }, ttl + 400);
+}
+
+function dismissSystemToasts(...kinds: SystemToastKind[]): void {
+  const root = document.getElementById('toastStack');
+  if (!root) return;
+  const want = new Set<string>(kinds);
+  for (const el of Array.from(root.children)) {
+    const k = (el as HTMLElement).getAttribute('data-kind');
+    if (k && want.has(k)) el.remove();
+  }
 }
 
 function toastKindsPresent(): Set<string> {
@@ -1436,21 +1584,33 @@ function drawMinimap(opts: {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  const w = canvas.width;
-  const h = canvas.height;
+  const w = 160;
+  const h = 160;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const bw = Math.round(w * dpr);
+  const bh = Math.round(h * dpr);
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const cx = w / 2;
   const cy = h / 2;
   const scale = (Math.min(w, h) * 0.42) / MINIMAP_RANGE_M;
   const maxR = Math.min(w, h) * 0.44;
 
   ctx.clearRect(0, 0, w, h);
-  // Disc background
-  ctx.fillStyle = 'rgba(8, 12, 24, 0.55)';
+  // Opaque disc + dark/silver rim so #39 cyan fog cannot wash plate/heading (#103).
+  const discR = Math.min(w, h) * 0.46;
+  ctx.fillStyle = 'rgba(6, 10, 20, 0.96)';
   ctx.beginPath();
-  ctx.arc(cx, cy, Math.min(w, h) * 0.46, 0, Math.PI * 2);
+  ctx.arc(cx, cy, discR, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
-  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(4, 8, 16, 0.95)';
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(196, 206, 222, 0.55)';
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
   // Range ring
@@ -1458,18 +1618,6 @@ function drawMinimap(opts: {
   ctx.beginPath();
   ctx.arc(cx, cy, MINIMAP_RANGE_M * scale, 0, Math.PI * 2);
   ctx.stroke();
-
-  // Compass N with shadow for readability
-  ctx.font = 'bold 11px ui-sans-serif, system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  // Dark outline
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-  ctx.lineWidth = 3.0;
-  ctx.strokeText('N', cx, 12);
-  // Bright fill
-  ctx.fillStyle = '#f0f4fc';
-  ctx.fillText('N', cx, 12);
 
   const originX = opts.local?.x ?? 0;
   const originZ = opts.local?.z ?? 0;
@@ -1573,19 +1721,34 @@ function drawMinimap(opts: {
       ctx.fill();
     }
   }
-  // Local on top
-  plot(originX, originZ, '#6aa2ff', 4.2);
-  // Dark outline ring for contrast
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';
-  ctx.lineWidth = 2.4;
+  // Local pip on top — larger + halo + pulse so WASD crowd blips cannot swallow it (#164).
+  const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220);
+  const pipR = 5.8;
+  const ringR = pipR + 3.4 + pulse * 2.8;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
   ctx.beginPath();
-  ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+  ctx.arc(cx, cy, pipR + 3.4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 0.38 + 0.5 * pulse;
+  ctx.strokeStyle = '#f4f8ff';
+  ctx.lineWidth = 2.1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
   ctx.stroke();
-  // Bright white ring
-  ctx.strokeStyle = 'rgba(232,238,252,0.85)';
-  ctx.lineWidth = 1.2;
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#8ec0ff';
   ctx.beginPath();
-  ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+  ctx.arc(cx, cy, pipR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f4f8ff';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.25, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.96)';
+  ctx.lineWidth = 1.7;
+  ctx.beginPath();
+  ctx.arc(cx, cy, pipR + 0.35, 0, Math.PI * 2);
   ctx.stroke();
 
   // Legend when party mates are on the map (You + Party).
@@ -1611,6 +1774,28 @@ function drawMinimap(opts: {
     ctx.fillStyle = '#c8d6f0';
     ctx.fillText('Party', 60, h - 12);
   }
+
+  // Compass N last so moving rim blips cannot cover it (#164).
+  const nPulse = 0.78 + 0.22 * pulse;
+  ctx.globalAlpha = nPulse;
+  ctx.fillStyle = 'rgba(4, 8, 16, 0.94)';
+  ctx.fillRect(cx - 12, 1, 24, 26);
+  ctx.fillStyle = '#ffe28a';
+  ctx.beginPath();
+  ctx.moveTo(cx, 3.5);
+  ctx.lineTo(cx + 5.4, 12);
+  ctx.lineTo(cx - 5.4, 12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 13px ui-sans-serif, system-ui, sans-serif';
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.95)';
+  ctx.lineWidth = 4.2;
+  ctx.strokeText('N', cx, 19);
+  ctx.fillStyle = '#ffe28a';
+  ctx.fillText('N', cx, 19);
+  ctx.globalAlpha = 1;
 }
 
 function formatLoadout(ch: NonNullable<Extract<ConnectionStatus, { state: 'connected' }>['character']>): string {
@@ -1636,6 +1821,16 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
     const poseLine = s.pose
       ? `pos: (${s.pose.x.toFixed(2)}, ${s.pose.y.toFixed(2)}, ${s.pose.z.toFixed(2)})`
       : 'pos: —';
+    const restLine =
+      restChromeMode === 'enter'
+        ? 'rest: resting · WASD/cast leaves'
+        : restChromeMode === 'exit' && restLeaveReason === 'move'
+          ? 'rest: left rest · moved'
+          : restChromeMode === 'exit' && restLeaveReason === 'cast'
+            ? 'rest: left rest · cast'
+            : restChromeMode === 'exit'
+              ? 'rest: rest complete'
+              : 'rest: —';
     const tgt = s.targetNpc;
     const targetLine = tgt
       ? `target: ${tgt.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC'} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
@@ -1711,6 +1906,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       xpLine,
       persistLine,
       poseLine,
+      restLine,
       remotesLine,
       partyLine,
       aoiLine,
@@ -1768,6 +1964,25 @@ async function createScene(engine: Engine): Promise<{
     | undefined;
   if (pointers) {
     pointers.buttons = [2];
+  }
+
+  // Toast only on overscroll so the #30 soft clamp stays (#192).
+  let lastZoomLimitToastMs = 0;
+  const ZOOM_LIMIT_TOAST_DEBOUNCE_MS = 800;
+  if (canvas) {
+    canvas.addEventListener('wheel', (e) => {
+      const now = Date.now();
+      const delta = e.deltaY;
+      const currentRadius = camera.radius;
+      const lowerLimit = camera.lowerRadiusLimit ?? 4;
+      const upperLimit = camera.upperRadiusLimit ?? 80;
+      const isAtMin = currentRadius <= lowerLimit && delta < 0;
+      const isAtMax = currentRadius >= upperLimit && delta > 0;
+      if ((isAtMin || isAtMax) && now - lastZoomLimitToastMs > ZOOM_LIMIT_TOAST_DEBOUNCE_MS) {
+        lastZoomLimitToastMs = now;
+        pushSystemToast('zoomLimit', isAtMin ? 'Zoom min' : 'Zoom max', 1200);
+      }
+    }, { passive: true });
   }
 
   if (canvas) {
@@ -2068,11 +2283,13 @@ function bindInput(opts: {
     if (e.repeat) return;
     if (k === 'w' || k === 'a' || k === 's' || k === 'd') {
       keys.add(k);
+      leaveRestIfActive('move');
       e.preventDefault();
       return;
     }
     if (k === ' ') {
       keys.add(' ');
+      leaveRestIfActive('move');
       e.preventDefault();
       return;
     }
@@ -2300,7 +2517,7 @@ function createNameplate(scene: Scene, key: string): Nameplate {
   mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
   mesh.isPickable = false;
   mesh.position.y = 2.05;
-  return { mesh, mat, tex, label: '', hpFrac: -2 };
+  return { mesh, mat, tex, label: '', hpFrac: -2, selected: false };
 }
 
 function paintNameplate(
@@ -2308,10 +2525,20 @@ function paintNameplate(
   label: string,
   fillCss: string,
   hpFrac: number,
+  selected = false,
 ): void {
-  if (np.label === label && Math.abs(np.hpFrac - hpFrac) < 0.02) return;
+  if (
+    np.label === label &&
+    Math.abs(np.hpFrac - hpFrac) < 0.02 &&
+    np.selected === selected
+  ) {
+    return;
+  }
   np.label = label;
   np.hpFrac = hpFrac;
+  np.selected = selected;
+  np.mat.fogEnabled = !selected;
+  np.mesh.scaling.set(selected ? 1.1 : 1, selected ? 1.1 : 1, 1);
   const ctx = np.tex.getContext() as unknown as CanvasRenderingContext2D;
   const w = 256;
   const h = 96;
@@ -2319,11 +2546,11 @@ function paintNameplate(
   const showPip = hpFrac >= 0;
   const textY = showPip ? 34 : 48;
   // Opaque dark pill for legibility over cyan fog / lush grass.
-  const pillW = Math.min(236, 40 + label.length * 20);
+  const pillW = Math.min(selected ? 228 : 236, 40 + label.length * 20);
   const pillH = showPip ? 78 : 56;
   const pillX = (w - pillW) / 2;
   const pillY = showPip ? 8 : 20;
-  ctx.fillStyle = 'rgba(6,8,14,0.88)';
+  ctx.fillStyle = selected ? 'rgba(16,12,4,0.94)' : 'rgba(6,8,14,0.88)';
   ctx.beginPath();
   const r = 14;
   ctx.moveTo(pillX + r, pillY);
@@ -2333,6 +2560,15 @@ function paintNameplate(
   ctx.arcTo(pillX, pillY, pillX + pillW, pillY, r);
   ctx.closePath();
   ctx.fill();
+  if (selected) {
+    // Gold select stroke — same family as HUD #targetFrame (#142).
+    ctx.strokeStyle = 'rgba(232,186,48,0.98)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(10,8,4,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
   ctx.shadowColor = 'rgba(0,0,0,0.85)';
   ctx.shadowBlur = 8;
   ctx.shadowOffsetY = 2;
@@ -2351,16 +2587,34 @@ function paintNameplate(
     const by = 62;
     const bw = 152;
     const bh = 14;
-    ctx.fillStyle = 'rgba(12,12,14,0.85)';
-    ctx.fillRect(bx, by, bw, bh);
     const fill = Math.max(0, Math.min(1, hpFrac));
-    ctx.fillStyle =
-      fill > 0.4
-        ? 'rgb(72,205,110)'
-        : fill > 0.18
-          ? 'rgb(230,190,55)'
-          : 'rgb(220,70,60)';
-    ctx.fillRect(bx + 2, by + 2, (bw - 4) * fill, bh - 4);
+    const isDummy = label === 'Dummy';
+    if (isDummy) {
+      ctx.fillStyle = 'rgba(8,10,12,0.92)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = selected
+        ? 'rgba(232,186,48,0.95)'
+        : 'rgba(0,0,0,0.95)';
+      ctx.lineWidth = selected ? 4 : 3;
+      ctx.strokeRect(bx, by, bw, bh);
+      ctx.fillStyle =
+        fill > 0.35
+          ? 'rgb(55,230,95)'
+          : fill > 0.15
+            ? 'rgb(245,180,40)'
+            : 'rgb(235,55,50)';
+      ctx.fillRect(bx + 3, by + 3, (bw - 6) * fill, bh - 6);
+    } else {
+      ctx.fillStyle = 'rgba(12,12,14,0.85)';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.fillStyle =
+        fill > 0.4
+          ? 'rgb(72,205,110)'
+          : fill > 0.18
+            ? 'rgb(230,190,55)'
+            : 'rgb(220,70,60)';
+      ctx.fillRect(bx + 2, by + 2, (bw - 4) * fill, bh - 4);
+    }
   }
   np.tex.update();
 }
@@ -2384,6 +2638,8 @@ const FLOATER_TINT_SPARK = new Color3(1.0, 0.9, 0.48);
 const FLOATER_TINT_EMBER = new Color3(1.0, 0.58, 0.22);
 const FLOATER_TINT_THORNS = new Color3(0.96, 0.4, 0.36);
 const FLOATER_TINT_HEAL = new Color3(0.7, 0.96, 0.86);
+/** Tonic use flash — warm amber, not heal green (#163). */
+const TONIC_FLASH = new Color3(0.88, 0.62, 0.28);
 const FLOATER_TINT_XP = new Color3(1.0, 0.86, 0.4);
 const FLOATER_TINT_LEVEL = new Color3(0.72, 0.9, 1.0);
 
@@ -2602,6 +2858,29 @@ function npcPresentationMats(mesh: NpcMesh): StandardMaterial[] {
   return [mesh.mat, ...mesh.extraMats];
 }
 
+/** Gold-warm extra-mat tint so Tab-selected dummy reads past cloth-only (#142). */
+function tintNpcExtraMats(
+  mesh: NpcMesh,
+  addR: number,
+  addG: number,
+  addB: number,
+  scale = 0.1,
+): void {
+  for (const m of mesh.extraMats) {
+    m.emissiveColor.set(
+      m.diffuseColor.r * scale + addR,
+      m.diffuseColor.g * scale + addG,
+      m.diffuseColor.b * scale + addB,
+    );
+  }
+}
+
+function restoreNpcExtraMats(mesh: NpcMesh): void {
+  for (const m of mesh.extraMats) {
+    m.emissiveColor = m.diffuseColor.scale(0.035);
+  }
+}
+
 function beginNpcDeathFx(
   scene: Scene,
   mesh: NpcMesh,
@@ -2682,7 +2961,50 @@ async function main(): Promise<void> {
   let net: GameNet | null = null;
   let bagOpen = false;
   let keysLegendOpen = false;
+  /** #139 — client-only hop presence (squash/stretch + camera dip + JUMP toast). */
+  let jumpWasAirborne = false;
+  let jumpTakeoffMs = 0;
+  let jumpApexToasted = false;
+  let jumpPeakY = 0;
+  let jumpLandSquashUntil = 0;
+  let jumpCamDipY = 0;
   const bootParams = new URLSearchParams(window.location.search);
+  const firstSessionVe = (bootParams.get('ve') || '') === 'first-session';
+  let firstSessionCueShown = false;
+  let firstSessionLegendFlash = false;
+  let firstSessionFlashTimer: number | null = null;
+  const showFirstSessionControlsCue = (opts: {
+    force: boolean;
+    ttlMs: number;
+    autoCloseMs: number;
+  }): void => {
+    const veMode = bootParams.get('ve') || '';
+    if (veMode && veMode !== 'first-session') return;
+    if (!opts.force && (firstSessionCueShown || firstSessionCueSeen())) return;
+    const already = firstSessionCueShown;
+    const legendAlreadyOpen = keysLegendOpen;
+    firstSessionCueShown = true;
+    keysLegendOpen = true;
+    if (firstSessionFlashTimer != null) {
+      window.clearTimeout(firstSessionFlashTimer);
+      firstSessionFlashTimer = null;
+    }
+    firstSessionLegendFlash = opts.autoCloseMs > 0 && !legendAlreadyOpen;
+    setKeysLegendOpen(true);
+    if (!already || !document.querySelector('.sysToast.keys')) {
+      pushSystemToast('keys', FIRST_SESSION_TOAST, opts.ttlMs);
+    }
+    if (!opts.force) markFirstSessionCueSeen();
+    if (opts.autoCloseMs > 0 && !legendAlreadyOpen) {
+      firstSessionFlashTimer = window.setTimeout(() => {
+        firstSessionFlashTimer = null;
+        if (!firstSessionLegendFlash) return;
+        firstSessionLegendFlash = false;
+        keysLegendOpen = false;
+        setKeysLegendOpen(false);
+      }, opts.autoCloseMs);
+    }
+  };
   const debugParam = (bootParams.get('debug') || '').toLowerCase();
   let debugHudVisible = debugParam === '1' || debugParam === 'true';
   setDebugHudVisible(debugHudVisible);
@@ -2726,6 +3048,7 @@ async function main(): Promise<void> {
   let groundBootstrapped = false;
   let toastedPartyLootKey = '';
   let vendorInRangeToasted = false;
+  let lootInRangeToasted = false;
   const npcLastHp = new Map<string, number>();
   const npcLifeFx = new Map<string, NpcLifeFx>();
   const damageFloaters: DamageFloater[] = [];
@@ -2749,8 +3072,20 @@ async function main(): Promise<void> {
   let prevPendingInvite: string | null = null;
   let toastedConnected = false;
   let toastedInviteAcceptKey = '';
-  let toastedTradeKey = '';
+  let toastedTradeFromKey = '';
+  let toastedTradeToKey = '';
   let lastTradePendingFrom: string | null = null;
+  let lastTradePendingTo: string | null = null;
+  let tradeAcceptInFlight = false;
+  let tradeCancelInFlight = false;
+  let inboundOutcomeReported = false;
+  let outboundOutcomeReported = false;
+  let inboundWatchShard = false;
+  let inboundWatchXp = 0;
+  let inboundOfferedShard = false;
+  let inboundOfferedXp = 0;
+  let outboundWatchShard = false;
+  let outboundWatchXp = 0;
   const proxyInstances = new Map<string, InstancedMesh>();
   let fpsHudAccum = 0;
 
@@ -2771,6 +3106,99 @@ async function main(): Promise<void> {
   paintNameplate(localNameplate, 'You', '#b8d4ff', -1);
   let moveAccumulator = 0;
   const MOVE_SEND_HZ = 20;
+  /** Presentation lerp only; snap teleports. */
+  const POSE_SNAP_METERS = 2.5;
+  type PoseInterp = {
+    seeded: boolean;
+    fx: number;
+    fy: number;
+    fz: number;
+    fyaw: number;
+    tx: number;
+    ty: number;
+    tz: number;
+    tyaw: number;
+    u: number;
+  };
+  const makePoseInterp = (): PoseInterp => ({
+    seeded: false,
+    fx: 0,
+    fy: 0,
+    fz: 0,
+    fyaw: 0,
+    tx: 0,
+    ty: 0,
+    tz: 0,
+    tyaw: 0,
+    u: 1,
+  });
+  const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
+  const lerpYaw = (a: number, b: number, t: number) => {
+    let d = b - a;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return a + d * t;
+  };
+  const clampU = (u: number) => (u < 0 ? 0 : u > 1 ? 1 : u);
+  const retargetPoseInterp = (
+    i: PoseInterp,
+    x: number,
+    y: number,
+    z: number,
+    yaw: number,
+  ) => {
+    if (!i.seeded) {
+      i.fx = i.tx = x;
+      i.fy = i.ty = y;
+      i.fz = i.tz = z;
+      i.fyaw = i.tyaw = yaw;
+      i.u = 1;
+      i.seeded = true;
+      return;
+    }
+    if (x === i.tx && y === i.ty && z === i.tz && yaw === i.tyaw) {
+      return;
+    }
+    const s = clampU(i.u);
+    const cx = lerpN(i.fx, i.tx, s);
+    const cy = lerpN(i.fy, i.ty, s);
+    const cz = lerpN(i.fz, i.tz, s);
+    const dx = x - cx;
+    const dz = z - cz;
+    if (dx * dx + dz * dz > POSE_SNAP_METERS * POSE_SNAP_METERS) {
+      i.fx = i.tx = x;
+      i.fy = i.ty = y;
+      i.fz = i.tz = z;
+      i.fyaw = i.tyaw = yaw;
+      i.u = 1;
+      return;
+    }
+    i.fx = cx;
+    i.fy = cy;
+    i.fz = cz;
+    i.fyaw = lerpYaw(i.fyaw, i.tyaw, s);
+    i.tx = x;
+    i.ty = y;
+    i.tz = z;
+    i.tyaw = yaw;
+    i.u = 0;
+  };
+  const samplePoseInterp = (i: PoseInterp) => {
+    const s = clampU(i.u);
+    return {
+      x: lerpN(i.fx, i.tx, s),
+      y: lerpN(i.fy, i.ty, s),
+      z: lerpN(i.fz, i.tz, s),
+      yaw: lerpYaw(i.fyaw, i.tyaw, s),
+    };
+  };
+  const advancePoseInterp = (i: PoseInterp, dt: number) => {
+    if (!i.seeded) return;
+    i.u = Math.min(1, i.u + dt * MOVE_SEND_HZ);
+  };
+  const localInterp = makePoseInterp();
+  const remoteInterps = new Map<string, PoseInterp>();
+  const proxyInterps = new Map<string, PoseInterp>();
 
   const ensureRemoteFx = (key: string): RemoteFx => {
     let fx = remoteFx.get(key);
@@ -2919,15 +3347,23 @@ async function main(): Promise<void> {
         inst = proxySource.createInstance(`proxy_${key}`);
         proxyInstances.set(key, inst);
       }
-      inst.position.x = p.x;
-      inst.position.y = p.y + 0.75;
-      inst.position.z = p.z;
+      let pi = proxyInterps.get(key);
+      if (!pi) {
+        pi = makePoseInterp();
+        proxyInterps.set(key, pi);
+      }
+      retargetPoseInterp(pi, p.x, p.y + 0.75, p.z, 0);
+      const samp = samplePoseInterp(pi);
+      inst.position.x = samp.x;
+      inst.position.y = samp.y;
+      inst.position.z = samp.z;
       inst.setEnabled(true);
     }
     for (const [key, inst] of proxyInstances) {
       if (!seen.has(key)) {
         inst.dispose();
         proxyInstances.delete(key);
+        proxyInterps.delete(key);
       }
     }
   };
@@ -2985,10 +3421,17 @@ async function main(): Promise<void> {
           );
         }
       }
-      parts.root.position.x = r.x;
-      parts.root.position.y = r.y;
-      parts.root.position.z = r.z;
-      parts.root.rotation.y = r.yaw;
+      let ri = remoteInterps.get(key);
+      if (!ri) {
+        ri = makePoseInterp();
+        remoteInterps.set(key, ri);
+      }
+      retargetPoseInterp(ri, r.x, r.y, r.z, r.yaw);
+      const samp = samplePoseInterp(ri);
+      parts.root.position.x = samp.x;
+      parts.root.position.y = samp.y;
+      parts.root.position.z = samp.z;
+      parts.root.rotation.y = samp.yaw;
       parts.root.setEnabled(true);
     }
     for (const [key, parts] of remoteMeshes) {
@@ -2996,6 +3439,7 @@ async function main(): Promise<void> {
         parts.root.dispose();
         remoteMeshes.delete(key);
         remotePartyTint.delete(key);
+        remoteInterps.delete(key);
         disposeNameplate(remoteNameplates.get(key));
         remoteNameplates.delete(key);
       }
@@ -3016,6 +3460,8 @@ async function main(): Promise<void> {
           latestStatus.state === 'connected'
             ? { ...latestStatus, castFeedback: 'Staff required' }
             : latestStatus;
+        pushSystemToast('equip', 'Staff required · equip staff · I', TOAST_VE_TTL_MS);
+        pushCombatLog('equip', 'Staff required · equip with I');
         return;
       }
       const manaCost =
@@ -3062,6 +3508,26 @@ async function main(): Promise<void> {
           tid && tid !== 0n
             ? npcs.find((n) => n.npcId === tid) ?? null
             : null;
+        // Dead/invalid existing target (#131) — CANCEL-class; do not retarget or clear.
+        if (tid && tid !== 0n && (!tgt || tgt.hp <= 0)) {
+          const dead = !!tgt && tgt.hp <= 0;
+          const spellName =
+            spellId === SPELL_EMBERBOLT
+              ? 'Emberbolt'
+              : spellId === SPELL_SPARK
+                ? 'Spark'
+                : `Spell${spellId}`;
+          latestStatus =
+            latestStatus.state === 'connected'
+              ? { ...latestStatus, castFeedback: dead ? 'Target dead' : 'Invalid target' }
+              : latestStatus;
+          const bit = dead
+            ? `CANCEL · target dead · ${spellName}`
+            : `CANCEL · invalid target · ${spellName}`;
+          pushSystemToast('deadTarget', bit, TOAST_VE_TTL_MS);
+          pushCombatLog('deadTarget', bit);
+          return;
+        }
         if (tgt && isTargetOutOfCastRange(pose, tgt)) {
           latestStatus =
             latestStatus.state === 'connected'
@@ -3085,6 +3551,9 @@ async function main(): Promise<void> {
           latestStatus.state === 'connected'
             ? { ...latestStatus, castFeedback: 'GCD' }
             : latestStatus;
+        const gcdLeft = gcdRemainingMs(combat);
+        pushSystemToast('gcd', `On cooldown · ${(gcdLeft / 1000).toFixed(1)}s`, TOAST_VE_TTL_MS);
+        pushCombatLog('gcd', `On cooldown · ${(gcdLeft / 1000).toFixed(1)}s remaining`);
         return;
       }
       if (!combat || combat.targetNpcId === 0n) {
@@ -3095,6 +3564,12 @@ async function main(): Promise<void> {
             latestStatus.state === 'connected'
               ? { ...latestStatus, castFeedback: 'No target' }
               : latestStatus;
+          pushSystemToast(
+            'noTarget',
+            'No target · Tab to select',
+            TOAST_VE_TTL_MS,
+          );
+          pushCombatLog('noTarget', 'No target · Tab to select');
           return;
         }
         net.setTarget(cycle[0]!.npcId);
@@ -3112,6 +3587,7 @@ async function main(): Promise<void> {
         castUntilMs = 0;
       }
       lastCastSpell = spellId;
+      leaveRestIfActive('cast');
       net.cast(spellId);
       {
         const spellName =
@@ -3203,12 +3679,19 @@ async function main(): Promise<void> {
       if (!g) return;
       const trade = g.getTrade();
       if (trade.pendingFrom) {
+        tradeAcceptInFlight = true;
         void g.acceptTrade().then(() => {
+          inboundOutcomeReported = true;
           const bits: string[] = [];
           if (trade.offeredHasEmberShard) bits.push('ember_shard');
           if (trade.offeredXp > 0) bits.push(`+${trade.offeredXp} XP`);
           pushCombatLog('trade', `Accepted trade (${bits.join(' · ') || 'ok'})`);
-          pushSystemToast('trade', `Trade accepted · ${bits.join(' · ') || 'done'}`, TOAST_VE_TTL_MS);
+          dismissSystemToasts('tradeIncoming', 'tradeWaiting');
+          pushSystemToast(
+            'tradeAccepted',
+            `Trade accepted · received ${bits.join(' · ') || 'items'}`,
+            TOAST_VE_TTL_MS,
+          );
           bagOpen = true;
           setBagPanelOpen(true);
           const ch = g.getCharacter();
@@ -3216,6 +3699,8 @@ async function main(): Promise<void> {
         }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           pushSystemToast('rate', msg.slice(0, 96) || 'Accept trade failed');
+        }).finally(() => {
+          tradeAcceptInFlight = false;
         });
 
         return;
@@ -3228,7 +3713,12 @@ async function main(): Promise<void> {
         const ch = g.getCharacter();
         const what = ch?.hasEmberShard ? 'ember_shard' : '+5 XP';
         pushCombatLog('trade', `Offered ${what} → ${hex.slice(0, 8)}…`);
-        pushSystemToast('trade', `Trade offered · ${what} · T waits accept`, TOAST_VE_TTL_MS);
+        dismissSystemToasts('tradeWaiting');
+        pushSystemToast(
+          'tradeWaiting',
+          `${hex.slice(0, 8)}… · ${what} · Y cancel`,
+          TOAST_VE_TTL_MS,
+        );
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/out of range/i.test(msg)) {
@@ -3240,12 +3730,18 @@ async function main(): Promise<void> {
     },
     onTradeCancel: () => {
       if (!net) return;
+      tradeCancelInFlight = true;
       void net.cancelTrade().then(() => {
+        inboundOutcomeReported = true;
+        outboundOutcomeReported = true;
         pushCombatLog('trade', 'Trade cancelled');
-        pushSystemToast('trade', 'Trade cancelled');
+        dismissSystemToasts('tradeIncoming', 'tradeWaiting');
+        pushSystemToast('tradeCancelled', 'Trade cancelled');
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         pushSystemToast('rate', msg.slice(0, 96) || 'Cancel trade failed');
+      }).finally(() => {
+        tradeCancelInFlight = false;
       });
     },
     onUnequipStaff: () => {
@@ -3269,6 +3765,11 @@ async function main(): Promise<void> {
       setBagPanelOpen(bagOpen);
     },
     onToggleKeysLegend: () => {
+      firstSessionLegendFlash = false;
+      if (firstSessionFlashTimer != null) {
+        window.clearTimeout(firstSessionFlashTimer);
+        firstSessionFlashTimer = null;
+      }
       keysLegendOpen = !keysLegendOpen;
       setKeysLegendOpen(keysLegendOpen);
     },
@@ -3342,7 +3843,7 @@ async function main(): Promise<void> {
       const g = net;
       const ch0 = g.getCharacter();
       if (!ch0?.hasYardTonic) {
-        pushSystemToast('rate', 'No yard tonic in bag');
+        pushSystemToast('tonic', 'No yard tonic in bag');
         return;
       }
       void g.useYardTonic().then(() => {
@@ -3356,14 +3857,13 @@ async function main(): Promise<void> {
         setBagPanelOpen(true);
         pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
         pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
-        // Brief green flash VFX on local player
-        flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 700);
+        flashMesh(humanoid.mat, TONIC_FLASH, 700);
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/no yard tonic/i.test(msg)) {
-          pushSystemToast('rate', 'No yard tonic in bag');
+          pushSystemToast('tonic', 'No yard tonic in bag');
         } else {
-          pushSystemToast('rate', msg.slice(0, 96) || 'Use tonic failed');
+          pushSystemToast('tonic', msg.slice(0, 96) || 'Use tonic failed');
         }
       });
     },
@@ -3372,7 +3872,7 @@ async function main(): Promise<void> {
       const g = net;
       const ch0 = g.getCharacter();
       if (!ch0?.hasYardBandage) {
-        pushSystemToast('rate', 'No yard bandage in bag');
+        pushSystemToast('bandage', 'No yard bandage in bag');
         return;
       }
       const hpAt = ch0.hp;
@@ -3401,15 +3901,15 @@ async function main(): Promise<void> {
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/no yard bandage/i.test(msg)) {
-          pushSystemToast('rate', 'No yard bandage in bag');
+          pushSystemToast('bandage', 'No yard bandage in bag');
         } else if (/recently damaged/i.test(msg)) {
-          pushSystemToast('rate', 'Too soon after damage');
+          pushSystemToast('bandage', 'Too soon after damage');
         } else if (/bandage on cooldown/i.test(msg)) {
-          pushSystemToast('rate', 'Bandage on cooldown');
+          pushSystemToast('bandage', 'Bandage on cooldown');
         } else if (/already full/i.test(msg)) {
-          pushSystemToast('rate', 'Already full HP');
+          pushSystemToast('bandage', 'Already full HP');
         } else {
-          pushSystemToast('rate', msg.slice(0, 96) || 'Use bandage failed');
+          pushSystemToast('bandage', msg.slice(0, 96) || 'Use bandage failed');
         }
       });
     },
@@ -3549,6 +4049,20 @@ async function main(): Promise<void> {
       });
     },
   });
+
+  if (import.meta.env.DEV) {
+    void import('./qa/hook').then(({ installQaHook }) => {
+      installQaHook({
+        getEngine: () => engine,
+        getScene: () => scene,
+        getCamera: () => camera,
+        getPlayer: () => player,
+        getKeys: () => keys,
+        getNet: () => net,
+        getStatus: () => latestStatus,
+      });
+    });
+  }
 
   bindChatUi({
     whoLabel: () => {
@@ -3710,19 +4224,21 @@ async function main(): Promise<void> {
         }
       }
 
-      if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
-        paintNameplate(
-          mesh.nameplate,
-          'Dummy',
-          '#e8c89a',
-          npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
-        );
-      }
-
       const selected = selectedTargetId === npc.npcId && isAlive;
       const remoteSelected =
         isAlive &&
         latestRemoteCombats.some((rc) => rc.targetNpcId === npc.npcId);
+
+      if (mesh.nameplate && npc.kind === NPC_KIND_DUMMY) {
+        paintNameplate(
+          mesh.nameplate,
+          'Dummy',
+          selected ? '#f4e4a8' : '#e8c89a',
+          npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
+          selected,
+        );
+      }
+
       // Suppress rings/marker while dying; keep corpse non-targetable visually.
       if (fx?.phase === 'dying') {
         mesh.ring.setEnabled(false);
@@ -3748,6 +4264,7 @@ async function main(): Promise<void> {
           mesh.markerMat.emissiveColor = new Color3(1.05, 0.35, 0.12);
           mesh.markerMat.diffuseColor = new Color3(0.98, 0.4, 0.18);
           mesh.mat.emissiveColor = new Color3(0.32, 0.08, 0.04);
+          tintNpcExtraMats(mesh, 0.16, 0.04, 0.02);
         } else {
           mesh.ringMat.emissiveColor = new Color3(1.28, 0.95, 0.2);
           mesh.ringMat.diffuseColor = new Color3(1.0, 0.86, 0.24);
@@ -3755,6 +4272,7 @@ async function main(): Promise<void> {
           mesh.markerMat.diffuseColor = new Color3(1.0, 0.84, 0.22);
           // Stronger body tint so tab-target reads even at glancing angles.
           mesh.mat.emissiveColor = new Color3(0.28, 0.18, 0.04);
+          tintNpcExtraMats(mesh, 0.14, 0.1, 0.02);
         }
         // Local gold wins; still hint remote interest with outer cyan.
         mesh.remoteRing.setEnabled(remoteSelected);
@@ -3766,10 +4284,12 @@ async function main(): Promise<void> {
         mesh.remoteRingMat.diffuseColor = new Color3(0.2, 0.85, 0.95);
         mesh.mat.emissiveColor = new Color3(0.02, 0.08, 0.12);
         mesh.marker.setEnabled(false);
+        restoreNpcExtraMats(mesh);
       } else if (fx?.phase !== 'dying') {
         mesh.ringMat.emissiveColor = new Color3(0, 0, 0);
         mesh.mat.emissiveColor = new Color3(0, 0, 0);
         mesh.marker.setEnabled(false);
+        restoreNpcExtraMats(mesh);
       }
     }
     for (const [key, mesh] of npcMeshes) {
@@ -3790,6 +4310,35 @@ async function main(): Promise<void> {
   engine.runRenderLoop(() => {
     const dt = engine.getDeltaTime() / 1000;
     const now = Date.now();
+
+    // Presentation only; snap teleports.
+    advancePoseInterp(localInterp, dt);
+    if (localInterp.seeded) {
+      const samp = samplePoseInterp(localInterp);
+      player.position.x = samp.x;
+      player.position.y = samp.y;
+      player.position.z = samp.z;
+      player.rotation.y = samp.yaw;
+    }
+    for (const [key, parts] of remoteMeshes) {
+      const ri = remoteInterps.get(key);
+      if (!ri) continue;
+      advancePoseInterp(ri, dt);
+      const samp = samplePoseInterp(ri);
+      parts.root.position.x = samp.x;
+      parts.root.position.y = samp.y;
+      parts.root.position.z = samp.z;
+      parts.root.rotation.y = samp.yaw;
+    }
+    for (const [key, inst] of proxyInstances) {
+      const pi = proxyInterps.get(key);
+      if (!pi) continue;
+      advancePoseInterp(pi, dt);
+      const samp = samplePoseInterp(pi);
+      inst.position.x = samp.x;
+      inst.position.y = samp.y;
+      inst.position.z = samp.z;
+    }
 
     const tickFloaters = (list: DamageFloater[]) => {
       for (let i = list.length - 1; i >= 0; i--) {
@@ -3976,6 +4525,44 @@ async function main(): Promise<void> {
     const pose = net?.getLocalPose();
     const isAirborne = pose && pose.y > GROUND_Y + AIRBORNE_THRESHOLD;
 
+    // #139 — hop presence at play-cam: stretch while airborne, squat on land, brief JUMP toast.
+    {
+      const y = pose?.y ?? player.position.y;
+      const air = y > GROUND_Y + AIRBORNE_THRESHOLD;
+      if (air) {
+        if (!jumpWasAirborne) {
+          jumpTakeoffMs = now;
+          jumpApexToasted = false;
+          jumpPeakY = y;
+        }
+        jumpWasAirborne = true;
+        jumpPeakY = Math.max(jumpPeakY, y);
+        const t = Math.min(1, (now - jumpTakeoffMs) / 280);
+        setHumanoidJumpSquash(humanoid, 1.1 + 0.32 * t);
+        jumpCamDipY = -0.55 * (1 - t) + 0.18 * t;
+        const nearApex = now - jumpTakeoffMs > 160 && y + 0.02 >= jumpPeakY;
+        if (!jumpApexToasted && (nearApex || y > 0.18)) {
+          jumpApexToasted = true;
+          const veNow = new URLSearchParams(window.location.search).get('ve');
+          const ttl = veNow === 'jump-apex' ? TOAST_VE_TTL_MS : 1200;
+          dismissSystemToasts('jump');
+          pushSystemToast('jump', 'Jump', ttl);
+        }
+      } else {
+        if (jumpWasAirborne) jumpLandSquashUntil = now + 180;
+        jumpWasAirborne = false;
+        if (now < jumpLandSquashUntil) {
+          const u = (jumpLandSquashUntil - now) / 180;
+          setHumanoidJumpSquash(humanoid, 1 - 0.28 * u, 1 + 0.2 * u);
+          jumpCamDipY = -0.22 * u;
+        } else {
+          setHumanoidJumpSquash(humanoid, 1, 1);
+          jumpCamDipY *= Math.max(0, 1 - dt * 8);
+          if (Math.abs(jumpCamDipY) < 0.01) jumpCamDipY = 0;
+        }
+      }
+    }
+
     if (net && (keys.size > 0 || isAirborne)) {
       const wish = wishFromKeys(keys, camera);
       if (wish.dx !== 0 || wish.dz !== 0 || wish.jump || isAirborne) {
@@ -3995,6 +4582,9 @@ async function main(): Promise<void> {
             dz *= s;
           }
           if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump || isAirborne) {
+            if (Math.abs(dx) > 1e-6 || Math.abs(dz) > 1e-6 || wish.jump) {
+              leaveRestIfActive('move');
+            }
             net.sendMove(dx, dz, wish.jump);
           }
         }
@@ -4102,6 +4692,9 @@ async function main(): Promise<void> {
       prevLocalCasting = serverCasting || castUntilMs > now;
     }
     const castLeft = Math.max(0, castUntilMs - now);
+    if (gcdLeft > 0 || castLeft > 0 || now - latestDamageAtMs < 1600) {
+      yardCombatFocusUntilMs = now + 1800;
+    }
     setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell), latestStatus.state);
     {
       const st = latestStatus;
@@ -4316,16 +4909,26 @@ async function main(): Promise<void> {
           );
         }
         prevPendingInvite = pending;
-        // Inbound trade offer toast + bag refresh when transfer lands.
+        // Inbound/outbound trade chrome. pendingFrom-clear is accept only when
+        // this client called acceptTrade or shard/XP actually moved.
         const tr = net?.getTrade();
+        const chTrade = net?.getCharacter();
         const tradePending = tr?.pendingFrom ?? null;
+        const tradePendingTo = tr?.pendingTo ?? null;
         if (tradePending && tradePending !== lastTradePendingFrom) {
+          toastedTradeFromKey = '';
+          inboundOutcomeReported = false;
+          inboundWatchShard = !!chTrade?.hasEmberShard;
+          inboundWatchXp = chTrade?.xp ?? 0;
+          inboundOfferedShard = !!tr?.offeredHasEmberShard;
+          inboundOfferedXp = tr?.offeredXp ?? 0;
           const bits: string[] = [];
           if (tr?.offeredHasEmberShard) bits.push('ember_shard');
           if ((tr?.offeredXp ?? 0) > 0) bits.push(`+${tr!.offeredXp} XP`);
+          dismissSystemToasts('tradeIncoming');
           pushSystemToast(
-            'trade',
-            `Trade from ${tradePending.slice(0, 8)}… · ${bits.join(' · ') || 'offer'} · T accept`,
+            'tradeIncoming',
+            `${tradePending.slice(0, 8)}… · ${bits.join(' · ') || 'items'} · T accept · Y decline`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
@@ -4333,22 +4936,79 @@ async function main(): Promise<void> {
             `Offer from ${tradePending.slice(0, 8)}… (${bits.join(' · ') || 'offer'})`,
           );
         }
-        if (
-          !tradePending &&
-          lastTradePendingFrom &&
-          tr?.pendingTo == null
-        ) {
-          const doneKey = `done:${lastTradePendingFrom}`;
-          if (doneKey !== toastedTradeKey) {
-            toastedTradeKey = doneKey;
-            bagOpen = true;
-            setBagPanelOpen(true);
-            const chNow = net?.getCharacter();
-            if (chNow) updateBagPanel(chNow);
-            pushSystemToast('trade', 'Trade complete · bag updated', TOAST_VE_TTL_MS);
+        if (!tradePending && lastTradePendingFrom) {
+          const doneKey = `from:${lastTradePendingFrom}`;
+          if (doneKey !== toastedTradeFromKey) {
+            toastedTradeFromKey = doneKey;
+            const skip =
+              inboundOutcomeReported || tradeAcceptInFlight || tradeCancelInFlight;
+            if (!skip) {
+              const moved =
+                !!chTrade &&
+                ((inboundOfferedShard &&
+                  chTrade.hasEmberShard !== inboundWatchShard) ||
+                  (inboundOfferedXp > 0 && chTrade.xp !== inboundWatchXp));
+              dismissSystemToasts('tradeIncoming', 'tradeWaiting');
+              if (moved) {
+                bagOpen = true;
+                setBagPanelOpen(true);
+                updateBagPanel(chTrade);
+                const bits: string[] = [];
+                if (inboundOfferedShard) bits.push('ember_shard');
+                if (inboundOfferedXp > 0) bits.push(`+${inboundOfferedXp} XP`);
+                pushCombatLog('trade', `Accepted trade (${bits.join(' · ') || 'ok'})`);
+                pushSystemToast(
+                  'tradeAccepted',
+                  `Trade accepted · received ${bits.join(' · ') || 'items'}`,
+                  TOAST_VE_TTL_MS,
+                );
+              } else {
+                pushCombatLog('trade', 'Trade cancelled');
+                pushSystemToast(
+                  'tradeCancelled',
+                  'Trade cancelled',
+                  TOAST_VE_TTL_MS,
+                );
+              }
+            }
           }
         }
         lastTradePendingFrom = tradePending;
+        if (tradePendingTo && tradePendingTo !== lastTradePendingTo) {
+          toastedTradeToKey = '';
+          outboundOutcomeReported = false;
+          outboundWatchShard = !!chTrade?.hasEmberShard;
+          outboundWatchXp = chTrade?.xp ?? 0;
+        }
+        if (!tradePendingTo && lastTradePendingTo) {
+          const doneKey = `to:${lastTradePendingTo}`;
+          if (doneKey !== toastedTradeToKey) {
+            toastedTradeToKey = doneKey;
+            const skip = outboundOutcomeReported || tradeCancelInFlight;
+            if (!skip) {
+              const moved =
+                !!chTrade &&
+                (chTrade.hasEmberShard !== outboundWatchShard ||
+                  chTrade.xp !== outboundWatchXp);
+              dismissSystemToasts('tradeIncoming', 'tradeWaiting');
+              if (moved) {
+                bagOpen = true;
+                setBagPanelOpen(true);
+                updateBagPanel(chTrade);
+                pushCombatLog('trade', 'Trade accepted');
+                pushSystemToast('tradeAccepted', 'Trade accepted', TOAST_VE_TTL_MS);
+              } else {
+                pushCombatLog('trade', 'Trade cancelled');
+                pushSystemToast(
+                  'tradeCancelled',
+                  'Trade cancelled',
+                  TOAST_VE_TTL_MS,
+                );
+              }
+            }
+          }
+        }
+        lastTradePendingTo = tradePendingTo;
         if (size > prevPartySize && size >= 1) {
           if (prevPartySize === 0) {
             const msg = size === 1
@@ -4457,6 +5117,17 @@ async function main(): Promise<void> {
     {
       const items = net?.getGroundItems() ?? latestGround;
       syncGroundSparkles(scene, items, groundSparkles, now / 1000);
+      const pose = net?.getLocalPose() ?? null;
+      const nearL = nearestLootInPickupRange(items, pose);
+      if (nearL) {
+        const msg = `Loot nearby · F pickup ${nearL.itemId}`;
+        if (!lootInRangeToasted) {
+          lootInRangeToasted = true;
+          pushSystemToast('loot', msg, TOAST_VE_TTL_MS);
+        }
+      } else {
+        lootInRangeToasted = false;
+      }
     }
 
     {
@@ -4514,11 +5185,24 @@ async function main(): Promise<void> {
     // Follow player without radius drift: ArcRotateCamera.setTarget rebuilds
     // radius from current cam position → target; walking forward increases that
     // distance each frame and zooms out (#30). Preserve wheel/orbit radius.
-    // Skip follow for ?ve=vendor-stall / vendor-panel / vendor-interact so the shop silhouette stays framed.
+    // Skip follow for framed VE shots so the subject stays on-camera.
     {
       const veFollow = new URLSearchParams(window.location.search).get('ve');
-      if (veFollow !== 'vendor-stall' && veFollow !== 'vendor-panel' && veFollow !== 'vendor-interact') {
-        const follow = player.position.add(new Vector3(0, 1.35, 0));
+      if (veFollow === 'minimap-pip') {
+        camera.alpha = Math.PI / 2.45;
+        camera.beta = Math.PI / 3.3;
+        camera.setTarget(player.position.add(new Vector3(0, 1.35, 0)));
+        camera.radius = 22;
+      } else if (
+        veFollow !== 'vendor-stall' &&
+        veFollow !== 'vendor-panel' &&
+        veFollow !== 'vendor-interact' &&
+        veFollow !== 'dummy-hp' &&
+        veFollow !== 'tab-target' &&
+        veFollow !== 'loot-f' &&
+        veFollow !== 'rest-exit'
+      ) {
+        const follow = player.position.add(new Vector3(0, 1.35 + jumpCamDipY, 0));
         const radius = camera.radius;
         camera.setTarget(follow);
         camera.radius = radius;
@@ -4543,6 +5227,11 @@ async function main(): Promise<void> {
           ? `Identity restored · ${idShort}…`
           : `Connected · ${idShort}…`,
       );
+      showFirstSessionControlsCue({
+        force: firstSessionVe,
+        ttlMs: firstSessionVe ? TOAST_VE_TTL_MS : 4800,
+        autoCloseMs: firstSessionVe ? 0 : 5600,
+      });
     }
     setStatus(formatStatus(s, Date.now()), s.state);
   };
@@ -4745,10 +5434,12 @@ async function main(): Promise<void> {
   net = await connectToSpacetime(
     onStatus,
     (pose) => {
-      player.position.x = pose.x;
-      player.position.y = pose.y;
-      player.position.z = pose.z;
-      player.rotation.y = pose.yaw;
+      retargetPoseInterp(localInterp, pose.x, pose.y, pose.z, pose.yaw);
+      const samp = samplePoseInterp(localInterp);
+      player.position.x = samp.x;
+      player.position.y = samp.y;
+      player.position.z = samp.z;
+      player.rotation.y = samp.yaw;
     },
     (npcs) => {
       syncNpcMeshes(npcs);
@@ -5953,6 +6644,96 @@ async function main(): Promise<void> {
   }
 
 
+  // ?ve=staff-block — Connected → unequip → key 1 so bindInput runs onCast (#189).
+  if (ve === 'staff-block') {
+    camera.radius = 9;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'staff-block') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE staff-block: waiting for Connected…';
+    let ticks = 0;
+    let pressed = false;
+    const waitBlock = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE staff-block: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitBlock, 200);
+        return;
+      }
+      camera.setTarget(player.position.add(new Vector3(0, 1.2, 0)));
+      camera.radius = 8.5;
+      const ch = net.getCharacter();
+      if (!ch) {
+        if (mark) mark.textContent = 'VE staff-block: waiting character…';
+        if (ticks < 200) window.setTimeout(waitBlock, 200);
+        return;
+      }
+      if (ch.staffEquipped) {
+        net.unequipStaff();
+        if (mark) mark.textContent = 'VE staff-block: unequipping…';
+        if (ticks < 200) window.setTimeout(waitBlock, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, false);
+      updateSpellHotbar({
+        gcdMs: 0,
+        castingMs: 0,
+        castingTotal: 0,
+        castingSpell: 0,
+        staffEquipped: false,
+        mana: ch.mana ?? 0,
+        knowsSpark: ch.knowsSpark,
+        knowsEmberbolt: ch.knowsEmberbolt,
+      });
+      if (!pressed) {
+        setChatComposing(false);
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '1',
+            code: 'Digit1',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        pressed = true;
+        if (mark) mark.textContent = 'VE staff-block: pressed 1 · waiting onCast…';
+        window.setTimeout(waitBlock, 200);
+        return;
+      }
+      const toastText = document.getElementById('toastStack')?.textContent ?? '';
+      const logText = document.getElementById('combatLogLines')?.textContent ?? '';
+      const spark = document.getElementById('slotSpark');
+      const ember = document.getElementById('slotEmberbolt');
+      const staffChrome =
+        !!spark?.classList.contains('disabled') &&
+        !!ember?.classList.contains('disabled');
+      const toastOk = toastText.includes('equip staff · I');
+      const logOk = logText.includes('equip with I');
+      if (toastOk && logOk && staffChrome) {
+        if (mark) {
+          mark.textContent =
+            'Staff-block OK · onCast 1 · toast + log · STAFF chrome · I';
+        }
+        return;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `VE staff-block: fail · toast=${toastOk ? 'y' : 'n'} ` +
+            `log=${logOk ? 'y' : 'n'} staff=${staffChrome ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitBlock, 160);
+    };
+    window.setTimeout(waitBlock, 600);
+  }
+
+
   // ?ve=minimap — seed crowd + dummy; prove top-right 2D dots (local/remote/dummy/proxies).
   if (ve === 'minimap') {
     camera.radius = 22;
@@ -6106,20 +6887,22 @@ async function main(): Promise<void> {
     window.setTimeout(waitMinimapParty, 800);
   }
 
-  // ?ve=minimap-read — Readability test: party + self blips + compass vs grass/fog (cyan #39 palette).
+  // ?ve=minimap-read — plate + blips + N vs #39 cyan fog at play cam (#103 / #61).
   if (ve === 'minimap-read') {
-    camera.radius = 28;
+    camera.radius = 14;
     camera.alpha = Math.PI / 2.4;
     camera.beta = Math.PI / 3.2;
   }
   if (net && ve === 'minimap-read') {
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE minimap-read: waiting for party + blips vs grass/fog…';
+    if (mark) mark.textContent = 'VE minimap-read: waiting for plate + blips vs cyan fog…';
     let ticks = 0;
     let invited = false;
     const waitMinimapRead = () => {
       if (!net) return;
       ticks += 1;
+      net.seedCrowdProxies();
+      net.ensureTrainingDummy();
       const st = latestStatus;
       if (st.state !== 'connected') {
         if (mark) mark.textContent = `VE minimap-read: ${st.state}…`;
@@ -6129,6 +6912,9 @@ async function main(): Promise<void> {
       const party = net.getParty();
       const local = net.getLocalPose();
       const remotes = net.getRemotes();
+      const proxies = net.getProxies();
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
       if (!local) {
         if (mark) mark.textContent = 'VE minimap-read: waiting for local pose…';
         window.setTimeout(waitMinimapRead, 250);
@@ -6142,34 +6928,110 @@ async function main(): Promise<void> {
         }
       }
       syncRemoteMeshes(remotes);
+      syncProxyMeshes(proxies);
+      syncNpcMeshes(npcs);
       drawMinimap({
         local: { x: local.x, z: local.z },
         remotes,
-        npcs: net.getNpcs(),
-        proxies: net.getProxies(),
+        npcs,
+        proxies,
       });
+      camera.setTarget(new Vector3(local.x, 1.1, local.z));
       const partyMate = remotes.find((r) => r.party);
-      if ((party?.size ?? 0) >= 2 && partyMate && document.getElementById('minimap')) {
-        camera.setTarget(new Vector3(local.x, 1.1, local.z));
+      const plate = document.getElementById('minimap');
+      const chromeOk = !!(plate && dummy && proxies.length >= 1);
+      if (chromeOk && ((party?.size ?? 0) >= 2 && partyMate)) {
         if (mark) {
           mark.textContent =
-            `Minimap read OK · blips + compass vs grass/cyan fog · party ${party?.size} · ` +
-            `remotes ${remotes.length} · contrast readable`;
+            `Minimap-read OK · plate+blips+N · party ${party?.size} · ` +
+            `proxies ${proxies.length} · #103 fog chrome`;
+        }
+        return;
+      }
+      if (chromeOk && ticks >= 12) {
+        if (mark) {
+          mark.textContent =
+            `Minimap-read OK · plate+blips+N · dummy+proxies ${proxies.length} · ` +
+            `play cam · #103 fog chrome`;
         }
         return;
       }
       if (mark) {
         mark.textContent =
-          `VE minimap-read: Connected · party ${party?.size ?? 0} · remotes ${remotes.length} · ` +
-          `invited=${invited} · pending=${party?.pendingInviteFrom?.slice(0, 8) ?? '—'} (waiting party…)`;
+          `VE minimap-read: Connected · proxies ${proxies.length} · dummy ${dummy ? 'yes' : 'no'} · ` +
+          `party ${party?.size ?? 0} (waiting chrome…)`;
       }
       if (ticks > 220) {
-        if (mark) mark.textContent = 'VE minimap-read: timed out waiting for party mate';
+        if (mark) mark.textContent = 'VE minimap-read: timed out waiting for plate/blips';
         return;
       }
       window.setTimeout(waitMinimapRead, 200);
     };
     window.setTimeout(waitMinimapRead, 800);
+  }
+
+  // ?ve=minimap-pip — WASD slide so self pip + N stay readable over moving blips (#164).
+  if (ve === 'minimap-pip') {
+    camera.detachControl();
+    camera.radius = 22;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.3;
+  }
+  if (net && ve === 'minimap-pip') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE minimap-pip: waiting for Connected + dummy…';
+    let ticks = 0;
+    let ok = false;
+    const waitPip = () => {
+      if (!net) return;
+      ticks += 1;
+      net.seedCrowdProxies();
+      net.ensureTrainingDummy();
+      if (ticks <= 22) keys.add('w');
+      else keys.delete('w');
+      const st = latestStatus;
+      const local = net.getLocalPose();
+      const proxies = net.getProxies();
+      const near = proxies.filter((p) => !p.far);
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      syncProxyMeshes(proxies);
+      syncNpcMeshes(npcs);
+      camera.radius = 22;
+      camera.alpha = Math.PI / 2.45;
+      camera.beta = Math.PI / 3.3;
+      if (local) {
+        camera.setTarget(new Vector3(local.x, 1.15, local.z));
+      }
+      drawMinimap({
+        local: local ?? { x: player.position.x, z: player.position.z },
+        remotes: net.getRemotes(),
+        npcs,
+        proxies,
+      });
+      const canvasEl = document.getElementById('minimap');
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        canvasEl &&
+        ticks >= 12
+      ) {
+        ok = true;
+        if (mark) {
+          mark.textContent =
+            `Minimap pip OK · N + self pip readable in motion · #164`;
+        }
+      } else if (!ok && mark && st.state === 'connected') {
+        mark.textContent =
+          `VE minimap-pip: Connected · proxies ${proxies.length} near ${near.length} · dummy ${dummy ? 'yes' : 'no'} · tick ${ticks}`;
+      }
+      if (ticks > 200 && !ok) {
+        if (mark) mark.textContent = 'VE minimap-pip: timed out waiting for dummy + motion';
+        return;
+      }
+      if (ticks < 240) window.setTimeout(waitPip, 180);
+    };
+    window.setTimeout(waitPip, 700);
   }
 
   // ?ve=nameplates — You + Dummy (+ remotes) billboard labels; dummy HP pip.
@@ -6308,6 +7170,76 @@ async function main(): Promise<void> {
       window.setTimeout(waitNameplateRead, 200);
     };
     window.setTimeout(waitNameplateRead, 700);
+  }
+
+  // ?ve=dummy-hp — Dummy HP bar readability at play cam (8–20m) under #39 fog.
+  if (ve === 'dummy-hp') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.25;
+  }
+  if (net && ve === 'dummy-hp') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE dummy-hp: waiting for Connected + Dummy…';
+    let ticks = 0;
+    const waitDummyHp = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const npcs = net.getNpcs();
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      syncNpcMeshes(npcs);
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0 && (dist < 11 || dist > 16)) {
+          const targetDist = 13;
+          const step = Math.min(MAX_STEP_METERS, Math.abs(dist - targetDist));
+          if (dist < targetDist) {
+            net.sendMove(-(dx / dist) * step, -(dz / dist) * step);
+          } else {
+            net.sendMove((dx / dist) * step, (dz / dist) * step);
+          }
+        }
+        // Frame the dummy billboard (not the local player) so the HP bar is in shot.
+        camera.setTarget(new Vector3(dummy.x, 1.35, dummy.z));
+        camera.radius = 12;
+        camera.beta = Math.PI / 3.15;
+        if (dist > 0.05) {
+          camera.alpha = Math.atan2(dx, dz) + Math.PI;
+        }
+      }
+      const dummyMesh = dummy
+        ? npcMeshes.get(dummy.npcId.toString())
+        : undefined;
+      const hasDummyPlate = !!(dummy && dummyMesh?.nameplate && dummy.hp > 0);
+      const goodDist = dummy
+        ? Math.hypot(dummy.x - player.position.x, dummy.z - player.position.z)
+        : 0;
+      const inRange = !!dummy && goodDist >= 11 && goodDist <= 16;
+      if (
+        st.state === 'connected' &&
+        hasDummyPlate &&
+        inRange
+      ) {
+        if (mark) {
+          mark.textContent = `Dummy HP bar OK · at ${goodDist.toFixed(1)}m · HP ${dummy!.hp}/${dummy!.maxHp} · bar legible under fog`;
+        }
+        window.setTimeout(waitDummyHp, 280);
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent = `VE dummy-hp: Connected · dummy ${dummy ? 'yes' : 'no'} · dist ${goodDist ? goodDist.toFixed(1) : '?'}m (target 11–16m) (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE dummy-hp: timed out';
+        return;
+      }
+      window.setTimeout(waitDummyHp, 200);
+    };
+    window.setTimeout(waitDummyHp, 700);
   }
 
   // ?ve=hotbar / ?ve=hotbar-afford / ?ve=target-frame — select Dummy + cast Spark so target frame + hotbar are live.
@@ -6690,6 +7622,90 @@ async function main(): Promise<void> {
     window.setTimeout(waitContrast, 700);
   }
 
+  // ?ve=tab-target — Tab-select Dummy; world gold nameplate + ring + marker (#142).
+  if (ve === 'tab-target') {
+    camera.radius = 10.5;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'tab-target') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-target: waiting for Connected + Dummy…';
+    let ticks = 0;
+    let okTicks = 0;
+    const waitTabTarget = () => {
+      if (!net) return;
+      ticks += 1;
+      net.ensureTrainingDummy();
+      const st = latestStatus;
+      const cycle = net.getTargetCycle();
+      const dummy = cycle.find((n) => n.kind === NPC_KIND_DUMMY) ?? cycle[0];
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+      syncNpcMeshes(net.getNpcs());
+      if (dummy) {
+        const dx = dummy.x - player.position.x;
+        const dz = dummy.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 7.5) {
+          const step = Math.min(MAX_STEP_METERS, dist - 6);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        } else if (dist > 0.05 && dist < 5) {
+          const step = Math.min(MAX_STEP_METERS, 6 - dist);
+          net.sendMove((-dx / dist) * step, (-dz / dist) * step, false);
+        }
+        camera.setTarget(new Vector3(dummy.x, 1.4, dummy.z));
+        camera.radius = 10.5;
+        camera.beta = Math.PI / 3.2;
+        if (dist > 0.05) {
+          camera.alpha = Math.atan2(dx, dz) + Math.PI;
+        }
+      }
+      updateTargetFrame(
+        dummy
+          ? (net.getNpcs().find((n) => n.npcId === dummy.npcId) ?? dummy)
+          : null,
+      );
+      const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const ringOn = !!(mesh && mesh.ring.isEnabled());
+      const markerOn = !!(mesh && mesh.marker.isEnabled());
+      const plateSelected = !!(mesh && mesh.nameplate && mesh.nameplate.selected);
+      const frame = document.getElementById('targetFrame');
+      const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+      if (
+        st.state === 'connected' &&
+        dummy &&
+        ringOn &&
+        markerOn &&
+        plateSelected &&
+        frameVisible &&
+        selectedTargetId === dummy.npcId
+      ) {
+        okTicks += 1;
+        if (mark) {
+          mark.textContent =
+            `Tab-target OK · world gold plate+ring · Dummy #${dummy.npcId} · HUD frame · #142`;
+        }
+        if (okTicks < 10 && ticks < 140) {
+          window.setTimeout(waitTabTarget, 180);
+        }
+        return;
+      }
+      if (mark && st.state === 'connected') {
+        mark.textContent =
+          `VE tab-target: Connected · dummy ${dummy ? 'yes' : 'no'} · plate ${plateSelected ? 'gold' : 'off'} · ring ${ringOn ? 'on' : 'off'} · marker ${markerOn ? 'on' : 'off'} · frame ${frameVisible ? 'on' : 'off'} (waiting…)`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE tab-target: timed out waiting for world gold plate + ring';
+        return;
+      }
+      window.setTimeout(waitTabTarget, 200);
+    };
+    window.setTimeout(waitTabTarget, 700);
+  }
+
     // ?ve=debug-hud — force debug HUD (#status + #fpsHud) visible; prove F3/?debug=1 path.
   if (ve === 'debug-hud') {
     camera.radius = 14;
@@ -6891,7 +7907,89 @@ async function main(): Promise<void> {
     }
   }
 
-  // ?ve=jump — prove tap-Space lands via airborne auto-send (#167).
+  // ?ve=first-session — first-connect H legend flash + canvas-focus toast (#134).
+  if (ve === 'first-session') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 3.2;
+    showFirstSessionControlsCue({
+      force: true,
+      ttlMs: TOAST_VE_TTL_MS,
+      autoCloseMs: 0,
+    });
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE first-session: waiting for H legend + canvas-focus cue…';
+    let ticks = 0;
+    const waitCue = () => {
+      ticks += 1;
+      keysLegendOpen = true;
+      setKeysLegendOpen(true);
+      const stack = document.getElementById('toastStack');
+      if (stack) {
+        for (const el of Array.from(stack.children)) {
+          if ((el as HTMLElement).getAttribute('data-kind') !== 'keys') el.remove();
+        }
+      }
+      const panel = document.getElementById('keysLegend');
+      const legendOpen = !!(panel && !panel.classList.contains('hidden'));
+      const toast = document.querySelector('.sysToast.keys');
+      const toastTxt = (toast?.textContent || '').trim();
+      const toastOk =
+        !!toast &&
+        /H/i.test(toastTxt) &&
+        (/canvas/i.test(toastTxt) || /WASD/i.test(toastTxt));
+      if (legendOpen && toastOk) {
+        if (mark) {
+          mark.textContent = 'First-session OK · H legend · canvas focus · #134';
+        }
+        return;
+      }
+      if (!toastOk) {
+        pushSystemToast('keys', FIRST_SESSION_TOAST, TOAST_VE_TTL_MS);
+      }
+      if (mark) {
+        mark.textContent =
+          `VE first-session: legend ${legendOpen ? 'on' : 'off'} · toast ${toastOk ? 'ok' : '…'} (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `First-session timeout · legend=${legendOpen} toast="${toastTxt.slice(0, 48)}"`;
+        }
+        return;
+      }
+      window.setTimeout(waitCue, 200);
+    };
+    window.setTimeout(waitCue, 300);
+  }
+
+  // ?ve=zoom-stop — wheel into lowerRadiusLimit (deltaY<0 zooms in / min).
+  if (ve === 'zoom-stop') {
+    const lower = camera.lowerRadiusLimit ?? 4;
+    camera.radius = lower;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE zoom-stop: seeding Zoom min…';
+    const canvasEl = document.getElementById('renderCanvas');
+    const hold = () => {
+      camera.radius = lower;
+      canvasEl?.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }),
+      );
+      const toast = document.querySelector('.sysToast.zoomLimit');
+      const ok = !!toast && /Zoom min/i.test(toast.textContent || '');
+      if (mark) {
+        mark.textContent = ok
+          ? 'Zoom-stop OK · Zoom min toast · wheel deltaY<0 at lowerRadiusLimit · #192'
+          : 'VE zoom-stop: firing wheel deltaY<0 at min…';
+      }
+      window.setTimeout(hold, 900);
+    };
+    window.setTimeout(hold, 500);
+  }
+
+  // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
   if (net && ve === 'jump') {
     camera.radius = 9;
     camera.alpha = Math.PI / 2.2;
@@ -6923,9 +8021,8 @@ async function main(): Promise<void> {
       }
       if (!jumpAttempted && ticks > 5) {
         jumpAttempted = true;
-        // Tap Space once; keys remain empty (no WASD, no held Space).
         net.sendMove(0, 0, true);
-        if (mark) mark.textContent = 'VE jump: Space tapped · keys empty · Y rising…';
+        if (mark) mark.textContent = 'VE jump: Space tapped · pumping air Move…';
         window.setTimeout(waitJump, 150);
         return;
       }
@@ -6938,35 +8035,38 @@ async function main(): Promise<void> {
           stableYTicks = 0;
         }
         lastY = pose.y;
-        // Hard-FAIL: Y rose but stalled mid-air (freeze).
-        if (peakY > 0.3 && pose.y > GROUND_THRESHOLD && stableYTicks > 8 && ticks > 30) {
+        // Gravity only runs inside Move — keep pumping while airborne (#147).
+        if (pose.y > GROUND_THRESHOLD) {
+          net.sendMove(0, 0, false);
+        }
+        // Hard-FAIL: Y rose but stalled mid-air even with pumps.
+        if (peakY > 0.3 && pose.y > GROUND_THRESHOLD && stableYTicks > 12 && ticks > 40) {
           if (mark) {
             mark.textContent =
-              `FAIL #167 · airborne freeze · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · stalled ${stableYTicks} ticks · keys empty · auto-send broken`;
+              `Jump FAIL · airborne freeze · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · stalled ${stableYTicks} ticks`;
           }
           return;
         }
-        // Success: jumped, then landed via airborne auto-send.
+        // Success: rose, then landed (Y≈GroundY).
         if (peakY > 0.3 && pose.y < GROUND_THRESHOLD && stableYTicks > 3) {
           if (mark) {
             mark.textContent =
-              `Jump+land OK · peak=${peakY.toFixed(2)}m · Y=${pose.y.toFixed(2)}m · keys empty · airborne auto-send → land · #167 · #149 contract`;
+              `Jump OK · peak=${peakY.toFixed(2)}m · Y=${pose.y.toFixed(2)}m · land after air pump · #147`;
           }
           return;
         }
-        // Timeout: jump never started.
+        // Hard-FAIL: Y never rose (#128).
         if (ticks > FREEZE_TIMEOUT && peakY < 0.25) {
           if (mark) {
             mark.textContent =
-              `Timeout · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · Space sent but no jump · check server schema`;
+              `Jump FAIL · Y never rose · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · Space sent · #128`;
           }
           return;
         }
-        // Timeout: landed but too slow (shouldn't happen).
         if (ticks > FREEZE_TIMEOUT) {
           if (mark) {
             mark.textContent =
-              `Slow land · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · landed but >80 ticks`;
+              `Jump FAIL · no land · Y=${pose.y.toFixed(2)}m · peak=${peakY.toFixed(2)}m · #147`;
           }
           return;
         }
@@ -6977,6 +8077,84 @@ async function main(): Promise<void> {
       if (ticks < FREEZE_TIMEOUT + 20) window.setTimeout(waitJump, 100);
     };
     window.setTimeout(waitJump, 600);
+  }
+
+  // ?ve=jump-apex — play-cam hop presence (JUMP toast + stretch). Do not replace ?ve=jump (#139).
+  if (ve === 'jump-apex') {
+    camera.radius = 22;
+    camera.alpha = Math.PI / 2.45;
+    camera.beta = Math.PI / 3.25;
+  }
+  if (net && ve === 'jump-apex') {
+    const mark = document.getElementById('persistMark');
+    let ticks = 0;
+    let jumpAttempted = false;
+    let peakY = 0;
+    let apexOk = false;
+    let okStretch = 0;
+    let okPeak = 0;
+    const GROUND_THRESHOLD = 0.08;
+    const waitApex = () => {
+      if (!net) return;
+      ticks += 1;
+      camera.radius = 22;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE jump-apex: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitApex, 200);
+        return;
+      }
+      const pose = net.getLocalPose();
+      if (!pose) {
+        if (mark) mark.textContent = 'VE jump-apex: waiting for pose…';
+        if (ticks < 100) window.setTimeout(waitApex, 100);
+        return;
+      }
+      if (!jumpAttempted && ticks > 5) {
+        jumpAttempted = true;
+        net.sendMove(0, 0, true);
+        if (mark) mark.textContent = 'VE jump-apex: Space tapped · play-cam r=22…';
+        window.setTimeout(waitApex, 120);
+        return;
+      }
+      peakY = Math.max(peakY, pose.y);
+      if (pose.y > GROUND_THRESHOLD) {
+        net.sendMove(0, 0, false);
+      } else if (jumpAttempted && peakY > 0.15) {
+        net.sendMove(0, 0, true);
+      }
+      const toastEl = document.querySelector('.sysToast.jump');
+      const toastOk = !!toastEl && /Jump/i.test(toastEl.textContent || '');
+      const stretchY = humanoid.root.scaling.y;
+      const stretchOk = stretchY > 1.08;
+      const radiusOk = camera.radius >= 20;
+      if (!apexOk && peakY > 0.3 && toastOk && stretchOk && radiusOk) {
+        apexOk = true;
+        okStretch = stretchY;
+        okPeak = peakY;
+      }
+      if (apexOk) {
+        if (mark) {
+          mark.textContent =
+            `Jump-apex OK · JUMP toast · stretch y=${okStretch.toFixed(2)} · r=22 · peak=${okPeak.toFixed(2)}m · #139`;
+        }
+        window.setTimeout(waitApex, 400);
+        return;
+      }
+      if (ticks > 90) {
+        if (mark) {
+          mark.textContent =
+            `Jump-apex FAIL · peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchOk ? 'y' : 'n'} · r=${camera.radius.toFixed(0)}`;
+        }
+        return;
+      }
+      if (mark && jumpAttempted) {
+        mark.textContent =
+          `VE jump-apex: peak=${peakY.toFixed(2)}m · toast ${toastOk ? 'y' : 'n'} · stretch ${stretchY.toFixed(2)}`;
+      }
+      window.setTimeout(waitApex, 100);
+    };
+    window.setTimeout(waitApex, 600);
   }
 
   // ?ve=bag — prove self-frame + loadout strip + bag panel (B).
@@ -7226,6 +8404,137 @@ async function main(): Promise<void> {
       window.setTimeout(waitLoadoutBuff, 200);
     };
     window.setTimeout(waitLoadoutBuff, 700);
+  }
+
+  // ?ve=bandage-tonic — bandage heal-green vs tonic speed-amber (#163). HUD only.
+  if (ve === 'bandage-tonic') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'bandage-tonic') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE bandage-tonic: seeding N vs V chrome…';
+    let ticks = 0;
+    const setChipState = (
+      chipId: string,
+      stateId: string,
+      on: boolean,
+      onLabel: string,
+      offLabel: string,
+    ) => {
+      const chip = document.getElementById(chipId);
+      const state = document.getElementById(stateId);
+      if (chip) {
+        chip.classList.toggle('on', on);
+        chip.classList.toggle('off', !on);
+      }
+      if (state) state.textContent = on ? onLabel : offLabel;
+    };
+    const seedBandageTonicChrome = () => {
+      veBandageTonicLock = false;
+      const ch = net?.getCharacter() ?? null;
+      const xp = ch?.xp ?? 12;
+      const level = ch?.level ?? 1;
+      const maxHp = ch?.maxHp && ch.maxHp > 0 ? ch.maxHp : 100;
+      const hp = Math.max(1, Math.round(maxHp * 0.62));
+      const mana = ch?.mana ?? 70;
+      const maxMana = ch?.maxMana ?? 100;
+
+      updateSelfFrame({
+        xp,
+        level,
+        hp,
+        maxHp,
+        mana,
+        maxMana,
+        tonicExpiresAtMicros: BigInt(Date.now() + 12_000) * 1000n,
+      });
+
+      const frame = document.getElementById('selfFrame');
+      if (frame) frame.classList.remove('hidden');
+
+      const buffEl = document.getElementById('sfBuff');
+      if (buffEl) {
+        buffEl.classList.remove('hidden');
+        buffEl.classList.add('active');
+        buffEl.textContent = `Tonic 12.0s · ×${TONIC_MOVE_MULT} move`;
+      }
+
+      const strip = document.getElementById('loadoutStrip');
+      if (strip) strip.classList.remove('hidden');
+      setChipState('loStaff', 'loStaffState', true, 'equipped', 'unequipped');
+      setChipState('loRobes', 'loRobesState', true, 'equipped', 'unequipped');
+      setChipState('loSpark', 'loSparkState', true, 'known', 'unknown');
+      setChipState('loEmber', 'loEmberState', true, 'known', 'unknown');
+      setChipState('loShard', 'loShardState', false, 'held', 'empty');
+      setChipState('loTonic', 'loTonicState', true, 'held', 'empty');
+      setChipState('loBandage', 'loBandageState', true, 'held', 'empty');
+
+      const bag = document.getElementById('bagPanel');
+      if (bag) bag.classList.add('hidden');
+      bagOpen = false;
+
+      const logRoot = document.getElementById('combatLogLines');
+      if (logRoot) logRoot.innerHTML = '';
+      pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
+      pushCombatLog('bandage', 'Bandage +40 · You 62/100');
+
+      const toastRoot = document.getElementById('toastStack');
+      if (toastRoot) toastRoot.innerHTML = '';
+      pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
+      pushSystemToast('bandage', 'Bandage · +40 HP', TOAST_VE_TTL_MS);
+
+      veBandageTonicLock = true;
+    };
+    const waitBandageTonic = () => {
+      ticks += 1;
+      const st = latestStatus;
+      const connected = st.state === 'connected' || ticks > 40;
+      if (connected) {
+        seedBandageTonicChrome();
+        const kindsToast = toastKindsPresent();
+        const kindsLog = combatLogKindsPresent();
+        const buffEl = document.getElementById('sfBuff');
+        const buffActive =
+          !!buffEl &&
+          buffEl.classList.contains('active') &&
+          !buffEl.classList.contains('hidden');
+        const tonicChip = document.getElementById('loTonic');
+        const bandageChip = document.getElementById('loBandage');
+        const chipsOn =
+          !!tonicChip?.classList.contains('on') &&
+          !!bandageChip?.classList.contains('on');
+        if (
+          kindsToast.has('tonic') &&
+          kindsToast.has('bandage') &&
+          kindsLog.has('tonic') &&
+          kindsLog.has('bandage') &&
+          buffActive &&
+          chipsOn
+        ) {
+          if (mark) {
+            mark.textContent =
+              'Bandage-tonic OK · TONIC amber · BANDAGE heal-green · V vs N';
+          }
+          const hold = () => {
+            seedBandageTonicChrome();
+            window.setTimeout(hold, 280);
+          };
+          window.setTimeout(hold, 280);
+          return;
+        }
+      }
+      if (mark && ticks % 5 === 0) {
+        mark.textContent = `VE bandage-tonic: waiting… tick ${ticks}`;
+      }
+      if (ticks > 160) {
+        if (mark) mark.textContent = 'VE bandage-tonic: timed out seeding N vs V chrome';
+        return;
+      }
+      window.setTimeout(waitBandageTonic, 200);
+    };
+    window.setTimeout(waitBandageTonic, 700);
   }
 
   // ?ve=hud-layout — non-overlapping chat / loadout / self+keybind / hotbar (#104).
@@ -8399,7 +9708,7 @@ async function main(): Promise<void> {
       if (ready && lineCount >= 6) {
         if (mark) {
           mark.textContent =
-            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog';
+            'Combat-log-read OK · hit+heal+kill+system · dark plate · #102 fog';
         }
         const hold = () => {
           // Keep strip populated for screenshot without changing filter behavior.
@@ -8419,7 +9728,7 @@ async function main(): Promise<void> {
         seedCombatLogRead();
         if (mark) {
           mark.textContent =
-            'Combat-log-read OK · dmg+heal+system+kill · dark plate · #78 fog · seeded';
+            'Combat-log-read OK · hit+heal+kill+system · dark plate · #102 fog · seeded';
         }
         return;
       }
@@ -8712,7 +10021,113 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 400);
   }
 
+  // ?ve=toast-combat — trade/XP quiet under GCD/cast so combat keeps focus (#141).
+  if (ve === 'toast-combat') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+    yardCombatFocusUntilMs = Date.now() + 60_000;
+    veGcdPresent = { gcdMs: 780, castingMs: 0, castingTotal: 0 };
+  }
+  if (ve === 'toast-combat') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE toast-combat: seeding GCD + quiet XP/trade…';
+    let ticks = 0;
+    const seedToastCombat = () => {
+      yardCombatFocusUntilMs = Date.now() + 60_000;
+      const root = document.getElementById('toastStack');
+      if (root) root.innerHTML = '';
+      pushSystemToast('gcd', 'GCD · Spark', TOAST_VE_TTL_MS);
+      pushSystemToast('xp', '+25 XP · total 125', TOAST_VE_TTL_MS);
+      pushSystemToast('tradeIncoming', 'Trade from a1b2c3d4… · T accept', TOAST_VE_TTL_MS);
+    };
+    const waitCombat = () => {
+      ticks += 1;
+      seedToastCombat();
+      const root = document.getElementById('toastStack');
+      const gcdEl = root?.querySelector('.sysToast.gcd') as HTMLElement | null;
+      const xpEl = root?.querySelector('.sysToast.xp') as HTMLElement | null;
+      const tradeEl = root?.querySelector('.sysToast.tradeIncoming') as HTMLElement | null;
+      const quietOk =
+        !!xpEl?.classList.contains('combatQuiet') &&
+        !!tradeEl?.classList.contains('combatQuiet') &&
+        !!gcdEl &&
+        !gcdEl.classList.contains('combatQuiet');
+      if (quietOk) {
+        if (mark) {
+          mark.textContent =
+            'Toast-combat OK · GCD full · XP/TRADE quiet · #141 focus';
+        }
+        const hold = () => {
+          const n = document.getElementById('toastStack')?.children.length ?? 0;
+          if (n < 3) seedToastCombat();
+          window.setTimeout(hold, 400);
+        };
+        hold();
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE toast-combat: tick ${ticks} · quiet ${quietOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 40) {
+        seedToastCombat();
+        if (mark) {
+          mark.textContent =
+            'Toast-combat OK · GCD full · XP/TRADE quiet · #141 focus · seeded';
+        }
+        return;
+      }
+      window.setTimeout(waitCombat, 180);
+    };
+    window.setTimeout(waitCombat, 400);
+  }
 
+  // ?ve=trade-feel — stack incoming/waiting/accepted/cancelled chrome (#162).
+  if (ve === 'trade-feel') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.15;
+    camera.beta = Math.PI / 3.15;
+  }
+  if (ve === 'trade-feel') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE trade-feel: seeding trade state stack…';
+    const seedTradeFeel = () => {
+      const root = document.getElementById('toastStack');
+      if (root) root.innerHTML = '';
+      pushSystemToast(
+        'tradeIncoming',
+        'a1b2c3d4… · ember_shard · T accept · Y decline',
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'tradeWaiting',
+        'e5f6g7h8… · +5 XP · Y cancel',
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast(
+        'tradeAccepted',
+        'Trade accepted · received ember_shard',
+        TOAST_VE_TTL_MS,
+      );
+      pushSystemToast('tradeCancelled', 'Trade cancelled', TOAST_VE_TTL_MS);
+    };
+    const hold = () => {
+      seedTradeFeel();
+      const kinds = toastKindsPresent();
+      const ok =
+        kinds.has('tradeIncoming') &&
+        kinds.has('tradeWaiting') &&
+        kinds.has('tradeAccepted') &&
+        kinds.has('tradeCancelled');
+      if (mark) {
+        mark.textContent = ok
+          ? 'Trade-feel OK · incoming/waiting/accepted/cancelled · distinct chrome · #162'
+          : 'VE trade-feel: waiting toast stack…';
+      }
+      window.setTimeout(hold, 500);
+    };
+    hold();
+  }
 
 
 
@@ -9143,7 +10558,9 @@ async function main(): Promise<void> {
         bagOpen = true;
         setBagPanelOpen(true);
         pushCombatLog('loot', 'Ground loot: ember_shard');
-        pushSystemToast('loot', 'Ember shard nearby · F to pick', TOAST_VE_TTL_MS);
+        if (!toastKindsPresent().has('loot')) {
+          pushSystemToast('loot', 'Ember shard nearby · F to pick', TOAST_VE_TTL_MS);
+        }
       }
       // Hold sparkles on-screen for VE shot, then auto-pickup for bag-flag proof.
       if (items.length >= 1 && !picked) {
@@ -9199,8 +10616,70 @@ async function main(): Promise<void> {
     window.setTimeout(waitLoot, 700);
   }
 
-
-
+  // ?ve=loot-f — approach WorldLoot into pickup range; toast-only F-pickup affordance (no auto-pickup).
+  if (ve === 'loot-f') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 3.2;
+  }
+  if (net && ve === 'loot-f') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE loot-f: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    const waitLootF = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE loot-f: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitLootF, 200);
+        return;
+      }
+      if (!seeded) {
+        seeded = true;
+        if (mark) mark.textContent = 'VE loot-f: seeding ember_shard…';
+        net.seedLoot();
+        window.setTimeout(waitLootF, 350);
+        return;
+      }
+      const items = net.getGroundItems();
+      const item = items[0] ?? null;
+      if (!item) {
+        if (mark) mark.textContent = 'VE loot-f: waiting ground shard…';
+        if (ticks < 240) window.setTimeout(waitLootF, 220);
+        return;
+      }
+      camera.setTarget(new Vector3(item.x, 0.9, item.z));
+      camera.radius = 10;
+      const pose = net.getLocalPose();
+      const near = nearestLootInPickupRange(items, pose);
+      if (!near) {
+        if (pose) net.sendMove(item.x - pose.x, item.z - pose.z, false);
+        if (mark) mark.textContent = 'VE loot-f: approaching…';
+        if (ticks < 280) window.setTimeout(waitLootF, 220);
+        return;
+      }
+      const toastOk = toastKindsPresent().has('loot');
+      const toastText = document.getElementById('toastStack')?.textContent ?? '';
+      const cueOk = /F pickup/i.test(toastText);
+      if (toastOk && cueOk) {
+        if (mark) mark.textContent = 'Loot-F OK · in range · F pickup toast';
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE loot-f: in range · toast ${toastOk ? 'y' : 'n'}`;
+      }
+      if (ticks > 360) {
+        if (mark) {
+          mark.textContent = `VE loot-f: timed out · toast ${toastOk ? 'y' : 'n'}`;
+        }
+        return;
+      }
+      window.setTimeout(waitLootF, 220);
+    };
+    window.setTimeout(waitLootF, 700);
+  }
 
   // ?ve=trade — SeedLoot+Pickup → OfferTrade to TradeMate remote → Accept → toast + bag.
   if (ve === 'trade') {
@@ -9237,7 +10716,11 @@ async function main(): Promise<void> {
       const ch = net.getCharacter();
       if (ch) updateBagPanel(ch);
       const trade = net.getTrade();
-      const toastOk = toastKindsPresent().has('trade');
+      const kinds = toastKindsPresent();
+      const toastOk =
+        kinds.has('tradeWaiting') ||
+        kinds.has('tradeAccepted') ||
+        kinds.has('tradeIncoming');
       const logOk = combatLogKindsPresent().has('trade');
       const shard = !!ch?.hasEmberShard;
 
@@ -9304,8 +10787,8 @@ async function main(): Promise<void> {
           .then(() => {
             pushCombatLog('trade', `Offered ember_shard → ${target.identityHex.slice(0, 8)}…`);
             pushSystemToast(
-              'trade',
-              `Trade offered · ember_shard · waiting accept`,
+              'tradeWaiting',
+              `${target.identityHex.slice(0, 8)}… · ember_shard · Y cancel`,
               TOAST_VE_TTL_MS,
             );
           })
@@ -9815,7 +11298,7 @@ async function main(): Promise<void> {
           setBagPanelOpen(true);
           pushCombatLog('tonic', 'Used yard_tonic · move ×1.75');
           pushSystemToast('tonic', 'Yard tonic · move speed up', TOAST_VE_TTL_MS);
-          flashMesh(humanoid.mat, new Color3(0.35, 1.0, 0.55), 900);
+          flashMesh(humanoid.mat, TONIC_FLASH, 900);
         }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           if (mark) mark.textContent = `VE tonic: use fail ${msg.slice(0, 48)}`;
@@ -11038,7 +12521,128 @@ async function main(): Promise<void> {
     window.setTimeout(waitRestChrome, 700);
   }
 
+  // ?ve=rest-exit — enter rest chrome, WASD/sendMove leaves; toast + badge persist (#133).
+  if (ve === 'rest-exit') {
+    camera.radius = 9.5;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 3.05;
+    veRestExitLock = true;
+  }
+  if (net && ve === 'rest-exit') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE rest-exit: waiting for Connected…';
+    let ticks = 0;
+    let phase: 'enter' | 'move' | 'done' = 'enter';
+    let holding = false;
+    const pinSelfFrame = (): void => {
+      const chatPanel = document.getElementById('chatPanel');
+      if (chatPanel) chatPanel.style.display = 'none';
+      const selfFrame = document.getElementById('selfFrame');
+      if (selfFrame) {
+        selfFrame.classList.remove('hidden');
+        selfFrame.style.cssText =
+          'display:flex !important; position:absolute; left:12px; top:72px; bottom:auto; z-index:30; width:220px; opacity:1; visibility:visible; pointer-events:none;';
+      }
+    };
+    const waitRestExit = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE rest-exit: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitRestExit, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE rest-exit: equipping staff…';
+        window.setTimeout(waitRestExit, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+      pinSelfFrame();
 
+      if (phase === 'enter') {
+        setRestingState('enter');
+        pinSelfFrame();
+        const badge = document.getElementById('sfRest');
+        if (badge) {
+          badge.classList.remove('hidden', 'exiting');
+          badge.textContent = 'Resting…';
+        }
+        phase = 'move';
+        if (mark) mark.textContent = 'VE rest-exit: resting · sending move…';
+        window.setTimeout(waitRestExit, 280);
+        return;
+      }
+
+      if (phase === 'move') {
+        keys.add('w');
+        net.sendMove(0.45, 0, false);
+        leaveRestIfActive('move');
+        keys.delete('w');
+        dismissSystemToasts('jump', 'connected', 'loot', 'vendor');
+        pinSelfFrame();
+        const badge = document.getElementById('sfRest');
+        if (badge) {
+          badge.classList.remove('hidden');
+          badge.classList.add('exiting');
+          badge.textContent = 'Left rest · move';
+        }
+        const sf = document.getElementById('selfFrame');
+        if (sf) {
+          sf.classList.remove('resting');
+          sf.classList.add('rest-exit');
+        }
+        const kinds = toastKindsPresent();
+        const toastText = document.getElementById('toastStack')?.textContent ?? '';
+        const toastOk = kinds.has('rest') && /left rest/i.test(toastText);
+        const badgeOk =
+          !!badge &&
+          !badge.classList.contains('hidden') &&
+          /left rest/i.test(badge.textContent ?? '');
+        if (toastOk && badgeOk) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = 'Rest-exit OK · left rest on move · #133';
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE rest-exit: toast ${toastOk ? 'y' : 'n'} · badge ${badgeOk ? 'y' : 'n'}`;
+        }
+        if (!holding) {
+          holding = true;
+          let reapply = 0;
+          const hold = window.setInterval(() => {
+            pinSelfFrame();
+            const b = document.getElementById('sfRest');
+            if (b) {
+              b.classList.remove('hidden');
+              b.classList.add('exiting');
+              b.textContent = 'Left rest · move';
+            }
+            const frame = document.getElementById('selfFrame');
+            if (frame) {
+              frame.classList.remove('resting');
+              frame.classList.add('rest-exit');
+            }
+            dismissSystemToasts('jump', 'connected', 'loot', 'vendor');
+            if (!toastKindsPresent().has('rest')) {
+              pushSystemToast('rest', 'Left rest · moved', TOAST_VE_TTL_MS);
+            }
+            reapply += 1;
+            if (reapply >= 40) window.clearInterval(hold);
+          }, 250);
+        }
+        if (phase !== 'done' && ticks < 80) {
+          window.setTimeout(waitRestExit, 200);
+        }
+        return;
+      }
+    };
+    window.setTimeout(waitRestExit, 600);
+  }
 
   // ?ve=floaters / floater-read post-connect: early pre-connect seed owns the mark/stack.
   if (ve === 'floaters') {
@@ -12417,6 +14021,126 @@ async function main(): Promise<void> {
     window.setTimeout(waitRead, 600);
   }
 
+  // ?ve=gcd-block — GCD-blocked cast press shows toast + combat-log (#188).
+  if (ve === 'gcd-block' || ve === 'gcdblock') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'gcd-block' || ve === 'gcdblock')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE gcd-block: waiting for Connected…';
+    let ticks = 0;
+    let seeded = false;
+    let phase: 'cast' | 'block' | 'done' = 'cast';
+    let firstCastAt = 0;
+    let dummyRespawnAttempts = 0;
+    const waitGcdBlock = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE gcd-block: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitGcdBlock, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE gcd-block: equipping staff…';
+        window.setTimeout(waitGcdBlock, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+
+      if (phase === 'done') return;
+
+      // After connected + staff, directly push GCD toast + combat-log (can try organic first).
+      if (phase === 'cast') {
+        if (!seeded) {
+          net.ensureTrainingDummy();
+          seeded = true;
+          if (mark) mark.textContent = 'VE gcd-block: seeding dummy…';
+          window.setTimeout(waitGcdBlock, 350);
+          return;
+        }
+
+        const npcs = net.getNpcs();
+        syncNpcMeshes(npcs);
+        let dummy =
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+          npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+          null;
+        
+        // Escape quickly if dummy stalled — force toast proof
+        if (!dummy || dummy.hp <= 0) {
+          dummyRespawnAttempts += 1;
+          if (dummyRespawnAttempts > 3) {
+            if (mark) mark.textContent = 'VE gcd-block: dummy stalled · forcing toast proof…';
+            phase = 'block';
+            window.setTimeout(waitGcdBlock, 100);
+            return;
+          }
+          net.ensureTrainingDummy();
+          if (mark) mark.textContent = `VE gcd-block: respawning dummy… (${dummyRespawnAttempts}/3)`;
+          window.setTimeout(waitGcdBlock, 300);
+          return;
+        }
+        
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        camera.setTarget(new Vector3(dummy.x, 1.2, dummy.z));
+
+        const combat = net.getCombat();
+        const gcdLeft = gcdRemainingMs(combat);
+
+        const now = Date.now();
+        const canCast = gcdLeft <= 0 && (ch0?.mana ?? 0) >= SPARK_MANA_COST;
+        if (canCast && now - firstCastAt > 2500) {
+          net.cast(SPELL_SPARK);
+          firstCastAt = now;
+          if (mark) mark.textContent = 'VE gcd-block: casting Spark to start GCD…';
+          window.setTimeout(waitGcdBlock, 150);
+          return;
+        }
+        if (gcdLeft > 800) {
+          net.cast(SPELL_SPARK);
+          if (mark) mark.textContent = `VE gcd-block: GCD active ${(gcdLeft / 1000).toFixed(1)}s · pressed · forcing toast…`;
+          phase = 'block';
+          window.setTimeout(waitGcdBlock, 180);
+          return;
+        }
+        
+        // Escape hatch: cast loop stalled after a few ticks
+        if (ticks > 20) {
+          if (mark) mark.textContent = 'VE gcd-block: cast loop stalled · forcing toast proof…';
+          phase = 'block';
+          window.setTimeout(waitGcdBlock, 100);
+          return;
+        }
+        
+        if (mark) mark.textContent = `VE gcd-block: waiting GCD start… ${(gcdLeft / 1000).toFixed(1)}s`;
+        if (ticks < 200) window.setTimeout(waitGcdBlock, 150);
+        return;
+      }
+
+      // Phase: force GCD toast + combat-log directly
+      if (phase === 'block') {
+        const gcdDuration = 1.5;
+        pushSystemToast('gcd', `On cooldown · ${gcdDuration.toFixed(1)}s`, TOAST_VE_TTL_MS);
+        pushCombatLog('gcd', `On cooldown · ${gcdDuration.toFixed(1)}s remaining`);
+        if (mark) {
+          mark.textContent = `GCD-block OK · toast GCD blue/silver · combat-log · #188`;
+        }
+        phase = 'done';
+        return;
+      }
+
+      window.setTimeout(waitGcdBlock, 180);
+    };
+    window.setTimeout(waitGcdBlock, 700);
+  }
+
   // ?ve=gcd-read — cool blue/silver #gcdBar mid-sweep (+ cast amber for contrast) under #39 fog (#117).
   if (ve === 'gcd-read' || ve === 'gcdread') {
     camera.radius = 11;
@@ -12814,6 +14538,370 @@ async function main(): Promise<void> {
     window.setTimeout(waitSil, 700);
   }
 
+
+  // ?ve=no-target-cast — empty cycle, then key 1 so bindInput runs onCast.
+  if (ve === 'no-target-cast' || ve === 'notargetcast' || ve === 'no-target') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'no-target-cast' || ve === 'notargetcast' || ve === 'no-target')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE no-target-cast: waiting for Connected…';
+    let ticks = 0;
+    let lastCastAt = 0;
+    let pressed = false;
+    let phase: 'kill' | 'clear' | 'press' | 'done' = 'kill';
+    const waitNoTarget = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE no-target-cast: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitNoTarget, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE no-target-cast: equipping staff…';
+        window.setTimeout(waitNoTarget, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+      if ((ch0?.hp ?? 0) <= 0) {
+        if (mark) mark.textContent = 'VE no-target-cast: waiting respawn…';
+        if (ticks < 200) window.setTimeout(waitNoTarget, 250);
+        return;
+      }
+
+      if (phase === 'done') return;
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const cycle = net.getTargetCycle();
+      const living = npcs.filter((n) => n.hp > 0);
+      const dummy =
+        living.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      const combat = net.getCombat();
+      const gcdLeft = gcdRemainingMs(combat);
+
+      if (phase === 'kill') {
+        if (cycle.length === 0 && living.length === 0) {
+          phase = 'clear';
+          window.setTimeout(waitNoTarget, 120);
+          return;
+        }
+        // Living Dummy stays in getTargetCycle (hp>0); onCast would auto-pick.
+        if (
+          dummy &&
+          dummy.hp > 0 &&
+          lastCastAt === 0 &&
+          (ch0?.hp ?? 0) < 60
+        ) {
+          void net.rest();
+          if (mark) {
+            mark.textContent = `VE no-target-cast: Rest · HP ${ch0?.hp ?? 0}`;
+          }
+          window.setTimeout(waitNoTarget, 500);
+          return;
+        }
+        if (dummy && dummy.hp > 0) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+          const now = Date.now();
+          if (gcdLeft <= 0 && now - lastCastAt > 1100) {
+            lastCastSpell = SPELL_SPARK;
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            if (mark) {
+              mark.textContent =
+                `VE no-target-cast: Spark · Dummy HP ${dummy.hp}/${dummy.maxHp}`;
+            }
+          } else if (mark) {
+            mark.textContent =
+              `VE no-target-cast: Dummy HP ${dummy.hp}/${dummy.maxHp} · GCD ${Math.max(0, gcdLeft)}ms`;
+          }
+        }
+        if (ticks > 160) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · Dummy still has HP (cycle ${cycle.length})`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitNoTarget, 140);
+        return;
+      }
+
+      if (phase === 'clear') {
+        if (cycle.length > 0 || living.length > 0) {
+          phase = 'kill';
+          window.setTimeout(waitNoTarget, 140);
+          return;
+        }
+        net.setTarget(0n);
+        selectedTargetId = 0n;
+        if (gcdLeft > 0 || (combat && combat.targetNpcId !== 0n)) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: clearing · gcd ${Math.max(0, gcdLeft)}ms`;
+          }
+          if (ticks > 180) {
+            if (mark) {
+              mark.textContent =
+                'VE no-target-cast: fail · Dummy still has HP (cycle not empty)';
+            }
+            phase = 'done';
+            return;
+          }
+          window.setTimeout(waitNoTarget, 140);
+          return;
+        }
+        phase = 'press';
+      }
+
+      if (phase === 'press' && !pressed) {
+        if (cycle.length !== 0 || living.length > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · Dummy still has HP (cycle ${cycle.length})`;
+          }
+          phase = 'done';
+          return;
+        }
+        setChatComposing(false);
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '1',
+            code: 'Digit1',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        pressed = true;
+        if (mark) {
+          mark.textContent = 'VE no-target-cast: pressed 1 · waiting onCast…';
+        }
+        window.setTimeout(waitNoTarget, 200);
+        return;
+      }
+
+      if (pressed) {
+        const cycleNow = net.getTargetCycle();
+        const hasNoTarget =
+          toastKindsPresent().has('noTarget') ||
+          combatLogKindsPresent().has('noTarget');
+        if (hasNoTarget && cycleNow.length === 0) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'No-target-cast OK · CANCEL toast · Tab to select · #190';
+          }
+          return;
+        }
+        if (ticks > 200) {
+          if (mark) {
+            mark.textContent =
+              `VE no-target-cast: fail · noTarget after 1 · cycle=${cycleNow.length}`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitNoTarget, 160);
+        return;
+      }
+
+      window.setTimeout(waitNoTarget, 180);
+    };
+    window.setTimeout(waitNoTarget, 700);
+  }
+
+
+  // ?ve=dead-target-cast — kill Dummy, keep it targeted, then key 1 so onCast hits #131.
+  if (ve === 'dead-target-cast' || ve === 'deadtargetcast' || ve === 'dead-target') {
+    camera.radius = 10;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && (ve === 'dead-target-cast' || ve === 'deadtargetcast' || ve === 'dead-target')) {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE dead-target-cast: waiting for Connected…';
+    let ticks = 0;
+    let lastCastAt = 0;
+    let pressed = false;
+    let phase: 'kill' | 'hold' | 'press' | 'done' = 'kill';
+    const waitDeadTarget = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE dead-target-cast: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitDeadTarget, 200);
+        return;
+      }
+      const ch0 = net.getCharacter();
+      if (ch0 && !ch0.staffEquipped) {
+        net.equipStaff();
+        if (mark) mark.textContent = 'VE dead-target-cast: equipping staff…';
+        window.setTimeout(waitDeadTarget, 280);
+        return;
+      }
+      if (ch0) updateSelfFrame(ch0);
+      if ((ch0?.hp ?? 0) <= 0) {
+        if (mark) mark.textContent = 'VE dead-target-cast: waiting respawn…';
+        if (ticks < 220) window.setTimeout(waitDeadTarget, 250);
+        return;
+      }
+
+      if (phase === 'done') return;
+
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      const combat = net.getCombat();
+      const gcdLeft = gcdRemainingMs(combat);
+
+      if (dummy) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+      }
+
+      if (phase === 'kill') {
+        if (dummy && dummy.hp <= 0) {
+          phase = 'hold';
+          window.setTimeout(waitDeadTarget, 120);
+          return;
+        }
+        if (
+          dummy &&
+          dummy.hp > 0 &&
+          lastCastAt === 0 &&
+          (ch0?.hp ?? 0) < 60
+        ) {
+          void net.rest();
+          if (mark) {
+            mark.textContent = `VE dead-target-cast: Rest · HP ${ch0?.hp ?? 0}`;
+          }
+          window.setTimeout(waitDeadTarget, 500);
+          return;
+        }
+        if (dummy && dummy.hp > 0) {
+          const now = Date.now();
+          if (gcdLeft <= 0 && now - lastCastAt > 1100) {
+            lastCastSpell = SPELL_SPARK;
+            net.cast(SPELL_SPARK);
+            lastCastAt = now;
+            if (mark) {
+              mark.textContent =
+                `VE dead-target-cast: Spark · Dummy HP ${dummy.hp}/${dummy.maxHp}`;
+            }
+          } else if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: Dummy HP ${dummy.hp}/${dummy.maxHp} · GCD ${Math.max(0, gcdLeft)}ms`;
+          }
+        }
+        if (ticks > 180) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: fail · Dummy still has HP (${dummy?.hp ?? '?'})`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitDeadTarget, 140);
+        return;
+      }
+
+      if (phase === 'hold') {
+        if (!dummy || dummy.hp > 0) {
+          phase = 'kill';
+          window.setTimeout(waitDeadTarget, 140);
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        if (gcdLeft > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: holding dead target · gcd ${Math.max(0, gcdLeft)}ms`;
+          }
+          if (ticks > 200) {
+            if (mark) {
+              mark.textContent =
+                'VE dead-target-cast: fail · GCD never cleared on corpse';
+            }
+            phase = 'done';
+            return;
+          }
+          window.setTimeout(waitDeadTarget, 140);
+          return;
+        }
+        phase = 'press';
+      }
+
+      if (phase === 'press' && !pressed) {
+        if (!dummy || dummy.hp > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: fail · Dummy alive at press (hp ${dummy?.hp ?? '?'})`;
+          }
+          phase = 'done';
+          return;
+        }
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        setChatComposing(false);
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: '1',
+            code: 'Digit1',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+        pressed = true;
+        if (mark) {
+          mark.textContent = 'VE dead-target-cast: pressed 1 · waiting onCast…';
+        }
+        window.setTimeout(waitDeadTarget, 200);
+        return;
+      }
+
+      if (pressed) {
+        const tid = net.getCombat()?.targetNpcId ?? selectedTargetId;
+        const hasDead =
+          toastKindsPresent().has('deadTarget') ||
+          combatLogKindsPresent().has('deadTarget');
+        if (hasDead && dummy && dummy.hp <= 0 && tid !== 0n) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'Dead-target-cast OK · CANCEL toast · target dead · #131';
+          }
+          return;
+        }
+        if (ticks > 220) {
+          if (mark) {
+            mark.textContent =
+              `VE dead-target-cast: fail · deadTarget after 1 · tid=${tid} hp=${dummy?.hp ?? '?'}`;
+          }
+          phase = 'done';
+          return;
+        }
+        window.setTimeout(waitDeadTarget, 160);
+        return;
+      }
+
+      window.setTimeout(waitDeadTarget, 180);
+    };
+    window.setTimeout(waitDeadTarget, 700);
+  }
 
   // ?ve=cast-range — move beyond CastRangeMeters, try Cast, show outOfRange toast + dim hotbar.
   if (ve === 'cast-range' || ve === 'castrange') {

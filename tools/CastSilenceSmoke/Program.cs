@@ -3,6 +3,7 @@ using SpacetimeDB;
 using SpacetimeDB.Types;
 
 // After hard interrupt, CastLockedUntil gates Cast with "silenced" until expiry.
+// Move still commits during silence (silence ≠ stun).
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
 const int timeoutMs = 60000;
@@ -109,8 +110,45 @@ try
     }
     Console.WriteLine($"CastLockedUntil micros={lockUs}");
 
+    // Silence must not freeze locomotion (≠ stun). Prove Move while CastLockedUntil is live,
+    // before waiting GCD (silence window is only CastSilenceMs).
+    var lockTick = Environment.TickCount64;
+    var poseBefore = conn.Db.PlayerPose.Identity.Find(id)!;
+    await ExpectMoveCommit(conn, Movement.MaxStepMeters, 0f, jump: false, "silence xz");
+    await PumpUntil(() =>
+    {
+        var p = conn.Db.PlayerPose.Identity.Find(id);
+        return p is not null && MathF.Abs(p.X - poseBefore.X) > 0.05f;
+    }, timeoutMs, conn, "pose X after silence Move");
+    var poseAfterXz = conn.Db.PlayerPose.Identity.Find(id)!;
+    Console.WriteLine($"silence Move XZ OK {poseBefore.X:F2}->{poseAfterXz.X:F2}");
+
+    await ExpectMoveCommit(conn, 0f, 0f, jump: true, "silence jump");
+    await PumpUntil(() =>
+    {
+        var p = conn.Db.PlayerPose.Identity.Find(id);
+        return p is not null
+            && (p.Y > Movement.GroundY + 0.05f
+                || MathF.Abs(p.VelY - Movement.JumpVelocity) < 1f);
+    }, timeoutMs, conn, "pose Y after silence jump");
+    var poseAfterJump = conn.Db.PlayerPose.Identity.Find(id)!;
+    Console.WriteLine($"silence Move jump OK Y={poseAfterJump.Y:F2} velY={poseAfterJump.VelY:F2}");
+
+    locked = conn.Db.PlayerCombat.Identity.Find(id)!;
+    if (locked.CastLockedUntil.MicrosecondsSinceUnixEpoch <= 0)
+    {
+        Fail("CastLockedUntil cleared by Move during silence");
+        return;
+    }
+
     // Wait past GCD so silence (not GCD) is the reject reason.
-    await DelayPump(conn, Combat.GcdMs + 80);
+    // Subtract time spent proving Move so we still land inside CastSilenceMs.
+    var usedMs = (int)(Environment.TickCount64 - lockTick);
+    var gcdWait = Combat.GcdMs + 80 - usedMs;
+    if (gcdWait > 0)
+    {
+        await DelayPump(conn, gcdWait);
+    }
     await TopUpMana(conn, id);
 
     // Ensure still locked
@@ -178,6 +216,46 @@ catch (Exception e)
 finally
 {
     try { conn?.Disconnect(); } catch { /* ignore */ }
+}
+
+static async Task ExpectMoveCommit(DbConnection conn, float dx, float dz, bool jump, string label)
+{
+    string? fail = null;
+    var committed = false;
+    var tcs = new TaskCompletionSource();
+    void OnMove(ReducerEventContext ctx, float _dx, float _dz, bool _jump)
+    {
+        switch (ctx.Event.Status)
+        {
+            case Status.Failed(var reason):
+                fail = reason;
+                tcs.TrySetResult();
+                break;
+            case Status.Committed:
+                committed = true;
+                tcs.TrySetResult();
+                break;
+            case Status.OutOfEnergy(_):
+                tcs.TrySetException(new Exception($"Move out of energy ({label})"));
+                break;
+        }
+    }
+    conn.Reducers.OnMove += OnMove;
+    try
+    {
+        conn.Reducers.Move(dx, dz, jump);
+        await Pump(tcs.Task, timeoutMs, conn, "move commit " + label);
+    }
+    finally
+    {
+        conn.Reducers.OnMove -= OnMove;
+    }
+    if (!committed)
+    {
+        Fail($"expected Move commit during silence ({label}), got: {fail ?? "(null)"}");
+        throw new Exception("move commit mismatch");
+    }
+    Console.WriteLine($"Move commit OK ({label})");
 }
 
 static async Task ExpectCastFail(DbConnection conn, int spellId, string needle, string label)
