@@ -167,9 +167,11 @@ type Nameplate = {
   hpFrac: number;
 };
 
-function setStatus(text: string): void {
+function setStatus(text: string, connState?: ConnectionStatus['state']): void {
   const el = document.getElementById('status');
-  if (el) el.textContent = text;
+  if (!el) return;
+  el.textContent = text;
+  if (connState) el.dataset.conn = connState;
 }
 
 function setGcdBar(
@@ -177,20 +179,39 @@ function setGcdBar(
   castingMs: number,
   castingTotal: number,
   spellName?: string,
+  /** When omitted (VE seeds), treat as connected so GCD chrome can still demo. */
+  connState?: ConnectionStatus['state'],
 ): void {
   const fill = document.getElementById('gcdFill');
   const label = document.getElementById('gcdLabel');
+  const bar = document.getElementById('gcdBar');
   const castFill = document.getElementById('castFill');
   const castLabel = document.getElementById('castLabel');
   const gcdLeft = veGcdPresent?.gcdMs ?? remainingMs;
+  // Connection chrome != GCD chrome: never claim "ready" while offline/connecting.
+  const live = !connState || connState === 'connected';
   if (fill) {
-    const pct = Math.min(100, (gcdLeft / 1200) * 100);
-    fill.style.width = `${pct}%`;
-    fill.classList.toggle('ready', gcdLeft <= 0);
+    if (!live) {
+      fill.style.width = '0%';
+      fill.classList.remove('ready');
+    } else {
+      const pct = Math.min(100, (gcdLeft / 1200) * 100);
+      fill.style.width = `${pct}%`;
+      fill.classList.toggle('ready', gcdLeft <= 0);
+    }
+  }
+  if (bar) {
+    bar.dataset.gcd = !live ? 'offline' : gcdLeft > 0 ? 'sweep' : 'idle';
   }
   if (label) {
-    label.textContent =
-      gcdLeft > 0 ? `GCD ${ (gcdLeft / 1000).toFixed(1) }s` : 'GCD ready';
+    if (!live) {
+      // Neutral dash — connection progress lives in #status / toast, not here.
+      label.textContent = 'GCD · —';
+    } else {
+      // "idle" = gameplay cooldown clear (never "ready" — that conflates with Connected).
+      label.textContent =
+        gcdLeft > 0 ? `GCD ${ (gcdLeft / 1000).toFixed(1) }s` : 'GCD idle';
+    }
   }
   if (castFill && castLabel) {
     const ve = veCastFeedbackPresent;
@@ -1515,7 +1536,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
       ? `target: ${tgt.kind === NPC_KIND_DUMMY ? 'Dummy' : 'NPC'} #${tgt.npcId} HP ${tgt.hp}/${tgt.maxHp}`
       : 'target: (none — Tab)';
     const gcd = gcdRemainingMs(s.combat, nowMs);
-    const gcdLine = gcd > 0 ? `GCD: ${(gcd / 1000).toFixed(2)}s` : 'GCD: ready';
+    const gcdLine = gcd > 0 ? `GCD cooldown: ${(gcd / 1000).toFixed(2)}s` : 'GCD idle';
     const castLine = s.castFeedback ? `cast: ${s.castFeedback}` : 'cast: —';
     const persistLine = s.restoredToken
       ? 'persist: restored token (same identity)'
@@ -1580,7 +1601,7 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
         ? 'remote-cast: (none)'
         : `remote-cast: ${remoteCastBits.join(' · ')}`;
     return [
-      'Connected',
+      'Connected · online',
       `identity: ${s.identityHex}`,
       xpLine,
       persistLine,
@@ -1600,12 +1621,12 @@ function formatStatus(s: ConnectionStatus, nowMs: number): string {
   }
   if (s.state === 'connecting') {
     const restore = s.restoredToken ? ' (restoring token…)' : '';
-    return `Connecting…${restore}\nuri: ${s.uri}\ndb: ${s.database}`;
+    return `Connecting…${restore}\nconn: in progress\nuri: ${s.uri}\ndb: ${s.database}`;
   }
   if (s.state === 'error') {
-    return `Error: ${s.message}\nuri: ${s.uri}\ndb: ${s.database}`;
+    return `Conn error\nError: ${s.message}\nuri: ${s.uri}\ndb: ${s.database}`;
   }
-  return `Disconnected\nuri: ${s.uri}\ndb: ${s.database}`;
+  return `Disconnected\nconn: offline\nuri: ${s.uri}\ndb: ${s.database}`;
 }
 
 async function createScene(engine: Engine): Promise<{
@@ -3923,7 +3944,7 @@ async function main(): Promise<void> {
       prevLocalCasting = serverCasting || castUntilMs > now;
     }
     const castLeft = Math.max(0, castUntilMs - now);
-    setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell));
+    setGcdBar(gcdLeft, castLeft, castTotalMs, castSpellDisplayName(lastCastSpell), latestStatus.state);
     {
       const st = latestStatus;
       const tgt =
@@ -4211,7 +4232,7 @@ async function main(): Promise<void> {
       }
     }
     if (latestStatus.state === 'connected') {
-      setStatus(formatStatus(latestStatus, now));
+      setStatus(formatStatus(latestStatus, now), latestStatus.state);
       const equipped = latestStatus.character?.staffEquipped ?? true;
       setStaffMeshVisible(humanoid.staff, equipped);
       const robesOn = latestStatus.character?.robesEquipped ?? true;
@@ -4315,7 +4336,7 @@ async function main(): Promise<void> {
   });
   window.addEventListener('resize', () => engine.resize());
 
-  setStatus('Connecting to SpacetimeDB…');
+  setStatus('Connecting…\nto SpacetimeDB', 'connecting');
   const onStatus = (s: ConnectionStatus) => {
     latestStatus = s;
     if (s.state === 'connected' && s.combat) {
@@ -4331,7 +4352,7 @@ async function main(): Promise<void> {
           : `Connected · ${idShort}…`,
       );
     }
-    setStatus(formatStatus(s, Date.now()));
+    setStatus(formatStatus(s, Date.now()), s.state);
   };
 
   const renderedChatIds = new Set<string>();
@@ -6519,6 +6540,66 @@ async function main(): Promise<void> {
       window.setTimeout(waitDebug, 200);
     };
     window.setTimeout(waitDebug, 600);
+  }
+
+  // ?ve=status-read — prove Connected vs Connecting vs GCD idle are lexically distinct (#129).
+  if (ve === 'status-read') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.35;
+    camera.beta = Math.PI / 3.15;
+    debugHudVisible = true;
+    setDebugHudVisible(true);
+  }
+  if (ve === 'status-read') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE status-read: waiting for Connected + GCD idle…';
+    let ticks = 0;
+    const waitStatusRead = () => {
+      ticks += 1;
+      const st = latestStatus;
+      const statusEl = document.getElementById('status');
+      const gcdLabel = document.getElementById('gcdLabel');
+      const gcdBar = document.getElementById('gcdBar');
+      setDebugHudVisible(true);
+      // Keep status text fresh for the shot.
+      setStatus(formatStatus(st, Date.now()), st.state);
+      if (st.state === 'connected') {
+        // Force idle GCD chrome so the shot shows Connected · online + GCD idle (not "ready").
+        setGcdBar(0, 0, 0, undefined, 'connected');
+      }
+      const statusTxt = (statusEl?.textContent || '').trim();
+      const gcdTxt = (gcdLabel?.textContent || '').trim();
+      const hasConn = statusTxt.startsWith('Connected · online');
+      const hasGcdIdle = gcdTxt === 'GCD idle';
+      const noReady = !statusTxt.includes('GCD: ready') && !gcdTxt.includes('ready');
+      const gcdIdleAttr = gcdBar?.dataset.gcd === 'idle';
+      const statusVisible = !!(
+        statusEl &&
+        !statusEl.classList.contains('hidden') &&
+        statusEl.offsetWidth > 0
+      );
+      if (st.state === 'connected' && statusVisible && hasConn && hasGcdIdle && noReady && gcdIdleAttr) {
+        if (mark) {
+          mark.textContent =
+            'Status-read OK · Connected · online · GCD idle · #129';
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE status-read: ${st.state} · status ${statusVisible ? 'on' : 'off'} · ` +
+          `connLine ${hasConn ? 'ok' : '…'} · gcd "${gcdTxt}" (waiting…)`;
+      }
+      if (ticks > 200) {
+        if (mark) {
+          mark.textContent =
+            `Status-read timeout · ${st.state} · "${statusTxt.split('\n')[0] || ''}" · gcd "${gcdTxt}"`;
+        }
+        return;
+      }
+      window.setTimeout(waitStatusRead, 200);
+    };
+    window.setTimeout(waitStatusRead, 500);
   }
 
   // ?ve=keys — open keybind legend overlay + clear HUD mark for screenshot.

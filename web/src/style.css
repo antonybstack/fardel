@@ -43,6 +43,21 @@ body {
   white-space: pre-wrap;
 }
 
+/* #129 — connection chrome on #status: Connected vs Connecting vs offline. */
+#status[data-conn="connected"] {
+  border-color: rgba(94, 214, 138, 0.55);
+  box-shadow: 0 0 0 1px rgba(40, 120, 70, 0.35);
+}
+#status[data-conn="connecting"] {
+  border-color: rgba(255, 196, 86, 0.6);
+  box-shadow: 0 0 0 1px rgba(140, 100, 20, 0.35);
+}
+#status[data-conn="disconnected"],
+#status[data-conn="error"] {
+  border-color: rgba(255, 120, 100, 0.55);
+  box-shadow: 0 0 0 1px rgba(120, 40, 30, 0.35);
+}
+
 #combatBars {
   display: flex;
   flex-direction: column;
@@ -128,6 +143,18 @@ body {
   width: 100% !important;
   opacity: 0.58;
   box-shadow: inset 0 1px 0 rgba(200, 230, 232, 0.32);
+}
+
+/* #129 — offline/connecting: dim GCD plate (never reads as ready/connected). */
+#gcdBar[data-gcd="offline"] {
+  opacity: 0.55;
+  border-color: rgba(120, 140, 170, 0.45);
+}
+#gcdBar[data-gcd="idle"] .barLabel {
+  color: #d8ecf0;
+}
+#gcdBar[data-gcd="sweep"] .barLabel {
+  color: #f0f5ff;
 }
 
 .barFill {
