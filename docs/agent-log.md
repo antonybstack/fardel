@@ -147,3 +147,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** #354 inserts Kind=2 yard hostiles. `if (n.Hp > 0) break` can pick a hostile; dummy thorns never fire.
 - **Do this:** Find Dummy by `Kind == Combat.NpcKindDummy` (1). Do not assume Iter() order.
 - **Seen in:** #354
+
+### 2026-09-08 — place,path — polar `a ∈ (0.15, 0.55)` only opens the SE strip
+- **Cause:** Mid/understory keep-out used polar angle, so a north/bent path stayed walled in and `?ve=place-wow` (looking north) never showed a receding trail.
+- **Do this:** Keep-out with distance-to-polyline (`distToPath` in `forest.ts`). Polar SE skip does not follow a bent path.
+- **Seen in:** #342
