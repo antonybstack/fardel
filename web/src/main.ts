@@ -37,6 +37,7 @@ import {
   REST_MANA_RESTORE,
   NPC_KIND_DUMMY,
   NPC_KIND_HOSTILE,
+  HOSTILE_AGGRO_RADIUS,
   CROWD_NEAR_COUNT,
   type ConnectionStatus,
   type CrowdProxyView,
@@ -5649,7 +5650,7 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.55;
         // E8.7: far-cam Idle must still read staff-grip (not 8m close-up).
         camera.radius = 16;
-      } else if (veFollow === 'hostile-spawn') {
+      } else if (veFollow === 'hostile-spawn' || veFollow === 'leash') {
         // North of pad: dummy (5,0) + hostiles (3,7)/(-7,3) in one shot.
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -8894,6 +8895,85 @@ async function main(): Promise<void> {
       window.setTimeout(waitH, 250);
     };
     window.setTimeout(waitH, 400);
+  }
+
+  // ?ve=leash — pull then drop (#355). ?ve=aggro is the #360 session shot.
+  if (ve === 'leash') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.05;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'leash') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE leash: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'pull' | 'drop' | 'done' = 'pull';
+    let pulledId: bigint | null = null;
+    const padAx = 3;
+    const padAz = 7;
+    const waitL = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE leash: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 240) window.setTimeout(waitL, 200);
+        return;
+      }
+      const home = Math.hypot(padA.x - (padA.spawnX || padAx), padA.z - (padA.spawnZ || padAz));
+      if (phase === 'pull') {
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > HOSTILE_AGGRO_RADIUS - 0.4 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (padA.aggroed || home > 0.7) {
+          pulledId = padA.npcId;
+          phase = 'drop';
+          if (mark) mark.textContent = 'VE leash: pulled — running out…';
+        } else if (mark) {
+          mark.textContent = `VE leash: walking in · d=${dist.toFixed(1)} · home=${home.toFixed(2)}`;
+        }
+      } else if (phase === 'drop') {
+        const tx = -12;
+        const tz = -8;
+        const dx = tx - player.position.x;
+        const dz = tz - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.6) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        const victim = hostiles.find((n) => n.npcId === pulledId) ?? padA;
+        const vHome = Math.hypot(
+          victim.x - (victim.spawnX || padAx),
+          victim.z - (victim.spawnZ || padAz),
+        );
+        if (!victim.aggroed && vHome < 0.45) {
+          phase = 'done';
+          if (mark) mark.textContent = 'Leash OK · pulled · returned · #355';
+          return;
+        }
+        if (mark) {
+          mark.textContent = `VE leash: drop · aggro=${victim.aggroed ? 'y' : 'n'} · home=${vHome.toFixed(1)}`;
+        }
+      }
+      if (ticks > 240) {
+        if (mark) mark.textContent = `Leash FAIL · phase ${phase} · #355`;
+        return;
+      }
+      window.setTimeout(waitL, 200);
+    };
+    window.setTimeout(waitL, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).

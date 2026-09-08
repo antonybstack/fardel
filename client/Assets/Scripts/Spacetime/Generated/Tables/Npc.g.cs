@@ -46,6 +46,10 @@ namespace SpacetimeDB.Types
         public global::SpacetimeDB.Col<Npc, float> Z { get; }
         public global::SpacetimeDB.Col<Npc, int> Hp { get; }
         public global::SpacetimeDB.Col<Npc, int> MaxHp { get; }
+        public global::SpacetimeDB.Col<Npc, float> SpawnX { get; }
+        public global::SpacetimeDB.Col<Npc, float> SpawnY { get; }
+        public global::SpacetimeDB.Col<Npc, float> SpawnZ { get; }
+        public global::SpacetimeDB.Col<Npc, bool> Aggroed { get; }
 
         public NpcCols(string tableName)
         {
@@ -56,6 +60,10 @@ namespace SpacetimeDB.Types
             Z = new global::SpacetimeDB.Col<Npc, float>(tableName, "z");
             Hp = new global::SpacetimeDB.Col<Npc, int>(tableName, "hp");
             MaxHp = new global::SpacetimeDB.Col<Npc, int>(tableName, "max_hp");
+            SpawnX = new global::SpacetimeDB.Col<Npc, float>(tableName, "spawn_x");
+            SpawnY = new global::SpacetimeDB.Col<Npc, float>(tableName, "spawn_y");
+            SpawnZ = new global::SpacetimeDB.Col<Npc, float>(tableName, "spawn_z");
+            Aggroed = new global::SpacetimeDB.Col<Npc, bool>(tableName, "aggroed");
         }
     }
 

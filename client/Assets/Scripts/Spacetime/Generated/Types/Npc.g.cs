@@ -27,6 +27,14 @@ namespace SpacetimeDB.Types
         public int Hp;
         [DataMember(Name = "max_hp")]
         public int MaxHp;
+        [DataMember(Name = "spawn_x")]
+        public float SpawnX;
+        [DataMember(Name = "spawn_y")]
+        public float SpawnY;
+        [DataMember(Name = "spawn_z")]
+        public float SpawnZ;
+        [DataMember(Name = "aggroed")]
+        public bool Aggroed;
 
         public Npc(
             ulong NpcId,
@@ -35,7 +43,11 @@ namespace SpacetimeDB.Types
             float Y,
             float Z,
             int Hp,
-            int MaxHp
+            int MaxHp,
+            float SpawnX,
+            float SpawnY,
+            float SpawnZ,
+            bool Aggroed
         )
         {
             this.NpcId = NpcId;
@@ -45,6 +57,10 @@ namespace SpacetimeDB.Types
             this.Z = Z;
             this.Hp = Hp;
             this.MaxHp = MaxHp;
+            this.SpawnX = SpawnX;
+            this.SpawnY = SpawnY;
+            this.SpawnZ = SpawnZ;
+            this.Aggroed = Aggroed;
         }
 
         public Npc()
