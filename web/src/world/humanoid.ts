@@ -984,9 +984,11 @@ export function setHumanoidCasting(
     if (!a.casting) return;
     a.casting = false;
     a.turning = false;
+    // Recover Idle/Walk first so CPU-skin never sits on bind-T between Spell
+    // stop and the next clip (cancel/interrupt pop).
+    if (!a.dead && !a.airborne) setHumanoidMoving(parts, false);
     stopIfPlaying(a.cast);
     if (a.cast) a.cast.speedRatio = 1;
-    if (!a.dead && !a.airborne) setHumanoidMoving(parts, false);
     return;
   }
   if (a.dead || !a.cast) return;

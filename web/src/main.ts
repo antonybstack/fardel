@@ -5972,11 +5972,14 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = veFollow === 'jump-pose' ? 9 : 7;
-      } else if (veFollow === 'cast-anim') {
+      } else if (veFollow === 'cast-anim' || veFollow === 'cast-cancel-pose') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
-        camera.setTarget(player.position.add(new Vector3(0, 1.05, 0)));
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.05;
+        tgt.z = player.position.z;
         camera.alpha = Math.PI / 2.2;
         camera.beta = Math.PI / 2.6;
         camera.radius = 8;
@@ -7305,6 +7308,120 @@ async function main(): Promise<void> {
       if (!castOk && ticks < 240) window.setTimeout(waitCast, 200);
     };
     window.setTimeout(waitCast, 600);
+  }
+
+  // ?ve=cast-cancel-pose — Esc/CancelCast recovers Idle_Weapon, no bind-T (#431).
+  if (ve === 'cast-cancel-pose') {
+    camera.radius = 8;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'cast-cancel-pose') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cast-cancel-pose: waiting for Connected…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let phase: 'cast' | 'cancel' | 'recover' = 'cast';
+    let sawSpell = false;
+    const waitPose = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cast-cancel-pose: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitPose, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitPose, 250);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy =
+        npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ?? null;
+      if (!dummy) {
+        net.ensureTrainingDummy();
+        if (mark) mark.textContent = 'VE cast-cancel-pose: seeding dummy…';
+        window.setTimeout(waitPose, 300);
+        return;
+      }
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = clipBare(pb.playing);
+      if (phase === 'cast') {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        if (
+          ch &&
+          ch.hp > 0 &&
+          (ch.mana ?? 0) >= EMBERBOLT_MANA_COST &&
+          gcdRemainingMs(net.getCombat()) <= 0
+        ) {
+          net.cast(SPELL_EMBERBOLT);
+          lastCastSpell = SPELL_EMBERBOLT;
+          phase = 'cancel';
+          if (mark) mark.textContent = 'VE cast-cancel-pose: Emberbolt windup…';
+        }
+        window.setTimeout(waitPose, 200);
+        return;
+      }
+      if (phase === 'cancel') {
+        if (pb.skinned > 0 && /spell/i.test(pb.playing ?? '')) sawSpell = true;
+        const combat = net.getCombat();
+        const wind = combat && combat.castingSpellId !== 0;
+        if (sawSpell || wind) {
+          void net.cancelCast();
+          setHumanoidCasting(humanoid, false);
+          phase = 'recover';
+          if (mark) mark.textContent = 'VE cast-cancel-pose: CancelCast…';
+        }
+        if (ticks > 200) {
+          if (mark) {
+            mark.textContent = pb.skinned <= 0
+              ? `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`
+              : `Cast cancel FAIL · no Spell hold · ${clip}`;
+          }
+          return;
+        }
+        window.setTimeout(waitPose, 180);
+        return;
+      }
+      const recoverOk =
+        pb.skinned > 0 &&
+        /^idle_weapon$/i.test(clip) &&
+        !/spell/i.test(pb.playing ?? '');
+      if (recoverOk) {
+        if (mark) {
+          mark.textContent = `Cast cancel OK · ${clip} · skinned ${pb.skinned}`;
+        }
+        return;
+      }
+      if (pb.skinned <= 0) {
+        if (mark) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        }
+        if (ticks > 220) return;
+        window.setTimeout(waitPose, 180);
+        return;
+      }
+      if (ticks > 240) {
+        if (mark) {
+          mark.textContent = `Cast cancel FAIL · recover ${clip} · skinned ${pb.skinned}`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent = `VE cast-cancel-pose: recover ${clip}…`;
+      }
+      window.setTimeout(waitPose, 180);
+    };
+    window.setTimeout(waitPose, 700);
   }
 
   // ?ve=character-wow — E8.12 play-cam reel: idle, walk, run, hop pose, Spell.

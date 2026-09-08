@@ -143,6 +143,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `setHumanoidCasting` loops Spell until CastEndsAt / cancel / interrupt. Spark stays the one-shot. Do not treat animation-end as the windup end.
 - **Seen in:** #331
 
+### 2026-09-08 — humanoid,cast — cancel stops Spell before Idle and flashes bind-T
+- **Cause:** `setHumanoidCasting(false)` called `stopIfPlaying(cast)` then `setHumanoidMoving(false)`. One CPU-skin frame has no playing group → bind-T pop mid-Spell1.
+- **Do this:** Start Idle_Weapon (or unarmed Idle) first, then stop Spell. `?ve=cast-cancel-pose` persistMark names the recover clip + `skinned`. Do not change `?ve=cast-cancel` chrome mark.
+- **Seen in:** #431
+
 ### 2026-09-08 — npc,smoke — first `Npc.Iter()` living row is not Dummy after hostiles
 - **Cause:** #354 inserts Kind=2 yard hostiles. `if (n.Hp > 0) break` can pick a hostile; dummy thorns never fire.
 - **Do this:** Find Dummy by `Kind == Combat.NpcKindDummy` (1). Do not assume Iter() order.
