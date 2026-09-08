@@ -9666,6 +9666,40 @@ async function main(): Promise<void> {
     window.setTimeout(waitDeathUx, 600);
   }
 
+  // ?ve=death-chrome — #107: death greyout + respawn countdown UI demo for readability vs #39 fog.
+  if (ve === 'death-chrome') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.3;
+    camera.beta = Math.PI / 3.1;
+  }
+  if (net && ve === 'death-chrome') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE death-chrome: waiting for Connected…';
+    let ticks = 0;
+    const waitDeathChrome = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE death-chrome: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitDeathChrome, 200);
+        return;
+      }
+      // Show death greyout immediately with countdown frozen at 3s for demo.
+      setDeathGreyout(true, 'Respawn in 3.0s…', { freezeSub: true });
+      if (mark) {
+        mark.textContent = 'Death chrome demo · greyout + countdown readable vs cyan fog (#107)';
+      }
+      // Hold the UI for screenshots.
+      const hold = () => {
+        setDeathGreyout(true, 'Respawn in 3.0s…', { freezeSub: true });
+        window.setTimeout(hold, 200);
+      };
+      hold();
+    };
+    window.setTimeout(waitDeathChrome, 600);
+  }
+
   // ?ve=xp-float — seed dummy → kill for Character.Xp → "+N XP" floater near local player.
   if (ve === 'xp-float') {
     camera.radius = 11;
