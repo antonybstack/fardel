@@ -3737,11 +3737,27 @@ async function main(): Promise<void> {
         ri = makePoseInterp();
         remoteInterps.set(key, ri);
       }
-      retargetPoseInterp(ri, r.x, r.y, r.z, r.yaw);
+      const prevTx = ri.seeded ? ri.tx : r.x;
+      const prevTz = ri.seeded ? ri.tz : r.z;
+      retargetPoseInterp(ri, r.x, r.y, r.z, r.yaw, {
+        snapGroundedXz: r.y <= 0.05,
+      });
       const samp = samplePoseInterp(ri);
       parts.root.position.x = samp.x;
       parts.root.position.y = samp.y;
       parts.root.position.z = samp.z;
+      const stepX = r.x - prevTx;
+      const stepZ = r.z - prevTz;
+      if (r.y <= 0.05 && Math.hypot(stepX, stepZ) > 0.04) {
+        let st = remoteWalkHold.get(key);
+        if (!st) {
+          st = { hold: 0, dx: 0, dz: 0 };
+          remoteWalkHold.set(key, st);
+        }
+        st.hold = REMOTE_WALK_HOLD_S;
+        st.dx = stepX * MOVE_SEND_HZ;
+        st.dz = stepZ * MOVE_SEND_HZ;
+      }
       parts.root.setEnabled(true);
       const rHp = net?.getCharacterFor(key)?.hp;
       if (typeof rHp === 'number') {
@@ -4694,12 +4710,13 @@ async function main(): Promise<void> {
         st.hold -= dt;
       }
       const moving = st.hold > 0 && samp.y <= 0.05;
+      const spd = Math.hypot(st.dx, st.dz);
       if (samp.y > 0.05) {
         setHumanoidAirborne(parts, true);
       } else {
         setHumanoidAirborne(parts, false);
-        // Full-step remotes exceed Run_Weapon speed; E8.8 persistMark names Walk.
-        setHumanoidMoving(parts, moving);
+        // Walk named (not Run); speedRatio from snap/hold m/s.
+        setHumanoidMoving(parts, moving, false, spd);
       }
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
@@ -4966,7 +4983,7 @@ async function main(): Promise<void> {
           const running =
             moving &&
             (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
-          setHumanoidMoving(humanoid, moving, running);
+          setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
         }
       } else {
         moveAccumulator = 0;
@@ -4987,7 +5004,7 @@ async function main(): Promise<void> {
         const running =
           moving &&
           (ve === 'run' || (ve !== 'walk' && keys.has('w') && !keys.has('s')));
-        setHumanoidMoving(humanoid, moving, running);
+        setHumanoidMoving(humanoid, moving, running, moving ? MOVE_SPEED : 0);
       }
     }
     humanoid.root.scaling.set(1, 1, 1);
@@ -6608,11 +6625,6 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE walk: waiting for Connected…';
     let ticks = 0;
-    const playingNames = (): string =>
-      scene.animationGroups
-        .filter((g) => g.isPlaying)
-        .map((g) => g.name.replace(/^player__/, ''))
-        .join(' · ');
     const waitWalk = () => {
       if (!net) return;
       ticks += 1;
@@ -6636,12 +6648,14 @@ async function main(): Promise<void> {
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
       keys.add('w');
-      setHumanoidMoving(humanoid, true);
-      const playing = playingNames();
+      setHumanoidMoving(humanoid, true, false, MOVE_SPEED);
+      const pb = readHumanoidPlayback(humanoid);
+      const walkOk =
+        pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
       if (mark) {
-        mark.textContent = playing
-          ? `Walk OK · ${playing} · Connected`
-          : 'VE walk FAIL · no clip playing';
+        mark.textContent = walkOk
+          ? `Walk OK · ${pb.playing} · skinned ${pb.skinned}`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
       }
       if (ticks < 240) window.setTimeout(waitWalk, 200);
     };
@@ -6681,7 +6695,7 @@ async function main(): Promise<void> {
       setStaffMeshVisible(humanoid.staff, true);
       setRobesMeshVisible(humanoid, true);
       keys.add('w');
-      setHumanoidMoving(humanoid, true, true);
+      setHumanoidMoving(humanoid, true, true, MOVE_SPEED);
       const pb = readHumanoidPlayback(humanoid);
       const runOk =
         pb.skinned > 0 &&
@@ -6987,7 +7001,7 @@ async function main(): Promise<void> {
       const local = net.getLocalPose();
       const playbackOf = (hex: string) => {
         const p = remoteMeshes.get(hex);
-        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null };
+        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null, height: 0 };
       };
       const preferred =
         remotes.find((r) => {
@@ -7002,7 +7016,7 @@ async function main(): Promise<void> {
         remotes[0];
       const pb = preferred
         ? playbackOf(preferred.identityHex)
-        : { skinned: 0, playing: null, idle: null };
+        : { skinned: 0, playing: null, idle: null, height: 0 };
       const walkOn =
         pb.skinned > 0 && !!pb.playing && /walk/i.test(pb.playing);
       if (mark) {
@@ -10988,11 +11002,13 @@ async function main(): Promise<void> {
       const idleOk =
         pb.skinned > 0 &&
         !!pb.playing &&
-        /idle/i.test(pb.playing);
+        /idle/i.test(pb.playing) &&
+        pb.height >= 1.5 &&
+        pb.height <= 2.15;
       if (mark) {
         mark.textContent = idleOk
-          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned}`
-          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+          ? `Idle OK · ${pb.playing} · skinned ${pb.skinned} · ${pb.height.toFixed(2)}m`
+          : `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned} · ${pb.height.toFixed(2)}m`;
       }
     };
     window.setTimeout(waitIdle, 800);
