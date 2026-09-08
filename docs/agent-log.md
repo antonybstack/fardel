@@ -217,3 +217,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** Fog hits 100% at 200 m while unfogged mountains continue, so the forest rim reads as a stacked band / halo vs sky=fogColor.
 - **Do this:** LINEAR start 22 / end 260. Do not raise end to reach ridges (`applyFog=false` + baked steps). Do not switch EXP2. Sky lower band = fogColor.
 - **Seen in:** #348
+
+### 2026-09-08 — ve,npc — fight VE Tab can select the other in-range hostile
+- **Cause:** From pad A melee both yard hostiles sit inside CastRange. `cyclePreferHostiles` sorts by id, so one Tab may land on pad B while pad A is the one swinging.
+- **Do this:** Session fight VEs (`?ve=encounter`) `setTarget` the pulled pad. Do not treat one Tab as the aggroed NPC.
+- **Seen in:** #361
