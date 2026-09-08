@@ -384,6 +384,53 @@ function thinInstanceFromMatrices(mesh: Mesh, matrices: Matrix[]): void {
 }
 
 /**
+ * Thin-instance a pack tree. Merge to one mesh so the glTF source at origin
+ * does not also draw in the clearing (SetBuffer still renders the parented
+ * child bind-pose at 0,0).
+ */
+function thinInstancePackRoot(root: TransformNode, matrices: Matrix[]): void {
+  if (matrices.length === 0) {
+    hideTemplate(root);
+    return;
+  }
+  root.setEnabled(true);
+  root.position.set(0, 0, 0);
+  root.scaling.setAll(1);
+  root.rotation.setAll(0);
+  const sources: Mesh[] = [];
+  const consider = (m: AbstractMesh): void => {
+    if (m instanceof Mesh && m.getTotalVertices() > 0) sources.push(m);
+  };
+  if (root instanceof Mesh) consider(root);
+  for (const m of root.getChildMeshes(true)) consider(m);
+  if (sources.length === 0) {
+    hideTemplate(root);
+    return;
+  }
+  for (const s of sources) s.computeWorldMatrix(true);
+  const merged = Mesh.MergeMeshes(sources, false, true, undefined, false, true);
+  hideTemplate(root);
+  if (merged) {
+    merged.name = `${root.name}_inst`;
+    merged.isPickable = false;
+    merged.applyFog = true;
+    merged.position.set(0, 0, 0);
+    merged.setEnabled(true);
+    merged.isVisible = true;
+    thinInstanceFromMatrices(merged, matrices);
+    merged.alwaysSelectAsActiveMesh = true;
+    return;
+  }
+  for (const m of sources) {
+    m.setEnabled(true);
+    m.isVisible = true;
+    m.isPickable = false;
+    m.applyFog = true;
+    thinInstanceFromMatrices(m, matrices);
+  }
+}
+
+/**
  * Fog / sky (#270) + lighting (#277, lifts #39). Stylized dusk forest, not photoreal.
  *
  * | Param        | #39                         | now                                       |
@@ -632,6 +679,10 @@ function mattePackMaterials(meshes: AbstractMesh[], alphaTestLeaves: boolean): v
           mat.useAlphaFromAlbedoTexture = true;
           mat.transparencyMode = PBRMaterial.PBRMATERIAL_ALPHATEST;
           mat.alphaCutOff = 0.42;
+        } else {
+          // Pack glTF ships MASK on CommonTree leaves; keep ALPHATEST on heroes only (#340).
+          mat.transparencyMode = PBRMaterial.PBRMATERIAL_OPAQUE;
+          mat.useAlphaFromAlbedoTexture = false;
         }
       }
     } else if (mat instanceof StandardMaterial) {
@@ -644,6 +695,9 @@ function mattePackMaterials(meshes: AbstractMesh[], alphaTestLeaves: boolean): v
           mat.useAlphaFromDiffuseTexture = true;
           mat.transparencyMode = Material.MATERIAL_ALPHATEST;
           mat.alphaCutOff = 0.42;
+        } else {
+          mat.transparencyMode = Material.MATERIAL_OPAQUE;
+          mat.useAlphaFromDiffuseTexture = false;
         }
       }
     }
@@ -664,6 +718,7 @@ async function loadPackRoot(
   fileName: string,
   templateName: string,
   alphaTestLeaves = false,
+  forThinInstance = false,
 ): Promise<TransformNode | null> {
   try {
     const result = await ImportMeshAsync(fileName, scene, { rootUrl: PACK_ROOT });
@@ -688,9 +743,14 @@ async function loadPackRoot(
     }
 
     mattePackMaterials(result.meshes, alphaTestLeaves);
-    // Freeze world matrix after we place clones; templates stay hidden at origin.
-    root.position.set(0, -500, 0);
-    hideTemplate(root);
+    if (forThinInstance) {
+      // Instance source must sit at origin; parking at -500 culls every instance.
+      root.position.set(0, 0, 0);
+      root.setEnabled(true);
+    } else {
+      root.position.set(0, -500, 0);
+      hideTemplate(root);
+    }
     return root;
   } catch (err) {
     console.warn(`[forest] failed to load ${fileName}`, err);
@@ -739,11 +799,11 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
   }
   if (heroTemplates.length === 0) return false;
 
-  // Mid: 2–4 variants for ring (classic / tall / stubby).
+  // Mid: 2–4 variants for ring (classic / tall / stubby). ThinInstances — not unique clones (#340).
   const midFiles = ['CommonTree_1.gltf', 'CommonTree_3.gltf', 'CommonTree_5.gltf'] as const;
   const midTemplates: TransformNode[] = [];
   for (let i = 0; i < midFiles.length; i++) {
-    const t = await loadPackRoot(scene, midFiles[i]!, `midTemplate_${i}`);
+    const t = await loadPackRoot(scene, midFiles[i]!, `midTemplate_${i}`, false, true);
     if (t) midTemplates.push(t);
   }
   if (midTemplates.length === 0) return false;
@@ -762,6 +822,7 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     placeClone(tmpl, h.name, h.x, h.z, h.scale, h.yaw);
   }
 
+  const midMats: Matrix[][] = midTemplates.map(() => []);
   const ringCount = 24;
   const innerR = 48;
   const outerR = 110;
@@ -770,34 +831,39 @@ async function placeQuaterniusForest(scene: Scene): Promise<boolean> {
     const r = innerR + hash01(i * 7) * (outerR - innerR);
     // Keep south-east approach / path readable.
     if (a > 0.15 && a < 0.55 && r < 62) continue;
-    const tmpl = midTemplates[i % midTemplates.length]!;
+    const ti = i % midTemplates.length;
     const s = 2.4 + hash01(i * 11) * 1.6;
-    // Variant personality: classic / taller / stubbier via Y scale.
     const yMul = i % 3 === 1 ? 1.28 : i % 3 === 2 ? 0.82 : 1.0;
-    const clone = placeClone(
-      tmpl,
-      `midTree_${i}`,
-      Math.cos(a) * r,
-      Math.sin(a) * r,
-      s,
-      hash01(i * 17) * Math.PI * 2,
+    midMats[ti]!.push(
+      composeInstanceMatrix(
+        Math.cos(a) * r,
+        Math.sin(a) * r,
+        s,
+        s * yMul,
+        s,
+        hash01(i * 17) * Math.PI * 2,
+      ),
     );
-    clone.scaling.y *= yMul;
   }
 
   for (let i = 0; i < 12; i++) {
     const a = (i / 12) * Math.PI * 2 + 0.4;
     const r = 135 + hash01(i * 19) * 40;
-    const tmpl = midTemplates[i % midTemplates.length]!;
+    const ti = i % midTemplates.length;
     const s = 2.0 + hash01(i * 23) * 1.4;
-    placeClone(
-      tmpl,
-      `farTree_${i}`,
-      Math.cos(a) * r,
-      Math.sin(a) * r,
-      s,
-      hash01(i * 29) * Math.PI * 2,
+    midMats[ti]!.push(
+      composeInstanceMatrix(
+        Math.cos(a) * r,
+        Math.sin(a) * r,
+        s,
+        s,
+        s,
+        hash01(i * 29) * Math.PI * 2,
+      ),
     );
+  }
+  for (let i = 0; i < midTemplates.length; i++) {
+    thinInstancePackRoot(midTemplates[i]!, midMats[i]!);
   }
 
   // Understory: grass / fern / rock / bush clusters (budget-friendly counts).
