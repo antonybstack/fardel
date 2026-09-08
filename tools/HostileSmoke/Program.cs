@@ -4,7 +4,7 @@ using SpacetimeDB.Types;
 
 var uri = GameConstants.ResolveLocalUri();
 var db = GameConstants.ResolveDatabaseName();
-const int timeoutMs = 50000;
+const int timeoutMs = 70000;
 
 DbConnection? conn = null;
 var connected = new TaskCompletionSource<Identity>();
@@ -46,14 +46,22 @@ try
         Fail($"dummy kind={dummy.Kind} hp={dummy.Hp}");
         return;
     }
+    var dummyId = dummy.NpcId;
 
     var padA = FindHostileNear(conn, Combat.HostileSpawnAx, Combat.HostileSpawnAz)
         ?? throw new Exception("hostile pad A missing");
     var padB = FindHostileNear(conn, Combat.HostileSpawnBx, Combat.HostileSpawnBz)
         ?? throw new Exception("hostile pad B missing");
+    var padC = FindKindNear(conn, Combat.NpcKindBrigand, Combat.HostileSpawnCx, Combat.HostileSpawnCz)
+        ?? throw new Exception("brigand pad C missing");
     if (padA.Kind != Combat.NpcKindHostile || padB.Kind != Combat.NpcKindHostile)
     {
         Fail($"kinds A={padA.Kind} B={padB.Kind}");
+        return;
+    }
+    if (padC.Kind != Combat.NpcKindBrigand || padC.Hp <= 0)
+    {
+        Fail($"pad C kind={padC.Kind} hp={padC.Hp} want Kind=3 living");
         return;
     }
     if (padA.Hp <= 0 || padA.MaxHp != Combat.HostileMaxHp || padB.Hp <= 0)
@@ -66,7 +74,7 @@ try
         Fail("hostiles aggroed at spawn (origin should be outside AggroRadius)");
         return;
     }
-    Console.WriteLine($"spawn A id={padA.NpcId} B id={padB.NpcId} dummy id={dummy.NpcId}");
+    Console.WriteLine($"spawn A id={padA.NpcId} B id={padB.NpcId} C id={padC.NpcId} dummy id={dummyId}");
 
     var hp0 = conn.Db.Character.Identity.Find(identity)!.Hp;
     if (hp0 <= Combat.HostileAttackDamage)
@@ -146,13 +154,89 @@ try
         Fail("hostile B died with A");
         return;
     }
-    if (FindDummy(conn) is not { Hp: > 0 } dummyEnd || dummyEnd.NpcId != dummy.NpcId)
+    AssertDummyTrainer(conn, dummyId, "after A death");
+    if (FindNpc(conn, padC.NpcId) is not { Hp: > 0, Kind: Combat.NpcKindBrigand })
     {
-        Fail("dummy trainer gone after hostile death");
+        Fail("brigand C gone after killing A");
         return;
     }
 
-    Console.WriteLine($"OK: HostileSmoke passed spawn aggro damage {hp0}->{hpHit} death");
+    await PumpUntil(() => FindLootNear(conn, Combat.HostileSpawnAx, Combat.HostileSpawnAz) is not null,
+        timeoutMs, conn, "corpse WorldLoot");
+    var shard = FindLootNear(conn, Combat.HostileSpawnAx, Combat.HostileSpawnAz)!;
+    await MoveToward(conn, identity, shard.X, shard.Z);
+    await PumpUntil(() =>
+    {
+        var p = conn.Db.PlayerPose.Identity.Find(identity);
+        return p is not null && Dist(p.X, p.Z, shard.X, shard.Z) <= Loot.PickupRangeMeters;
+    }, timeoutMs, conn, "in corpse pickup");
+    conn.Reducers.Pickup();
+    await PumpUntil(() => FindLoot(conn, shard.LootId) is null, timeoutMs, conn, "corpse loot despawned");
+    await PumpUntil(() =>
+    {
+        var n = FindNpc(conn, padA.NpcId);
+        return n is { Hp: > 0, Kind: Combat.NpcKindHostile }
+            && Dist(n.X, n.Z, Combat.HostileSpawnAx, Combat.HostileSpawnAz) < 0.6f;
+    }, timeoutMs, conn, "A loot respawn");
+    AssertDummyTrainer(conn, dummyId, "after A loot respawn");
+    Console.WriteLine($"loot-respawn A id={padA.NpcId} hp={FindNpc(conn, padA.NpcId)!.Hp}");
+
+    // Pickup is on the pad — break leash before the Kind=3 cycle.
+    await MoveToward(conn, identity, -8f, -8f);
+    await PumpUntil(() =>
+    {
+        var n = FindNpc(conn, padA.NpcId);
+        return n is { Hp: > 0, Aggroed: false }
+            && Dist(n.X, n.Z, Combat.HostileSpawnAx, Combat.HostileSpawnAz) < 0.8f;
+    }, timeoutMs, conn, "A leashed home");
+    await MoveToward(conn, identity, 0f, 0f);
+    await DelayPump(conn, Combat.GcdMs + 80);
+
+    conn.Reducers.SetTarget(padC.NpcId);
+    await PumpUntil(() =>
+        conn.Db.PlayerCombat.Identity.Find(identity) is { } cc && cc.TargetNpcId == padC.NpcId,
+        timeoutMs, conn, "target C");
+    while (FindNpc(conn, padC.NpcId) is { Hp: > 0 })
+    {
+        var ch = conn.Db.Character.Identity.Find(identity);
+        if (ch is null || ch.Hp <= 0)
+        {
+            Fail("player died before brigand death");
+            return;
+        }
+        var before = FindNpc(conn, padC.NpcId)!.Hp;
+        conn.Reducers.Cast(Combat.SpellSpark);
+        await PumpUntil(() =>
+        {
+            var n = FindNpc(conn, padC.NpcId);
+            return n is null || n.Hp < before || n.Hp == 0;
+        }, timeoutMs, conn, "spark C");
+        await DelayPump(conn, Combat.GcdMs + 50);
+    }
+    if (FindNpc(conn, padC.NpcId) is { Kind: var deadKind } && deadKind != Combat.NpcKindBrigand)
+    {
+        Fail($"pad C kind={deadKind} after death");
+        return;
+    }
+    await PumpUntil(() =>
+    {
+        var n = FindNpc(conn, padC.NpcId);
+        return n is { Hp: > 0, Kind: Combat.NpcKindBrigand }
+            && Dist(n.X, n.Z, Combat.HostileSpawnCx, Combat.HostileSpawnCz) < 0.6f;
+    }, timeoutMs, conn, "C linger respawn");
+    AssertDummyTrainer(conn, dummyId, "after C linger");
+    if (FindNpc(conn, padA.NpcId) is not { Hp: > 0, Kind: Combat.NpcKindHostile })
+    {
+        Fail("pad A not living Kind=2 after C cycle");
+        return;
+    }
+    if (FindNpc(conn, padB.NpcId) is not { Hp: > 0, Kind: Combat.NpcKindHostile })
+    {
+        Fail("pad B not living Kind=2 after C cycle");
+        return;
+    }
+
+    Console.WriteLine($"OK: HostileSmoke passed types loot respawn dummy {hp0}->{hpHit}");
     Environment.ExitCode = 0;
 }
 catch (Exception e)
@@ -195,6 +279,47 @@ static Npc? FindHostileNear(DbConnection conn, float x, float z)
     return null;
 }
 
+static Npc? FindKindNear(DbConnection conn, int kind, float x, float z)
+{
+    foreach (var n in conn.Db.Npc.Iter())
+    {
+        if (n.Kind != kind) continue;
+        var hx = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnX : n.X;
+        var hz = MathF.Abs(n.SpawnX) > 0.01f || MathF.Abs(n.SpawnZ) > 0.01f ? n.SpawnZ : n.Z;
+        if (Dist(hx, hz, x, z) < 0.5f) return n;
+    }
+    return null;
+}
+
+static void AssertDummyTrainer(DbConnection conn, ulong dummyId, string when)
+{
+    var dummy = FindDummy(conn);
+    if (dummy is null || dummy.NpcId != dummyId || dummy.Kind != Combat.NpcKindDummy)
+    {
+        Fail($"dummy trainer gone {when} kind={dummy?.Kind}");
+        Environment.Exit(1);
+    }
+}
+
+static WorldLoot? FindLootNear(DbConnection conn, float x, float z)
+{
+    foreach (var row in conn.Db.WorldLoot.Iter())
+    {
+        if (row.ItemId != Loot.EmberShardItemId) continue;
+        if (Dist(row.X, row.Z, x, z) < 2.5f) return row;
+    }
+    return null;
+}
+
+static WorldLoot? FindLoot(DbConnection conn, ulong id)
+{
+    foreach (var row in conn.Db.WorldLoot.Iter())
+    {
+        if (row.LootId == id) return row;
+    }
+    return null;
+}
+
 static Npc? FindNpc(DbConnection conn, ulong id)
 {
     foreach (var n in conn.Db.Npc.Iter())
@@ -214,7 +339,7 @@ static float Dist(float x, float z, float ox, float oz)
 static async Task MoveToward(DbConnection conn, Identity id, float tx, float tz)
 {
     var guard = 0;
-    while (guard++ < 120)
+    while (guard++ < 160)
     {
         var p = conn.Db.PlayerPose.Identity.Find(id)!;
         var dx = tx - p.X;
