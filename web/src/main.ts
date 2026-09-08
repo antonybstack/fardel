@@ -5761,6 +5761,7 @@ async function main(): Promise<void> {
       } else if (
         veFollow === 'hostile-spawn' ||
         veFollow === 'leash' ||
+        veFollow === 'aggro' ||
         veFollow === 'hostile-read'
       ) {
         // North of pad: dummy (5,0) + hostiles (3,7)/(-7,3) in one shot.
@@ -9121,14 +9122,15 @@ async function main(): Promise<void> {
   }
 
   // ?ve=leash — pull then drop (#355). ?ve=aggro is the #360 session shot.
-  if (ve === 'leash') {
+  if (ve === 'leash' || ve === 'aggro') {
     camera.radius = 18;
     camera.alpha = Math.PI / 2.05;
     camera.beta = Math.PI / 2.7;
   }
-  if (net && ve === 'leash') {
+  if (net && (ve === 'leash' || ve === 'aggro')) {
+    const aggroVe = ve === 'aggro';
     const mark = document.getElementById('persistMark');
-    if (mark) mark.textContent = 'VE leash: waiting for hostiles…';
+    if (mark) mark.textContent = aggroVe ? 'VE aggro: waiting for hostiles…' : 'VE leash: waiting for hostiles…';
     let ticks = 0;
     let phase: 'pull' | 'drop' | 'done' = 'pull';
     let pulledId: bigint | null = null;
@@ -9145,7 +9147,7 @@ async function main(): Promise<void> {
         hostiles[0];
       if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
         if (mark) {
-          mark.textContent = `VE leash: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
         }
         if (ticks < 240) window.setTimeout(waitL, 200);
         return;
@@ -9162,9 +9164,9 @@ async function main(): Promise<void> {
         if (padA.aggroed || home > 0.7) {
           pulledId = padA.npcId;
           phase = 'drop';
-          if (mark) mark.textContent = 'VE leash: pulled — running out…';
+          if (mark) mark.textContent = aggroVe ? 'VE aggro: pulled — dropping leash…' : 'VE leash: pulled — running out…';
         } else if (mark) {
-          mark.textContent = `VE leash: walking in · d=${dist.toFixed(1)} · home=${home.toFixed(2)}`;
+          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: walking in · d=${dist.toFixed(1)} · home=${home.toFixed(2)}`;
         }
       } else if (phase === 'drop') {
         const tx = -12;
@@ -9183,15 +9185,23 @@ async function main(): Promise<void> {
         );
         if (!victim.aggroed && vHome < 0.45) {
           phase = 'done';
-          if (mark) mark.textContent = 'Leash OK · pulled · returned · #355';
+          if (mark) {
+            mark.textContent = aggroVe
+              ? 'Aggro OK · pulled · leashed · #360'
+              : 'Leash OK · pulled · returned · #355';
+          }
           return;
         }
         if (mark) {
-          mark.textContent = `VE leash: drop · aggro=${victim.aggroed ? 'y' : 'n'} · home=${vHome.toFixed(1)}`;
+          mark.textContent = `VE ${aggroVe ? 'aggro' : 'leash'}: drop · aggro=${victim.aggroed ? 'y' : 'n'} · home=${vHome.toFixed(1)}`;
         }
       }
       if (ticks > 240) {
-        if (mark) mark.textContent = `Leash FAIL · phase ${phase} · #355`;
+        if (mark) {
+          mark.textContent = aggroVe
+            ? `Aggro FAIL · phase ${phase} · #360`
+            : `Leash FAIL · phase ${phase} · #355`;
+        }
         return;
       }
       window.setTimeout(waitL, 200);
