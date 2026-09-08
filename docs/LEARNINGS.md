@@ -2,6 +2,8 @@
 
 What Fardel keeps from prior work — and what it leaves behind.
 
+Runtime traps the farm hits while implementing live in [agent-log.md](agent-log.md). Do not append those here.
+
 ## From unbound (Rust / Bevy / SpacetimeDB)
 
 **Keep**
