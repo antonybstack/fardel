@@ -4421,7 +4421,7 @@ async function main(): Promise<void> {
         setHumanoidMoving(parts, moving);
         if (moving) {
           const targetYaw = Math.atan2(dx, dz);
-          const a = 1 - Math.exp(-dt * YAW_FACE_HZ);
+          const a = 1 - Math.exp(-Math.max(0, dt) * YAW_FACE_HZ);
           parts.root.rotation.y = lerpYaw(parts.root.rotation.y, targetYaw, a);
         }
       } else {
@@ -5326,14 +5326,19 @@ async function main(): Promise<void> {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
-        const rp = [...remoteMeshes.values()][0];
-        const tgt = rp
-          ? rp.root.position.add(new Vector3(0, 1.0, 0))
-          : player.position.add(new Vector3(0, 1.0, 0));
-        camera.setTarget(tgt);
+        let focus = player.position.add(new Vector3(0, 1.0, 0));
+        let best = -1;
+        for (const parts of remoteMeshes.values()) {
+          const d = Vector3.Distance(parts.root.position, player.position);
+          if (d > best) {
+            best = d;
+            focus = parts.root.position.add(new Vector3(0, 1.0, 0));
+          }
+        }
+        camera.setTarget(focus);
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
-        camera.radius = 8;
+        camera.radius = 9;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -6305,21 +6310,33 @@ async function main(): Promise<void> {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE remote-walk: waiting for remotes…';
     let ticks = 0;
+    let nudged = false;
     const waitRemoteWalk = () => {
       if (!net) return;
       ticks += 1;
-      syncRemoteMeshes(net.getRemotes());
+      if (!nudged && latestStatus.state === 'connected') {
+        nudged = true;
+        for (let i = 0; i < 4; i++) net.sendMove(-0.75, 0, false);
+      }
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
       const playing = scene.animationGroups
         .filter((g) => /remote_/i.test(g.name) && g.isPlaying)
         .map((g) => g.name.replace(/^remote_[^_]+__/, ''))
         .join(' · ');
       const walkOn = /walk/i.test(playing);
       const n = remoteMeshes.size;
+      const local = net.getLocalPose();
+      const preferred =
+        remotes.find((r) => {
+          if (!local) return true;
+          return Math.hypot(r.x - local.x, r.z - local.z) > 1.5;
+        }) ?? remotes[0];
       if (mark) {
-        if (walkOn) {
-          mark.textContent = `Remote walk OK · remotes ${n} · ${playing}`;
-        } else if (n > 0) {
-          mark.textContent = `VE remote-walk: remotes ${n} · ${playing || 'idle'} (waiting pose delta)`;
+        if (walkOn && preferred) {
+          mark.textContent = `Remote walk OK · remotes ${n} · Walk · @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)})`;
+        } else if (n > 0 && preferred) {
+          mark.textContent = `VE remote-walk: remotes ${n} · ${playing || 'idle'} @(${preferred.x.toFixed(1)},${preferred.z.toFixed(1)}) (waiting pose delta)`;
         } else {
           mark.textContent = 'VE remote-walk: remotes 0…';
         }
