@@ -1208,6 +1208,16 @@ function pushSystemToast(
   }, ttlMs + 400);
 }
 
+function dismissSystemToasts(...kinds: SystemToastKind[]): void {
+  const root = document.getElementById('toastStack');
+  if (!root) return;
+  const want = new Set<string>(kinds);
+  for (const el of Array.from(root.children)) {
+    const k = (el as HTMLElement).getAttribute('data-kind');
+    if (k && want.has(k)) el.remove();
+  }
+}
+
 function toastKindsPresent(): Set<string> {
   const root = document.getElementById('toastStack');
   const kinds = new Set<string>();
@@ -2792,8 +2802,20 @@ async function main(): Promise<void> {
   let prevPendingInvite: string | null = null;
   let toastedConnected = false;
   let toastedInviteAcceptKey = '';
-  let toastedTradeKey = '';
+  let toastedTradeFromKey = '';
+  let toastedTradeToKey = '';
   let lastTradePendingFrom: string | null = null;
+  let lastTradePendingTo: string | null = null;
+  let tradeAcceptInFlight = false;
+  let tradeCancelInFlight = false;
+  let inboundOutcomeReported = false;
+  let outboundOutcomeReported = false;
+  let inboundWatchShard = false;
+  let inboundWatchXp = 0;
+  let inboundOfferedShard = false;
+  let inboundOfferedXp = 0;
+  let outboundWatchShard = false;
+  let outboundWatchXp = 0;
   const proxyInstances = new Map<string, InstancedMesh>();
   let fpsHudAccum = 0;
 
@@ -3366,12 +3388,19 @@ async function main(): Promise<void> {
       if (!g) return;
       const trade = g.getTrade();
       if (trade.pendingFrom) {
+        tradeAcceptInFlight = true;
         void g.acceptTrade().then(() => {
+          inboundOutcomeReported = true;
           const bits: string[] = [];
           if (trade.offeredHasEmberShard) bits.push('ember_shard');
           if (trade.offeredXp > 0) bits.push(`+${trade.offeredXp} XP`);
           pushCombatLog('trade', `Accepted trade (${bits.join(' · ') || 'ok'})`);
-          pushSystemToast('tradeAccepted', `Trade accepted · received ${bits.join(' · ') || 'items'}`, TOAST_VE_TTL_MS);
+          dismissSystemToasts('tradeIncoming', 'tradeWaiting');
+          pushSystemToast(
+            'tradeAccepted',
+            `Trade accepted · received ${bits.join(' · ') || 'items'}`,
+            TOAST_VE_TTL_MS,
+          );
           bagOpen = true;
           setBagPanelOpen(true);
           const ch = g.getCharacter();
@@ -3379,6 +3408,8 @@ async function main(): Promise<void> {
         }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           pushSystemToast('rate', msg.slice(0, 96) || 'Accept trade failed');
+        }).finally(() => {
+          tradeAcceptInFlight = false;
         });
 
         return;
@@ -3391,7 +3422,12 @@ async function main(): Promise<void> {
         const ch = g.getCharacter();
         const what = ch?.hasEmberShard ? 'ember_shard' : '+5 XP';
         pushCombatLog('trade', `Offered ${what} → ${hex.slice(0, 8)}…`);
-        pushSystemToast('tradeWaiting', `Offering ${what} to ${hex.slice(0, 8)}… · awaiting accept · Y cancel`, TOAST_VE_TTL_MS);
+        dismissSystemToasts('tradeWaiting');
+        pushSystemToast(
+          'tradeWaiting',
+          `${hex.slice(0, 8)}… · ${what} · Y cancel`,
+          TOAST_VE_TTL_MS,
+        );
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         if (/out of range/i.test(msg)) {
@@ -3403,12 +3439,18 @@ async function main(): Promise<void> {
     },
     onTradeCancel: () => {
       if (!net) return;
+      tradeCancelInFlight = true;
       void net.cancelTrade().then(() => {
+        inboundOutcomeReported = true;
+        outboundOutcomeReported = true;
         pushCombatLog('trade', 'Trade cancelled');
+        dismissSystemToasts('tradeIncoming', 'tradeWaiting');
         pushSystemToast('tradeCancelled', 'Trade cancelled');
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         pushSystemToast('rate', msg.slice(0, 96) || 'Cancel trade failed');
+      }).finally(() => {
+        tradeCancelInFlight = false;
       });
     },
     onUnequipStaff: () => {
@@ -4522,16 +4564,26 @@ async function main(): Promise<void> {
           );
         }
         prevPendingInvite = pending;
-        // Inbound trade offer toast + bag refresh when transfer lands.
+        // Inbound/outbound trade chrome. pendingFrom-clear is accept only when
+        // this client called acceptTrade or shard/XP actually moved.
         const tr = net?.getTrade();
+        const chTrade = net?.getCharacter();
         const tradePending = tr?.pendingFrom ?? null;
+        const tradePendingTo = tr?.pendingTo ?? null;
         if (tradePending && tradePending !== lastTradePendingFrom) {
+          toastedTradeFromKey = '';
+          inboundOutcomeReported = false;
+          inboundWatchShard = !!chTrade?.hasEmberShard;
+          inboundWatchXp = chTrade?.xp ?? 0;
+          inboundOfferedShard = !!tr?.offeredHasEmberShard;
+          inboundOfferedXp = tr?.offeredXp ?? 0;
           const bits: string[] = [];
           if (tr?.offeredHasEmberShard) bits.push('ember_shard');
           if ((tr?.offeredXp ?? 0) > 0) bits.push(`+${tr!.offeredXp} XP`);
+          dismissSystemToasts('tradeIncoming');
           pushSystemToast(
             'tradeIncoming',
-            `Trade offer from ${tradePending.slice(0, 8)}… · ${bits.join(' · ') || 'items'} · T accept · Y decline`,
+            `${tradePending.slice(0, 8)}… · ${bits.join(' · ') || 'items'} · T accept · Y decline`,
             TOAST_VE_TTL_MS,
           );
           pushCombatLog(
@@ -4539,22 +4591,79 @@ async function main(): Promise<void> {
             `Offer from ${tradePending.slice(0, 8)}… (${bits.join(' · ') || 'offer'})`,
           );
         }
-        if (
-          !tradePending &&
-          lastTradePendingFrom &&
-          tr?.pendingTo == null
-        ) {
-          const doneKey = `done:${lastTradePendingFrom}`;
-          if (doneKey !== toastedTradeKey) {
-            toastedTradeKey = doneKey;
-            bagOpen = true;
-            setBagPanelOpen(true);
-            const chNow = net?.getCharacter();
-            if (chNow) updateBagPanel(chNow);
-            pushSystemToast('tradeAccepted', 'Trade complete · bag updated', TOAST_VE_TTL_MS);
+        if (!tradePending && lastTradePendingFrom) {
+          const doneKey = `from:${lastTradePendingFrom}`;
+          if (doneKey !== toastedTradeFromKey) {
+            toastedTradeFromKey = doneKey;
+            const skip =
+              inboundOutcomeReported || tradeAcceptInFlight || tradeCancelInFlight;
+            if (!skip) {
+              const moved =
+                !!chTrade &&
+                ((inboundOfferedShard &&
+                  chTrade.hasEmberShard !== inboundWatchShard) ||
+                  (inboundOfferedXp > 0 && chTrade.xp !== inboundWatchXp));
+              dismissSystemToasts('tradeIncoming', 'tradeWaiting');
+              if (moved) {
+                bagOpen = true;
+                setBagPanelOpen(true);
+                updateBagPanel(chTrade);
+                const bits: string[] = [];
+                if (inboundOfferedShard) bits.push('ember_shard');
+                if (inboundOfferedXp > 0) bits.push(`+${inboundOfferedXp} XP`);
+                pushCombatLog('trade', `Accepted trade (${bits.join(' · ') || 'ok'})`);
+                pushSystemToast(
+                  'tradeAccepted',
+                  `Trade accepted · received ${bits.join(' · ') || 'items'}`,
+                  TOAST_VE_TTL_MS,
+                );
+              } else {
+                pushCombatLog('trade', 'Trade cancelled');
+                pushSystemToast(
+                  'tradeCancelled',
+                  'Trade cancelled',
+                  TOAST_VE_TTL_MS,
+                );
+              }
+            }
           }
         }
         lastTradePendingFrom = tradePending;
+        if (tradePendingTo && tradePendingTo !== lastTradePendingTo) {
+          toastedTradeToKey = '';
+          outboundOutcomeReported = false;
+          outboundWatchShard = !!chTrade?.hasEmberShard;
+          outboundWatchXp = chTrade?.xp ?? 0;
+        }
+        if (!tradePendingTo && lastTradePendingTo) {
+          const doneKey = `to:${lastTradePendingTo}`;
+          if (doneKey !== toastedTradeToKey) {
+            toastedTradeToKey = doneKey;
+            const skip = outboundOutcomeReported || tradeCancelInFlight;
+            if (!skip) {
+              const moved =
+                !!chTrade &&
+                (chTrade.hasEmberShard !== outboundWatchShard ||
+                  chTrade.xp !== outboundWatchXp);
+              dismissSystemToasts('tradeIncoming', 'tradeWaiting');
+              if (moved) {
+                bagOpen = true;
+                setBagPanelOpen(true);
+                updateBagPanel(chTrade);
+                pushCombatLog('trade', 'Trade accepted');
+                pushSystemToast('tradeAccepted', 'Trade accepted', TOAST_VE_TTL_MS);
+              } else {
+                pushCombatLog('trade', 'Trade cancelled');
+                pushSystemToast(
+                  'tradeCancelled',
+                  'Trade cancelled',
+                  TOAST_VE_TTL_MS,
+                );
+              }
+            }
+          }
+        }
+        lastTradePendingTo = tradePendingTo;
         if (size > prevPartySize && size >= 1) {
           if (prevPartySize === 0) {
             const msg = size === 1
@@ -9052,12 +9161,12 @@ async function main(): Promise<void> {
       if (root) root.innerHTML = '';
       pushSystemToast(
         'tradeIncoming',
-        'Trade offer from a1b2c3d4… · ember_shard · T accept · Y decline',
+        'a1b2c3d4… · ember_shard · T accept · Y decline',
         TOAST_VE_TTL_MS,
       );
       pushSystemToast(
         'tradeWaiting',
-        'Offering +5 XP to e5f6g7h8… · awaiting accept · Y cancel',
+        'e5f6g7h8… · +5 XP · Y cancel',
         TOAST_VE_TTL_MS,
       );
       pushSystemToast(
@@ -9080,7 +9189,7 @@ async function main(): Promise<void> {
           ? 'Trade-feel OK · incoming/waiting/accepted/cancelled · distinct chrome · #162'
           : 'VE trade-feel: waiting toast stack…';
       }
-      window.setTimeout(hold, 2800);
+      window.setTimeout(hold, 500);
     };
     hold();
   }
@@ -9680,7 +9789,7 @@ async function main(): Promise<void> {
             pushCombatLog('trade', `Offered ember_shard → ${target.identityHex.slice(0, 8)}…`);
             pushSystemToast(
               'tradeWaiting',
-              `Offering ember_shard to ${target.identityHex.slice(0, 8)}… · awaiting accept · Y cancel`,
+              `${target.identityHex.slice(0, 8)}… · ember_shard · Y cancel`,
               TOAST_VE_TTL_MS,
             );
           })
