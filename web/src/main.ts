@@ -52,6 +52,7 @@ import {
 import {
   buildForestClearing,
   COLLISION_VE_HERO,
+  DIRT_SURFACE_Y,
   getTrunkCapsules,
   nearestTrunk,
   PLAYER_TRUNK_RADIUS,
@@ -2327,7 +2328,7 @@ function makeNpcMesh(scene: Scene, npc: NpcView): NpcMesh {
     const dummy = createTrainingDummy(scene, `npc_${npc.npcId}`);
     body = dummy.body;
     body.parent = root;
-    body.position.y = 0;
+    body.position.y = DIRT_SURFACE_Y;
     mat = dummy.mat;
     extraMats = dummy.extraMats;
   } else {
@@ -2447,6 +2448,7 @@ function makeVendorMesh(scene: Scene, vendor: VendorView): { root: Mesh; mat: St
   // desaturated canvas under locked #39 fog/sun; readable at 8–20m play cam.
   const stall = createVendorStall(scene, `vendorStall_${vendor.vendorId}`);
   stall.body.parent = root;
+  stall.body.position.y = DIRT_SURFACE_Y;
   const mat = stall.mat;
 
   const nameplate = createNameplate(scene, `vendor_${vendor.vendorId}`);
@@ -6477,9 +6479,9 @@ async function main(): Promise<void> {
 
   // ?ve=dummy — frame scarecrow/practice dummy at play-cam under canonical #39 lights.
   if (ve === 'dummy') {
-    camera.radius = 9.5;
+    camera.radius = 8.4;
     camera.alpha = Math.PI / 2.15;
-    camera.beta = Math.PI / 2.75;
+    camera.beta = Math.PI / 2.48;
   }
   if (net && ve === 'dummy') {
     const mark = document.getElementById('persistMark');
@@ -6514,13 +6516,13 @@ async function main(): Promise<void> {
         camera.setTarget(
           new Vector3(
             player.position.x * 0.15 + dummy.x * 0.85,
-            1.2,
+            0.72,
             player.position.z * 0.15 + dummy.z * 0.85,
           ),
         );
-        camera.radius = 9.5;
+        camera.radius = 8.4;
         camera.alpha = Math.PI / 2.15;
-        camera.beta = Math.PI / 2.75;
+        camera.beta = Math.PI / 2.48;
       }
       const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
       const scarecrow =
@@ -6535,7 +6537,7 @@ async function main(): Promise<void> {
         okTicks += 1;
         if (mark) {
           mark.textContent =
-            `Dummy OK · scarecrow silhouette · wood+canvas · canonical forest lights · #${dummy.npcId}`;
+            `Dummy OK · post on dirt · no float · scarecrow · #${dummy.npcId}`;
         }
         if (okTicks < 6 && ticks < 140) {
           window.setTimeout(waitDummy, 180);
@@ -12358,7 +12360,7 @@ async function main(): Promise<void> {
     const STALL_X = -2.5;
     const STALL_Z = 2.0;
     const preview = createVendorStall(scene, 'veVendorPanelStall');
-    preview.body.position.set(STALL_X, 0, STALL_Z);
+    preview.body.position.set(STALL_X, DIRT_SURFACE_Y, STALL_Z);
     const plate = createNameplate(scene, 'veVendorPanelStall');
     plate.mesh.parent = preview.body;
     plate.mesh.position.set(0, 2.45, 0);
@@ -12424,21 +12426,21 @@ async function main(): Promise<void> {
 
   // ?ve=vendor-stall — play-cam frame of shop silhouette (posts+counter+awning) under #39 fog (#58).
   if (ve === 'vendor-stall') {
-    // Face stall front (counter/-Z); play-cam height so awning+counter read.
-    camera.radius = 11;
+    // Face stall front (counter/-Z); tilt so posts meet dirt (#347).
+    camera.radius = 9.5;
     camera.alpha = -Math.PI / 2.15;
-    camera.beta = Math.PI / 2.35;
+    camera.beta = Math.PI / 2.42;
     // Presentation preview at known YardVendor spawn — independent of syncVendorMeshes
     // so empty yard_vendor sub cannot dispose it mid-shot.
     const STALL_X = -2.5;
     const STALL_Z = 2.0;
     const preview = createVendorStall(scene, 'veVendorStall');
-    preview.body.position.set(STALL_X, 0, STALL_Z);
+    preview.body.position.set(STALL_X, DIRT_SURFACE_Y, STALL_Z);
     const plate = createNameplate(scene, 'veVendorStall');
     plate.mesh.parent = preview.body;
     plate.mesh.position.set(0, 2.45, 0);
     paintNameplate(plate, 'Vendor', '#7dffb5', 1);
-    camera.setTarget(new Vector3(STALL_X, 1.1, STALL_Z));
+    camera.setTarget(new Vector3(STALL_X, 0.55, STALL_Z));
   }
   if (net && ve === 'vendor-stall') {
     const mark = document.getElementById('persistMark');
@@ -12457,13 +12459,13 @@ async function main(): Promise<void> {
       const live = net.getVendors()[0];
       const x = live?.x ?? STALL_X;
       const z = live?.z ?? STALL_Z;
-      camera.setTarget(new Vector3(x, 1.1, z));
-      camera.radius = 11;
+      camera.setTarget(new Vector3(x, 0.55, z));
+      camera.radius = 9.5;
       camera.alpha = -Math.PI / 2.15;
-      camera.beta = Math.PI / 2.35;
+      camera.beta = Math.PI / 2.42;
       if (mark) {
         mark.textContent =
-          'Vendor-stall OK · shop silhouette · Connected';
+          'Vendor-stall OK · posts on dirt · no float · shop silhouette · Connected';
       }
     };
     window.setTimeout(waitStall, 600);

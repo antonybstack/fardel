@@ -452,6 +452,9 @@ const YARD_DUMMY_Z = 0;
 const YARD_VENDOR_X = -2.5;
 const YARD_VENDOR_Z = 2;
 
+/** Dirt-disc top. Dummy post / vendor feet plant here — not grass y=0 (#347). */
+export const DIRT_SURFACE_Y = 0.036;
+
 /** North landmark hero — `?ve=collision` walks into this bole. */
 export const COLLISION_VE_HERO = { x: 6, z: -40 } as const;
 
@@ -1398,19 +1401,30 @@ function buildClearingPath(scene: Scene): void {
   };
 
   // Small irregular worn hollows at spawn — not a concentric disc pad.
-  // DummySpawn (5, 0) and vendor (-2.5, 2) must sit on dirt (ellipse < 1).
+  // DummySpawn (5, 0) and vendor (−2.5, 2) must sit on dirt (ellipse < 1) (#347).
   const hollowMat = matteDirt('dirtMat', new Color3(0.46, 0.34, 0.24), new Color3(0.012, 0.009, 0.006));
-  const hollows: Array<{ x: number; z: number; r: number; sx: number; sz: number }> = [
+  const hollows: Array<{ x: number; z: number; r: number; sx: number; sz: number; y?: number }> = [
     { x: 0.4, z: 0.2, r: 3.4, sx: 1.52, sz: 0.82 },
     { x: 2.6, z: 2.8, r: 2.2, sx: 1.4, sz: 0.65 },
     { x: -2.2, z: -1.4, r: 1.8, sx: 0.9, sz: 1.2 },
     { x: 1.2, z: -2.6, r: 1.5, sx: 1.5, sz: 0.7 },
-    { x: 5.0, z: 0.0, r: 1.7, sx: 1.2, sz: 0.85 },
-    { x: -2.5, z: 2.0, r: 1.55, sx: 1.12, sz: 0.92 },
+    { x: 5.0, z: 0.0, r: 2.05, sx: 1.28, sz: 1.05, y: DIRT_SURFACE_Y - 0.006 },
+    { x: -2.5, z: 2.0, r: 1.95, sx: 1.22, sz: 1.08, y: DIRT_SURFACE_Y - 0.006 },
   ];
   for (let i = 0; i < hollows.length; i++) {
     const h = hollows[i]!;
-    placeGroundDisc(scene, `dirtHollow_${i}`, h.x, h.z, 0.028, h.r, 16, h.sx, h.sz, hollowMat);
+    placeGroundDisc(
+      scene,
+      `dirtHollow_${i}`,
+      h.x,
+      h.z,
+      h.y ?? 0.028,
+      h.r,
+      16,
+      h.sx,
+      h.sz,
+      hollowMat,
+    );
   }
 
   const trailMat = matteDirt('pathTrailMat', new Color3(0.45, 0.33, 0.23), new Color3(0.011, 0.008, 0.005));
