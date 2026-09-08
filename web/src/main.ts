@@ -18,6 +18,7 @@ import {
   castRemainingMs,
   SPELL_EMBERBOLT,
   SPELL_SPARK,
+  GCD_MS,
   EMBERBOLT_CAST_MS,
   SPARK_MANA_COST,
   EMBERBOLT_MANA_COST,
@@ -9134,6 +9135,101 @@ async function main(): Promise<void> {
       window.setTimeout(waitA, 200);
     };
     window.setTimeout(waitA, 500);
+  }
+
+  // ?ve=hunt-loot — kill pad A from outside aggro, corpse WorldLoot, F pickup (#357).
+  if (ve === 'hunt-loot') {
+    camera.radius = 18;
+    camera.alpha = Math.PI / 2.1;
+    camera.beta = Math.PI / 2.7;
+  }
+  if (net && ve === 'hunt-loot') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hunt-loot: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'kill' | 'walk' | 'pick' | 'done' = 'kill';
+    let lastCast = 0;
+    let sparkleHold = 0;
+    const padAx = 3;
+    const padAz = 7;
+    const waitH = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      const items = net.getGroundItems();
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE hunt-loot: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 320) window.setTimeout(waitH, 200);
+        return;
+      }
+      if (phase === 'kill') {
+        if (padA.hp > 0) {
+          net.setTarget(padA.npcId);
+          const now = Date.now();
+          if (now - lastCast >= GCD_MS + 80) {
+            net.cast(SPELL_SPARK);
+            lastCast = now;
+          }
+          if (mark) {
+            mark.textContent = `VE hunt-loot: spark pad A · hp ${padA.hp}/${padA.maxHp}`;
+          }
+        } else {
+          phase = 'walk';
+          if (mark) mark.textContent = 'VE hunt-loot: corpse — waiting shard…';
+        }
+      } else if (phase === 'walk') {
+        const shard =
+          items.find((it) => Math.hypot(it.x - padAx, it.z - padAz) < 2.5) ?? items[0];
+        if (!shard) {
+          if (mark) mark.textContent = `VE hunt-loot: waiting WorldLoot · ground ${items.length}`;
+        } else {
+          const dx = shard.x - player.position.x;
+          const dz = shard.z - player.position.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist > PICKUP_RANGE_METERS - 0.4) {
+            const step = Math.min(MAX_STEP_METERS, dist);
+            net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+            if (mark) {
+              mark.textContent = `VE hunt-loot: walking to shard · d=${dist.toFixed(1)}`;
+            }
+          } else {
+            sparkleHold += 1;
+            if (sparkleHold < 8) {
+              if (mark) {
+                mark.textContent = `Hunt-loot OK · corpse shard · F pickup · #357`;
+              }
+            } else {
+              phase = 'pick';
+              void net.pickup().catch(() => undefined);
+            }
+          }
+        }
+      } else if (phase === 'pick') {
+        const shardLeft = items.some((it) => Math.hypot(it.x - padAx, it.z - padAz) < 2.5);
+        const bag = !!net.getCharacter()?.hasEmberShard;
+        if (!shardLeft && bag) {
+          phase = 'done';
+          if (mark) mark.textContent = 'Hunt-loot OK · corpse shard · F pickup · #357';
+          return;
+        }
+        if (mark) {
+          mark.textContent = `VE hunt-loot: picking · ground ${items.length} · bag ${bag ? 'y' : 'n'}`;
+        }
+      }
+      if (ticks > 320) {
+        if (mark) mark.textContent = `Hunt-loot FAIL · phase ${phase} · #357`;
+        return;
+      }
+      window.setTimeout(waitH, 200);
+    };
+    window.setTimeout(waitH, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
