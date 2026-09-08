@@ -77,6 +77,7 @@ import {
   setHumanoidStaffEquipped,
   setHumanoidTurning,
   type HumanoidParts,
+  type HumanoidPlayback,
 } from './world/humanoid';
 import { createTrainingDummy } from './world/dummy';
 import {
@@ -9250,7 +9251,7 @@ async function main(): Promise<void> {
     window.setTimeout(waitOrbit, 200);
   }
 
-  // ?ve=hostile-spawn / ?ve=hostile-body — Kind=2 skinned Idle, dummy trainer (#400).
+  // ?ve=hostile-spawn / ?ve=hostile-body — two Kind=2 people + dummy trainer (#405).
   if (ve === 'hostile-spawn' || ve === 'hostile-body') {
     camera.radius = 18;
     camera.alpha = Math.PI / 2.05;
@@ -9264,7 +9265,8 @@ async function main(): Promise<void> {
       if (!net) return;
       ticks += 1;
       const npcs = net.getNpcs();
-      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      syncNpcMeshes(npcs);
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE);
       const dummyRow = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
       const dummyMesh = dummyRow
         ? npcMeshes.get(dummyRow.npcId.toString())
@@ -9272,51 +9274,60 @@ async function main(): Promise<void> {
       const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
       const hostileParts: HumanoidParts[] = [];
       let capsuleLeft = false;
+      let livingIdle: HumanoidPlayback | null = null;
       for (const n of hostiles) {
         const mesh = npcMeshes.get(n.npcId.toString());
         if (mesh?.humanoid) {
-          setHumanoidMoving(mesh.humanoid, false);
+          if (n.hp > 0) setHumanoidMoving(mesh.humanoid, false);
           hostileParts.push(mesh.humanoid);
-        } else if (mesh) {
-          capsuleLeft = true;
-        }
-      }
-      if (
-        hostiles.length >= 2 &&
-        dummyTrainer &&
-        hostileParts.length >= 2 &&
-        !capsuleLeft
-      ) {
-        const pbs = hostileParts.map(readHumanoidPlayback);
-        const pb0 = pbs[0]!;
-        const bodyOk = pbs.every(
-          (pb) =>
+          const pb = readHumanoidPlayback(mesh.humanoid);
+          if (
+            n.hp > 0 &&
             pb.skinned > 0 &&
             !!pb.playing &&
             /idle/i.test(pb.playing) &&
             pb.height >= 1.5 &&
-            pb.height <= 2.15,
-        );
-        if (bodyOk) {
-          if (mark) {
-            mark.textContent =
-              `Hostile body OK · n=${hostiles.length} · ${pb0.playing} · skinned ${pb0.skinned} · dummy trainer · #400`;
+            pb.height <= 2.15
+          ) {
+            livingIdle = pb;
           }
-          return;
-        }
-        if (ticks > 80) {
-          if (mark) {
-            mark.textContent =
-              `T-POSE · clip=${pb0.playing ?? 'none'} · skeleton=${pb0.skinned} · dummy trainer · #400`;
-          }
-          return;
+        } else if (mesh) {
+          capsuleLeft = true;
         }
       }
-      if (ticks > 80) {
+      const pbs = hostileParts.map(readHumanoidPlayback);
+      const peopleOk =
+        pbs.length >= 2 &&
+        pbs.every(
+          (pb) =>
+            pb.skinned > 0 &&
+            !!pb.playing &&
+            /idle|death/i.test(pb.playing),
+        );
+      if (
+        hostiles.length >= 2 &&
+        dummyTrainer &&
+        peopleOk &&
+        livingIdle &&
+        !capsuleLeft
+      ) {
         if (mark) {
-          mark.textContent = capsuleLeft
-            ? `Hostile body FAIL · capsule · dummy ${dummyTrainer ? 'trainer' : 'n'} · #400`
-            : `Hostile body FAIL · hostiles ${hostiles.length}/2 · body ${hostileParts.length} · dummy ${dummyTrainer ? 'trainer' : 'n'} · #400`;
+          mark.textContent =
+            `Hostile body OK · n=${hostiles.length} · ${livingIdle.playing} · skinned ${livingIdle.skinned} · dummy trainer`;
+        }
+        return;
+      }
+      const pb0 = pbs[0];
+      if (ticks > 160) {
+        if (mark) {
+          if (capsuleLeft) {
+            mark.textContent = 'Hostile body FAIL · capsule · dummy trainer';
+          } else if (pb0 && pb0.skinned <= 0) {
+            mark.textContent = `T-POSE · clip=${pb0.playing ?? 'none'} · skeleton=${pb0.skinned}`;
+          } else {
+            mark.textContent =
+              `Hostile body FAIL · hostiles ${hostiles.length}/2 · body ${hostileParts.length} · dummy ${dummyTrainer ? 'trainer' : 'n'}`;
+          }
         }
         return;
       }
