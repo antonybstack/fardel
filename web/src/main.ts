@@ -3737,10 +3737,14 @@ async function main(): Promise<void> {
   };
   const localInterp = makePoseInterp();
   const remoteInterps = new Map<string, PoseInterp>();
-  /** Grounded interp parks at u=1 between 20Hz snaps; hold Walk across the gap. */
-  const REMOTE_WALK_HOLD_S = 0.15;
+  /** Grounded interp parks at u=1 between 20Hz snaps; hold Walk across the gap.
+   * 70–90 ms covers one 20 Hz interval without a leftover stride after stop. */
+  const REMOTE_WALK_HOLD_S = 0.09;
   const REMOTE_WALK_SPD = 0.55;
   const remoteWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
+  /** Last pose step that armed Walk. Re-sync with step=0 must not clear this. */
+  const remoteWalkStepAt = new Map<string, number>();
+  const REMOTE_WALK_STOP_MS = 80;
   /** HostileTickMs 100 — hold Walk across 10 Hz NPC snaps (same trap as remotes). */
   const NPC_WALK_HOLD_S = 0.22;
   const NPC_WALK_STEP = 0.04;
@@ -4013,6 +4017,7 @@ async function main(): Promise<void> {
         st.hold = REMOTE_WALK_HOLD_S;
         st.dx = stepX * MOVE_SEND_HZ;
         st.dz = stepZ * MOVE_SEND_HZ;
+        remoteWalkStepAt.set(key, performance.now());
       }
       parts.root.setEnabled(true);
       const rChNow = net?.getCharacterFor(key);
@@ -4041,6 +4046,7 @@ async function main(): Promise<void> {
         remoteLastHp.delete(key);
         remoteInterps.delete(key);
         remoteWalkHold.delete(key);
+        remoteWalkStepAt.delete(key);
         disposeNameplate(remoteNameplates.get(key));
         remoteNameplates.delete(key);
       }
@@ -5098,7 +5104,15 @@ async function main(): Promise<void> {
       }
       const interpolating = ri.u < 1 - 1e-4;
       const segSpd = Math.hypot(ri.vx, ri.vz);
-      if (interpolating && segSpd > REMOTE_WALK_SPD) {
+      const lastStepAt = remoteWalkStepAt.get(key);
+      if (
+        lastStepAt != null &&
+        performance.now() - lastStepAt > REMOTE_WALK_STOP_MS
+      ) {
+        st.hold = 0;
+        st.dx = 0;
+        st.dz = 0;
+      } else if (interpolating && segSpd > REMOTE_WALK_SPD) {
         st.hold = REMOTE_WALK_HOLD_S;
         st.dx = ri.vx;
         st.dz = ri.vz;
@@ -6349,6 +6363,65 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-walk-stop') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        // SecondClient patrols (−6.5, −5) ↔ (−1.5, −5). Never fall back to You.
+        let fx = -4;
+        let fy = 1.0;
+        let fz = -5;
+        let best = -1;
+        let bestHex: string | null = null;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x + 4, parts.root.position.z + 5) <
+            3.5;
+          if (
+            /death/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.2 ||
+            !nearPad
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const idle =
+            /idle_weapon/i.test(clip) &&
+            !/walk/i.test(clip) &&
+            parts.staff.isEnabled();
+          const walking = /walk/i.test(clip);
+          const hold = remoteWalkHold.get(hex)?.hold ?? 0;
+          const lastStep = remoteWalkStepAt.get(hex) ?? 0;
+          const rank =
+            (hold > 0 || walking ? 3000 : idle ? 2000 : 100) + lastStep * 0.001;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'remote-sheathed') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6625,7 +6698,8 @@ async function main(): Promise<void> {
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
         veFollow !== 'zoom-stop' &&
-        veFollow !== 'remote-hop'
+        veFollow !== 'remote-hop' &&
+        veFollow !== 'remote-walk-stop'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -8351,6 +8425,123 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitRemoteWalk, 200);
     };
     window.setTimeout(waitRemoteWalk, 700);
+  }
+
+  // ?ve=remote-walk-stop — E8.30 other wizard Idle after Walk, no leftover stride.
+  if (ve === 'remote-walk-stop') {
+    camera.radius = 7;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-walk-stop') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-walk-stop: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let sawWalk = false;
+    let walkedHex: string | null = null;
+    let latchedMark: string | null = null;
+    const waitStop = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      for (const [hex, p] of remoteMeshes) {
+        const ch = net.getCharacterFor(hex);
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        const live =
+          !!ch &&
+          ch.hp > 0 &&
+          pb.height >= 1.2 &&
+          !/death/i.test(clip) &&
+          nearPad &&
+          (walkedHex == null || hex === walkedHex);
+        p.root.setEnabled(live);
+      }
+      const living = remotes.filter((r) => {
+        const p = remoteMeshes.get(r.identityHex);
+        return !!p && p.root.isEnabled();
+      });
+      const n = living.length;
+      let preferred: RemotePose | undefined;
+      for (const r of living) {
+        const p = remoteMeshes.get(r.identityHex);
+        if (!p) continue;
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        if (!nearPad) continue;
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        if (
+          pb.skinned > 0 &&
+          (/walk/i.test(clip) || (remoteWalkHold.get(r.identityHex)?.hold ?? 0) > 0)
+        ) {
+          sawWalk = true;
+          walkedHex = r.identityHex;
+        }
+        if (
+          sawWalk &&
+          (!walkedHex || walkedHex === r.identityHex) &&
+          p.root.position.y <= 0.05 &&
+          pb.skinned > 0 &&
+          pb.height >= 1.2 &&
+          /idle_weapon/i.test(clip) &&
+          !/walk/i.test(clip) &&
+          !/death/i.test(clip) &&
+          p.staff.isEnabled()
+        ) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : living[0]
+          ? remoteMeshes.get(living[0].identityHex)
+          : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const idleOk =
+        !!preferred &&
+        sawWalk &&
+        pb.skinned > 0 &&
+        pb.height >= 1.2 &&
+        /idle_weapon/i.test(clip) &&
+        !/walk/i.test(clip) &&
+        !/death/i.test(clip) &&
+        !!parts?.staff.isEnabled();
+      if (idleOk) {
+        latchedMark = `Idle OK · ${clip} · skinned ${pb.skinned} · remote-walk-stop`;
+      }
+      if (mark) {
+        if (latchedMark) {
+          mark.textContent = latchedMark;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (n > 0) {
+          mark.textContent =
+            `VE remote-walk-stop: remotes ${n} · ${clip} · walk ${sawWalk ? 'seen' : 'waiting'} · skinned ${pb.skinned} (FARDEL_SECOND_WALK_STOP=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-walk-stop: remotes 0 (start tools/SecondClient FARDEL_SECOND_WALK_STOP=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitStop, 80);
+    };
+    window.setTimeout(waitStop, 700);
   }
 
   // ?ve=remote-sheathed — E8.26 remote Character.staffEquipped=false plays unarmed Idle.
