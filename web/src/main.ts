@@ -5897,6 +5897,33 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.18;
         camZoomRadius = CAM_COLLISION_VE_RADIUS;
         camCollideThisFrame = true;
+      } else if (veFollow === 'encounter') {
+        // Play follow + trunk clamp: fight among trees, camera stays out of boles (#361).
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        const sel =
+          selectedTargetId !== 0n ? npcMeshes.get(selectedTargetId.toString()) : undefined;
+        const hx = sel?.root.position.x ?? player.position.x;
+        const hz = sel?.root.position.z ?? player.position.z;
+        tgt.x = player.position.x * 0.45 + hx * 0.55;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z * 0.45 + hz * 0.55;
+        camera.alpha = -0.62;
+        camera.beta = Math.PI / 2.38;
+        camZoomRadius = 14;
+        camCollideThisFrame = true;
       } else if (
         veFollow !== 'vendor-stall' &&
         veFollow !== 'vendor-panel' &&
@@ -9647,6 +9674,127 @@ async function main(): Promise<void> {
       window.setTimeout(waitR, 200);
     };
     window.setTimeout(waitR, 500);
+  }
+
+  // ?ve=encounter — fight a hostile among trees, cam out of trunks, nameplate on (#361).
+  if (ve === 'encounter') {
+    camera.radius = 14;
+    camera.alpha = -0.62;
+    camera.beta = Math.PI / 2.38;
+  }
+  if (net && ve === 'encounter') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE encounter: waiting for hostiles…';
+    let ticks = 0;
+    let phase: 'pull' | 'fight' | 'done' = 'pull';
+    let tabbed = false;
+    let hp0 = 0;
+    const padAx = 3;
+    const padAz = 7;
+    const camInTrunk = (): boolean => {
+      const p = camera.position;
+      return trunks.some(
+        (t) =>
+          Math.hypot(p.x - t.x, p.z - t.z) < t.r &&
+          p.y >= t.y0 - 0.3 &&
+          p.y <= t.y1 + 0.3,
+      );
+    };
+    const waitE = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      const hostiles = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummyOk = npcs.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const padA =
+        hostiles.find((n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6) ??
+        hostiles[0];
+      const hp = net.getCharacter()?.hp ?? 0;
+      if (latestStatus.state !== 'connected' || !padA || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE encounter: ${latestStatus.state} · hostiles ${hostiles.length}/2…`;
+        }
+        if (ticks < 280) window.setTimeout(waitE, 200);
+        return;
+      }
+      if (hp <= 0) {
+        phase = 'pull';
+        tabbed = false;
+        hp0 = 0;
+        if (mark) mark.textContent = 'VE encounter: dead — waiting respawn…';
+        if (ticks < 280) window.setTimeout(waitE, 200);
+        return;
+      }
+      if (phase === 'pull') {
+        if (!hp0) hp0 = hp;
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (padA.aggroed) {
+          phase = 'fight';
+          if (mark) mark.textContent = `VE encounter: pulled · hp ${hp} — waiting swing…`;
+        } else if (mark) {
+          mark.textContent = `VE encounter: walking in · d=${dist.toFixed(1)} · hp ${hp}`;
+        }
+      } else if (phase === 'fight') {
+        const dx = padA.x - player.position.x;
+        const dz = padA.z - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 0.35) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (!tabbed || selectedTargetId !== padA.npcId) {
+          net.setTarget(padA.npcId);
+          selectedTargetId = padA.npcId;
+          tabbed = true;
+        }
+        syncNpcMeshes(net.getNpcs());
+        updateTargetFrame(padA);
+        const mesh = npcMeshes.get(padA.npcId.toString());
+        const plateOn = !!(mesh?.nameplate && mesh.nameplate.mesh.isEnabled());
+        const plateLabel = mesh?.nameplate?.label ?? '';
+        const ringOn = !!(mesh && mesh.ring.isEnabled());
+        const clipped = camInTrunk();
+        if (
+          padA.aggroed &&
+          hp < hp0 &&
+          plateOn &&
+          plateLabel === 'Hostile' &&
+          ringOn &&
+          !clipped
+        ) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = 'Encounter OK · fighting · plate · cam clear · #361';
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE encounter: fight · hp ${hp}/${hp0} · aggro ${padA.aggroed ? 'y' : 'n'} · ` +
+            `plate ${plateLabel || 'no'} · ring ${ringOn ? 'on' : 'off'} · cam ${clipped ? 'clip' : 'clear'}`;
+        }
+      }
+      if (ticks > 280) {
+        const tgtFail = npcs.find((n) => n.npcId === selectedTargetId);
+        const meshFail = tgtFail ? npcMeshes.get(tgtFail.npcId.toString()) : undefined;
+        const clippedFail = camInTrunk();
+        if (mark) {
+          mark.textContent =
+            `Encounter FAIL · phase ${phase} · hp ${hp} · tgt ${tgtFail?.kind ?? 'none'} · ` +
+            `plate ${meshFail?.nameplate?.label || 'no'} · ring ${meshFail?.ring.isEnabled() ? 'on' : 'off'} · ` +
+            `cam ${clippedFail ? 'clip' : 'clear'} · #361`;
+        }
+        return;
+      }
+      window.setTimeout(waitE, 200);
+    };
+    window.setTimeout(waitE, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
