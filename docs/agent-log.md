@@ -388,3 +388,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `setHumanoidMoving(..., spd >= 3.2, spd)` → Run_Weapon if staffed, unarmed Run if sheathed. Slow hold stays Walk. Stop still Idle (#478). `?ve=remote-run` persistMark `/^Run OK/` + Run + skinned. Walk-only on a sprinting remote = fail.
 - **Seen in:** #480 / #333
 
+### 2026-09-08 — ve,tab — sequential Spark wipe loses the all-dead window
+- **Cause:** HostileMaxHp 40 / Spark 10 / GCD 1.2s is 4.8s per pad. `HostileCorpseLingerMs` is 4s, so the first corpse revives before the last pad dies. Tab then prefers the living Kind=2, not Dummy.
+- **Do this:** Wound every `IsHostileKind` to one Spark, then finish them on consecutive GCDs. Tab Dummy immediately. persistMark `?ve=tab-dummy` names Dummy trainer; corpse-as-target = fail. Stay at origin. Do not wait linger / pickup.
+- **Seen in:** #496
+

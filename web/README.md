@@ -99,6 +99,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=face-target-walk` | Walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432); HUD `Walk OK · Walk · skinned 1 · face target` |
 | `?ve=tab-hostile` | Tab visits Kind=2 and Kind=3; dummy still in cycle (#453); HUD `Tab-hostile OK · Brigand #… · dummy selectable · #453`. |
 | `?ve=tab-aggro` | After a pull, Tab selects the **aggroed** NPC (not lowest id) while Kind=2 and Kind=3 are in range (#484); HUD `Tab-aggro OK · Brigand · pulled · dummy trainer`. Dummy stays in the cycle |
+| `?ve=tab-dummy` | After Kind=2 and Kind=3 are corpses, Tab selects Dummy trainer (#496); HUD `Tab-dummy OK · Dummy trainer · wipe · #496`. Corpses skipped / not sticky. Stay at origin. |
 | `?ve=hostile-read` | Hostile coral plate vs Dummy parchment vs Vendor mint at play cam (#359); HUD `Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359`. |
 | `?ve=hostile-types` | Kind=2 Hostile coral vs Kind=3 Brigand violet vs Dummy parchment vs Vendor mint (#418); HUD `Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418`. |
 | `?ve=brigand-plate` | Kind=2 Hostile coral vs Kind=3 Brigand violet nameplates + combat log names both (#454); HUD `Brigand-plate OK · Hostile coral · Brigand violet · Dummy parchment · log both · #454`. |

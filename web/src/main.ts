@@ -171,7 +171,7 @@ function nearestLootInPickupRange(
   return best;
 }
 
-/** Tab cycle: aggroed in-range hostiles first, then other in-range hostiles, then dummy (#484 / #358). */
+/** Tab cycle: living in-range hostiles (aggroed first), then Dummy, then living far hostiles (#484 / #358 / #496). Corpses skipped — never sticky. */
 function tabTargetCycle(net: GameNet): NpcView[] {
   const alive = net.getNpcs().filter((n) => n.hp > 0);
   const pose = net.getLocalPose();
@@ -207,11 +207,14 @@ function npcStunnedNow(n: NpcView, nowMs = Date.now()): boolean {
 }
 
 function cyclePreferHostiles(net: GameNet): bigint | null {
-  const cycle = tabTargetCycle(net);
+  const cycle = tabTargetCycle(net).filter((n) => n.hp > 0);
   if (cycle.length === 0) return null;
   const cur = net.getCombat()?.targetNpcId ?? 0n;
-  let idx = cycle.findIndex((n) => n.npcId === cur);
-  idx = (idx + 1) % cycle.length;
+  const curRow = net.getNpcs().find((n) => n.npcId === cur);
+  // Dead / missing current is not in the living cycle. After a wipe
+  // cycle[0] is Dummy (no living in-range hostiles). Do not stick on a corpse.
+  const idxCur = curRow && curRow.hp > 0 ? cycle.findIndex((n) => n.npcId === cur) : -1;
+  const idx = idxCur < 0 ? 0 : (idxCur + 1) % cycle.length;
   const next = cycle[idx]!.npcId;
   net.setTarget(next);
   return next;
@@ -6846,6 +6849,7 @@ async function main(): Promise<void> {
         veFollow !== 'tab-target' &&
         veFollow !== 'tab-hostile' &&
         veFollow !== 'tab-aggro' &&
+        veFollow !== 'tab-dummy' &&
         veFollow !== 'hostile-read' &&
         veFollow !== 'hostile-types' &&
         veFollow !== 'brigand-plate' &&
@@ -12634,6 +12638,176 @@ async function main(): Promise<void> {
       window.setTimeout(waitL, 200);
     };
     window.setTimeout(waitL, 500);
+  }
+
+  // ?ve=tab-dummy — after Kind=2 + Kind=3 are corpses, Tab lands on Dummy (#496).
+  // Stay at origin (outside AggroRadius). Wound every hostile then finish on
+  // consecutive GCDs so linger does not restock before the wipe. Dummy trainer.
+  if (ve === 'tab-dummy') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.08;
+    camera.beta = Math.PI / 2.65;
+  }
+  if (net && ve === 'tab-dummy') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-dummy: waiting for Kind=2 + Brigand…';
+    let ticks = 0;
+    let phase: 'kill' | 'tab' | 'done' = 'kill';
+    let lastCast = 0;
+    let tabbed = false;
+    const waitD = () => {
+      if (!net) return;
+      ticks += 1;
+      const pose = net.getLocalPose();
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyOk = !!dummy;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = dummyOk && !!dMesh && !dMesh.humanoid;
+      const hostiles = npcs.filter((n) => isHostileKind(n.kind));
+      const livingH = hostiles.filter((n) => n.hp > 0);
+      const kind2 = hostiles.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const kind3 = hostiles.filter((n) => n.kind === NPC_KIND_BRIGAND);
+      const corpse2 = kind2.some((n) => n.hp <= 0);
+      const corpse3 = kind3.some((n) => n.hp <= 0);
+      const selfHp = net.getCharacter()?.hp ?? 0;
+      const cam = camera.target;
+      cam.x = 5.6;
+      cam.y = 1.12;
+      cam.z = -0.9;
+      camera.radius = 13;
+      camera.beta = Math.PI / 2.65;
+      if (latestStatus.state !== 'connected' || !dummyOk || kind2.length < 1 || kind3.length < 1) {
+        if (mark) {
+          mark.textContent =
+            `VE tab-dummy: ${latestStatus.state} · H2 ${kind2.length} · B ${kind3.length}…`;
+        }
+        if (ticks < 400) window.setTimeout(waitD, 200);
+        return;
+      }
+      if (selfHp <= 0) {
+        if (mark) mark.textContent = 'Tab-dummy FAIL · player died · #496';
+        return;
+      }
+      if (pose && Math.hypot(pose.x, pose.z) > 0.7) {
+        const step = Math.min(MAX_STEP_METERS, Math.hypot(pose.x, pose.z));
+        const dist = Math.hypot(pose.x, pose.z);
+        const slid = slideAgainstTrunks(pose.x, pose.z, (-pose.x / dist) * step, (-pose.z / dist) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      if (phase === 'kill') {
+        if (livingH.length === 0 && corpse2 && corpse3) {
+          phase = 'tab';
+          tabbed = false;
+        } else {
+          const wound = livingH.filter((n) => n.hp > 10);
+          const prey = wound[0] ?? livingH[0];
+          if (prey) {
+            net.setTarget(prey.npcId);
+            selectedTargetId = prey.npcId;
+            const ch = net.getCharacter();
+            const mana = ch?.mana ?? 0;
+            if (mana < SPARK_MANA_COST) {
+              void net.rest();
+              if (mark) mark.textContent = `VE tab-dummy: Rest · mana ${mana}`;
+            } else {
+              const now = Date.now();
+              if (now - lastCast >= GCD_MS + 80) {
+                net.cast(SPELL_SPARK);
+                lastCast = now;
+              }
+              if (mark) {
+                mark.textContent =
+                  `VE tab-dummy: spark ${npcPlateName(prey.kind)} · hp ${prey.hp}/${prey.maxHp} · live ${livingH.length}`;
+              }
+            }
+          }
+        }
+      }
+      if (phase === 'done') {
+        if (mark) mark.textContent = 'Tab-dummy OK · Dummy trainer · wipe · #496';
+        return;
+      }
+      if (phase === 'tab') {
+        if (livingH.length > 0) {
+          phase = 'kill';
+          tabbed = false;
+          if (ticks < 400) window.setTimeout(waitD, 200);
+          return;
+        }
+        const combatId = net.getCombat()?.targetNpcId ?? 0n;
+        const combatRow = npcs.find((n) => n.npcId === combatId) ?? null;
+        const needTab =
+          !tabbed ||
+          !combatRow ||
+          combatRow.hp <= 0 ||
+          combatRow.kind !== NPC_KIND_DUMMY;
+        if (needTab) {
+          const id = cyclePreferHostiles(net);
+          if (id != null) selectedTargetId = id;
+          tabbed = true;
+        }
+        const tgtId = selectedTargetId !== 0n ? selectedTargetId : combatId;
+        const tgt = npcs.find((n) => n.npcId === tgtId) ?? combatRow;
+        const cycle = tabTargetCycle(net);
+        const corpseInCycle = cycle.some((n) => n.hp <= 0);
+        const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+        updateTargetFrame(tgt && tgt.hp > 0 ? tgt : dummy);
+        const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+        const ringOn = !!(mesh && mesh.ring.isEnabled());
+        const frame = document.getElementById('targetFrame');
+        const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+        const frameName = document.getElementById('tfName')?.textContent ?? '';
+        const corpseTarget = !!tgt && tgt.hp <= 0 && isHostileKind(tgt.kind);
+        const capsuleCorpse = hostiles.some((n) => {
+          if (n.hp > 0) return false;
+          const m = npcMeshes.get(n.npcId.toString());
+          return !!m && !m.humanoid;
+        });
+        if (capsuleCorpse) {
+          if (mark) mark.textContent = 'Tab-dummy FAIL · capsule · #496';
+          return;
+        }
+        const landedDummy =
+          !!tgt &&
+          tgt.kind === NPC_KIND_DUMMY &&
+          tgt.hp > 0;
+        if (corpseTarget && !landedDummy) {
+          tabbed = false;
+          if (mark) mark.textContent = 'VE tab-dummy: Tab skipped corpse…';
+        }
+        const ok =
+          landedDummy &&
+          dummyTrainer &&
+          dummyInCycle &&
+          !corpseInCycle &&
+          corpse2 &&
+          corpse3 &&
+          livingH.length === 0 &&
+          ringOn &&
+          frameVisible &&
+          /dummy/i.test(frameName);
+        if (ok) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = 'Tab-dummy OK · Dummy trainer · wipe · #496';
+          }
+          return;
+        } else if (mark && !corpseTarget) {
+          mark.textContent =
+            `VE tab-dummy: Tab tgt ${tgt ? `${npcPlateName(tgt.kind)} hp ${tgt.hp}` : 'none'} · ${frameName}`;
+        }
+      }
+      if (ticks > 400) {
+        if (mark) mark.textContent = `Tab-dummy FAIL · phase ${phase} · #496`;
+        return;
+      }
+      window.setTimeout(waitD, 200);
+    };
+    window.setTimeout(waitD, 500);
   }
 
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
