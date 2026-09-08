@@ -5178,7 +5178,9 @@ async function main(): Promise<void> {
             net.sendMove(dx, dz, wish.jump);
           }
         }
-        if (isAirborne) {
+        if (ve === 'character-wow') {
+          // waitWow owns Idle/Walk/Run/hop/Spell.
+        } else if (isAirborne) {
           setHumanoidAirborne(humanoid, true);
           setHumanoidTurning(humanoid, false);
         } else {
@@ -5192,7 +5194,9 @@ async function main(): Promise<void> {
         }
       } else {
         moveAccumulator = 0;
-        if (isAirborne) {
+        if (ve === 'character-wow') {
+          // waitWow owns clips.
+        } else if (isAirborne) {
           setHumanoidAirborne(humanoid, true);
           setHumanoidTurning(humanoid, false);
         } else {
@@ -5203,7 +5207,9 @@ async function main(): Promise<void> {
       }
     } else {
       moveAccumulator = 0;
-      if (isAirborne) {
+      if (ve === 'character-wow') {
+        // waitWow owns clips.
+      } else if (isAirborne) {
         setHumanoidAirborne(humanoid, true);
         setHumanoidTurning(humanoid, false);
       } else {
@@ -5312,6 +5318,8 @@ async function main(): Promise<void> {
       prevLocalCasting = serverCasting || castUntilMs > now;
       if (ve === 'cast-anim') {
         setHumanoidCasting(humanoid, true);
+      } else if (ve === 'character-wow') {
+        // waitWow owns Spell.
       } else {
         const emberHold =
           (combatNow?.castingSpellId === SPELL_EMBERBOLT && serverCasting) ||
@@ -5961,8 +5969,7 @@ async function main(): Promise<void> {
         veFollow === 'flinch' ||
         veFollow === 'yaw' ||
         veFollow === 'jump-pose' ||
-        veFollow === 'look-at' ||
-        veFollow === 'character-wow'
+        veFollow === 'look-at'
       ) {
         // Side play-cam so Walk/Run stride / wish facing / hop pose / look-at reads.
         camera.inertialAlphaOffset = 0;
@@ -5972,6 +5979,19 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = veFollow === 'jump-pose' ? 9 : 7;
+      } else if (veFollow === 'character-wow') {
+        // South of spawn looking north: player clips in front, Kind=2 at (3,7)
+        // behind, Dummy trainer (5,0) to the right. Mutate target in place.
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x + 1.2;
+        tgt.y = player.position.y + 1.1;
+        tgt.z = player.position.z + 2.5;
+        camera.alpha = -Math.PI / 2;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 12;
       } else if (veFollow === 'cast-anim' || veFollow === 'cast-cancel-pose') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -7424,15 +7444,20 @@ async function main(): Promise<void> {
     window.setTimeout(waitPose, 700);
   }
 
-  // ?ve=character-wow — E8.12 play-cam reel: idle, walk, run, hop pose, Spell.
+  // ?ve=character-wow — E8.12 reel + E8.24 hostile person (not capsule). Dummy trainer.
   if (ve === 'character-wow') {
-    camera.radius = 8;
-    camera.alpha = 0.35;
+    camera.radius = 12;
+    camera.alpha = -Math.PI / 2;
     camera.beta = Math.PI / 2.45;
   }
   if (net && ve === 'character-wow') {
     const mark = document.getElementById('persistMark');
     if (mark) mark.textContent = 'VE character-wow: waiting for Connected…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
     let ticks = 0;
     const seen: string[] = [];
     let t0 = 0;
@@ -7485,21 +7510,74 @@ async function main(): Promise<void> {
       if (elapsed >= 4.0 && elapsed < 5.4 && !seen.includes('hop-pose')) {
         seen.push('hop-pose');
       }
-      const wowOk =
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummyRow = npcs.find((n) => n.kind === NPC_KIND_DUMMY) ?? null;
+      const dummyMesh = dummyRow
+        ? npcMeshes.get(dummyRow.npcId.toString())
+        : undefined;
+      const dummyTrainer = !!dummyMesh && !dummyMesh.humanoid;
+      let hostilePb: ReturnType<typeof readHumanoidPlayback> | null = null;
+      let capsuleLeft = false;
+      for (const n of npcs) {
+        if (!isHostileKind(n.kind)) continue;
+        const mesh = npcMeshes.get(n.npcId.toString());
+        if (mesh?.humanoid) {
+          if (n.hp > 0) setHumanoidMoving(mesh.humanoid, false);
+          const hpb = readHumanoidPlayback(mesh.humanoid);
+          if (
+            hpb.skinned > 0 &&
+            !!hpb.playing &&
+            /idle|death/i.test(hpb.playing)
+          ) {
+            const livingIdle =
+              n.hp > 0 && /idle/i.test(hpb.playing ?? '');
+            if (!hostilePb || livingIdle) hostilePb = hpb;
+            if (livingIdle) break;
+          }
+        } else if (mesh) {
+          capsuleLeft = true;
+        }
+      }
+      const playerOk =
         pb.skinned > 0 &&
         seen.some((n) => /idle/i.test(n)) &&
         seen.some((n) => /walk/i.test(n)) &&
         seen.some((n) => /run/i.test(n)) &&
         seen.includes('hop-pose') &&
         seen.some((n) => /spell/i.test(n));
-      if (mark) {
-        mark.textContent = wowOk
-          ? `Character wow OK · ${seen.join(' · ')} · skinned ${pb.skinned}`
-          : pb.skinned <= 0
-            ? `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`
-            : `VE character-wow · ${seen.join(' · ') || pb.playing || '…'} · skinned ${pb.skinned}`;
+      const wowOk =
+        playerOk &&
+        dummyTrainer &&
+        !capsuleLeft &&
+        hostilePb != null &&
+        hostilePb.skinned > 0;
+      if (wowOk && hostilePb) {
+        if (mark) {
+          const clips = seen.map((n) => (n === 'hop-pose' ? n : clipBare(n)));
+          mark.textContent =
+            `Character wow OK · ${clips.join(' · ')} · Hostile ${clipBare(hostilePb.playing)} · skinned ${pb.skinned} · dummy trainer`;
+        }
+        return;
       }
-      if (ticks < 80) window.setTimeout(waitWow, 200);
+      if (ticks > 120) {
+        if (mark) {
+          if (capsuleLeft) {
+            mark.textContent = 'capsule · hostile not a person';
+          } else if (pb.skinned <= 0 || (hostilePb && hostilePb.skinned <= 0)) {
+            mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+          } else {
+            mark.textContent =
+              `Character wow FAIL · ${seen.join(' · ') || 'no clips'} · hostile ${hostilePb ? clipBare(hostilePb.playing) : 'none'} · dummy ${dummyTrainer ? 'trainer' : 'n'}`;
+          }
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          `VE character-wow · ${seen.join(' · ') || pb.playing || '…'} · hostile ${hostilePb ? clipBare(hostilePb.playing) : '…'} · skinned ${pb.skinned}`;
+      }
+      window.setTimeout(waitWow, 200);
     };
     window.setTimeout(waitWow, 700);
   }
