@@ -7078,17 +7078,30 @@ async function main(): Promise<void> {
     }
   }
 
-  // ?ve=zoom-stop — Camera wheel hard-stop feel (#192): prove min/max zoom toast on wheel overscroll.
-  // Interim ve-capture note for Lead: ve.sparkify.dev — muted silver "Zoom min"/"Zoom max" toast.
+  // ?ve=zoom-stop — wheel into lowerRadiusLimit (deltaY<0 zooms in / min).
   if (ve === 'zoom-stop') {
-    camera.radius = camera.lowerRadiusLimit + 0.5;
+    const lower = camera.lowerRadiusLimit ?? 4;
+    camera.radius = lower;
     camera.alpha = Math.PI / 2.3;
     camera.beta = Math.PI / 3.1;
     const mark = document.getElementById('persistMark');
-    if (mark) {
-      mark.textContent =
-        'VE zoom-stop: Scroll down (min) or up (max) past limit · muted silver toast · #192';
-    }
+    if (mark) mark.textContent = 'VE zoom-stop: seeding Zoom min…';
+    const canvasEl = document.getElementById('renderCanvas');
+    const hold = () => {
+      camera.radius = lower;
+      canvasEl?.dispatchEvent(
+        new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }),
+      );
+      const toast = document.querySelector('.sysToast.zoomLimit');
+      const ok = !!toast && /Zoom min/i.test(toast.textContent || '');
+      if (mark) {
+        mark.textContent = ok
+          ? 'Zoom-stop OK · Zoom min toast · wheel deltaY<0 at lowerRadiusLimit · #192'
+          : 'VE zoom-stop: firing wheel deltaY<0 at min…';
+      }
+      window.setTimeout(hold, 900);
+    };
+    window.setTimeout(hold, 500);
   }
 
   // ?ve=jump — tap-Space then pump air Move until land (#147). Hard-FAIL if Y never rises (#128).
