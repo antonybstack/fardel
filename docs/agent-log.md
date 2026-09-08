@@ -42,3 +42,13 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Cause:** MCP browser cannot launch/interact reliably on this host.
 - **Do this:** Prove feel with harness `?ve=` + screenshot + `ve-upload.sh`, or a local Playwright script against the **seat** Vite (`:520N` + `?db=&module=`), never prod `:3000`.
 - **Seen in:** Lead playpass; Dev4 VE capture
+
+### 2026-09-08 — place,mountain — LINEAR fogEnd flattens distant ridges into a cardboard wall
+- **Cause:** Scene LINEAR `fogEnd` (95 / 200) fully fogs any mesh past the forest. Peaks sitting on that plane read as a 2D strip.
+- **Do this:** Backdrop mountains: `applyFog=false` + `fogEnabled=false` and bake dusk-blue value steps. Do not raise `fogEnd` just to “reach” the range (that clears the forest haze).
+- **Seen in:** #295 / #273
+
+### 2026-09-08 — ve,camera — establishing `?ve=` pose is eaten by the follow loop
+- **Cause:** `ArcRotateCamera.setTarget(player)` each frame rebuilds alpha/beta/radius from the current camera position.
+- **Do this:** Lock `?ve=sky-horizon` / `?ve=place-wow` (and similar establishing shots) inside the follow branch every frame. A one-shot set after connect is not enough.
+- **Seen in:** #295 / #273, #276
