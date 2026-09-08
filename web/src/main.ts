@@ -5704,7 +5704,8 @@ async function main(): Promise<void> {
         veFollow === 'flinch' ||
         veFollow === 'yaw' ||
         veFollow === 'jump-pose' ||
-        veFollow === 'look-at'
+        veFollow === 'look-at' ||
+        veFollow === 'character-wow'
       ) {
         // Side play-cam so Walk/Run stride / wish facing / hop pose / look-at reads.
         camera.inertialAlphaOffset = 0;
@@ -6934,6 +6935,86 @@ async function main(): Promise<void> {
       if (!castOk && ticks < 240) window.setTimeout(waitCast, 200);
     };
     window.setTimeout(waitCast, 600);
+  }
+
+  // ?ve=character-wow — E8.12 play-cam reel: idle, walk, run, hop pose, Spell.
+  if (ve === 'character-wow') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'character-wow') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE character-wow: waiting for Connected…';
+    let ticks = 0;
+    const seen: string[] = [];
+    let t0 = 0;
+    const waitWow = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE character-wow: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitWow, 200);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitWow, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitWow, 250);
+        return;
+      }
+      if (!t0) t0 = Date.now();
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      const elapsed = (Date.now() - t0) / 1000;
+      if (elapsed < 1.2) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidMoving(humanoid, false);
+      } else if (elapsed < 2.6) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidMoving(humanoid, true, false, MOVE_SPEED);
+      } else if (elapsed < 4.0) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidMoving(humanoid, true, true, MOVE_SPEED);
+      } else if (elapsed < 5.4) {
+        setHumanoidCasting(humanoid, false);
+        setHumanoidMoving(humanoid, false);
+        setHumanoidAirborne(humanoid, true);
+      } else {
+        setHumanoidAirborne(humanoid, false);
+        setHumanoidCasting(humanoid, true);
+      }
+      const pb = readHumanoidPlayback(humanoid);
+      if (pb.playing && !seen.includes(pb.playing)) seen.push(pb.playing);
+      if (elapsed >= 4.0 && elapsed < 5.4 && !seen.includes('hop-pose')) {
+        seen.push('hop-pose');
+      }
+      const wowOk =
+        pb.skinned > 0 &&
+        seen.some((n) => /idle/i.test(n)) &&
+        seen.some((n) => /walk/i.test(n)) &&
+        seen.some((n) => /run/i.test(n)) &&
+        seen.includes('hop-pose') &&
+        seen.some((n) => /spell/i.test(n));
+      if (mark) {
+        mark.textContent = wowOk
+          ? `Character wow OK · ${seen.join(' · ')} · skinned ${pb.skinned}`
+          : pb.skinned <= 0
+            ? `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`
+            : `VE character-wow · ${seen.join(' · ') || pb.playing || '…'} · skinned ${pb.skinned}`;
+      }
+      if (ticks < 80) window.setTimeout(waitWow, 200);
+    };
+    window.setTimeout(waitWow, 700);
   }
 
   // ?ve=two-client — frame local + remote humanoids; wait for remotes >= 1.
