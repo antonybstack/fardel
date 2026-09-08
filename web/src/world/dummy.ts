@@ -82,6 +82,17 @@ export function createTrainingDummy(
   stake.material = woodMat;
   stake.isPickable = false;
 
+  // Foot block so the post reads planted on dirt, not hovering on grass (#347).
+  const foot = MeshBuilder.CreateCylinder(
+    `${prefix}_foot`,
+    { height: 0.05, diameter: 0.28, tessellation: 8 },
+    scene,
+  );
+  foot.parent = body;
+  foot.position.y = 0.025;
+  foot.material = woodMat;
+  foot.isPickable = false;
+
   // Crossbeam at shoulder height — classic scarecrow T.
   const beam = MeshBuilder.CreateCylinder(
     `${prefix}_beam`,
