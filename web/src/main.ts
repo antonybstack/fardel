@@ -3131,6 +3131,8 @@ async function main(): Promise<void> {
   const MOVE_SEND_HZ = 20;
   /** Presentation lerp only; snap teleports. */
   const POSE_SNAP_METERS = 2.5;
+  /** Match Movement.Gravity — display-only airborne extrapolation (#258). */
+  const POSE_GRAVITY = -20;
   type PoseInterp = {
     seeded: boolean;
     fx: number;
@@ -3142,6 +3144,9 @@ async function main(): Promise<void> {
     tz: number;
     tyaw: number;
     u: number;
+    vx: number;
+    vy: number;
+    vz: number;
   };
   const makePoseInterp = (): PoseInterp => ({
     seeded: false,
@@ -3154,6 +3159,9 @@ async function main(): Promise<void> {
     tz: 0,
     tyaw: 0,
     u: 1,
+    vx: 0,
+    vy: 0,
+    vz: 0,
   });
   const lerpN = (a: number, b: number, t: number) => a + (b - a) * t;
   const lerpYaw = (a: number, b: number, t: number) => {
@@ -3176,6 +3184,7 @@ async function main(): Promise<void> {
       i.fz = i.tz = z;
       i.fyaw = i.tyaw = yaw;
       i.u = 1;
+      i.vx = i.vy = i.vz = 0;
       i.seeded = true;
       return;
     }
@@ -3194,8 +3203,13 @@ async function main(): Promise<void> {
       i.fz = i.tz = z;
       i.fyaw = i.tyaw = yaw;
       i.u = 1;
+      i.vx = i.vy = i.vz = 0;
       return;
     }
+    const invSnap = MOVE_SEND_HZ;
+    i.vx = (x - cx) * invSnap;
+    i.vy = (y - cy) * invSnap;
+    i.vz = (z - cz) * invSnap;
     i.fx = cx;
     i.fy = cy;
     i.fz = cz;
@@ -3218,6 +3232,20 @@ async function main(): Promise<void> {
   const advancePoseInterp = (i: PoseInterp, dt: number) => {
     if (!i.seeded) return;
     i.u = Math.min(1, i.u + dt * MOVE_SEND_HZ);
+    const air = i.ty > 0.05 || i.fy > 0.05;
+    if (!air || i.u < 1 || dt <= 0) return;
+    // Between 20Hz snapshots, keep the hop arc moving (display only).
+    i.tx += i.vx * dt;
+    i.tz += i.vz * dt;
+    i.ty += i.vy * dt;
+    i.vy += POSE_GRAVITY * dt;
+    if (i.ty <= 0) {
+      i.ty = 0;
+      i.vy = 0;
+    }
+    i.fx = i.tx;
+    i.fy = i.ty;
+    i.fz = i.tz;
   };
   const localInterp = makePoseInterp();
   const remoteInterps = new Map<string, PoseInterp>();
