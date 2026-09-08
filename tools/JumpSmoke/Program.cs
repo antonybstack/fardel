@@ -88,7 +88,8 @@ try
         return;
     }
 
-    Console.WriteLine($"spawn pose ({pose.X}, {pose.Y}, {pose.Z}) velY={pose.VelY}");
+    var spawnLastGroundedMicros = pose.LastGroundedMicros;
+    Console.WriteLine($"spawn pose ({pose.X}, {pose.Y}, {pose.Z}) velY={pose.VelY} lastGroundedMicros={spawnLastGroundedMicros}");
 
     // Jump while grounded
     conn.Reducers.Move(0f, 0f, jump: true);
@@ -146,13 +147,24 @@ try
         Fail($"landed Y={landY} not at GroundY={Movement.GroundY}");
         return;
     }
-    if (conn.Db.PlayerPose.Identity.Find(identity) is { } landPose
-        && MathF.Abs(landPose.VelY) > 0.1f)
+    if (conn.Db.PlayerPose.Identity.Find(identity) is not { } landPose)
+    {
+        Fail("PlayerPose missing after land");
+        return;
+    }
+    if (MathF.Abs(landPose.VelY) > 0.1f)
     {
         Fail($"landed VelY={landPose.VelY} not ≈0");
         return;
     }
-    Console.WriteLine($"landed: Y={landY}");
+    
+    // Assert LastGroundedMicros advanced (strictly greater than pre-jump)
+    if (landPose.LastGroundedMicros <= spawnLastGroundedMicros)
+    {
+        Fail($"landed LastGroundedMicros={landPose.LastGroundedMicros} not > spawn={spawnLastGroundedMicros}");
+        return;
+    }
+    Console.WriteLine($"landed: Y={landY} lastGroundedMicros={landPose.LastGroundedMicros} (advanced from {spawnLastGroundedMicros})");
 
     // Second jump while airborne should not re-boost (anti multi-jump)
     // Get current pose
