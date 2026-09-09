@@ -2052,7 +2052,7 @@ const CAM_ZOOM_MAX = 42;
 /** Vertical bole colliders for camera push-in. Quaternius AABB is canopy-wide — do not use it. */
 type TrunkCollider = {
   name: string;
-  kind: 'hero' | 'mid' | 'dummy' | 'hostile' | 'brigand';
+  kind: 'hero' | 'mid' | 'dummy' | 'hostile' | 'brigand' | 'vendor';
   x: number;
   z: number;
   r: number;
@@ -2071,6 +2071,10 @@ const CAM_COLLIDE_FLOOR = 1.55;
 const CAM_BODY_PAD = 0.45;
 const CAM_BODY_DUMMY_R = 0.58;
 const CAM_BODY_HOSTILE_R = 0.48;
+/** Stall posts ~0.95×0.62; awning ~1.18×0.85. Circumscribe without eating origin. */
+const CAM_STALL_R = 1.12;
+const CAM_STALL_PAD = 0.4;
+const CAM_STALL_Y1 = 2.25;
 
 function collectTrunkColliders(scene: Scene): TrunkCollider[] {
   const trunks: TrunkCollider[] = [];
@@ -2297,6 +2301,24 @@ function collectBodyColliders(
       y0: 0,
       y1: dummy ? 2.2 : 1.95,
       pad: CAM_BODY_PAD,
+    });
+  }
+  return out;
+}
+
+/** YardVendor stall cylinder. Dummy/hostiles stay on collectBodyColliders (#497). */
+function collectStallColliders(vendors: VendorView[]): TrunkCollider[] {
+  const out: TrunkCollider[] = [];
+  for (const v of vendors) {
+    out.push({
+      name: 'Vendor',
+      kind: 'vendor',
+      x: v.x,
+      z: v.z,
+      r: CAM_STALL_R,
+      y0: 0,
+      y1: CAM_STALL_Y1,
+      pad: CAM_STALL_PAD,
     });
   }
   return out;
@@ -3419,6 +3441,7 @@ async function main(): Promise<void> {
       veCam !== 'cam-collision' &&
       veCam !== 'cam-collision-mid' &&
       veCam !== 'cam-collision-dummy' &&
+      veCam !== 'cam-collision-vendor' &&
       veCam !== 'cam-collision-hop' &&
       Math.abs(camera.radius - camAppliedRadius) > 0.08
     ) {
@@ -3426,13 +3449,14 @@ async function main(): Promise<void> {
     }
     camZoomRadius = Math.min(maxR, Math.max(minR, camZoomRadius));
     const bodies = collectBodyColliders(net?.getNpcs() ?? [], npcMeshes);
+    const stalls = collectStallColliders(net?.getVendors() ?? []);
     const { radius, hit } = clampRadiusVsTrunks(
       camera.target,
       camera.alpha,
       camera.beta,
       camZoomRadius,
       CAM_COLLIDE_FLOOR,
-      [...trunks, ...bodies],
+      [...trunks, ...bodies, ...stalls],
     );
     camera.radius = radius;
     camAppliedRadius = radius;
@@ -6767,6 +6791,35 @@ async function main(): Promise<void> {
           const mesh = npcMeshes.get(dummy.npcId.toString());
           const dx = (mesh?.root.position.x ?? dummy.x) - player.position.x;
           const dz = (mesh?.root.position.z ?? dummy.z) - player.position.z;
+          camera.alpha = Math.atan2(dz, dx) + 0.08;
+        }
+        camera.beta = Math.PI / 2.18;
+        camZoomRadius = CAM_ZOOM_MIN;
+        camCollideThisFrame = true;
+      } else if (veFollow === 'cam-collision-vendor') {
+        // Min-zoom orbit into the stall. Collision may pull below zoom min (#497).
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
+        const vendor = (net?.getVendors() ?? [])[0];
+        if (vendor) {
+          const mesh = vendorMeshes.get(vendor.vendorId.toString());
+          const dx = (mesh?.root.position.x ?? vendor.x) - player.position.x;
+          const dz = (mesh?.root.position.z ?? vendor.z) - player.position.z;
           camera.alpha = Math.atan2(dz, dx) + 0.08;
         }
         camera.beta = Math.PI / 2.18;
@@ -12946,6 +12999,87 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitDummy, 200);
     };
     window.setTimeout(waitDummy, 400);
+  }
+
+  // ?ve=cam-collision-vendor — min-zoom orbit into the stall; must not sit inside (#497).
+  // Dummy + living hostiles still collide. Stay off pad B (AggroRadius). Dummy trainer.
+  if (net && ve === 'cam-collision-vendor') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = CAM_ZOOM_MIN;
+    camZoomRadius = CAM_ZOOM_MIN;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision-vendor: finding stall…';
+    let ticks = 0;
+    // Wider stall than Dummy: stand farther so min-zoom grazes (~4.1) instead of
+    // a face close-up. Keep off pad B (AggroRadius 3).
+    const standOff = 5.6;
+    const waitStall = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cam-collision-vendor: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitStall, 200);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const pose = net.getLocalPose();
+      const vendor = net.getVendors()[0];
+      const dummyOk = (net.getNpcs() ?? []).some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      if (!pose || !vendor || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE cam-collision-vendor: waiting stall ${vendor ? 'y' : 'n'} dummy ${dummyOk ? 'y' : 'n'}`;
+        }
+        if (ticks < 240) window.setTimeout(waitStall, 200);
+        return;
+      }
+      const mesh = vendorMeshes.get(vendor.vendorId.toString());
+      const tx = mesh?.root.position.x ?? vendor.x;
+      const tz = mesh?.root.position.z ?? vendor.z;
+      const dx = tx - pose.x;
+      const dz = tz - pose.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.2 && Math.abs(d - standOff) > 0.25) {
+        const toward = d > standOff ? 1 : -1;
+        const step = Math.min(MAX_STEP_METERS, Math.abs(d - standOff));
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          toward * (dx / d) * step,
+          toward * (dz / d) * step,
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const cam = camera.position;
+      const camD = Math.hypot(cam.x - tx, cam.z - tz);
+      const atStand = Math.abs(d - standOff) <= 0.4;
+      const ok =
+        atStand &&
+        hit === 'Vendor' &&
+        got < want &&
+        camD > CAM_STALL_R &&
+        dummyOk;
+      if (ok) {
+        if (mark) {
+          mark.textContent =
+            `Cam-collision OK · Vendor · stall · r=${got.toFixed(1)} < want=${want.toFixed(1)} · min-zoom`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          Math.abs(d - standOff) > 0.25
+            ? `VE cam-collision-vendor: walk d=${d.toFixed(1)} → ${standOff.toFixed(1)}`
+            : `VE cam-collision-vendor: r=${got.toFixed(1)} want=${want.toFixed(1)} hit=${hit ?? 'none'} · camD=${camD.toFixed(2)}`;
+      }
+      if (ticks < 280) window.setTimeout(waitStall, 200);
+    };
+    window.setTimeout(waitStall, 400);
   }
 
   // ?ve=cam-collision-hop — Space-hop while orbiting into a hero bole (#483).
