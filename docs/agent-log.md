@@ -438,3 +438,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Pad C chase uses the kick/stun/leash lock (radius 14, tgt 6.2/−1.6). Wait Kind=2 home before pull. persistMark `?ve=brigand-chase` names Brigand + Walk + skinned. Capsule / Idle slide = fail. Dummy trainer.
 - **Seen in:** #533
 
+### 2026-09-08 — ve,kick — Kind=3 Kick shove decays before persistMark
+- **Cause:** After KickNpc, pad C walks back toward spawn (or a later snapshot matches the pre-kick seed). VE required live shove ≥ 0.6 at OK time, so Tab-on-Kind=2 never persisted.
+- **Do this:** Latch shove, then Tab. persistMark `?ve=kick-shove-tab` names both kinds + Tab. Dummy-first while a hostile lives = fail. Stay at origin.
+- **Seen in:** #532
+

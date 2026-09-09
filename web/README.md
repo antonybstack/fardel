@@ -118,6 +118,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=kick` | KickNpc Kind=3 Brigand interrupt + dummy still kickable (#452); HUD `Kick OK · Brigand #… · interrupt · dummy kickable · #452`. |
 | `?ve=kick-tab` | Kick pad A Kind=2, Tab lands on living Kind=3 (#502); HUD `Kick-tab OK · Hostile · Brigand · Tab · dummy trainer · #502`. Dummy-first while a hostile lives = fail. Stay at origin. |
 | `?ve=kick-shove` | KickNpc Kind=3 shoves; Dummy XZ planted (#505); HUD `Kick-shove OK · Brigand shove · Dummy planted · #505`. Dummy wander = fail. Stay at origin. |
+| `?ve=kick-shove-tab` | KickNpc Kind=3 (shove), Tab lands on living Kind=2 (#532); HUD `Kick-shove-tab OK · Brigand · Hostile · Tab · dummy trainer · #532`. Dummy-first while a hostile lives = fail. Stay at origin. |
 | `?ve=stun` | StunNpc Kind=3 Brigand lock + dummy still stunnable (#452); HUD `Stun OK · Brigand #… · lock · dummy stunnable · #452`. Walk to ~4m (StunRange 5, AggroRadius 3). |
 | `?ve=stun-hold` | StunNpc a chasing Kind=3 Brigand; it stands for the lock (no Walk moonwalk / leash slide) (#487); HUD `Stun-hold OK · Brigand · stun hold · dummy trainer · #487`. Dummy stays trainer. Drift / Walk during lock = fail. |
 | `?ve=stun-then-kick` | StunNpc then KickNpc the same Kind=3; Brigand shoves; Dummy planted (#531); HUD `Stun-kick OK · Brigand · stun · kick · dummy trainer · #531`. Dummy wander = fail. Walk into StunRange 5. |

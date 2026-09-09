@@ -7352,6 +7352,7 @@ async function main(): Promise<void> {
         veFollow !== 'kick' &&
         veFollow !== 'kick-tab' &&
         veFollow !== 'kick-shove' &&
+        veFollow !== 'kick-shove-tab' &&
         veFollow !== 'stun' &&
         veFollow !== 'stun-then-kick' &&
         veFollow !== 'brigand-stun-plate' &&
@@ -23186,6 +23187,207 @@ async function main(): Promise<void> {
       window.setTimeout(waitS, 150);
     };
     window.setTimeout(waitS, 500);
+  }
+
+  // ?ve=kick-shove-tab — KickNpc Kind=3 shove, Tab lands on living Kind=2 (#532).
+  // Stay at origin (KickRange 8, AggroRadius 3). Dummy after hostiles.
+  if (ve === 'kick-shove-tab') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.12;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'kick-shove-tab') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE kick-shove-tab: waiting Kind=2 + Kind=3…';
+    const padAx = 3;
+    const padAz = 7;
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let brigX = 0;
+    let brigZ = 0;
+    let seeded = false;
+    let kicked = false;
+    let shoved = false;
+    let kickBusy = false;
+    let tabbed = false;
+    const waitKs = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const kind2 = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const kind3 = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const padA =
+        kind2.find(
+          (n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6,
+        ) ?? kind2[0];
+      const padC =
+        kind3.find(
+          (n) => Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? kind3[0];
+      const pose = net.getLocalPose();
+      const tgtCam = camera.target;
+      tgtCam.x = 4.2;
+      tgtCam.y = 1.3;
+      tgtCam.z = 1.2;
+      camera.radius = 16;
+      camera.beta = Math.PI / 2.55;
+      if (
+        latestStatus.state !== 'connected' ||
+        !dummyTrainer ||
+        !padA ||
+        !padC ||
+        !pose
+      ) {
+        if (mark) {
+          mark.textContent =
+            `VE kick-shove-tab: ${latestStatus.state} · H2 ${kind2.length} · B ${kind3.length}…`;
+        }
+        if (ticks < 280) window.setTimeout(waitKs, 150);
+        return;
+      }
+      const bMesh = npcMeshes.get(padC.npcId.toString());
+      const hMesh = npcMeshes.get(padA.npcId.toString());
+      const capsule = (!!bMesh && !bMesh.humanoid) || (!!hMesh && !hMesh.humanoid);
+      if (capsule) {
+        if (mark) mark.textContent = 'Kick-shove-tab FAIL · capsule · #532';
+        return;
+      }
+      const dxC = padC.x - pose.x;
+      const dzC = padC.z - pose.z;
+      const distC = Math.hypot(dxC, dzC);
+      if (distC > KICK_RANGE_METERS - 0.3 && distC > HOSTILE_AGGRO_RADIUS + 0.5) {
+        const step = Math.min(MAX_STEP_METERS, distC - (KICK_RANGE_METERS - 0.4));
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          (dxC / distC) * step,
+          (dzC / distC) * step,
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      } else if (Math.hypot(pose.x, pose.z) > 0.7 && distC <= KICK_RANGE_METERS - 0.35) {
+        const d = Math.hypot(pose.x, pose.z);
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          (-pose.x / d) * Math.min(MAX_STEP_METERS, d),
+          (-pose.z / d) * Math.min(MAX_STEP_METERS, d),
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      if (!seeded) {
+        brigX = padC.x;
+        brigZ = padC.z;
+        seeded = true;
+      }
+      const brigShove = Math.hypot(padC.x - brigX, padC.z - brigZ);
+      if (brigShove >= 0.6) shoved = true;
+      const cycle = tabTargetCycle(net);
+      const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyFirst =
+        cycle.length > 0 &&
+        cycle[0]!.kind === NPC_KIND_DUMMY &&
+        kind2.length + kind3.length > 0;
+      if (dummyFirst) {
+        if (mark) {
+          mark.textContent = 'Kick-shove-tab FAIL · Dummy-first while hostile lives · #532';
+        }
+        return;
+      }
+      const ch = net.getCharacter();
+      const mana = ch?.mana ?? 0;
+      const gcd = gcdRemainingMs(net.getCombat());
+      if (!kicked) {
+        net.setTarget(padC.npcId);
+        selectedTargetId = padC.npcId;
+        const committed = (net.getCombat()?.targetNpcId ?? 0n) === padC.npcId;
+        if (!committed) {
+          if (mark) mark.textContent = 'VE kick-shove-tab: setTarget Brigand…';
+        } else if (mana < KICK_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE kick-shove-tab: Rest · mana ${mana}`;
+        } else if (!kickBusy && gcd <= 0) {
+          kickBusy = true;
+          brigX = padC.x;
+          brigZ = padC.z;
+          void net.kickNpc(padC.npcId).then(() => {
+            kicked = true;
+            kickBusy = false;
+            const bit = `Kick · Brigand #${padC.npcId} · shove`;
+            pushCombatLog('kick', bit);
+            pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+          }).catch(() => {
+            kickBusy = false;
+          });
+        }
+        if (mark && !kicked) {
+          mark.textContent = `VE kick-shove-tab: kick Brigand · gcd ${gcd}`;
+        }
+      } else if (!tabbed) {
+        if (!shoved) {
+          if (mark) {
+            mark.textContent = `VE kick-shove-tab: wait shove ${brigShove.toFixed(2)}…`;
+          }
+        } else {
+          const id = cyclePreferHostiles(net);
+          if (id != null) selectedTargetId = id;
+          tabbed = true;
+        }
+      }
+      const combatId = net.getCombat()?.targetNpcId ?? selectedTargetId;
+      const tgt = npcs.find((n) => n.npcId === combatId) ?? null;
+      updateTargetFrame(tgt && tgt.hp > 0 ? tgt : null);
+      const frameName = document.getElementById('tfName')?.textContent ?? '';
+      const landedOther =
+        kicked &&
+        tabbed &&
+        shoved &&
+        !!tgt &&
+        tgt.hp > 0 &&
+        tgt.kind === NPC_KIND_HOSTILE;
+      const dummySel = !!tgt && tgt.kind === NPC_KIND_DUMMY && kind2.length + kind3.length > 0;
+      if (dummySel) {
+        if (mark) {
+          mark.textContent = 'Kick-shove-tab FAIL · Tab Dummy while hostile lives · #532';
+        }
+        return;
+      }
+      if (
+        landedOther &&
+        dummyTrainer &&
+        dummyInCycle &&
+        kind2.length > 0 &&
+        kind3.length > 0 &&
+        /hostile/i.test(frameName)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Kick-shove-tab OK · Brigand · Hostile · Tab · dummy trainer · #532';
+        }
+        return;
+      }
+      if (mark && kicked) {
+        mark.textContent =
+          `VE kick-shove-tab: Tab tgt ${tgt ? npcPlateName(tgt.kind) : 'none'} · shove ${brigShove.toFixed(2)} · ${frameName}`;
+      }
+      if (ticks > 300) {
+        if (mark) {
+          mark.textContent =
+            `Kick-shove-tab FAIL · tgt ${tgt ? npcPlateName(tgt.kind) : 'none'} · shove ${brigShove.toFixed(2)} · #532`;
+        }
+        return;
+      }
+      window.setTimeout(waitKs, 150);
+    };
+    window.setTimeout(waitKs, 500);
   }
 
   // ?ve=stun-then-kick — StunNpc then KickNpc the same Kind=3; Dummy planted (#531).
