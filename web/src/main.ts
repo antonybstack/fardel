@@ -4138,6 +4138,21 @@ async function main(): Promise<void> {
         const prev = remoteLastHp.get(key);
         if (prev != null && rHp < prev && rHp > 0) {
           playHumanoidFlinch(parts);
+          if (ve === 'remote-walk-flinch') {
+            const pbHit = readHumanoidPlayback(parts);
+            const clipHit = (pbHit.playing ?? '').replace(/^.*\|/, '');
+            const holdHit = remoteWalkHold.get(key)?.hold ?? 0;
+            const markHit = document.getElementById('persistMark');
+            if (
+              markHit &&
+              pbHit.skinned > 0 &&
+              /recievehit/i.test(clipHit) &&
+              holdHit > 0
+            ) {
+              markHit.textContent =
+                `Walk-flinch OK · ${clipHit} · Walk · skinned ${pbHit.skinned}`;
+            }
+          }
         }
         setHumanoidDead(parts, rHp <= 0);
         if (prev != null && prev <= 0 && rHp > 0) {
@@ -5218,19 +5233,26 @@ async function main(): Promise<void> {
       const interpolating = ri.u < 1 - 1e-4;
       const segSpd = Math.hypot(ri.vx, ri.vz);
       const lastStepAt = remoteWalkStepAt.get(key);
-      if (
-        lastStepAt != null &&
-        performance.now() - lastStepAt > REMOTE_WALK_STOP_MS
-      ) {
-        st.hold = 0;
-        st.dx = 0;
-        st.dz = 0;
-      } else if (interpolating && segSpd > REMOTE_WALK_SPD) {
-        st.hold = REMOTE_WALK_HOLD_S;
-        st.dx = ri.vx;
-        st.dz = ri.vz;
-      } else {
-        st.hold -= dt;
+      const flinching = /recievehit/i.test(
+        (readHumanoidPlayback(parts).playing ?? '').replace(/^.*\|/, ''),
+      );
+      // RecieveHit lasts longer than REMOTE_WALK_STOP_MS. Expiring hold
+      // mid-flinch plants Idle while sendMove still translates (#516 / #482).
+      if (!flinching) {
+        if (
+          lastStepAt != null &&
+          performance.now() - lastStepAt > REMOTE_WALK_STOP_MS
+        ) {
+          st.hold = 0;
+          st.dx = 0;
+          st.dz = 0;
+        } else if (interpolating && segSpd > REMOTE_WALK_SPD) {
+          st.hold = REMOTE_WALK_HOLD_S;
+          st.dx = ri.vx;
+          st.dz = ri.vz;
+        } else {
+          st.hold -= dt;
+        }
       }
       const moving = st.hold > 0 && samp.y <= 0.05;
       const spd = Math.hypot(st.dx, st.dz);
@@ -6789,6 +6811,61 @@ async function main(): Promise<void> {
         camera.alpha = 0.15;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-walk-flinch') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        // SecondClient walks (3.2, 1.2) ↔ (5.4, 1.2); Dummy trainer (5, 0).
+        // Stay outside AggroRadius 3 vs pad C (7, −3).
+        let fx = 4.4;
+        let fy = 1.0;
+        let fz = 0.6;
+        let best = -1;
+        let bestHex: string | null = null;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x - 4.3, parts.root.position.z - 1.2) <
+            5.5;
+          if (
+            /death/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.2 ||
+            !nearPad
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const flinch = /recievehit/i.test(clip);
+          const walking = /walk/i.test(clip);
+          const hold = remoteWalkHold.get(hex)?.hold ?? 0;
+          const rank = flinch ? 4000 : walking || hold > 0 ? 3000 : 100;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'remote-two-clips') {
         hideLocalForRemoteHop(player, localNameplate);
         camera.inertialAlphaOffset = 0;
@@ -7193,6 +7270,7 @@ async function main(): Promise<void> {
         veFollow !== 'remote-run' &&
         veFollow !== 'remote-run-stop' &&
         veFollow !== 'remote-sheathed-run' &&
+        veFollow !== 'remote-walk-flinch' &&
         veFollow !== 'remote-two-clips' &&
         veFollow !== 'walk-flinch'
       ) {
@@ -9509,6 +9587,99 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitRunStop, 80);
     };
     window.setTimeout(waitRunStop, 700);
+  }
+
+  // ?ve=remote-walk-flinch — E8.37 RecieveHit on a walking remote, not sliding Idle.
+  if (ve === 'remote-walk-flinch') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-walk-flinch') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-walk-flinch: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let sawWalk = false;
+    const waitRemoteWalkFlinch = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      let preferred: RemotePose | undefined;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x - 4.3, p.root.position.z - 1.2) < 5.5;
+        const live =
+          nearPad &&
+          pb.skinned > 0 &&
+          pb.height >= 1.2 &&
+          !/death/i.test(clip);
+        p.root.setEnabled(live);
+        if (!live) continue;
+        if (/walk/i.test(clip) || (remoteWalkHold.get(r.identityHex)?.hold ?? 0) > 0) {
+          sawWalk = true;
+        }
+        if (
+          sawWalk &&
+          /recievehit/i.test(clip) &&
+          pb.skinned > 0 &&
+          !/t-pose/i.test(clip)
+        ) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const alreadyOk = /^Walk-flinch OK/.test(mark?.textContent ?? '');
+      const flinchOk =
+        !!preferred &&
+        sawWalk &&
+        pb.skinned > 0 &&
+        /recievehit/i.test(clip);
+      if (mark) {
+        if (flinchOk) {
+          mark.textContent = `Walk-flinch OK · ${clip} · Walk · skinned ${pb.skinned}`;
+        } else if (alreadyOk) {
+          /* keep RecieveHit latch */
+        } else if (preferred && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (remoteMeshes.size > 0) {
+          const any = [...remoteMeshes.values()][0];
+          const anyPb = any ? readHumanoidPlayback(any) : pb;
+          const anyClip = clipBare(anyPb.playing);
+          mark.textContent =
+            `VE remote-walk-flinch: remotes ${remoteMeshes.size} · ${anyClip} · walk ${sawWalk ? 'seen' : 'waiting'} · skinned ${anyPb.skinned} (FARDEL_SECOND_WALK_FLINCH=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-walk-flinch: remotes 0 (start tools/SecondClient FARDEL_SECOND_WALK_FLINCH=1)…';
+        }
+      }
+      if (ticks < 360) window.setTimeout(waitRemoteWalkFlinch, 50);
+    };
+    window.setTimeout(waitRemoteWalkFlinch, 700);
   }
 
   // ?ve=remote-two-clips — E8.33 two living remotes, Walk + Spell1, not a clone stamp.
