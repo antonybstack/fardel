@@ -6922,6 +6922,72 @@ async function main(): Promise<void> {
         camera.alpha = Math.PI / 2.2;
         camera.beta = Math.PI / 2.55;
         camera.radius = 14;
+      } else if (veFollow === 'remote-idle-walk') {
+        hideLocalForRemoteHop(player, localNameplate);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        // Sheath (−2.5, 0) + SW walker (−4, −5). Midpoint so both read.
+        let idleHex: string | null = null;
+        let walkHex: string | null = null;
+        let ix = -2.5;
+        let iz = 0;
+        let wx = -4;
+        let wz = -5;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          if (/death/i.test(clip) || pb.skinned <= 0 || pb.height < 1.0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const sheathedIdle =
+            /^idle$/i.test(clip) &&
+            !/weapon/i.test(clip) &&
+            !ch.staffEquipped &&
+            !parts.staff.isEnabled();
+          const staffedWalk =
+            /^walk$/i.test(clip) &&
+            ch.staffEquipped &&
+            parts.staff.isEnabled();
+          if (sheathedIdle && !idleHex) {
+            idleHex = hex;
+            ix = parts.root.position.x;
+            iz = parts.root.position.z;
+          } else if (staffedWalk && !walkHex) {
+            walkHex = hex;
+            wx = parts.root.position.x;
+            wz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === idleHex || hex === walkHex);
+        }
+        if (idleHex && walkHex) {
+          tgt.x = (ix + wx) * 0.5;
+          tgt.z = (iz + wz) * 0.5;
+        } else if (walkHex) {
+          tgt.x = wx;
+          tgt.z = wz;
+        } else if (idleHex) {
+          tgt.x = ix;
+          tgt.z = iz;
+        } else {
+          tgt.x = -3.2;
+          tgt.z = -2.5;
+        }
+        tgt.y = 1.1;
+        // East-of-target (PI/2.2) puts YardVendor between cam and the
+        // (−2.5, 0) sheath. West-of-target reads both wizards.
+        camera.alpha = -Math.PI / 2.2;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 16;
       } else if (veFollow === 'remote-sheathed') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -7272,6 +7338,7 @@ async function main(): Promise<void> {
         veFollow !== 'remote-sheathed-run' &&
         veFollow !== 'remote-walk-flinch' &&
         veFollow !== 'remote-two-clips' &&
+        veFollow !== 'remote-idle-walk' &&
         veFollow !== 'walk-flinch'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
@@ -9770,6 +9837,127 @@ async function main(): Promise<void> {
       if (ticks < 320) window.setTimeout(waitTwoClips, 80);
     };
     window.setTimeout(waitTwoClips, 700);
+  }
+
+  // ?ve=remote-idle-walk — E8.38 two living remotes: unarmed Idle + staffed Walk.
+  if (ve === 'remote-idle-walk') {
+    camera.radius = 16;
+    camera.alpha = -Math.PI / 2.2;
+    camera.beta = Math.PI / 2.55;
+    hideLocalForRemoteHop(player, localNameplate);
+  }
+  if (net && ve === 'remote-idle-walk') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-idle-walk: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const waitIdleWalk = () => {
+      if (!net) return;
+      ticks += 1;
+      hideLocalForRemoteHop(player, localNameplate);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      syncNpcMeshes(net.getNpcs());
+      let idleHex: string | null = null;
+      let walkHex: string | null = null;
+      let idleClip = '';
+      let walkClip = '';
+      let idleSkinned = 0;
+      let walkSkinned = 0;
+      let cloneStamp = false;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const living =
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          !/death/i.test(clip) &&
+          !/t-?pose/i.test(clip);
+        if (!living) {
+          p.root.setEnabled(false);
+          continue;
+        }
+        const sheathedIdle =
+          /^idle$/i.test(clip) &&
+          !/weapon/i.test(clip) &&
+          !ch.staffEquipped &&
+          !p.staff.isEnabled();
+        const staffedWalk =
+          /^walk$/i.test(clip) &&
+          ch.staffEquipped &&
+          p.staff.isEnabled();
+        if (sheathedIdle && idleHex && idleHex !== r.identityHex) {
+          cloneStamp = true;
+        }
+        if (staffedWalk && walkHex && walkHex !== r.identityHex) {
+          cloneStamp = true;
+        }
+        if (sheathedIdle && !idleHex) {
+          idleHex = r.identityHex;
+          idleClip = clip;
+          idleSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        if (staffedWalk && !walkHex) {
+          walkHex = r.identityHex;
+          walkClip = clip;
+          walkSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        p.root.setEnabled(false);
+      }
+      const dummy = (net.getNpcs() ?? []).find(
+        (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+      );
+      const dummyMesh = dummy
+        ? npcMeshes.get(dummy.npcId.toString())
+        : undefined;
+      const dummyTrainer = !!dummy && !dummyMesh?.humanoid;
+      const capsule = !!dummyMesh?.humanoid;
+      const sameClip =
+        !!idleClip &&
+        !!walkClip &&
+        idleClip.toLowerCase() === walkClip.toLowerCase();
+      const ok =
+        !!idleHex &&
+        !!walkHex &&
+        idleHex !== walkHex &&
+        idleSkinned > 0 &&
+        walkSkinned > 0 &&
+        dummyTrainer &&
+        !capsule &&
+        !cloneStamp &&
+        !sameClip;
+      if (mark) {
+        if (ok) {
+          mark.textContent =
+            `Idle-walk OK · ${idleClip} · ${walkClip} · sheathed · skinned ${idleSkinned + walkSkinned} · remotes 2`;
+        } else if (capsule) {
+          mark.textContent = 'capsule · dummy not trainer';
+        } else if (cloneStamp || sameClip) {
+          mark.textContent = `clone stamp · ${idleClip || '—'} · ${walkClip || '—'}`;
+        } else if (remoteMeshes.size > 0 && idleSkinned + walkSkinned <= 0) {
+          mark.textContent = `T-POSE · remotes ${remoteMeshes.size}`;
+        } else {
+          mark.textContent =
+            `VE remote-idle-walk: remotes ${remoteMeshes.size} · idle ${idleClip || '—'} · walk ${walkClip || '—'} (FARDEL_SECOND_SHEATH=1 + FARDEL_SECOND_WALK=1)`;
+        }
+      }
+      if (ticks < 320) window.setTimeout(waitIdleWalk, 80);
+    };
+    window.setTimeout(waitIdleWalk, 700);
   }
 
   // ?ve=remote-sheathed — E8.26 remote Character.staffEquipped=false plays unarmed Idle.

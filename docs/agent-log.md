@@ -423,3 +423,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Patrol (3.2, 1.2)↔(5.4, 1.2) north of dummy. DummyStrike while moving; respawn at hp≤20. Keep remote Walk hold during RecieveHit (clip lasts longer than 80 ms). persistMark RecieveHit+Walk. Dummy trainer.
 - **Seen in:** #516
 
+### 2026-09-08 — ve,remote — east-of-target cam hides (−2.5, 0) sheath behind YardVendor
+- **Cause:** `?ve=remote-two-clips` used `alpha = π/2.2` (cam east of target). Sheath pad (−2.5, 0) sits west of the stall, so the stall occludes unarmed Idle in a two-remote shot.
+- **Do this:** `?ve=remote-idle-walk` uses `alpha = −π/2.2` (west of target) + radius 16. persistMark names Idle + Walk + sheathed + remotes 2 live (do not latch). Distinct tokens. Dummy trainer.
+- **Seen in:** #517
+

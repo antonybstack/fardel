@@ -225,7 +225,8 @@ function relinkSkeletonToClones(
   }
 }
 
-/** Two remotes sharing one AnimationGroup play the same clip (clone stamp). */
+/** Two remotes sharing one AnimationGroup play the same clip (clone stamp).
+ * Idle+Walk (#517) and Walk+Spell (#481) each need a private group. */
 const claimedAnimGroupIds = new Set<number>();
 
 function takePrivateAnimGroups(groups: AnimationGroup[]): AnimationGroup[] {

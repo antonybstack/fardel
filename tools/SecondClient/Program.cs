@@ -15,6 +15,7 @@ var tokenDirEnv = Environment.GetEnvironmentVariable("FARDEL_SECOND_TOKEN_DIR");
 var tokenRole =
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_WALK"), "1", StringComparison.OrdinalIgnoreCase) ? "walk" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_CAST"), "1", StringComparison.OrdinalIgnoreCase) ? "cast" :
+    string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH"), "1", StringComparison.OrdinalIgnoreCase) ? "sheath" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN_STOP"), "1", StringComparison.OrdinalIgnoreCase) ? "run-stop" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN"), "1", StringComparison.OrdinalIgnoreCase) ? "run" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH_RUN"), "1", StringComparison.OrdinalIgnoreCase) ? "sheath-run" :
