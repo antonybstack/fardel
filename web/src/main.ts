@@ -3550,9 +3550,15 @@ async function main(): Promise<void> {
   });
   /** E2.4 visual facing from camera-relative wish. Server pose.yaw stays 0. */
   const YAW_FACE_HZ = 12;
-  /** Stationary look / A-D start — slower than loco so 90° is a blend, not a pop. */
+  /** Stationary last-wish / look — slower so 90° eases after WASD stop, not a pop. */
   const YAW_TURN_HZ = 4;
+  /** Hitch dt at 12Hz would lerp ~90°. Cap so key-up cannot snap. */
+  const YAW_TURN_MAX_RAD_S = 3.2;
+  const YAW_FACE_MAX_RAD_S = 7;
   let localFacingYaw = 0;
+  /** Last camera-relative wish heading. Key-up keeps blending here (#536). */
+  let lastWishYaw = 0;
+  let lastWishYawSet = false;
   let localTurningInPlace = false;
   const bootParams = new URLSearchParams(window.location.search);
   const ve = bootParams.get('ve') || '';
@@ -5184,6 +5190,8 @@ async function main(): Promise<void> {
       let faceYaw: number | null = null;
       if (wishMoving) {
         const wishYaw = Math.atan2(wish.dx, wish.dz);
+        lastWishYaw = wishYaw;
+        lastWishYawSet = true;
         // Face living target while walking only when wish is still mostly
         // forward. Perpendicular strafe keeps wish yaw so Walk does not moonwalk.
         faceYaw =
@@ -5199,14 +5207,23 @@ async function main(): Promise<void> {
         const fx = tgt.x - camPos.x;
         const fz = tgt.z - camPos.z;
         if (fx * fx + fz * fz > 1e-8) faceYaw = Math.atan2(fx, fz);
+      } else if (lastWishYawSet) {
+        // Key-up: finish last wish heading. Do not snap to 0 / camera.
+        faceYaw = lastWishYaw;
       }
       if (faceYaw != null) {
         const d = yawDelta(localFacingYaw, faceYaw);
         // Never plant Idle while translating — planted feet + sendMove slides.
-        localTurningInPlace = Math.abs(d) > 0.28 && !wishMoving;
-        const yawHz = localTurningInPlace ? YAW_TURN_HZ : YAW_FACE_HZ;
+        localTurningInPlace = Math.abs(d) > 0.18 && !wishMoving;
+        // Standing / key-up always uses the slow turn so 90° is a blend (#536).
+        const yawHz = wishMoving ? YAW_FACE_HZ : YAW_TURN_HZ;
         const a = 1 - Math.exp(-Math.max(0, dt) * yawHz);
-        localFacingYaw = lerpYaw(localFacingYaw, faceYaw, a);
+        let step = d * a;
+        const maxRad =
+          (wishMoving ? YAW_FACE_MAX_RAD_S : YAW_TURN_MAX_RAD_S) *
+          Math.max(0, dt);
+        if (Math.abs(step) > maxRad) step = Math.sign(step) * maxRad;
+        localFacingYaw += step;
       } else {
         localTurningInPlace = false;
       }
@@ -6461,6 +6478,17 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = veFollow === 'jump-pose' ? 9 : 7;
+      } else if (veFollow === 'yaw-blend') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.0;
+        tgt.z = player.position.z;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'walk-flinch') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -7341,6 +7369,7 @@ async function main(): Promise<void> {
         veFollow !== 'remote-walk-flinch' &&
         veFollow !== 'remote-two-clips' &&
         veFollow !== 'remote-idle-walk' &&
+        veFollow !== 'yaw-blend' &&
         veFollow !== 'walk-flinch'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
@@ -8633,6 +8662,121 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitLook, 200);
     };
     window.setTimeout(waitLook, 600);
+  }
+
+  // ?ve=yaw-blend — E8.39 last-yaw eases after WASD stop; no 90° snap. Dummy trainer.
+  if (ve === 'yaw-blend') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'yaw-blend') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE yaw-blend: waiting for Connected…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let walkTicks = 0;
+    let phase: 'walk' | 'stop' = 'walk';
+    let yawAtStop: number | null = null;
+    let prevYaw = 0;
+    let maxStep = 0;
+    let blendSteps = 0;
+    const waitBlend = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE yaw-blend: ${st.state}…`;
+        if (ticks < 200) window.setTimeout(waitBlend, 50);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitBlend, 200);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitBlend, 200);
+        return;
+      }
+      net.ensureTrainingDummy();
+      syncNpcMeshes(net.getNpcs());
+      const dummy = (net.getNpcs() ?? []).find(
+        (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+      );
+      const dummyMesh = dummy
+        ? npcMeshes.get(dummy.npcId.toString())
+        : undefined;
+      const dummyTrainer = !!dummy && !dummyMesh?.humanoid;
+      if (!dummy) {
+        if (mark) mark.textContent = 'VE yaw-blend: seeding dummy…';
+        if (ticks < 240) window.setTimeout(waitBlend, 50);
+        return;
+      }
+      // Tab Dummy so key-up has a large standing turn (the 90° snap).
+      net.setTarget(dummy.npcId);
+      selectedTargetId = dummy.npcId;
+      if (phase === 'walk') {
+        keys.add('d');
+        keys.delete('w');
+        keys.delete('a');
+        keys.delete('s');
+        walkTicks += 1;
+        if (walkTicks >= 10 && lastWishYawSet) {
+          keys.delete('d');
+          yawAtStop = localFacingYaw;
+          prevYaw = localFacingYaw;
+          phase = 'stop';
+        }
+        if (mark) {
+          mark.textContent = `VE yaw-blend: walk D · y=${localFacingYaw.toFixed(2)}`;
+        }
+        if (ticks < 240) window.setTimeout(waitBlend, 50);
+        return;
+      }
+      keys.delete('d');
+      keys.delete('w');
+      keys.delete('a');
+      keys.delete('s');
+      const step = Math.abs(yawDelta(prevYaw, localFacingYaw));
+      if (step > maxStep) maxStep = step;
+      if (step > 0.02 && step < 0.55) blendSteps += 1;
+      prevYaw = localFacingYaw;
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = clipBare(pb.playing);
+      const idle =
+        /^idle_weapon$/i.test(clip) && pb.skinned > 0 && pb.height >= 1.2;
+      const snap = maxStep > 0.7;
+      const ok =
+        idle &&
+        dummyTrainer &&
+        !snap &&
+        blendSteps >= 2 &&
+        yawAtStop != null;
+      if (mark) {
+        if (ok) {
+          mark.textContent =
+            `Idle OK · ${clip} · yaw blend · skinned ${pb.skinned}`;
+          return;
+        } else if (pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (snap) {
+          mark.textContent =
+            `Yaw SNAP · dyaw ${maxStep.toFixed(2)} · ${clip}`;
+        } else {
+          mark.textContent =
+            `VE yaw-blend: ${clip} · y=${localFacingYaw.toFixed(2)} · step ${step.toFixed(2)} · blend ${blendSteps}`;
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitBlend, 50);
+    };
+    window.setTimeout(waitBlend, 600);
   }
 
   // ?ve=face-target-walk — walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432).

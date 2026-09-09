@@ -709,6 +709,9 @@ export function createPlayerHumanoid(
   const cast = findAnim(animGroups, 'Spell1', 'Spell2', 'Staff_Attack');
   for (const g of animGroups) {
     g.stop();
+    // Walk→Idle / standing yaw must ease. Instant stop() is a 90° hip pop.
+    g.enableBlending = true;
+    g.blendingSpeed = 0.1;
   }
   const anim: HumanoidAnim = {
     idle: idleWeapon ?? idleUnarmed ?? (animGroups.length > 0 ? animGroups[0]! : null),
@@ -882,6 +885,19 @@ export function setHumanoidMoving(
     if (a.run) a.run.speedRatio = 0;
     if (a.runWeapon) a.runWeapon.speedRatio = 0;
     if (a.runUnarmed) a.runUnarmed.speedRatio = 0;
+    // Walk/Run → Idle: blend the groups so the body does not pop 90° with yaw.
+    const locoWasPlaying = !!(
+      a.walk?.isPlaying ||
+      a.walkWeapon?.isPlaying ||
+      a.walkUnarmed?.isPlaying ||
+      a.run?.isPlaying ||
+      a.runWeapon?.isPlaying ||
+      a.runUnarmed?.isPlaying
+    );
+    if (a.idle && locoWasPlaying) {
+      a.idle.enableBlending = true;
+      a.idle.blendingSpeed = 0.12;
+    }
     startLoop(a.idle);
     stopIfPlaying(a.walk, a.idle);
     stopIfPlaying(a.walkWeapon, a.idle);

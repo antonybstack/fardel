@@ -106,6 +106,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=tab-target` | Tab-select Dummy; world gold nameplate + HP pip + ring + marker (#142); HUD `Tab-target OK · world gold plate+ring · … · #142` |
 | `?ve=character-wow` | Idle_Weapon / sheathed Idle / Walk (face dummy) / Run / hop / Spell plus a Kind=2 person (not capsule); Dummy trainer (#433 / #451); HUD `Character wow OK · … · sheathed · Hostile Idle_Weapon · skinned 1 · dummy trainer` |
 | `?ve=face-target-walk` | Walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432); HUD `Walk OK · Walk · skinned 1 · face target` |
+| `?ve=yaw-blend` | Stop WASD: last-yaw eases, no 90° snap (#536); HUD `Idle OK · Idle_Weapon · yaw blend · skinned 1`. Dummy trainer. |
 | `?ve=tab-hostile` | Tab visits Kind=2 and Kind=3; dummy still in cycle (#453); HUD `Tab-hostile OK · Brigand #… · dummy selectable · #453`. |
 | `?ve=tab-aggro` | After a pull, Tab selects the **aggroed** NPC (not lowest id) while Kind=2 and Kind=3 are in range (#484); HUD `Tab-aggro OK · Brigand · pulled · dummy trainer`. Dummy stays in the cycle |
 | `?ve=tab-dummy` | After Kind=2 and Kind=3 are corpses, Tab selects Dummy trainer (#496); HUD `Tab-dummy OK · Dummy trainer · wipe · #496`. Corpses skipped / not sticky. Stay at origin. |
