@@ -18,6 +18,7 @@ var tokenRole =
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN_STOP"), "1", StringComparison.OrdinalIgnoreCase) ? "run-stop" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN"), "1", StringComparison.OrdinalIgnoreCase) ? "run" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH_RUN"), "1", StringComparison.OrdinalIgnoreCase) ? "sheath-run" :
+    string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_WALK_FLINCH"), "1", StringComparison.OrdinalIgnoreCase) ? "walk-flinch" :
     null;
 var useToken = !string.IsNullOrWhiteSpace(tokenDirEnv) || tokenRole != null;
 if (useToken)
@@ -114,6 +115,10 @@ try
         StringComparison.OrdinalIgnoreCase);
     var run = string.Equals(
         Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
+    var walkFlinch = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_WALK_FLINCH"),
         "1",
         StringComparison.OrdinalIgnoreCase);
     var walkHold = string.Equals(
@@ -330,6 +335,99 @@ try
                 Console.WriteLine($"READY sheath-run ({srPose.X:F2}, {srPose.Z:F2}) identity={identity}");
             }
             sheathRunPlus = !sheathRunPlus;
+        }
+    }
+    if (walkFlinch)
+    {
+        // ?ve=remote-walk-flinch: slow Walk near dummy + DummyStrike thorns so
+        // RecieveHit overlays locomotion (not sliding Idle). Dummy stays
+        // trainer. Do not walk into pad aggro.
+        var aliveGuardWf = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuardWf)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("walk-flinch: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+        {
+            conn.Reducers.EquipStaff();
+            await Frame(conn, 200);
+        }
+        var walkFlinchPlus = true;
+        var lastStrike = DateTime.UtcNow.AddSeconds(-2);
+        while (true)
+        {
+            var ch0 = conn.Db.Character.Identity.Find(identity);
+            if (ch0 is { Hp: <= 20 })
+            {
+                if (ch0.Hp > 0)
+                {
+                    try { conn.Reducers.DummyStrike(); }
+                    catch { /* die to reset HP */ }
+                }
+                Console.WriteLine("walk-flinch: waiting respawn");
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch0 is { StaffEquipped: false })
+            {
+                conn.Reducers.EquipStaff();
+                await Frame(conn, 150);
+            }
+            var destX = walkFlinchPlus ? 3.2f : 5.4f;
+            var destZ = 1.2f;
+            var walkGuardWf = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < walkGuardWf)
+            {
+                if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+                {
+                    await Frame(conn, 200);
+                    continue;
+                }
+                if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+                {
+                    await Frame(conn, 50);
+                    continue;
+                }
+                var dx = destX - cur.X;
+                var dz = destZ - cur.Z;
+                var dist = MathF.Sqrt(dx * dx + dz * dz);
+                if (dist < 0.4f)
+                {
+                    Console.WriteLine($"walk-flinch pad ({cur.X:F1}, {cur.Z:F1})");
+                    break;
+                }
+                var maxStep = Movement.MaxStepMeters * 0.15f;
+                var scale = MathF.Min(maxStep, dist) / dist;
+                conn.Reducers.Move(dx * scale, dz * scale, false);
+                var hpNow = conn.Db.Character.Identity.Find(identity)?.Hp ?? 0;
+                if (
+                    dist > 0.5f &&
+                    hpNow > 15 &&
+                    DateTime.UtcNow - lastStrike > TimeSpan.FromMilliseconds(800)
+                )
+                {
+                    try
+                    {
+                        conn.Reducers.DummyStrike();
+                        lastStrike = DateTime.UtcNow;
+                        Console.WriteLine($"walk-flinch DummyStrike hp={hpNow}");
+                    }
+                    catch (Exception e)
+                    {
+                        Console.Error.WriteLine("DummyStrike: " + e.Message);
+                    }
+                }
+                await Frame(conn, 50);
+            }
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } wfPose)
+            {
+                var hpReady = conn.Db.Character.Identity.Find(identity)?.Hp ?? 0;
+                Console.WriteLine($"READY walk-flinch ({wfPose.X:F2}, {wfPose.Z:F2}) hp={hpReady} identity={identity}");
+            }
+            walkFlinchPlus = !walkFlinchPlus;
         }
     }
     if (runStop)

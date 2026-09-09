@@ -1050,7 +1050,7 @@ export function playHumanoidFlinch(parts: HumanoidParts): void {
   if (a.idle) a.idle.speedRatio = 1;
   stopIfPlaying(a.flinch);
   // Do not force Idle on end — gait / remote hold resumes Walk if wish is
-  // still on. Idle-on-end while translating is a sliding Idle (#482).
+  // still on. Idle-on-end while translating is a sliding Idle (#482 / #516).
   a.flinch.start(false, 1.0, a.flinch.from, a.flinch.to, false);
 }
 

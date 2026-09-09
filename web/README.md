@@ -78,6 +78,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=remote-sheathed-run` | Unequipped remote Run, not Run_Weapon / hidden staff (#515); HUD `Run OK · Run · sheathed · skinned 1`. `FARDEL_SECOND_SHEATH_RUN=1` on `tools/SecondClient`. |
 | `?ve=remote-two-clips` | Two living remotes, two clips: Walk + Spell1 (#481); HUD `Two-clips OK · Walk · Spell1 · skinned · remotes 2`. `FARDEL_SECOND_WALK=1` + `FARDEL_SECOND_CAST=1` on two `tools/SecondClient` seats. |
 | `?ve=walk-flinch` | RecieveHit while Walk wish is held, not sliding Idle (#482); HUD `Walk-flinch OK · RecieveHit · Walk · skinned 1`. Dummy trainer. |
+| `?ve=remote-walk-flinch` | Remote RecieveHit while walking, not sliding Idle (#516); HUD `Walk-flinch OK · RecieveHit · Walk · skinned 1`. `FARDEL_SECOND_WALK_FLINCH=1` DummyStrike. Dummy trainer. |
 | `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
 | `?ve=minimap-read` | Plate + blips + N vs #39 cyan fog at play cam (#103 / #61) |
 | `?ve=minimap-pip` | Self pip + north readable while WASDing (#164); pulse/halo/N on top of sliding blips |

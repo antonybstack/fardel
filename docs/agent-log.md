@@ -418,3 +418,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Do not force Idle on flinch end. Gait / remote hold resumes Walk if wish is still on. `?ve=walk-flinch` persistMark names RecieveHit + Walk + skinned. T-POSE / Idle-only while W is held = fail.
 - **Seen in:** #482
 
+### 2026-09-08 — humanoid,remote,flinch — dummy-south Walk pulls pad C
+- **Cause:** Patrol (6.2, −1.8) is inside AggroRadius 3 of pad C (7, −3). DummyStrike thorns plus auto-attack kill the remote; Brigand steals the RecieveHit frame. Leftover walk-flinch tokens also skip DummyStrike at low HP.
+- **Do this:** Patrol (3.2, 1.2)↔(5.4, 1.2) north of dummy. DummyStrike while moving; respawn at hp≤20. Keep remote Walk hold during RecieveHit (clip lasts longer than 80 ms). persistMark RecieveHit+Walk. Dummy trainer.
+- **Seen in:** #516
+
