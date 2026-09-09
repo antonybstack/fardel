@@ -17,6 +17,7 @@ var tokenRole =
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_CAST"), "1", StringComparison.OrdinalIgnoreCase) ? "cast" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN_STOP"), "1", StringComparison.OrdinalIgnoreCase) ? "run-stop" :
     string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN"), "1", StringComparison.OrdinalIgnoreCase) ? "run" :
+    string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH_RUN"), "1", StringComparison.OrdinalIgnoreCase) ? "sheath-run" :
     null;
 var useToken = !string.IsNullOrWhiteSpace(tokenDirEnv) || tokenRole != null;
 if (useToken)
@@ -107,6 +108,10 @@ try
         Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN_STOP"),
         "1",
         StringComparison.OrdinalIgnoreCase);
+    var sheathRun = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_SHEATH_RUN"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
     var run = string.Equals(
         Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN"),
         "1",
@@ -120,7 +125,7 @@ try
         "1",
         StringComparison.OrdinalIgnoreCase);
 
-    if (!sheath && !sheathWalk && conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+    if (!sheath && !sheathWalk && !sheathRun && conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
     {
         conn.Reducers.EquipStaff();
         await Frame(conn, 200);
@@ -259,6 +264,72 @@ try
                 Console.WriteLine($"READY sheath-walk ({swPose.X:F2}, {swPose.Z:F2}) identity={identity}");
             }
             sheathWalkPlus = !sheathWalkPlus;
+        }
+    }
+    if (sheathRun)
+    {
+        // ?ve=remote-sheathed-run: unequip and sprint so the browser sees
+        // unarmed Run (not Run_Weapon + hidden stick). South-west of origin,
+        // outside AggroRadius 3. Full MaxStep so #480 Run threshold 3.2 fires.
+        var aliveGuardSr = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuardSr)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("sheath-run: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: true })
+        {
+            conn.Reducers.UnequipStaff();
+            await Frame(conn, 200);
+        }
+        var sheathRunPlus = true;
+        while (true)
+        {
+            var ch0 = conn.Db.Character.Identity.Find(identity);
+            if (ch0 is { Hp: <= 0 })
+            {
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch0 is { StaffEquipped: true })
+            {
+                conn.Reducers.UnequipStaff();
+                await Frame(conn, 150);
+            }
+            var destX = sheathRunPlus ? -1.5f : -6.5f;
+            var destZ = -5f;
+            var runGuardSr = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < runGuardSr)
+            {
+                if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+                {
+                    await Frame(conn, 200);
+                    continue;
+                }
+                if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+                {
+                    await Frame(conn, 50);
+                    continue;
+                }
+                var dx = destX - cur.X;
+                var dz = destZ - cur.Z;
+                var dist = MathF.Sqrt(dx * dx + dz * dz);
+                if (dist < 0.4f)
+                {
+                    Console.WriteLine($"sheath-run pad ({cur.X:F1}, {cur.Z:F1})");
+                    break;
+                }
+                var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+                conn.Reducers.Move(dx * scale, dz * scale, false);
+                await Frame(conn, 50);
+            }
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } srPose)
+            {
+                Console.WriteLine($"READY sheath-run ({srPose.X:F2}, {srPose.Z:F2}) identity={identity}");
+            }
+            sheathRunPlus = !sheathRunPlus;
         }
     }
     if (runStop)

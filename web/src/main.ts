@@ -6613,6 +6613,60 @@ async function main(): Promise<void> {
         camera.alpha = 0.15;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-sheathed-run') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = -4;
+        let fy = 1.0;
+        let fz = -5;
+        let best = -1;
+        let bestHex: string | null = null;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0 || ch.staffEquipped) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x + 4, parts.root.position.z + 5) <
+            3.5;
+          if (
+            /death/i.test(clip) ||
+            /weapon/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.0 ||
+            !nearPad ||
+            parts.staff.isEnabled()
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const running = /^run$/i.test(clip);
+          const hold = remoteWalkHold.get(hex)?.hold ?? 0;
+          const rank = running ? 3000 : hold > 0 ? 2000 : 100;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'remote-run') {
         player.setEnabled(false);
         localNameplate.mesh.setEnabled(false);
@@ -7104,6 +7158,7 @@ async function main(): Promise<void> {
         veFollow !== 'remote-sheathed-walk' &&
         veFollow !== 'remote-run' &&
         veFollow !== 'remote-run-stop' &&
+        veFollow !== 'remote-sheathed-run' &&
         veFollow !== 'remote-two-clips' &&
         veFollow !== 'walk-flinch'
       ) {
@@ -9134,6 +9189,96 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitSheathWalk, 80);
     };
     window.setTimeout(waitSheathWalk, 700);
+  }
+
+  // ?ve=remote-sheathed-run — E8.36 unequipped remote Run, not Run_Weapon.
+  if (ve === 'remote-sheathed-run') {
+    camera.radius = 7;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-sheathed-run') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-sheathed-run: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let latchedMark: string | null = null;
+    const waitSheathRun = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      let preferred: RemotePose | undefined;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || ch.staffEquipped || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        const runOkOne =
+          nearPad &&
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          /^run$/i.test(clip) &&
+          !/weapon/i.test(clip) &&
+          !/idle/i.test(clip) &&
+          !/death/i.test(clip) &&
+          !p.staff.isEnabled();
+        p.root.setEnabled(runOkOne);
+        if (runOkOne) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const runOk =
+        !!preferred &&
+        pb.skinned > 0 &&
+        /^run$/i.test(clip) &&
+        !/weapon/i.test(clip) &&
+        !parts?.staff.isEnabled();
+      if (runOk) {
+        latchedMark = `Run OK · ${clip} · sheathed · skinned ${pb.skinned}`;
+      }
+      const n = [...remoteMeshes.values()].filter((p) => p.root.isEnabled()).length;
+      if (mark) {
+        if (latchedMark) {
+          mark.textContent = latchedMark;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (remoteMeshes.size > 0) {
+          const any = [...remoteMeshes.values()][0];
+          const anyPb = any ? readHumanoidPlayback(any) : pb;
+          const anyClip = clipBare(anyPb.playing);
+          mark.textContent =
+            `VE remote-sheathed-run: remotes ${remoteMeshes.size} · ${anyClip} · staff ${any?.staff.isEnabled() ? 'on' : 'off'} · skinned ${anyPb.skinned} (FARDEL_SECOND_SHEATH_RUN=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-sheathed-run: remotes 0 (start tools/SecondClient FARDEL_SECOND_SHEATH_RUN=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitSheathRun, 80);
+    };
+    window.setTimeout(waitSheathRun, 700);
   }
 
   // ?ve=remote-run — E8.32 other wizard Run_Weapon at sprint wish, not Walk.
