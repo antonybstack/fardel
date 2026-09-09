@@ -428,3 +428,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `?ve=remote-idle-walk` uses `alpha = −π/2.2` (west of target) + radius 16. persistMark names Idle + Walk + sheathed + remotes 2 live (do not latch). Distinct tokens. Dummy trainer.
 - **Seen in:** #517
 
+### 2026-09-08 — ve,remote — leftover same-clip remotes are not a clone stamp
+- **Cause:** Two-remote VE failed `clone stamp` when a leftover SHEATH/WALK identity from a prior seat also played Idle or Walk. The two shown hexes were still distinct clips; extras were already hidden.
+- **Do this:** Clone-stamp fail only if the two *shown* clips are the same name. Hide leftover remotes. Do not require a unique Idle/Walk in the whole AOI.
+- **Seen in:** #517 / #542
+

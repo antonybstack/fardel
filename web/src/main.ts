@@ -9868,7 +9868,6 @@ async function main(): Promise<void> {
       let walkClip = '';
       let idleSkinned = 0;
       let walkSkinned = 0;
-      let cloneStamp = false;
       for (const r of remotes) {
         const ch = net.getCharacterFor(r.identityHex);
         const p = remoteMeshes.get(r.identityHex);
@@ -9896,12 +9895,6 @@ async function main(): Promise<void> {
           /^walk$/i.test(clip) &&
           ch.staffEquipped &&
           p.staff.isEnabled();
-        if (sheathedIdle && idleHex && idleHex !== r.identityHex) {
-          cloneStamp = true;
-        }
-        if (staffedWalk && walkHex && walkHex !== r.identityHex) {
-          cloneStamp = true;
-        }
         if (sheathedIdle && !idleHex) {
           idleHex = r.identityHex;
           idleClip = clip;
@@ -9938,7 +9931,6 @@ async function main(): Promise<void> {
         walkSkinned > 0 &&
         dummyTrainer &&
         !capsule &&
-        !cloneStamp &&
         !sameClip;
       if (mark) {
         if (ok) {
@@ -9946,7 +9938,7 @@ async function main(): Promise<void> {
             `Idle-walk OK · ${idleClip} · ${walkClip} · sheathed · skinned ${idleSkinned + walkSkinned} · remotes 2`;
         } else if (capsule) {
           mark.textContent = 'capsule · dummy not trainer';
-        } else if (cloneStamp || sameClip) {
+        } else if (sameClip) {
           mark.textContent = `clone stamp · ${idleClip || '—'} · ${walkClip || '—'}`;
         } else if (remoteMeshes.size > 0 && idleSkinned + walkSkinned <= 0) {
           mark.textContent = `T-POSE · remotes ${remoteMeshes.size}`;
