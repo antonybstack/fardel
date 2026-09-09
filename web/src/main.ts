@@ -211,9 +211,22 @@ function cyclePreferHostiles(net: GameNet): bigint | null {
   if (cycle.length === 0) return null;
   const cur = net.getCombat()?.targetNpcId ?? 0n;
   const curRow = net.getNpcs().find((n) => n.npcId === cur);
-  // Dead / missing current is not in the living cycle. After a wipe
-  // cycle[0] is Dummy (no living in-range hostiles). Do not stick on a corpse.
-  const idxCur = curRow && curRow.hp > 0 ? cycle.findIndex((n) => n.npcId === cur) : -1;
+  const hostiles = cycle.filter((n) => isHostileKind(n.kind));
+  // Empty / Dummy / corpse: first living hostile — never Dummy-first while
+  // a hostile lives (#502 / #496).
+  if (!curRow || curRow.hp <= 0 || !isHostileKind(curRow.kind)) {
+    const next = (hostiles[0] ?? cycle[0]!).npcId;
+    net.setTarget(next);
+    return next;
+  }
+  // After Kick Kind=2, Tab prefers living Kind=3 (other kind), not pad B / Dummy.
+  const otherKind = hostiles.filter((n) => n.kind !== curRow.kind);
+  if (otherKind.length > 0) {
+    const next = otherKind[0]!.npcId;
+    net.setTarget(next);
+    return next;
+  }
+  const idxCur = cycle.findIndex((n) => n.npcId === cur);
   const idx = idxCur < 0 ? 0 : (idxCur + 1) % cycle.length;
   const next = cycle[idx]!.npcId;
   net.setTarget(next);
@@ -7007,6 +7020,7 @@ async function main(): Promise<void> {
         veFollow !== 'brigand-body' &&
         veFollow !== 'hostile-chase' &&
         veFollow !== 'kick' &&
+        veFollow !== 'kick-tab' &&
         veFollow !== 'stun' &&
         veFollow !== 'brigand-stun-plate' &&
         veFollow !== 'brigand-cast' &&
@@ -21267,6 +21281,161 @@ async function main(): Promise<void> {
       window.setTimeout(waitKickNpc, 200);
     };
     window.setTimeout(waitKickNpc, 600);
+  }
+
+  // ?ve=kick-tab — Kick pad A Kind=2, Tab lands on living Kind=3 (#502).
+  // Stay at origin (KickRange 8, AggroRadius 3). Dummy after hostiles.
+  if (ve === 'kick-tab') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.1;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'kick-tab') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE kick-tab: waiting Kind=2 + Kind=3…';
+    const padAx = 3;
+    const padAz = 7;
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let kicked = false;
+    let kickBusy = false;
+    let tabbed = false;
+    const waitK = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const kind2 = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const kind3 = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const padA =
+        kind2.find(
+          (n) => Math.hypot((n.spawnX || padAx) - padAx, (n.spawnZ || padAz) - padAz) < 0.6,
+        ) ?? kind2[0];
+      const padC =
+        kind3.find(
+          (n) => Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? kind3[0];
+      const pose = net.getLocalPose();
+      const tgtCam = camera.target;
+      tgtCam.x = 3.6;
+      tgtCam.y = 1.2;
+      tgtCam.z = 1.2;
+      camera.radius = 14;
+      camera.beta = Math.PI / 2.6;
+      if (
+        latestStatus.state !== 'connected' ||
+        !dummyTrainer ||
+        !padA ||
+        !padC ||
+        !pose
+      ) {
+        if (mark) {
+          mark.textContent =
+            `VE kick-tab: ${latestStatus.state} · H2 ${kind2.length} · B ${kind3.length}…`;
+        }
+        if (ticks < 280) window.setTimeout(waitK, 150);
+        return;
+      }
+      if (Math.hypot(pose.x, pose.z) > 0.7) {
+        const d = Math.hypot(pose.x, pose.z);
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          (-pose.x / d) * Math.min(MAX_STEP_METERS, d),
+          (-pose.z / d) * Math.min(MAX_STEP_METERS, d),
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      const cycle = tabTargetCycle(net);
+      const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyFirst =
+        cycle.length > 0 &&
+        cycle[0]!.kind === NPC_KIND_DUMMY &&
+        kind2.length + kind3.length > 0;
+      if (dummyFirst) {
+        if (mark) mark.textContent = 'Kick-tab FAIL · Dummy-first while hostile lives · #502';
+        return;
+      }
+      const ch = net.getCharacter();
+      const mana = ch?.mana ?? 0;
+      const gcd = gcdRemainingMs(net.getCombat());
+      if (!kicked) {
+        net.setTarget(padA.npcId);
+        selectedTargetId = padA.npcId;
+        const committed = (net.getCombat()?.targetNpcId ?? 0n) === padA.npcId;
+        if (!committed) {
+          if (mark) mark.textContent = 'VE kick-tab: setTarget Hostile…';
+        } else if (mana < KICK_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE kick-tab: Rest · mana ${mana}`;
+        } else if (!kickBusy && gcd <= 0) {
+          kickBusy = true;
+          void net.kickNpc(padA.npcId).then(() => {
+            kicked = true;
+            kickBusy = false;
+            const bit = `Kick · Hostile #${padA.npcId} · interrupt`;
+            pushCombatLog('kick', bit);
+            pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+          }).catch(() => {
+            kickBusy = false;
+          });
+        }
+        if (mark && !kicked) {
+          mark.textContent = `VE kick-tab: kick pad A · gcd ${gcd}`;
+        }
+      } else if (!tabbed) {
+        const id = cyclePreferHostiles(net);
+        if (id != null) selectedTargetId = id;
+        tabbed = true;
+      }
+      const combatId = net.getCombat()?.targetNpcId ?? selectedTargetId;
+      const tgt = npcs.find((n) => n.npcId === combatId) ?? null;
+      updateTargetFrame(tgt && tgt.hp > 0 ? tgt : null);
+      const frameName = document.getElementById('tfName')?.textContent ?? '';
+      const landedOther =
+        kicked &&
+        !!tgt &&
+        tgt.hp > 0 &&
+        tgt.kind === NPC_KIND_BRIGAND;
+      const dummySel = !!tgt && tgt.kind === NPC_KIND_DUMMY && kind3.length > 0;
+      if (dummySel) {
+        if (mark) mark.textContent = 'Kick-tab FAIL · Tab Dummy while Kind=3 lives · #502';
+        return;
+      }
+      if (
+        landedOther &&
+        dummyTrainer &&
+        dummyInCycle &&
+        kind2.length > 0 &&
+        kind3.length > 0 &&
+        /brigand/i.test(frameName)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Kick-tab OK · Hostile · Brigand · Tab · dummy trainer · #502';
+        }
+        return;
+      }
+      if (mark && kicked) {
+        mark.textContent =
+          `VE kick-tab: Tab tgt ${tgt ? npcPlateName(tgt.kind) : 'none'} · ${frameName}`;
+      }
+      if (ticks > 300) {
+        if (mark) {
+          mark.textContent =
+            `Kick-tab FAIL · tgt ${tgt ? npcPlateName(tgt.kind) : 'none'} · #502`;
+        }
+        return;
+      }
+      window.setTimeout(waitK, 150);
+    };
+    window.setTimeout(waitK, 500);
   }
 
   // ?ve=counterspell — PvP Kick(Identity) vs a casting remote (SecondClient).
