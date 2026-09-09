@@ -6350,6 +6350,7 @@ async function main(): Promise<void> {
         veFollow === 'kick' ||
         veFollow === 'stun' ||
         veFollow === 'stun-hold' ||
+        veFollow === 'stun-then-kick' ||
         veFollow === 'leash' ||
         veFollow === 'aggro'
       ) {
@@ -7322,6 +7323,7 @@ async function main(): Promise<void> {
         veFollow !== 'kick-tab' &&
         veFollow !== 'kick-shove' &&
         veFollow !== 'stun' &&
+        veFollow !== 'stun-then-kick' &&
         veFollow !== 'brigand-stun-plate' &&
         veFollow !== 'brigand-cast' &&
         veFollow !== 'loot-cam' &&
@@ -22742,6 +22744,191 @@ async function main(): Promise<void> {
       window.setTimeout(waitS, 150);
     };
     window.setTimeout(waitS, 500);
+  }
+
+  // ?ve=stun-then-kick — StunNpc then KickNpc the same Kind=3; Dummy planted (#531).
+  // StunRange 5: walk to ~4m. KickRange 8 covers that stand. Dummy trainer.
+  if (ve === 'stun-then-kick') {
+    camera.radius = 14;
+    camera.alpha = Math.atan2(-3, 7) + 0.2;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'stun-then-kick') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE stun-then-kick: waiting Kind=3 + Dummy…';
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let dummyX = 0;
+    let dummyZ = 0;
+    let brigX = 0;
+    let brigZ = 0;
+    let seeded = false;
+    let stunned = false;
+    let kicked = false;
+    let stunBusy = false;
+    let kickBusy = false;
+    const waitSk = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const kind2Live = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.8,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const pose = net.getLocalPose();
+      const tgt = camera.target;
+      if (brigand && dummy) {
+        tgt.x = (brigand.x + dummy.x) * 0.5;
+        tgt.y = 1.25;
+        tgt.z = (brigand.z + dummy.z) * 0.5;
+        camera.radius = 14;
+        camera.beta = Math.PI / 2.6;
+      }
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || !pose) {
+        if (!brigand && kind2Live.length > 0 && dummy && ticks > 40) {
+          if (mark) mark.textContent = 'Stun-kick FAIL · Kind=2-only · #531';
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE stun-then-kick: ${latestStatus.state} · B ${brigand ? 'y' : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 300) window.setTimeout(waitSk, 150);
+        return;
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      if (capsule) {
+        if (mark) mark.textContent = 'Stun-kick FAIL · capsule · #531';
+        return;
+      }
+      if (!seeded) {
+        dummyX = dummy.x;
+        dummyZ = dummy.z;
+        brigX = brigand.x;
+        brigZ = brigand.z;
+        seeded = true;
+      }
+      const dummyDrift = Math.hypot(dummy.x - dummyX, dummy.z - dummyZ);
+      const brigShove = Math.hypot(brigand.x - brigX, brigand.z - brigZ);
+      if (dummyDrift > 0.2) {
+        if (mark) {
+          mark.textContent = `Stun-kick FAIL · Dummy wander ${dummyDrift.toFixed(2)}m · #531`;
+        }
+        return;
+      }
+      const dx = brigand.x - pose.x;
+      const dz = brigand.z - pose.z;
+      const dist = Math.hypot(dx, dz);
+      const ch = net.getCharacter();
+      const mana = ch?.mana ?? 0;
+      const gcd = gcdRemainingMs(net.getCombat());
+      net.setTarget(brigand.npcId);
+      selectedTargetId = brigand.npcId;
+      const committed = (net.getCombat()?.targetNpcId ?? 0n) === brigand.npcId;
+      if (!stunned) {
+        if (dist > STUN_RANGE_METERS - 0.45 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - (STUN_RANGE_METERS - 0.55));
+          const slid = slideAgainstTrunks(
+            pose.x,
+            pose.z,
+            (dx / dist) * step,
+            (dz / dist) * step,
+          );
+          if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+            net.sendMove(slid.dx, slid.dz, false);
+          }
+          if (mark) {
+            mark.textContent =
+              `VE stun-then-kick: walk ${dist.toFixed(1)}m → Brigand (stun ${STUN_RANGE_METERS})`;
+          }
+        } else if (!committed) {
+          if (mark) mark.textContent = 'VE stun-then-kick: setTarget Brigand…';
+        } else if (mana < STUN_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE stun-then-kick: Rest · mana ${mana}`;
+        } else if (!stunBusy && gcd <= 0) {
+          stunBusy = true;
+          dummyX = dummy.x;
+          dummyZ = dummy.z;
+          const stunId = brigand.npcId;
+          void net.stunNpc(stunId).then(() => {
+            stunned = true;
+            stunBusy = false;
+            const bit = `Stun · Brigand #${stunId} · lock`;
+            pushCombatLog('stun', bit);
+            pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+          }).catch(() => {
+            stunBusy = false;
+          });
+        }
+        if (mark && !stunned && dist <= STUN_RANGE_METERS - 0.45) {
+          mark.textContent = `VE stun-then-kick: stun Brigand · gcd ${gcd} · d=${dist.toFixed(1)}`;
+        }
+      } else if (!kicked) {
+        if (!npcStunnedNow(brigand) && gcd > 200) {
+          if (mark) {
+            mark.textContent = `VE stun-then-kick: waiting stun lock · gcd ${gcd}`;
+          }
+        } else if (mana < KICK_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE stun-then-kick: Rest · mana ${mana}`;
+        } else if (!kickBusy && gcd <= 0) {
+          kickBusy = true;
+          brigX = brigand.x;
+          brigZ = brigand.z;
+          dummyX = dummy.x;
+          dummyZ = dummy.z;
+          const kickId = brigand.npcId;
+          void net.kickNpc(kickId).then(() => {
+            kicked = true;
+            kickBusy = false;
+            const bit = `Kick · Brigand #${kickId} · shove`;
+            pushCombatLog('kick', bit);
+            pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
+          }).catch(() => {
+            kickBusy = false;
+          });
+        }
+        if (mark && !kicked) {
+          mark.textContent =
+            `VE stun-then-kick: kick Brigand · stun ${npcStunnedNow(brigand) ? 'y' : 'n'} · gcd ${gcd}`;
+        }
+      } else if (
+        brigShove >= 0.6 &&
+        dummyDrift <= 0.15 &&
+        dummyTrainer &&
+        bLabel === 'Brigand'
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Stun-kick OK · Brigand · stun · kick · dummy trainer · #531';
+        }
+        return;
+      } else if (mark) {
+        mark.textContent =
+          `VE stun-then-kick: shove ${brigShove.toFixed(2)} dummy ${dummyDrift.toFixed(2)} · ${bLabel || 'no'}`;
+      }
+      if (ticks > 320) {
+        if (mark) {
+          mark.textContent =
+            `Stun-kick FAIL · stun ${stunned ? 'y' : 'n'} · kick ${kicked ? 'y' : 'n'} · shove ${brigShove.toFixed(2)} · #531`;
+        }
+        return;
+      }
+      window.setTimeout(waitSk, 150);
+    };
+    window.setTimeout(waitSk, 500);
   }
 
   // ?ve=counterspell — PvP Kick(Identity) vs a casting remote (SecondClient).
