@@ -78,6 +78,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=remote-sheathed-run` | Unequipped remote Run, not Run_Weapon / hidden staff (#515); HUD `Run OK · Run · sheathed · skinned 1`. `FARDEL_SECOND_SHEATH_RUN=1` on `tools/SecondClient`. |
 | `?ve=remote-two-clips` | Two living remotes, two clips: Walk + Spell1 (#481); HUD `Two-clips OK · Walk · Spell1 · skinned · remotes 2`. `FARDEL_SECOND_WALK=1` + `FARDEL_SECOND_CAST=1` on two `tools/SecondClient` seats. |
 | `?ve=remote-idle-walk` | Two living remotes: unarmed Idle + staffed Walk (#517); HUD `Idle-walk OK · Idle · Walk · sheathed · skinned · remotes 2`. `FARDEL_SECOND_SHEATH=1` + `FARDEL_SECOND_WALK=1`. Dummy trainer. |
+| `?ve=staff-pose` | Unequip plants unarmed Idle; equip plants Idle_Weapon grip (#537); HUD `Staff-pose OK · Idle · Idle_Weapon · sheathed · skinned 1`. Dummy trainer. |
 | `?ve=walk-flinch` | RecieveHit while Walk wish is held, not sliding Idle (#482); HUD `Walk-flinch OK · RecieveHit · Walk · skinned 1`. Dummy trainer. |
 | `?ve=remote-walk-flinch` | Remote RecieveHit while walking, not sliding Idle (#516); HUD `Walk-flinch OK · RecieveHit · Walk · skinned 1`. `FARDEL_SECOND_WALK_FLINCH=1` DummyStrike. Dummy trainer. |
 | `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
@@ -105,6 +106,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |
 | `?ve=tab-target` | Tab-select Dummy; world gold nameplate + HP pip + ring + marker (#142); HUD `Tab-target OK · world gold plate+ring · … · #142` |
 | `?ve=character-wow` | Idle_Weapon / sheathed Idle / Walk (face dummy) / Run / hop / Spell plus a Kind=2 person (not capsule); Dummy trainer (#433 / #451); HUD `Character wow OK · … · sheathed · Hostile Idle_Weapon · skinned 1 · dummy trainer` |
+| `?ve=equip` | Unequip unarmed Idle (empty hands) then Idle_Weapon staff grip (#537); HUD `Idle OK · Idle · Idle_Weapon · sheathed · skinned 1`. Dummy trainer. |
 | `?ve=face-target-walk` | Walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432); HUD `Walk OK · Walk · skinned 1 · face target` |
 | `?ve=tab-hostile` | Tab visits Kind=2 and Kind=3; dummy still in cycle (#453); HUD `Tab-hostile OK · Brigand #… · dummy selectable · #453`. |
 | `?ve=tab-aggro` | After a pull, Tab selects the **aggroed** NPC (not lowest id) while Kind=2 and Kind=3 are in range (#484); HUD `Tab-aggro OK · Brigand · pulled · dummy trainer`. Dummy stays in the cycle |
