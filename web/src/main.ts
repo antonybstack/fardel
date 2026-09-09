@@ -12901,6 +12901,180 @@ async function main(): Promise<void> {
     window.setTimeout(waitH, 500);
   }
 
+  // ?ve=hunt-loot-brigand — kill Kind=3 from origin (outside aggro), F loot (#530).
+  // Play follow (do not zero inertialAlphaOffset). Dummy trainer, not a corpse.
+  if (ve === 'hunt-loot-brigand') {
+    camera.radius = 16;
+    camera.alpha = Math.atan2(-3, 7) + 0.35;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'hunt-loot-brigand') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE hunt-loot: waiting for Brigand…';
+    let ticks = 0;
+    let phase: 'kill' | 'walk' | 'pick' | 'done' = 'kill';
+    let lastCast = 0;
+    let killedId = 0n;
+    let pickBusy = false;
+    const padCx = 7;
+    const padCz = -3;
+    const waitHb = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && dummy.hp > 0 && !!dMesh && !dMesh.humanoid;
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND);
+      const kind2Live = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const padC =
+        brigands.find(
+          (n) => Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.8,
+        ) ?? brigands[0];
+      const pose = net.getLocalPose();
+      const items = net.getGroundItems();
+      const selfHp = net.getCharacter()?.hp ?? 0;
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !pose) {
+        if (ticks > 360) {
+          if (mark) {
+            mark.textContent =
+              !brigands.length && kind2Live.length > 0
+                ? 'Hunt-loot FAIL · Kind=2-only · #530'
+                : `Hunt-loot FAIL · B ${brigands.length} · D ${dummyTrainer ? 'y' : 'n'} · #530`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE hunt-loot: ${latestStatus.state} · B ${brigands.length} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        window.setTimeout(waitHb, 180);
+        return;
+      }
+      if (dummy && dummy.hp <= 0) {
+        if (mark) mark.textContent = 'Hunt-loot FAIL · dummy corpse · #530';
+        return;
+      }
+      if (selfHp <= 0) {
+        if (mark) mark.textContent = 'Hunt-loot FAIL · player died · #530';
+        return;
+      }
+      const bMesh = padC ? npcMeshes.get(padC.npcId.toString()) : undefined;
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      if (capsule) {
+        if (mark) mark.textContent = 'Hunt-loot FAIL · capsule · #530';
+        return;
+      }
+      // Kill from origin — CastRange 8, outside AggroRadius 3.
+      if (phase === 'kill' && Math.hypot(pose.x, pose.z) > 0.7) {
+        const dist = Math.hypot(pose.x, pose.z);
+        const step = Math.min(MAX_STEP_METERS, dist);
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          (-pose.x / dist) * step,
+          (-pose.z / dist) * step,
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      if (phase === 'kill') {
+        if (!padC || padC.kind !== NPC_KIND_BRIGAND) {
+          if (ticks > 360) {
+            if (mark) mark.textContent = 'Hunt-loot FAIL · Kind=2-only · #530';
+            return;
+          }
+          if (mark) mark.textContent = 'VE hunt-loot: waiting living Brigand…';
+        } else if (padC.hp > 0) {
+          net.setTarget(padC.npcId);
+          selectedTargetId = padC.npcId;
+          const committed = (net.getCombat()?.targetNpcId ?? 0n) === padC.npcId;
+          const now = Date.now();
+          if (committed && now - lastCast >= GCD_MS + 80) {
+            net.cast(SPELL_SPARK);
+            lastCast = now;
+          }
+          if (mark) {
+            mark.textContent =
+              `VE hunt-loot: spark Brigand · hp ${padC.hp}/${padC.maxHp}`;
+          }
+        } else {
+          killedId = padC.npcId;
+          phase = 'walk';
+          if (mark) mark.textContent = 'VE hunt-loot: Brigand corpse — waiting shard…';
+        }
+      } else if (phase === 'walk' || phase === 'pick') {
+        const corpse = npcs.find((n) => n.npcId === killedId) ?? padC;
+        const cx = corpse?.x ?? padCx;
+        const cz = corpse?.z ?? padCz;
+        const shard =
+          items.find((it) => Math.hypot(it.x - cx, it.z - cz) < 2.8) ??
+          items.find((it) => it.itemId === 'ember_shard' && Math.hypot(it.x - padCx, it.z - padCz) < 2.8);
+        const bag = !!net.getCharacter()?.hasEmberShard;
+        const shardLeft = !!shard;
+        if (bag && dummyTrainer && killedId !== 0n) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'Hunt-loot OK · Brigand · corpse · F pickup · dummy trainer · #530';
+          }
+          return;
+        }
+        if (!shard) {
+          if (mark) {
+            mark.textContent = `VE hunt-loot: waiting shard · ground ${items.length}`;
+          }
+        } else {
+          const dx = shard.x - pose.x;
+          const dz = shard.z - pose.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist > PICKUP_RANGE_METERS - 0.45) {
+            const step = Math.min(MAX_STEP_METERS, dist);
+            const slid = slideAgainstTrunks(
+              pose.x,
+              pose.z,
+              (dx / dist) * step,
+              (dz / dist) * step,
+            );
+            if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+              net.sendMove(slid.dx, slid.dz, false);
+            }
+            if (mark) {
+              mark.textContent =
+                `VE hunt-loot: walk shard · Brigand · d=${dist.toFixed(1)}`;
+            }
+          } else if (!pickBusy && !bag) {
+            pickBusy = true;
+            phase = 'pick';
+            void net.pickup().then(() => {
+              pickBusy = false;
+            }).catch(() => {
+              pickBusy = false;
+            });
+            if (mark) {
+              mark.textContent = 'VE hunt-loot: F pickup Brigand corpse…';
+            }
+          } else if (mark) {
+            mark.textContent =
+              `VE hunt-loot: picking · shard ${shardLeft ? 'y' : 'n'} · bag ${bag ? 'y' : 'n'}`;
+          }
+        }
+      }
+      if (ticks > 360) {
+        if (mark) {
+          mark.textContent =
+            `Hunt-loot FAIL · phase ${phase} · ${bLabel || 'no'} · #530`;
+        }
+        return;
+      }
+      window.setTimeout(waitHb, 180);
+    };
+    window.setTimeout(waitHb, 500);
+  }
+
   // ?ve=loot-cam — kill Kind=3, min-zoom Dummy collision, F still loots (#504).
   if (ve === 'loot-cam') {
     camera.radius = CAM_ZOOM_MIN;
