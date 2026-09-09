@@ -418,3 +418,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Do not force Idle on flinch end. Gait / remote hold resumes Walk if wish is still on. `?ve=walk-flinch` persistMark names RecieveHit + Walk + skinned. T-POSE / Idle-only while W is held = fail.
 - **Seen in:** #482
 
+### 2026-09-08 — ve,kick — Kind=3 shove walks home before persistMark samples
+- **Cause:** KickNpc shoves 1.2 m, then TickHostiles walks an unaggroed hostile home (0.4 m / 100 ms). Sampling XZ only after `kickNpc().then()` can read spawn again (shove 0).
+- **Do this:** Snapshot Dummy + Brigand XZ at fire. Track peak shove (net + mesh) every tick. persistMark `?ve=kick-shove` names Brigand shove + Dummy planted. Dummy wander = fail. Stay at origin.
+- **Seen in:** #505
+

@@ -6326,6 +6326,7 @@ async function main(): Promise<void> {
         camera.radius = 18;
       } else if (
         veFollow === 'kick' ||
+        veFollow === 'kick-shove' ||
         veFollow === 'stun' ||
         veFollow === 'stun-hold' ||
         veFollow === 'leash' ||
@@ -21976,7 +21977,8 @@ async function main(): Promise<void> {
     let dummyZ = 0;
     let brigX = 0;
     let brigZ = 0;
-    let seeded = false;
+    let peakShove = 0;
+    let fired = false;
     let kicked = false;
     let kickBusy = false;
     const waitS = () => {
@@ -21994,21 +21996,14 @@ async function main(): Promise<void> {
             n.hp > 0 &&
             Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.8,
         ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const bMesh = brigand ? npcMeshes.get(brigand.npcId.toString()) : undefined;
       const pose = net.getLocalPose();
-      const tgt = camera.target;
-      if (brigand && dummy) {
-        tgt.x = (brigand.x + dummy.x) * 0.5;
-        tgt.y = 1.25;
-        tgt.z = (brigand.z + dummy.z) * 0.5;
-        camera.radius = 14;
-        camera.beta = Math.PI / 2.6;
-      }
-      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || !pose) {
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || !pose || !dummy) {
         if (mark) {
           mark.textContent =
             `VE kick-shove: ${latestStatus.state} · B ${brigand ? 'y' : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
         }
-        if (ticks < 280) window.setTimeout(waitS, 150);
+        if (ticks < 280) window.setTimeout(waitS, 120);
         return;
       }
       if (Math.hypot(pose.x, pose.z) > 0.7) {
@@ -22023,16 +22018,24 @@ async function main(): Promise<void> {
           net.sendMove(slid.dx, slid.dz, false);
         }
       }
-      if (!seeded) {
-        dummyX = dummy.x;
-        dummyZ = dummy.z;
-        brigX = brigand.x;
-        brigZ = brigand.z;
-        seeded = true;
-      }
-      const dummyDrift = Math.hypot(dummy.x - dummyX, dummy.z - dummyZ);
-      const brigShove = Math.hypot(brigand.x - brigX, brigand.z - brigZ);
-      if (dummyDrift > 0.2) {
+      const bx = bMesh?.root.position.x ?? brigand.x;
+      const bz = bMesh?.root.position.z ?? brigand.z;
+      const dxp = dMesh?.root.position.x ?? dummy.x;
+      const dzp = dMesh?.root.position.z ?? dummy.z;
+      const dummyDrift = fired
+        ? Math.max(
+            Math.hypot(dummy.x - dummyX, dummy.z - dummyZ),
+            Math.hypot(dxp - dummyX, dzp - dummyZ),
+          )
+        : 0;
+      const brigShove = fired
+        ? Math.max(
+            Math.hypot(brigand.x - brigX, brigand.z - brigZ),
+            Math.hypot(bx - brigX, bz - brigZ),
+          )
+        : 0;
+      if (brigShove > peakShove) peakShove = brigShove;
+      if (fired && dummyDrift > 0.2) {
         if (mark) {
           mark.textContent = `Kick-shove FAIL · Dummy wander ${dummyDrift.toFixed(2)}m · #505`;
         }
@@ -22052,38 +22055,46 @@ async function main(): Promise<void> {
           if (mark) mark.textContent = `VE kick-shove: Rest · mana ${mana}`;
         } else if (!kickBusy && gcd <= 0) {
           kickBusy = true;
-          brigX = brigand.x;
-          brigZ = brigand.z;
-          dummyX = dummy.x;
-          dummyZ = dummy.z;
+          fired = true;
+          peakShove = 0;
+          brigX = bx;
+          brigZ = bz;
+          dummyX = dxp;
+          dummyZ = dzp;
           void net.kickNpc(brigand.npcId).then(() => {
             kicked = true;
             kickBusy = false;
+            const bit = `Kick · Brigand #${brigand.npcId} · shove`;
+            pushCombatLog('kick', bit);
+            pushSystemToast('kick', bit, TOAST_VE_TTL_MS);
           }).catch(() => {
             kickBusy = false;
+            fired = false;
           });
         }
-        if (mark && !kicked) {
-          mark.textContent = `VE kick-shove: kick Brigand · gcd ${gcd}`;
+        if (mark && !kicked && peakShove < 0.6) {
+          mark.textContent = `VE kick-shove: kick Brigand · gcd ${gcd} · peak ${peakShove.toFixed(2)}`;
         }
-      } else if (brigShove >= 0.6 && dummyDrift <= 0.15 && dummyTrainer) {
+      }
+      if (peakShove >= 0.6 && dummyDrift <= 0.15 && dummyTrainer) {
         if (mark) {
           mark.textContent =
             'Kick-shove OK · Brigand shove · Dummy planted · #505';
         }
         return;
-      } else if (mark) {
+      }
+      if (kicked && mark && peakShove < 0.6) {
         mark.textContent =
-          `VE kick-shove: shove ${brigShove.toFixed(2)} dummy ${dummyDrift.toFixed(2)}`;
+          `VE kick-shove: shove ${brigShove.toFixed(2)} peak ${peakShove.toFixed(2)} dummy ${dummyDrift.toFixed(2)}`;
       }
       if (ticks > 300) {
         if (mark) {
           mark.textContent =
-            `Kick-shove FAIL · shove ${brigShove.toFixed(2)} dummy ${dummyDrift.toFixed(2)} · #505`;
+            `Kick-shove FAIL · peak ${peakShove.toFixed(2)} dummy ${dummyDrift.toFixed(2)} · #505`;
         }
         return;
       }
-      window.setTimeout(waitS, 150);
+      window.setTimeout(waitS, fired && !kicked ? 50 : 120);
     };
     window.setTimeout(waitS, 500);
   }
