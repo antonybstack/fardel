@@ -398,6 +398,11 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Pull-in stays instant. Recover radius at `CAM_RADIUS_RECOVER_MPS`. If the spherical cam point is inside a hero/mid cylinder, push XZ onto the surface and rewrite alpha/radius (slide). Do not zero inertial on the play follow. E1 Y-spring stays. `?ve=cam-collision` still names the bole.
 - **Seen in:** #499
 
+### 2026-09-08 — ve,loot — min-zoom Dummy collision looks like it ate F-loot
+- **Cause:** Pad C shard is ~3.6 m from Dummy. Standing on the shard at zoom min 4.5 never hits the scarecrow, so VE cannot prove clamp vs pickup. Pickup is pose-range, not a camera ray.
+- **Do this:** Stand in pickup range toward Dummy so the cam-to-player segment hits the Dummy cylinder (`camCollideHit === 'Dummy'`). Then `pickup()`. persistMark `?ve=loot-cam` names loot + Dummy collision. Dummy trainer. Pickup-near-corpse still revives (#421).
+- **Seen in:** #504
+
 ### 2026-09-08 — npc,tab — Tab after Kick Kind=2 lands on pad B, not Kind=3
 - **Cause:** `cyclePreferHostiles` advanced by id in the living in-range list. Kick pad A (Kind=2) leaves it living; next id is pad B (also Kind=2). Dummy is after hostiles so a wrap can also Dummy-first.
 - **Do this:** From a living hostile, Tab prefers a living hostile of the **other** kind (aggroed-first). Dummy stays after hostiles. persistMark `?ve=kick-tab` names both kinds. Dummy-first while a hostile lives = fail. Stay at origin.

@@ -3511,6 +3511,7 @@ async function main(): Promise<void> {
       veCam !== 'cam-collision-dummy' &&
       veCam !== 'cam-collision-vendor' &&
       veCam !== 'cam-collision-hop' &&
+      veCam !== 'loot-cam' &&
       Math.abs(camera.radius - camAppliedRadius) > 0.08
     ) {
       camZoomRadius = camera.radius;
@@ -7062,6 +7063,37 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.18;
         camZoomRadius = CAM_ZOOM_MIN;
         camCollideThisFrame = true;
+      } else if (veFollow === 'loot-cam') {
+        // Min-zoom into Dummy while standing on Kind=3 corpse loot (#504).
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
+        const dummy = (net?.getNpcs() ?? []).find(
+          (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+        );
+        if (dummy) {
+          const mesh = npcMeshes.get(dummy.npcId.toString());
+          const dx = (mesh?.root.position.x ?? dummy.x) - player.position.x;
+          const dz = (mesh?.root.position.z ?? dummy.z) - player.position.z;
+          camera.alpha = Math.atan2(dz, dx) + 0.08;
+        }
+        camera.beta = Math.PI / 2.18;
+        camZoomRadius = CAM_ZOOM_MIN;
+        camCollideThisFrame = true;
       } else if (veFollow === 'encounter') {
         // Kind=2 (3,7) + Kind=3 (7,-3) + Dummy (5,0) as people while pad A is pulled (#456).
         camera.inertialAlphaOffset = 0;
@@ -7094,6 +7126,7 @@ async function main(): Promise<void> {
         veFollow !== 'stun' &&
         veFollow !== 'brigand-stun-plate' &&
         veFollow !== 'brigand-cast' &&
+        veFollow !== 'loot-cam' &&
         veFollow !== 'remote-sheathed' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
@@ -12238,6 +12271,137 @@ async function main(): Promise<void> {
       window.setTimeout(waitH, 200);
     };
     window.setTimeout(waitH, 500);
+  }
+
+  // ?ve=loot-cam — kill Kind=3, min-zoom Dummy collision, F still loots (#504).
+  if (ve === 'loot-cam') {
+    camera.radius = CAM_ZOOM_MIN;
+    camera.beta = Math.PI / 2.18;
+    camZoomRadius = CAM_ZOOM_MIN;
+  }
+  if (net && ve === 'loot-cam') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE loot-cam: waiting Kind=3…';
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let phase: 'kill' | 'walk' | 'zoom' | 'pick' | 'done' = 'kill';
+    let lastCast = 0;
+    let pickBusy = false;
+    const waitLc = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyOk = !!dummy;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = dummyOk && !!dMesh && !dMesh.humanoid;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.8,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND);
+      const pose = net.getLocalPose();
+      const items = net.getGroundItems();
+      const shard =
+        items.find((it) => Math.hypot(it.x - padCx, it.z - padCz) < 2.8) ??
+        items.find((it) => it.itemId === 'ember_shard') ??
+        items[0];
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !pose) {
+        if (mark) {
+          mark.textContent = `VE loot-cam: ${latestStatus.state} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 400) window.setTimeout(waitLc, 150);
+        return;
+      }
+      if (phase === 'kill') {
+        if (!brigand || brigand.hp <= 0) {
+          if (shard) phase = 'walk';
+          else if (mark) mark.textContent = 'VE loot-cam: waiting shard…';
+        } else {
+          net.setTarget(brigand.npcId);
+          selectedTargetId = brigand.npcId;
+          const committed = (net.getCombat()?.targetNpcId ?? 0n) === brigand.npcId;
+          const now = Date.now();
+          if (committed && now - lastCast >= GCD_MS + 80) {
+            net.cast(SPELL_SPARK);
+            lastCast = now;
+          }
+          if (mark) {
+            mark.textContent =
+              `VE loot-cam: spark Brigand · hp ${brigand.hp}/${brigand.maxHp}`;
+          }
+        }
+      }
+      if (phase === 'walk' || phase === 'zoom') {
+        if (!shard) {
+          if (mark) mark.textContent = 'VE loot-cam: waiting WorldLoot…';
+        } else {
+          const dxD = dummy.x - shard.x;
+          const dzD = dummy.z - shard.z;
+          const span = Math.hypot(dxD, dzD) || 1;
+          const stand = Math.min(PICKUP_RANGE_METERS - 0.55, span - 0.9);
+          const tx = shard.x + (dxD / span) * stand;
+          const tz = shard.z + (dzD / span) * stand;
+          const dx = tx - pose.x;
+          const dz = tz - pose.z;
+          const dist = Math.hypot(dx, dz);
+          const lootD = Math.hypot(pose.x - shard.x, pose.z - shard.z);
+          if (dist > 0.35) {
+            const step = Math.min(MAX_STEP_METERS, dist);
+            const slid = slideAgainstTrunks(pose.x, pose.z, (dx / dist) * step, (dz / dist) * step);
+            if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+              net.sendMove(slid.dx, slid.dz, false);
+            }
+            if (mark) {
+              mark.textContent = `VE loot-cam: walk loot+Dummy · d=${dist.toFixed(1)}`;
+            }
+          } else if (lootD <= PICKUP_RANGE_METERS - 0.2) {
+            phase = 'zoom';
+          }
+        }
+      }
+      if (phase === 'zoom' || phase === 'pick') {
+        const hit = camCollideHit;
+        const got = camera.radius;
+        const lootNear = nearestLootInPickupRange(items, pose);
+        const toastOk = toastKindsPresent().has('loot') || !!lootNear;
+        const bag = !!net.getCharacter()?.hasEmberShard;
+        const shardLeft = items.some((it) => Math.hypot(it.x - padCx, it.z - padCz) < 2.8);
+        if (hit === 'Dummy' && lootNear && !pickBusy) {
+          pickBusy = true;
+          void net.pickup().then(() => {
+            phase = 'pick';
+            pickBusy = false;
+          }).catch(() => {
+            pickBusy = false;
+          });
+        }
+        if (
+          hit === 'Dummy' &&
+          dummyTrainer &&
+          (bag || (phase === 'pick' && !shardLeft))
+        ) {
+          if (mark) {
+            mark.textContent =
+              'Loot-cam OK · corpse · F pickup · Dummy collision · #504';
+          }
+          return;
+        }
+        if (mark && phase !== 'done') {
+          mark.textContent =
+            `VE loot-cam: r=${got.toFixed(1)} hit=${hit ?? 'none'} loot ${lootNear ? 'y' : 'n'} bag ${bag ? 'y' : 'n'} toast ${toastOk ? 'y' : 'n'}`;
+        }
+      }
+      if (ticks > 420) {
+        if (mark) mark.textContent = `Loot-cam FAIL · phase ${phase} · hit ${camCollideHit ?? 'none'} · #504`;
+        return;
+      }
+      window.setTimeout(waitLc, 150);
+    };
+    window.setTimeout(waitLc, 500);
   }
 
   // ?ve=respawn — kill pad A from origin (outside aggro), linger revive at home (#421).
