@@ -443,3 +443,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Latch shove, then Tab. persistMark `?ve=kick-shove-tab` names both kinds + Tab. Dummy-first while a hostile lives = fail. Stay at origin.
 - **Seen in:** #532
 
+### 2026-09-08 — humanoid,remote,cast — standing Spell1 Idle-overlays / Death leftover
+- **Cause:** Remote gait `setHumanoidMoving` every frame while Emberbolt windup. Idle can start over Spell1 when `a.casting` lags the combat row. Hp>0 never called `setHumanoidDead(false)`, so a leftover Death pose kept Spell1 on a lying body.
+- **Do this:** Skip loco while `CastingSpellId` windup. Revive with `setHumanoidDead(false)` when Hp>0. Stop Death before Spell. persistMark fail if `idleOn` or height < 1.2. `?ve=remote-spell` + `FARDEL_SECOND_CAST=1`. Dummy trainer.
+- **Seen in:** #538
+
