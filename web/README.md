@@ -142,7 +142,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=sky-horizon` | Distant layered mountain ranges + fog-matched sky (#55 / #273) (`ve/babylon-sky-horizon.png`) |
 | `?ve=place-wow` | Establishing shot vs hordes place ref (#276 / #342); path recedes to a second silhouette |
 | `?ve=collision` | Local WASD blocked/sliding on a hero bole (#339); HUD `Collision OK · blocked against a hero trunk` |
-| `?ve=cam-collision` | Orbit into a **hero** bole; camera stays in the clearing (#351); HUD `Cam-collision OK · r=… · heroTree… · clearing` |
+| `?ve=cam-collision` | Orbit into a **hero** bole; camera stays in the clearing (#351 / #499); HUD `Cam-collision OK · r=… · heroTree… · clearing`. Radius recover + XZ slide — no 1-frame pop through the trunk |
 | `?ve=cam-collision-mid` | Orbit into a **midTree_*** bole; camera stays in the open (#465); HUD `Cam-collision OK · r=… · midTree_… · mid`. Hero-only hit = fail |
 | `?ve=cam-collision-dummy` | Min-zoom orbit into **Dummy**; camera stays outside the scarecrow (#466); HUD `Cam-collision OK · Dummy · r=… · min-zoom`. Living Hostile/Brigand use the same cylinders; corpses ignored |
 | `?ve=cam-collision-vendor` | Min-zoom orbit into the **vendor stall**; camera stays outside the awning (#497); HUD `Cam-collision OK · Vendor · stall · r=… · min-zoom`. Dummy + living hostiles still collide |
