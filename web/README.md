@@ -106,7 +106,6 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=target-contrast` | Select Dummy; prove gold `#targetFrame` + world reticule crisp under #39 cyan fog (`ve/babylon-target-contrast.png`); HUD `Target-contrast OK · gold frame+reticule · … · fog crisp` |
 | `?ve=tab-target` | Tab-select Dummy; world gold nameplate + HP pip + ring + marker (#142); HUD `Tab-target OK · world gold plate+ring · … · #142` |
 | `?ve=character-wow` | Idle_Weapon / sheathed Idle / Walk (face dummy) / Run / hop / Spell plus a Kind=2 person (not capsule); Dummy trainer (#433 / #451); HUD `Character wow OK · … · sheathed · Hostile Idle_Weapon · skinned 1 · dummy trainer` |
-| `?ve=equip` | Unequip unarmed Idle (empty hands) then Idle_Weapon staff grip (#537); HUD `Idle OK · Idle · Idle_Weapon · sheathed · skinned 1`. Dummy trainer. |
 | `?ve=face-target-walk` | Walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432); HUD `Walk OK · Walk · skinned 1 · face target` |
 | `?ve=tab-hostile` | Tab visits Kind=2 and Kind=3; dummy still in cycle (#453); HUD `Tab-hostile OK · Brigand #… · dummy selectable · #453`. |
 | `?ve=tab-aggro` | After a pull, Tab selects the **aggroed** NPC (not lowest id) while Kind=2 and Kind=3 are in range (#484); HUD `Tab-aggro OK · Brigand · pulled · dummy trainer`. Dummy stays in the cycle |

@@ -16618,6 +16618,11 @@ async function main(): Promise<void> {
       );
       const dummyTrainer = !!dummy && !npcMeshes.get(dummy.npcId.toString())?.humanoid;
       const ch = net.getCharacter();
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitPose, 200);
+        return;
+      }
       const pb = readHumanoidPlayback(humanoid);
       const clip = clipBare(pb.playing);
       const staffOn = humanoid.staff.isEnabled();
@@ -16625,12 +16630,14 @@ async function main(): Promise<void> {
         if (ch?.staffEquipped) {
           net.unequipStaff();
           setHumanoidStaffEquipped(humanoid, false);
+          setStaffMeshVisible(humanoid.staff, false);
           setHumanoidMoving(humanoid, false);
           if (mark) mark.textContent = 'VE staff-pose: unequipping…';
           if (ticks < 260) window.setTimeout(waitPose, 180);
           return;
         }
         setHumanoidStaffEquipped(humanoid, false);
+        setStaffMeshVisible(humanoid.staff, false);
         setHumanoidMoving(humanoid, false);
         const sheathOk =
           !!ch &&
@@ -16655,6 +16662,7 @@ async function main(): Promise<void> {
         phase = 'equip';
         net.equipStaff();
         setHumanoidStaffEquipped(humanoid, true);
+        setStaffMeshVisible(humanoid.staff, true);
         setHumanoidMoving(humanoid, false);
         if (mark) mark.textContent = `VE staff-pose: ${sheathClip} sheathed · equipping…`;
         if (ticks < 260) window.setTimeout(waitPose, 180);
@@ -16665,6 +16673,7 @@ async function main(): Promise<void> {
         setHumanoidStaffEquipped(humanoid, true);
       }
       setHumanoidStaffEquipped(humanoid, true);
+      setStaffMeshVisible(humanoid.staff, true);
       setHumanoidMoving(humanoid, false);
       const equipOk =
         !!ch &&
