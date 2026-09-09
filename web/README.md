@@ -96,6 +96,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=leash` | Walk into pad C aggro, Brigand leaves pad, run out, it returns (#455); HUD `Leash OK · Brigand #… · pulled · returned · dummy trainer · #455`. Dummy never aggro. |
 | `?ve=aggro` | Pad C Kind=3 pull-then-leash at play cam (#503 / #455); HUD `Aggro OK · Brigand #… · pulled · leashed · dummy trainer · #503`. Dummy trainer. Capsule / Kind=2-only = fail. |
 | `?ve=hostile-chase` | Kind=2/3 chase Walk (not Idle slide); leash return also Walk; dummy scarecrow (#447); HUD `Hostile chase OK · Walk · skinned 1 · dummy trainer` |
+| `?ve=brigand-chase` | Kind=3 chase Walk at play cam; leash return Walk; Dummy trainer (#533); HUD `Brigand chase OK · Walk · skinned 1 · dummy trainer · #533`. Capsule / Idle slide = fail. |
 | `?ve=auto-attack` | Pull pad A, HP drops on cadence, run out, HP stops (#356); HUD `Auto-attack OK · hp … · stopped · #356`. |
 | `?ve=auto-attack-brigand` | Pull pad C Kind=3, HP drops on melee cadence at play cam (#529); HUD `Auto-attack OK · Brigand · hp … · dummy trainer · #529`. Capsule / Kind=2-only = fail. Dummy trainer. |
 | `?ve=hunt-loot` | Kill pad A from outside aggro, corpse ember_shard, F pickup (#357); HUD `Hunt-loot OK · corpse shard · F pickup · #357`. |

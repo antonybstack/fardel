@@ -6369,7 +6369,8 @@ async function main(): Promise<void> {
         veFollow === 'stun-hold' ||
         veFollow === 'stun-then-kick' ||
         veFollow === 'leash' ||
-        veFollow === 'aggro'
+        veFollow === 'aggro' ||
+        veFollow === 'brigand-chase'
       ) {
         // Pad C Brigand (7,-3) + Dummy (5,0). Do not frame pad A (3,7) (#503).
         camera.inertialAlphaOffset = 0;
@@ -7347,6 +7348,7 @@ async function main(): Promise<void> {
         veFollow !== 'brigand-plate' &&
         veFollow !== 'brigand-body' &&
         veFollow !== 'hostile-chase' &&
+        veFollow !== 'brigand-chase' &&
         veFollow !== 'kick' &&
         veFollow !== 'kick-tab' &&
         veFollow !== 'kick-shove' &&
@@ -12719,6 +12721,185 @@ async function main(): Promise<void> {
       }
     };
     window.setTimeout(waitChase, 700);
+  }
+
+  // ?ve=brigand-chase — Kind=3 Walk while chasing / leash return (#533). Dummy trainer.
+  if (ve === 'brigand-chase') {
+    camera.radius = 14;
+    camera.alpha = Math.atan2(-3, 7) + 0.35;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'brigand-chase') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE brigand-chase: waiting for Brigand…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    const padCx = 7;
+    const padCz = -3;
+    const kiteDist = (HOSTILE_AGGRO_RADIUS + HOSTILE_MELEE_RANGE) * 0.5;
+    let ticks = 0;
+    let phase: 'pull' | 'chase' | 'drop' | 'done' = 'pull';
+    let sawChase = false;
+    let sawLeash = false;
+    const waitBc = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && dummy.hp > 0 && !!dummyMesh && !dummyMesh.humanoid;
+      const dummyAggro = dummy?.aggroed === true;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand) {
+        if (mark) {
+          mark.textContent =
+            `VE brigand-chase: ${latestStatus.state} · B ${brigand ? 'y' : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 320) window.setTimeout(waitBc, 80);
+        return;
+      }
+      if (dummyAggro) {
+        if (mark) mark.textContent = 'Brigand chase FAIL · dummy aggroed · #533';
+        return;
+      }
+      const kind2 = npcs.find((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      if (kind2 && phase === 'pull') {
+        const k2Home = Math.hypot(
+          kind2.x - (kind2.spawnX || 3),
+          kind2.z - (kind2.spawnZ || 7),
+        );
+        if (kind2.aggroed || k2Home > 0.8) {
+          const tx = -12;
+          const tz = -8;
+          const kx = tx - player.position.x;
+          const kz = tz - player.position.z;
+          const kd = Math.hypot(kx, kz);
+          if (kd > 0.6) {
+            const step = Math.min(MAX_STEP_METERS, kd);
+            net.sendMove((kx / kd) * step, (kz / kd) * step, false);
+          }
+          if (mark) {
+            mark.textContent =
+              `VE brigand-chase: wait Kind=2 home · aggro=${kind2.aggroed ? 'y' : 'n'} · h=${k2Home.toFixed(1)}`;
+          }
+          if (ticks < 320) window.setTimeout(waitBc, 80);
+          return;
+        }
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      if (capsule) {
+        if (mark) mark.textContent = 'Brigand chase FAIL · capsule · #533';
+        return;
+      }
+      const pb = bMesh?.humanoid ? readHumanoidPlayback(bMesh.humanoid) : null;
+      const clip = clipBare(pb?.playing ?? null);
+      const walking = pb != null && pb.skinned > 0 && /^walk$/i.test(clip);
+      const idleSlide = pb != null && pb.skinned > 0 && /idle/i.test(clip) && !/walk/i.test(clip);
+      const home = Math.hypot(
+        brigand.x - (brigand.spawnX || padCx),
+        brigand.z - (brigand.spawnZ || padCz),
+      );
+      const dx = brigand.x - player.position.x;
+      const dz = brigand.z - player.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (brigand.aggroed && home > 0.35 && walking) sawChase = true;
+      if (!brigand.aggroed && home > 0.45 && walking) sawLeash = true;
+      if (brigand.aggroed && home > 0.55 && idleSlide && ticks > 40) {
+        if (mark) {
+          mark.textContent = `Brigand chase FAIL · Idle slide · ${clip} · #533`;
+        }
+        return;
+      }
+      if (phase === 'pull') {
+        if (dist > HOSTILE_AGGRO_RADIUS - 0.35 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (brigand.aggroed && home > 0.25) {
+          selectedTargetId = brigand.npcId;
+          net.setTarget(brigand.npcId);
+          phase = 'chase';
+        } else if (mark) {
+          mark.textContent =
+            `VE brigand-chase: pull · d=${dist.toFixed(1)} · home=${home.toFixed(2)} · ${clip}`;
+        }
+      } else if (phase === 'chase') {
+        const tx = padCx;
+        const tz = padCz - 2.4;
+        const kx = tx - player.position.x;
+        const kz = tz - player.position.z;
+        const kd = Math.hypot(kx, kz);
+        const want = kiteDist;
+        if (dist < want - 0.08 && kd > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, kd);
+          net.sendMove((kx / kd) * step, (kz / kd) * step, false);
+        } else if (dist > want + 0.2 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist - want);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        } else if (kd > 0.35) {
+          const step = Math.min(MAX_STEP_METERS * 0.7, kd);
+          net.sendMove((kx / kd) * step, (kz / kd) * step, false);
+        }
+        if (sawChase && walking && bLabel === 'Brigand') {
+          phase = 'drop';
+        }
+        if (mark) {
+          mark.textContent =
+            `VE brigand-chase: chase · ${clip} · home=${home.toFixed(2)} · walk ${sawChase ? 'y' : 'n'}`;
+        }
+      } else if (phase === 'drop') {
+        const tx = -12;
+        const tz = -8;
+        const kx = tx - player.position.x;
+        const kz = tz - player.position.z;
+        const kd = Math.hypot(kx, kz);
+        if (kd > 0.6) {
+          const step = Math.min(MAX_STEP_METERS, kd);
+          net.sendMove((kx / kd) * step, (kz / kd) * step, false);
+        }
+        if (
+          sawChase &&
+          sawLeash &&
+          walking &&
+          dummyTrainer &&
+          bLabel === 'Brigand' &&
+          pb != null &&
+          pb.skinned > 0
+        ) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Brigand chase OK · Walk · skinned ${pb.skinned} · dummy trainer · #533`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE brigand-chase: drop · ${clip} · home=${home.toFixed(2)} · leash ${sawLeash ? 'y' : 'n'} · ${bLabel || 'no'}`;
+        }
+      }
+      if (ticks > 360) {
+        if (mark) {
+          mark.textContent =
+            `Brigand chase FAIL · phase ${phase} · chase ${sawChase ? 'y' : 'n'} · leash ${sawLeash ? 'y' : 'n'} · ${clip} · #533`;
+        }
+        return;
+      }
+      window.setTimeout(waitBc, 80);
+    };
+    window.setTimeout(waitBc, 500);
   }
 
   // ?ve=auto-attack — HP drops in melee, stops after leash (#356).

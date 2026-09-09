@@ -433,3 +433,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Keep `lastWishYaw`. Standing / key-up always `YAW_TURN_HZ` + rad/s cap. Do not Tab Dummy in `?ve=yaw-blend` (target steals last-wish). persistMark `/^Idle OK/` + Idle_Weapon + `yaw blend` + skinned. Dummy trainer.
 - **Seen in:** #536
 
+### 2026-09-08 — ve,npc — Kind=3 chase close-up fills with leftover Kind=2
+- **Cause:** `hostile-chase` follow ranks high-Z walkers (pad A). Radius 8 plus a leftover aggroed Kind=2 parks them in the lens, so the Brigand Walk never reads.
+- **Do this:** Pad C chase uses the kick/stun/leash lock (radius 14, tgt 6.2/−1.6). Wait Kind=2 home before pull. persistMark `?ve=brigand-chase` names Brigand + Walk + skinned. Capsule / Idle slide = fail. Dummy trainer.
+- **Seen in:** #533
+
