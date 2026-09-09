@@ -6984,6 +6984,7 @@ async function main(): Promise<void> {
         veFollow !== 'kick' &&
         veFollow !== 'stun' &&
         veFollow !== 'brigand-stun-plate' &&
+        veFollow !== 'brigand-cast' &&
         veFollow !== 'remote-sheathed' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
@@ -21591,6 +21592,213 @@ async function main(): Promise<void> {
       window.setTimeout(waitP, 120);
     };
     window.setTimeout(waitP, 500);
+  }
+
+  // ?ve=brigand-cast — Spark + Emberbolt land on living Kind=3 (#501).
+  // Stay at origin (CastRange 8 reaches pad C; AggroRadius 3 does not). Dummy trainer.
+  if (ve === 'brigand-cast') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.12;
+    camera.beta = Math.PI / 2.65;
+  }
+  if (net && ve === 'brigand-cast') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE brigand-cast: waiting for Kind=3…';
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let phase: 'spark' | 'ember' | 'dummy' | 'done' = 'spark';
+    let hp0 = 0;
+    let sparkHp = 0;
+    let lastCast = 0;
+    const waitC = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ??
+        npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_BRIGAND);
+      const pose = net.getLocalPose();
+      const tgt = camera.target;
+      if (brigand) {
+        tgt.x = (brigand.x + (dummy?.x ?? 5)) * 0.5;
+        tgt.y = 1.35;
+        tgt.z = (brigand.z + (dummy?.z ?? 0)) * 0.5;
+        camera.radius = 16;
+        camera.beta = Math.PI / 2.65;
+      }
+      net.ensureTrainingDummy();
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || brigand.hp <= 0 || !pose) {
+        if (mark) {
+          mark.textContent =
+            `VE brigand-cast: ${latestStatus.state} · B ${brigand ? (brigand.hp > 0 ? 'y' : 'corpse') : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 400) window.setTimeout(waitC, 150);
+        else if (mark) mark.textContent = 'Brigand-cast FAIL · no living Kind=3 · #501';
+        return;
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      if (capsule) {
+        if (mark) mark.textContent = 'Brigand-cast FAIL · capsule · #501';
+        return;
+      }
+      if (bLabel === 'Hostile' || bLabel === 'Dummy') {
+        if (mark) {
+          mark.textContent = `Brigand-cast FAIL · Kind=3 plate ${bLabel || 'none'} · #501`;
+        }
+        return;
+      }
+      // Stay at origin — CastRange 8, outside AggroRadius 3.
+      if (Math.hypot(pose.x, pose.z) > 0.7) {
+        const dist = Math.hypot(pose.x, pose.z);
+        const step = Math.min(MAX_STEP_METERS, dist);
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          (-pose.x / dist) * step,
+          (-pose.z / dist) * step,
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      const distB = Math.hypot(brigand.x - pose.x, brigand.z - pose.z);
+      if (distB > CAST_RANGE_METERS + 0.4) {
+        if (mark) {
+          mark.textContent =
+            `VE brigand-cast: OOR d=${distB.toFixed(1)} · stay origin · #501`;
+        }
+        if (ticks < 400) window.setTimeout(waitC, 120);
+        return;
+      }
+      const ch = net.getCharacter();
+      const mana = ch?.mana ?? 0;
+      const combat = net.getCombat();
+      const gcd = gcdRemainingMs(combat);
+      const windup = castRemainingMs(combat);
+      const now = Date.now();
+      const committed = (combat?.targetNpcId ?? 0n) === brigand.npcId;
+      if (phase === 'spark') {
+        if (hp0 <= 0) hp0 = brigand.hp;
+        net.setTarget(brigand.npcId);
+        selectedTargetId = brigand.npcId;
+        updateTargetFrame(brigand);
+        if (brigand.hp < hp0) {
+          sparkHp = brigand.hp;
+          phase = 'ember';
+        } else if (!committed) {
+          if (mark) mark.textContent = 'VE brigand-cast: setTarget Brigand…';
+        } else if (mana < SPARK_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE brigand-cast: Rest · mana ${mana}`;
+        } else if (gcd <= 0 && windup <= 0 && now - lastCast >= GCD_MS + 80) {
+          net.cast(SPELL_SPARK);
+          lastCast = now;
+          if (mark) {
+            mark.textContent =
+              `VE brigand-cast: Spark ${bLabel || 'Brigand'} · hp ${brigand.hp}/${brigand.maxHp}`;
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE brigand-cast: Spark wait · hp ${brigand.hp}/${hp0} · gcd ${gcd}`;
+        }
+      } else if (phase === 'ember') {
+        net.setTarget(brigand.npcId);
+        selectedTargetId = brigand.npcId;
+        updateTargetFrame(brigand);
+        if (sparkHp > 0 && brigand.hp < sparkHp) {
+          phase = 'dummy';
+        } else if (windup > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE brigand-cast: Emberbolt windup ${windup}ms · hp ${brigand.hp}`;
+          }
+        } else if (mana < EMBERBOLT_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE brigand-cast: Rest · mana ${mana}`;
+        } else if (gcd <= 0 && now - lastCast >= GCD_MS + 80) {
+          net.cast(SPELL_EMBERBOLT);
+          lastCast = now;
+          if (mark) {
+            mark.textContent =
+              `VE brigand-cast: Emberbolt ${bLabel || 'Brigand'} · hp ${brigand.hp}/${brigand.maxHp}`;
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE brigand-cast: Emberbolt wait · hp ${brigand.hp}/${sparkHp} · gcd ${gcd}`;
+        }
+      } else if (phase === 'dummy') {
+        if (dummy) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+          updateTargetFrame(dummy);
+        }
+        const combatId = net.getCombat()?.targetNpcId ?? 0n;
+        const combatRow = npcs.find((n) => n.npcId === combatId) ?? null;
+        const frame = document.getElementById('targetFrame');
+        const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+        const frameName = document.getElementById('tfName')?.textContent ?? '';
+        const dummySel =
+          !!dummy &&
+          dummy.hp > 0 &&
+          dummyTrainer &&
+          dLabel === 'Dummy' &&
+          (selectedTargetId === dummy.npcId || combatRow?.kind === NPC_KIND_DUMMY) &&
+          frameVisible &&
+          /dummy/i.test(frameName);
+        const sparkOk = sparkHp > 0 && sparkHp < hp0;
+        const emberOk = brigand.hp < sparkHp;
+        const living = brigand.hp > 0;
+        if (
+          bLabel === 'Brigand' &&
+          sparkOk &&
+          emberOk &&
+          dummySel &&
+          living &&
+          dummyTrainer
+        ) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'Brigand-cast OK · Brigand · Spark · Emberbolt · dummy trainer · #501';
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE brigand-cast: dummy ${dLabel || 'no'} frame ${frameName} · B hp ${brigand.hp}`;
+        }
+      }
+      if (phase === 'done') {
+        if (mark) {
+          mark.textContent =
+            'Brigand-cast OK · Brigand · Spark · Emberbolt · dummy trainer · #501';
+        }
+        return;
+      }
+      if (ticks > 300) {
+        if (mark) {
+          mark.textContent =
+            `Brigand-cast FAIL · phase ${phase} · plate ${bLabel || 'none'} · #501`;
+        }
+        return;
+      }
+      window.setTimeout(waitC, 120);
+    };
+    window.setTimeout(waitC, 500);
   }
 
   // ?ve=bash — PvP Stun(Identity) vs a nearby remote (SecondClient).
