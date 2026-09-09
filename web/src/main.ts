@@ -5242,6 +5242,7 @@ async function main(): Promise<void> {
         setHumanoidDead(parts, true);
         continue;
       }
+      setHumanoidDead(parts, false);
       let st = remoteWalkHold.get(key);
       if (!st) {
         st = { hold: 0, dx: 0, dz: 0 };
@@ -5271,12 +5272,28 @@ async function main(): Promise<void> {
           st.hold -= dt;
         }
       }
+      const rcNow = latestRemoteCombats.find((c) => c.identityHex === key);
+      const remoteCasting =
+        !!rcNow &&
+        rcNow.castingSpellId !== 0 &&
+        castRemainingMs(rcNow) > 0;
+      if (remoteCasting) {
+        st.hold = 0;
+        st.dx = 0;
+        st.dz = 0;
+      }
       const moving = st.hold > 0 && samp.y <= 0.05;
       const spd = Math.hypot(st.dx, st.dz);
       if (samp.y > 0.05) {
         st.hold = 0;
         setHumanoidAirborne(parts, true);
         parts.root.scaling.set(1, 1, 1);
+      } else if (remoteCasting) {
+        // Standing Spell1: do not plant Idle over the windup (#538).
+        st.hold = 0;
+        setHumanoidAirborne(parts, false);
+        parts.root.scaling.set(1, 1, 1);
+        setHumanoidCasting(parts, true);
       } else {
         setHumanoidAirborne(parts, false);
         parts.root.scaling.set(1, 1, 1);
@@ -7056,7 +7073,11 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
-      } else if (veFollow === 'remote-cast') {
+      } else if (veFollow === 'remote-cast' || veFollow === 'remote-spell') {
+        if (veFollow === 'remote-spell') {
+          player.setEnabled(false);
+          localNameplate.mesh.setEnabled(false);
+        }
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -7065,16 +7086,18 @@ async function main(): Promise<void> {
         let fy = player.position.y + 1.05;
         let fz = player.position.z;
         let best = -1;
-        for (const [, parts] of remoteMeshes) {
+        for (const [hex, parts] of remoteMeshes) {
+          const chR = net?.getCharacterFor(hex);
+          if (chR && chR.hp <= 0) continue;
           const pb = readHumanoidPlayback(parts);
+          if (pb.height < 1.2) continue;
           const casting =
             pb.skinned > 0 && !!pb.playing && /spell/i.test(pb.playing);
-          const d = Vector3.Distance(parts.root.position, player.position);
-          const rank = (casting ? 1000 : 0) + d;
+          const rank = (casting ? 2000 : 0) + pb.height;
           if (rank > best) {
             best = rank;
             fx = parts.root.position.x;
-            fy = parts.root.position.y + 1.05;
+            fy = parts.root.position.y + 0.95;
             fz = parts.root.position.z;
           }
         }
@@ -7083,7 +7106,8 @@ async function main(): Promise<void> {
         tgt.z = fz;
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
-        camera.radius = 8;
+        camera.radius = veFollow === 'remote-spell' ? 7 : 8;
+        if (veFollow === 'remote-spell') camCollideThisFrame = false;
       } else if (veFollow === 'remote-death') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -10265,6 +10289,107 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitRemoteCast, 180);
     };
     window.setTimeout(waitRemoteCast, 700);
+  }
+
+  // ?ve=remote-spell — E8.41 standing remote Spell1, not Idle overlay / T-pose. Dummy trainer.
+  if (ve === 'remote-spell') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-spell') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-spell: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let nudged = false;
+    const waitSpell = () => {
+      if (!net) return;
+      ticks += 1;
+      if (!nudged && latestStatus.state === 'connected') {
+        nudged = true;
+        for (let i = 0; i < 8; i++) net.sendMove(-0.75, -0.6, false);
+      }
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      const combats = net.getRemoteCombats();
+      syncRemoteMeshes(remotes);
+      syncRemoteCastFx(combats);
+      syncNpcMeshes(net.getNpcs());
+      const dummy = (net.getNpcs() ?? []).find(
+        (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+      );
+      const dummyTrainer =
+        !!dummy && !npcMeshes.get(dummy.npcId.toString())?.humanoid;
+      const n = [...remoteMeshes.values()].filter((p) => p.root.isEnabled()).length;
+      const playbackOf = (hex: string) => {
+        const p = remoteMeshes.get(hex);
+        return p ? readHumanoidPlayback(p) : { skinned: 0, playing: null, idle: null, height: 0, idleOn: false };
+      };
+      const castingCombat = combats.find(
+        (c) => c.castingSpellId !== 0 && castRemainingMs(c) > 0,
+      );
+      const preferred =
+        remotes.find((r) => {
+          const chR = net.getCharacterFor(r.identityHex);
+          const pb = playbackOf(r.identityHex);
+          return (
+            !!chR &&
+            chR.hp > 0 &&
+            pb.skinned > 0 &&
+            pb.height >= 1.2 &&
+            !!pb.playing &&
+            /spell/i.test(pb.playing)
+          );
+        }) ??
+        remotes.find((r) => {
+          const chR = net.getCharacterFor(r.identityHex);
+          return (
+            !!chR &&
+            chR.hp > 0 &&
+            r.identityHex === castingCombat?.identityHex
+          );
+        }) ??
+        null;
+      const pb = preferred
+        ? playbackOf(preferred.identityHex)
+        : { skinned: 0, playing: null, idle: null, height: 0, idleOn: false };
+      const clip = clipBare(pb.playing);
+      const overlay = !!pb.idleOn && /spell/i.test(clip);
+      const spellOn =
+        pb.skinned > 0 &&
+        pb.height >= 1.2 &&
+        /^spell1$/i.test(clip) &&
+        !overlay &&
+        dummyTrainer;
+      if (mark) {
+        if (spellOn) {
+          mark.textContent =
+            `Remote spell OK · ${clip} · skinned ${pb.skinned}`;
+          return;
+        }
+        if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (overlay) {
+          mark.textContent = `Idle overlay · ${clip} · skinned ${pb.skinned}`;
+        } else if (n > 0) {
+          mark.textContent =
+            `VE remote-spell: remotes ${n} · ${clip} · skinned ${pb.skinned} (FARDEL_SECOND_CAST=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-spell: remotes 0 (start tools/SecondClient FARDEL_SECOND_CAST=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitSpell, 180);
+    };
+    window.setTimeout(waitSpell, 700);
   }
 
   // ?ve=remote-death — E8.20 other wizards RecieveHit on HP drop, Death at Hp=0.

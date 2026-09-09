@@ -770,6 +770,8 @@ export type HumanoidPlayback = {
   playing: string | null;
   idle: string | null;
   height: number;
+  /** Idle group still running — Spell1 persistMark must fail this overlay. */
+  idleOn?: boolean;
 };
 
 export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
@@ -806,7 +808,13 @@ export function readHumanoidPlayback(parts: HumanoidParts): HumanoidPlayback {
                   : a?.idle?.isPlaying
                     ? a.idle.name
                     : null;
-  return { skinned, playing, idle: a?.idle?.name ?? null, height };
+  return {
+    skinned,
+    playing,
+    idle: a?.idle?.name ?? null,
+    height,
+    idleOn: !!a?.idle?.isPlaying,
+  };
 }
 
 function stopIfPlaying(
@@ -1101,6 +1109,8 @@ export function setHumanoidCasting(
   a.casting = true;
   a.turning = false;
   a.airborne = false;
+  stopIfPlaying(a.death);
+  if (a.death) a.death.speedRatio = 1;
   stopIfPlaying(a.idle);
   stopIfPlaying(a.walk);
   stopIfPlaying(a.run);
