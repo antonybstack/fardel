@@ -5527,6 +5527,7 @@ async function main(): Promise<void> {
             (ve === 'run' ||
               (ve !== 'walk' &&
                 ve !== 'walk-stop' &&
+                ve !== 'walk-flinch' &&
                 ve !== 'face-target-walk' &&
                 keys.has('w') &&
                 !keys.has('s')));
@@ -5561,6 +5562,7 @@ async function main(): Promise<void> {
           (ve === 'run' ||
             (ve !== 'walk' &&
               ve !== 'walk-stop' &&
+              ve !== 'walk-flinch' &&
               ve !== 'face-target-walk' &&
               keys.has('w') &&
               !keys.has('s')));
@@ -5859,6 +5861,18 @@ async function main(): Promise<void> {
               );
               flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
               playHumanoidFlinch(humanoid);
+              if (ve === 'walk-flinch' && keys.has('w')) {
+                const pbHit = readHumanoidPlayback(humanoid);
+                const clipHit = (pbHit.playing ?? '').replace(/^.*\|/, '');
+                const markHit = document.getElementById('persistMark');
+                if (
+                  markHit &&
+                  pbHit.skinned > 0 &&
+                  /recievehit/i.test(clipHit)
+                ) {
+                  markHit.textContent = `Walk-flinch OK · ${clipHit} · Walk · skinned ${pbHit.skinned}`;
+                }
+              }
             } else if (ch.hp > prevPlayerHp && prevPlayerHp > 0) {
               const healed = ch.hp - prevPlayerHp;
               // Authority-backed heal (Rest). Hotkey also toasts; avoid duplicate log spam.
@@ -6410,6 +6424,17 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = veFollow === 'jump-pose' ? 9 : 7;
+      } else if (veFollow === 'walk-flinch') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.0;
+        tgt.z = player.position.z;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'character-wow') {
         // South of spawn looking north: player clips in front, Kind=2 at (3,7)
         // behind, Dummy trainer (5,0) to the right. Mutate target in place.
@@ -6993,7 +7018,8 @@ async function main(): Promise<void> {
         veFollow !== 'remote-walk-stop' &&
         veFollow !== 'remote-sheathed-walk' &&
         veFollow !== 'remote-run' &&
-        veFollow !== 'remote-two-clips'
+        veFollow !== 'remote-two-clips' &&
+        veFollow !== 'walk-flinch'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -8080,6 +8106,102 @@ async function main(): Promise<void> {
       window.setTimeout(waitFlinch, 140);
     };
     window.setTimeout(waitFlinch, 600);
+  }
+
+  // ?ve=walk-flinch — E8.34 RecieveHit while Walk wish is held, not sliding Idle.
+  if (ve === 'walk-flinch') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'walk-flinch') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE walk-flinch: waiting for Connected…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let seeded = false;
+    let lastCastAt = 0;
+    let sawWalk = false;
+    const waitWalkFlinch = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE walk-flinch: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitWalkFlinch, 160);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitWalkFlinch, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitWalkFlinch, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+      }
+      const cycle = net.getTargetCycle();
+      const dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy && dummy.hp > 0) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const mesh = npcMeshes.get(dummy.npcId.toString());
+        const tx = mesh?.root.position.x ?? dummy.x;
+        const tz = mesh?.root.position.z ?? dummy.z;
+        const dx = tx - player.position.x;
+        const dz = tz - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 2.6) {
+          const scale = Math.min(0.22, dist) / dist;
+          net.sendMove(dx * scale, dz * scale, false);
+        } else if (dist < 1.8) {
+          net.sendMove(-dx * 0.12, -dz * 0.12, false);
+        } else {
+          net.sendMove(-dz * 0.16, dx * 0.16, false);
+        }
+        const gcd = gcdRemainingMs(net.getCombat());
+        const now = Date.now();
+        if (ch && ch.hp > 0 && dist < 8 && gcd <= 0 && now - lastCastAt > 900) {
+          lastCastSpell = SPELL_SPARK;
+          net.cast(SPELL_SPARK);
+          lastCastAt = now;
+        }
+      } else {
+        net.ensureTrainingDummy();
+      }
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = clipBare(pb.playing);
+      if (/^walk/i.test(clip) && pb.skinned > 0) sawWalk = true;
+      const flinchNow = /recievehit/i.test(clip) && pb.skinned > 0;
+      const ok = flinchNow && sawWalk && !/t-pose/i.test(clip);
+      if (mark) {
+        if (ok) {
+          mark.textContent = `Walk-flinch OK · ${clip} · Walk · skinned ${pb.skinned}`;
+        } else if (pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (!/^Walk-flinch OK/.test(mark.textContent ?? '')) {
+          mark.textContent = `VE walk-flinch: ${clip} · walk ${sawWalk ? 'seen' : 'waiting'} · hp ${ch?.hp ?? '?'}`;
+        }
+      }
+      if (ticks < 400) window.setTimeout(waitWalkFlinch, 32);
+    };
+    window.setTimeout(waitWalkFlinch, 600);
   }
 
   // ?ve=yaw — E2.4 face camera-relative wish (slerp, no client positions).
