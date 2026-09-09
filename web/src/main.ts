@@ -285,6 +285,8 @@ type Nameplate = {
   hpFrac: number;
   /** Local Tab-target gold chrome (#142). */
   selected: boolean;
+  /** StunNpc lock chrome. Must not rename Kind=3 off Brigand (#500). */
+  stunned: boolean;
 };
 
 function setStatus(text: string, connState?: ConnectionStatus['state']): void {
@@ -2945,7 +2947,7 @@ function createNameplate(scene: Scene, key: string): Nameplate {
   mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
   mesh.isPickable = false;
   mesh.position.y = 2.05;
-  return { mesh, mat, tex, label: '', hpFrac: -2, selected: false };
+  return { mesh, mat, tex, label: '', hpFrac: -2, selected: false, stunned: false };
 }
 
 function paintNameplate(
@@ -2954,17 +2956,20 @@ function paintNameplate(
   fillCss: string,
   hpFrac: number,
   selected = false,
+  stunned = false,
 ): void {
   if (
     np.label === label &&
     Math.abs(np.hpFrac - hpFrac) < 0.02 &&
-    np.selected === selected
+    np.selected === selected &&
+    np.stunned === stunned
   ) {
     return;
   }
   np.label = label;
   np.hpFrac = hpFrac;
   np.selected = selected;
+  np.stunned = stunned;
   np.mat.fogEnabled = !selected;
   np.mesh.scaling.set(selected ? 1.1 : 1, selected ? 1.1 : 1, 1);
   const ctx = np.tex.getContext() as unknown as CanvasRenderingContext2D;
@@ -2995,6 +3000,12 @@ function paintNameplate(
     ctx.stroke();
     ctx.strokeStyle = 'rgba(10,8,4,0.9)';
     ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  if (stunned) {
+    // Cyan stun rim. Label stays Dummy / Hostile / Brigand (#500).
+    ctx.strokeStyle = 'rgba(126,200,255,0.95)';
+    ctx.lineWidth = selected ? 3.5 : 4.5;
     ctx.stroke();
   }
   ctx.shadowColor = 'rgba(0,0,0,0.85)';
@@ -4983,6 +4994,7 @@ async function main(): Promise<void> {
           npcPlateColor(npc.kind, selected),
           npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
           selected,
+          stunned,
         );
       }
 
@@ -6857,6 +6869,7 @@ async function main(): Promise<void> {
         veFollow !== 'hostile-chase' &&
         veFollow !== 'kick' &&
         veFollow !== 'stun' &&
+        veFollow !== 'brigand-stun-plate' &&
         veFollow !== 'remote-sheathed' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
@@ -21258,6 +21271,121 @@ async function main(): Promise<void> {
       window.setTimeout(waitHold, 80);
     };
     window.setTimeout(waitHold, 500);
+  }
+
+  // ?ve=brigand-stun-plate — StunNpc Kind=3; plate stays Brigand, Dummy parchment (#500).
+  if (ve === 'brigand-stun-plate') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'brigand-stun-plate') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE brigand-stun-plate: waiting for Kind=3…';
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let stunBusy = false;
+    let stunnedAt = 0;
+    const waitP = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const pose = net.getLocalPose();
+      const tgt = camera.target;
+      if (brigand) {
+        tgt.x = (brigand.x + (dummy?.x ?? 5)) * 0.5;
+        tgt.y = 1.35;
+        tgt.z = (brigand.z + (dummy?.z ?? 0)) * 0.5;
+        camera.radius = 12;
+        camera.beta = Math.PI / 2.55;
+      }
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || !pose) {
+        if (mark) {
+          mark.textContent =
+            `VE brigand-stun-plate: ${latestStatus.state} · B ${brigand ? 'y' : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 260) window.setTimeout(waitP, 120);
+        return;
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const bStun = bMesh?.nameplate?.stunned === true;
+      const dStunOk = dLabel === 'Dummy';
+      if (bLabel === 'Hostile' || bLabel === 'Dummy') {
+        if (mark) {
+          mark.textContent = `Brigand-stun FAIL · Kind=3 plate ${bLabel || 'none'} · #500`;
+        }
+        return;
+      }
+      const dist = Math.hypot(brigand.x - pose.x, brigand.z - pose.z);
+      const inStun = dist <= STUN_RANGE_METERS - 0.45;
+      const inAggro = dist < HOSTILE_AGGRO_RADIUS;
+      if (!npcStunnedNow(brigand)) {
+        if (inAggro) {
+          const back = Math.hypot(pose.x, pose.z);
+          if (back > 0.2) {
+            net.sendMove(-pose.x * 0.4, -pose.z * 0.4, false);
+          }
+        } else if (!inStun) {
+          const dx = brigand.x - pose.x;
+          const dz = brigand.z - pose.z;
+          const step = Math.min(MAX_STEP_METERS, dist - (STUN_RANGE_METERS - 0.55));
+          const slid = slideAgainstTrunks(pose.x, pose.z, (dx / dist) * step, (dz / dist) * step);
+          if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+            net.sendMove(slid.dx, slid.dz, false);
+          }
+        } else if (!stunBusy && gcdRemainingMs(net.getCombat()) <= 0) {
+          stunBusy = true;
+          net.setTarget(brigand.npcId);
+          selectedTargetId = brigand.npcId;
+          void net.stunNpc(brigand.npcId).then(() => {
+            stunBusy = false;
+            stunnedAt = Date.now();
+          }).catch(() => {
+            stunBusy = false;
+          });
+        }
+        if (mark) {
+          mark.textContent =
+            `VE brigand-stun-plate: walk d=${dist.toFixed(1)} · plate ${bLabel || 'no'}`;
+        }
+      } else if (
+        bLabel === 'Brigand' &&
+        bStun &&
+        dStunOk &&
+        dummyTrainer &&
+        npcStunnedNow(brigand)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Brigand-stun OK · Brigand · stun · Dummy parchment · #500';
+        }
+        return;
+      } else if (mark) {
+        mark.textContent =
+          `VE brigand-stun-plate: lock plate ${bLabel || 'no'} stun ${bStun ? 'y' : 'n'} dummy ${dLabel}`;
+      }
+      if (ticks > 280) {
+        if (mark) mark.textContent = `Brigand-stun FAIL · plate ${bLabel || 'none'} · #500`;
+        return;
+      }
+      void stunnedAt;
+      window.setTimeout(waitP, 120);
+    };
+    window.setTimeout(waitP, 500);
   }
 
   // ?ve=bash — PvP Stun(Identity) vs a nearby remote (SecondClient).
