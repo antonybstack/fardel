@@ -428,3 +428,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** `?ve=remote-idle-walk` uses `alpha = −π/2.2` (west of target) + radius 16. persistMark names Idle + Walk + sheathed + remotes 2 live (do not latch). Distinct tokens. Dummy trainer.
 - **Seen in:** #517
 
+### 2026-09-08 — humanoid,yaw — key-up snaps 90° onto Tab-target / hitch dt
+- **Cause:** Walking used wishYaw. The first standing frame set `faceYaw = targetYaw` and could still use `YAW_FACE_HZ` (12) so a perpendicular strafe-stop popped onto Dummy. A hitch frame at 12Hz also lerps ~90°.
+- **Do this:** Keep `lastWishYaw`. Standing / key-up always `YAW_TURN_HZ` + rad/s cap. Do not Tab Dummy in `?ve=yaw-blend` (target steals last-wish). persistMark `/^Idle OK/` + Idle_Weapon + `yaw blend` + skinned. Dummy trainer.
+- **Seen in:** #536
+
