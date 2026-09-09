@@ -408,3 +408,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Do not force Idle on flinch end. Gait / remote hold resumes Walk if wish is still on. `?ve=walk-flinch` persistMark names RecieveHit + Walk + skinned. T-POSE / Idle-only while W is held = fail.
 - **Seen in:** #482
 
+### 2026-09-08 — tsc,release,hop — npm run build fails TS6133 remoteHopLatch
+- **Cause:** #490 hop cam writes `remoteHopLatch` (airborne remote hex) but never reads it. `tsconfig` `noUnusedLocals` fails Pages `tsc --noEmit`.
+- **Do this:** `void remoteHopLatch;` next to the declaration (same as `_latestXpAtMs`). Do not invent leftover-remote hide from this lane.
+- **Seen in:** #490 / #495 / pin e9382135 / #520 / pin 3e2bc75
+
