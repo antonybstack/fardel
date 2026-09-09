@@ -75,6 +75,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=remote-walk-stop` | Remote Walk then stand: Idle, no leftover stride (#478); HUD `Idle OK · Idle_Weapon · skinned 1 · remote-walk-stop`. `FARDEL_SECOND_WALK_STOP=1` on `tools/SecondClient`. |
 | `?ve=remote-run` | Remote sprint: Run_Weapon (staffed), not Walk (#480); HUD `Run OK · Run_Weapon · skinned 1`. `FARDEL_SECOND_RUN=1` on `tools/SecondClient`. |
 | `?ve=remote-run-stop` | Remote sprint then stand: Idle, no leftover Run stride (#514); HUD `Idle OK · Idle_Weapon · skinned 1 · remote-run-stop`. `FARDEL_SECOND_RUN_STOP=1` on `tools/SecondClient`. |
+| `?ve=remote-sheathed-run` | Unequipped remote Run, not Run_Weapon / hidden staff (#515); HUD `Run OK · Run · sheathed · skinned 1`. `FARDEL_SECOND_SHEATH_RUN=1` on `tools/SecondClient`. |
 | `?ve=remote-two-clips` | Two living remotes, two clips: Walk + Spell1 (#481); HUD `Two-clips OK · Walk · Spell1 · skinned · remotes 2`. `FARDEL_SECOND_WALK=1` + `FARDEL_SECOND_CAST=1` on two `tools/SecondClient` seats. |
 | `?ve=walk-flinch` | RecieveHit while Walk wish is held, not sliding Idle (#482); HUD `Walk-flinch OK · RecieveHit · Walk · skinned 1`. Dummy trainer. |
 | `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |

@@ -981,9 +981,13 @@ export function setHumanoidStaffEquipped(
   if (prevRun?.isPlaying && a.run && a.run !== prevRun) {
     stopIfPlaying(prevRun);
     startLoop(a.run);
+    if (!equipped) stopIfPlaying(a.idleWeapon, a.run);
     return;
   }
-  if (a.run?.isPlaying) return;
+  if (a.run?.isPlaying) {
+    if (!equipped) stopIfPlaying(a.idleWeapon, a.run);
+    return;
+  }
   stopIfPlaying(prevIdle, a.idle);
   stopIfPlaying(a.idleWeapon, a.idle);
   stopIfPlaying(a.idleUnarmed, a.idle);
