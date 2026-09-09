@@ -106,6 +106,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=hostile-types` | Kind=2 Hostile coral vs Kind=3 Brigand violet vs Dummy parchment vs Vendor mint (#418); HUD `Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418`. |
 | `?ve=brigand-plate` | Kind=2 Hostile coral vs Kind=3 Brigand violet nameplates + combat log names both (#454); HUD `Brigand-plate OK · Hostile coral · Brigand violet · Dummy parchment · log both · #454`. |
 | `?ve=kick` | KickNpc Kind=3 Brigand interrupt + dummy still kickable (#452); HUD `Kick OK · Brigand #… · interrupt · dummy kickable · #452`. |
+| `?ve=kick-tab` | Kick pad A Kind=2, Tab lands on living Kind=3 (#502); HUD `Kick-tab OK · Hostile · Brigand · Tab · dummy trainer · #502`. Dummy-first while a hostile lives = fail. Stay at origin. |
 | `?ve=stun` | StunNpc Kind=3 Brigand lock + dummy still stunnable (#452); HUD `Stun OK · Brigand #… · lock · dummy stunnable · #452`. Walk to ~4m (StunRange 5, AggroRadius 3). |
 | `?ve=stun-hold` | StunNpc a chasing Kind=3 Brigand; it stands for the lock (no Walk moonwalk / leash slide) (#487); HUD `Stun-hold OK · Brigand · stun hold · dummy trainer · #487`. Dummy stays trainer. Drift / Walk during lock = fail. |
 | `?ve=brigand-stun-plate` | StunNpc Kind=3; world plate stays **Brigand** (violet pip), Dummy parchment (#500); HUD `Brigand-stun OK · Brigand · stun · Dummy parchment · #500`. Hostile/Dummy label on Kind=3 = fail |
