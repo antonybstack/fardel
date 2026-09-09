@@ -6664,6 +6664,76 @@ async function main(): Promise<void> {
         camera.alpha = 0.15;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-run-stop') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        // SecondClient sprints (−6.5, −5) ↔ (−1.5, −5) then stands. Prefer a
+        // recently-stopped Idle so leftover FARDEL_SECOND_RUN does not steal.
+        let fx = -4;
+        let fy = 1.0;
+        let fz = -5;
+        let best = -1;
+        let bestHex: string | null = null;
+        const nowMs = performance.now();
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x + 4, parts.root.position.z + 5) <
+            3.5;
+          if (
+            /death/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.2 ||
+            !nearPad
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const running = /run/i.test(clip);
+          const idle =
+            /idle_weapon/i.test(clip) &&
+            !/run/i.test(clip) &&
+            !/walk/i.test(clip) &&
+            parts.staff.isEnabled();
+          const hold = remoteWalkHold.get(hex)?.hold ?? 0;
+          const lastStep = remoteWalkStepAt.get(hex) ?? 0;
+          const age = lastStep > 0 ? nowMs - lastStep : 1e9;
+          const recentlyStopped =
+            idle && age > REMOTE_WALK_STOP_MS && age < 5000;
+          const rank = recentlyStopped
+            ? 4000
+            : running || hold > 0
+              ? 2000 + lastStep * 0.001
+              : idle
+                ? 1000
+                : 100;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'remote-two-clips') {
         hideLocalForRemoteHop(player, localNameplate);
         camera.inertialAlphaOffset = 0;
@@ -7033,6 +7103,7 @@ async function main(): Promise<void> {
         veFollow !== 'remote-walk-stop' &&
         veFollow !== 'remote-sheathed-walk' &&
         veFollow !== 'remote-run' &&
+        veFollow !== 'remote-run-stop' &&
         veFollow !== 'remote-two-clips' &&
         veFollow !== 'walk-flinch'
       ) {
@@ -9148,6 +9219,117 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitRun, 80);
     };
     window.setTimeout(waitRun, 700);
+  }
+
+  // ?ve=remote-run-stop — E8.35 other wizard Idle after Run, no leftover stride.
+  if (ve === 'remote-run-stop') {
+    camera.radius = 7;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-run-stop') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-run-stop: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const sawRunAt = new Map<string, boolean>();
+    let latchedMark: string | null = null;
+    const waitRunStop = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      for (const [hex, p] of remoteMeshes) {
+        const ch = net.getCharacterFor(hex);
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        const live =
+          !!ch &&
+          ch.hp > 0 &&
+          pb.height >= 1.2 &&
+          !/death/i.test(clip) &&
+          nearPad;
+        p.root.setEnabled(live);
+      }
+      const living = remotes.filter((r) => {
+        const p = remoteMeshes.get(r.identityHex);
+        return !!p && p.root.isEnabled();
+      });
+      const n = living.length;
+      let preferred: RemotePose | undefined;
+      for (const r of living) {
+        const p = remoteMeshes.get(r.identityHex);
+        if (!p) continue;
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        if (!nearPad) continue;
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        if (pb.skinned > 0 && /run/i.test(clip)) {
+          sawRunAt.set(r.identityHex, true);
+        }
+        if (
+          sawRunAt.get(r.identityHex) &&
+          p.root.position.y <= 0.05 &&
+          pb.skinned > 0 &&
+          pb.height >= 1.2 &&
+          /idle_weapon/i.test(clip) &&
+          !/run/i.test(clip) &&
+          !/walk/i.test(clip) &&
+          !/death/i.test(clip) &&
+          p.staff.isEnabled()
+        ) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : living[0]
+          ? remoteMeshes.get(living[0].identityHex)
+          : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const idleOk =
+        !!preferred &&
+        pb.skinned > 0 &&
+        pb.height >= 1.2 &&
+        /idle_weapon/i.test(clip) &&
+        !/run/i.test(clip) &&
+        !/walk/i.test(clip) &&
+        !/death/i.test(clip) &&
+        !!parts?.staff.isEnabled();
+      if (idleOk) {
+        latchedMark = `Idle OK · ${clip} · skinned ${pb.skinned} · remote-run-stop`;
+      }
+      if (mark) {
+        if (latchedMark) {
+          mark.textContent = latchedMark;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (n > 0) {
+          mark.textContent =
+            `VE remote-run-stop: remotes ${n} · ${clip} · run ${sawRunAt.size ? 'seen' : 'waiting'} · skinned ${pb.skinned} (FARDEL_SECOND_RUN_STOP=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-run-stop: remotes 0 (start tools/SecondClient FARDEL_SECOND_RUN_STOP=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitRunStop, 80);
+    };
+    window.setTimeout(waitRunStop, 700);
   }
 
   // ?ve=remote-two-clips — E8.33 two living remotes, Walk + Spell1, not a clone stamp.
