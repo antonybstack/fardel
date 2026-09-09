@@ -6627,13 +6627,17 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
       } else if (veFollow === 'remote-two-clips') {
-        player.setEnabled(false);
-        localNameplate.mesh.setEnabled(false);
+        hideLocalForRemoteHop(player, localNameplate);
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
         const tgt = camera.target;
-        const living: { x: number; z: number; hex: string }[] = [];
+        let walkHex: string | null = null;
+        let spellHex: string | null = null;
+        let wx = -4;
+        let wz = -5;
+        let sx = 1.5;
+        let sz = -2;
         for (const [hex, parts] of remoteMeshes) {
           const ch = net?.getCharacterFor(hex);
           if (!ch || ch.hp <= 0) {
@@ -6646,26 +6650,38 @@ async function main(): Promise<void> {
             parts.root.setEnabled(false);
             continue;
           }
-          living.push({ x: parts.root.position.x, z: parts.root.position.z, hex });
+          const isLoco = /^(walk|run)(_weapon)?$/i.test(clip);
+          const isSpell = /spell/i.test(clip);
+          if (isSpell && !spellHex) {
+            spellHex = hex;
+            sx = parts.root.position.x;
+            sz = parts.root.position.z;
+          } else if (isLoco && !walkHex) {
+            walkHex = hex;
+            wx = parts.root.position.x;
+            wz = parts.root.position.z;
+          }
         }
-        const show = new Set(living.slice(0, 2).map((r) => r.hex));
         for (const [hex, parts] of remoteMeshes) {
-          parts.root.setEnabled(show.has(hex));
+          parts.root.setEnabled(hex === walkHex || hex === spellHex);
         }
-        if (living.length >= 2) {
-          tgt.x = (living[0].x + living[1].x) * 0.5;
-          tgt.z = (living[0].z + living[1].z) * 0.5;
-        } else if (living.length === 1) {
-          tgt.x = living[0].x;
-          tgt.z = living[0].z;
+        if (walkHex && spellHex) {
+          tgt.x = (wx + sx) * 0.5;
+          tgt.z = (wz + sz) * 0.5;
+        } else if (spellHex) {
+          tgt.x = sx;
+          tgt.z = sz;
+        } else if (walkHex) {
+          tgt.x = wx;
+          tgt.z = wz;
         } else {
-          tgt.x = -0.5;
-          tgt.z = -2.0;
+          tgt.x = -1;
+          tgt.z = -3;
         }
         tgt.y = 1.1;
         camera.alpha = Math.PI / 2.2;
         camera.beta = Math.PI / 2.55;
-        camera.radius = 16;
+        camera.radius = 14;
       } else if (veFollow === 'remote-sheathed') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -8999,11 +9015,10 @@ async function main(): Promise<void> {
 
   // ?ve=remote-two-clips — E8.33 two living remotes, Walk + Spell1, not a clone stamp.
   if (ve === 'remote-two-clips') {
-    camera.radius = 16;
+    camera.radius = 14;
     camera.alpha = Math.PI / 2.2;
     camera.beta = Math.PI / 2.55;
-    player.setEnabled(false);
-    localNameplate.mesh.setEnabled(false);
+    hideLocalForRemoteHop(player, localNameplate);
   }
   if (net && ve === 'remote-two-clips') {
     const mark = document.getElementById('persistMark');
@@ -9014,12 +9029,10 @@ async function main(): Promise<void> {
       return i >= 0 ? name.slice(i + 1) : name;
     };
     let ticks = 0;
-    let latchedMark: string | null = null;
     const waitTwoClips = () => {
       if (!net) return;
       ticks += 1;
-      player.setEnabled(false);
-      localNameplate.mesh.setEnabled(false);
+      hideLocalForRemoteHop(player, localNameplate);
       const remotes = net.getRemotes();
       syncRemoteMeshes(remotes);
       syncRemoteCastFx(net.getRemoteCombats());
@@ -9047,19 +9060,19 @@ async function main(): Promise<void> {
           p.root.setEnabled(false);
           continue;
         }
-        const isWalk = /^walk$/i.test(clip) || /^run(_weapon)?$/i.test(clip);
+        const isLoco = /^(walk|run)(_weapon)?$/i.test(clip);
         const isSpell = /spell/i.test(clip);
-        if (isWalk && !walkHex) {
-          walkHex = r.identityHex;
-          walkClip = clip;
-          walkSkinned = pb.skinned;
-          p.root.setEnabled(true);
-          continue;
-        }
         if (isSpell && !spellHex) {
           spellHex = r.identityHex;
           spellClip = clip;
           spellSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        if (isLoco && !walkHex) {
+          walkHex = r.identityHex;
+          walkClip = clip;
+          walkSkinned = pb.skinned;
           p.root.setEnabled(true);
           continue;
         }
@@ -9075,12 +9088,9 @@ async function main(): Promise<void> {
         walkSkinned > 0 &&
         spellSkinned > 0 &&
         !!dummy;
-      if (ok) {
-        latchedMark = `Two-clips OK · ${walkClip} · ${spellClip} · skinned ${Math.min(walkSkinned, spellSkinned)} · remotes 2`;
-      }
       if (mark) {
-        if (latchedMark) {
-          mark.textContent = latchedMark;
+        if (ok) {
+          mark.textContent = `Two-clips OK · ${walkClip} · ${spellClip} · skinned ${walkSkinned + spellSkinned} · remotes 2`;
         } else if (remoteMeshes.size > 0 && walkSkinned + spellSkinned <= 0) {
           mark.textContent = `T-POSE · remotes ${remoteMeshes.size}`;
         } else {

@@ -9,6 +9,23 @@ const float targetX = 4.0f;
 const float targetZ = 2.5f;
 const int timeoutMs = 30000;
 
+// Two concurrent SecondClients (WALK+CAST) need distinct tokens. Default
+// anonymous connect can reuse one identity and stamp the same clip twice.
+var tokenDirEnv = Environment.GetEnvironmentVariable("FARDEL_SECOND_TOKEN_DIR");
+var tokenRole =
+    string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_WALK"), "1", StringComparison.OrdinalIgnoreCase) ? "walk" :
+    string.Equals(Environment.GetEnvironmentVariable("FARDEL_SECOND_CAST"), "1", StringComparison.OrdinalIgnoreCase) ? "cast" :
+    null;
+var useToken = !string.IsNullOrWhiteSpace(tokenDirEnv) || tokenRole != null;
+if (useToken)
+{
+    var tokenDir = !string.IsNullOrWhiteSpace(tokenDirEnv)
+        ? tokenDirEnv!
+        : Path.Combine(Path.GetTempPath(), "fardel-second-" + tokenRole);
+    Directory.CreateDirectory(tokenDir);
+    AuthToken.Init("fardel-second", "settings.ini", tokenDir);
+}
+
 var connected = new TaskCompletionSource<Identity>();
 var subscribed = new TaskCompletionSource();
 
@@ -16,11 +33,17 @@ DbConnection? conn = null;
 
 try
 {
-    conn = DbConnection.Builder()
+    var builder = DbConnection.Builder()
         .WithUri(uri)
-        .WithDatabaseName(db)
-        .OnConnect((c, identity, _) =>
+        .WithDatabaseName(db);
+    if (useToken && !string.IsNullOrEmpty(AuthToken.Token))
+    {
+        builder = builder.WithToken(AuthToken.Token);
+    }
+    conn = builder
+        .OnConnect((c, identity, token) =>
         {
+            if (useToken && !string.IsNullOrEmpty(token)) AuthToken.SaveToken(token);
             connected.TrySetResult(identity);
         })
         .OnConnectError(e => connected.TrySetException(e))
@@ -380,8 +403,10 @@ try
             conn.Reducers.EquipStaff();
             await Frame(conn, 200);
         }
-        const float castX = 3.2f;
-        const float castZ = 1.2f;
+        // Near the SW walker so one radius-14 frame holds Walk + Spell.
+        // Dummy (5,0) is ~4 m — inside CastRange 8, outside AggroRadius 3.
+        const float castX = 1.5f;
+        const float castZ = -2.0f;
         var walkGuardC = DateTime.UtcNow.AddSeconds(8);
         while (DateTime.UtcNow < walkGuardC)
         {

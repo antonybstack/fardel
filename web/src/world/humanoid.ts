@@ -225,6 +225,29 @@ function relinkSkeletonToClones(
   }
 }
 
+/** Two remotes sharing one AnimationGroup play the same clip (clone stamp). */
+const claimedAnimGroupIds = new Set<number>();
+
+function takePrivateAnimGroups(groups: AnimationGroup[]): AnimationGroup[] {
+  const out: AnimationGroup[] = [];
+  for (const g of groups) {
+    if (!claimedAnimGroupIds.has(g.uniqueId)) {
+      claimedAnimGroupIds.add(g.uniqueId);
+      out.push(g);
+      continue;
+    }
+    const copy = g.clone(g.name);
+    if (copy) {
+      claimedAnimGroupIds.add(copy.uniqueId);
+      g.stop();
+      out.push(copy);
+    } else {
+      out.push(g);
+    }
+  }
+  return out;
+}
+
 /**
  * instantiateModelsToScene clone() falls back to container targets when the
  * conversion map misses a bone. Remotes then isPlaying Walk on the hidden
@@ -374,7 +397,7 @@ export function createPlayerHumanoid(
 
   const roots = inst.rootNodes;
   const meshes = collectMeshes(roots);
-  const animGroups = inst.animationGroups;
+  const animGroups = takePrivateAnimGroups(inst.animationGroups);
 
   // Wrap under a pivot so we can normalize orientation/scale without breaking bones.
   const pivot = new TransformNode(`${prefix}Pivot`, scene);
