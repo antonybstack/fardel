@@ -1012,6 +1012,10 @@ export function setHumanoidStaffEquipped(
   stopIfPlaying(a.run);
   if (a.idle) {
     a.idle.speedRatio = 1;
+    if (prevIdle && prevIdle !== a.idle) {
+      a.idle.enableBlending = true;
+      a.idle.blendingSpeed = 0.12;
+    }
     if (!a.idle.isPlaying) a.idle.start(true, 1.0, a.idle.from, a.idle.to, false);
   }
 }

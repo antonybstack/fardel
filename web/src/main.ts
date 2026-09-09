@@ -6322,7 +6322,7 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.55;
         // E8.7: far-cam Idle must still read staff-grip (not 8m close-up).
         camera.radius = 16;
-      } else if (veFollow === 'sheathed') {
+      } else if (veFollow === 'sheathed' || veFollow === 'staff-pose') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
@@ -16726,6 +16726,123 @@ async function main(): Promise<void> {
       if (!sheathedOk && ticks < 240) window.setTimeout(waitSheath, 180);
     };
     window.setTimeout(waitSheath, 700);
+  }
+
+  // ?ve=staff-pose — E8.40 unequip plants unarmed Idle; equip plants Idle_Weapon. Dummy trainer.
+  if (ve === 'staff-pose') {
+    camera.radius = 8;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'staff-pose') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE staff-pose: waiting for Connected…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let phase: 'unequip' | 'equip' = 'unequip';
+    let sheathClip = '';
+    let sheathSkinned = 0;
+    const waitPose = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE staff-pose: ${st.state}…`;
+        if (ticks < 220) window.setTimeout(waitPose, 180);
+        return;
+      }
+      net.ensureTrainingDummy();
+      syncNpcMeshes(net.getNpcs());
+      const dummy = (net.getNpcs() ?? []).find(
+        (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+      );
+      const dummyTrainer = !!dummy && !npcMeshes.get(dummy.npcId.toString())?.humanoid;
+      const ch = net.getCharacter();
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitPose, 200);
+        return;
+      }
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = clipBare(pb.playing);
+      const staffOn = humanoid.staff.isEnabled();
+      if (phase === 'unequip') {
+        if (ch?.staffEquipped) {
+          net.unequipStaff();
+          setHumanoidStaffEquipped(humanoid, false);
+          setStaffMeshVisible(humanoid.staff, false);
+          setHumanoidMoving(humanoid, false);
+          if (mark) mark.textContent = 'VE staff-pose: unequipping…';
+          if (ticks < 260) window.setTimeout(waitPose, 180);
+          return;
+        }
+        setHumanoidStaffEquipped(humanoid, false);
+        setStaffMeshVisible(humanoid.staff, false);
+        setHumanoidMoving(humanoid, false);
+        const sheathOk =
+          !!ch &&
+          !ch.staffEquipped &&
+          pb.skinned > 0 &&
+          pb.height >= 1.2 &&
+          /^idle$/i.test(clip) &&
+          !/weapon/i.test(clip) &&
+          !staffOn;
+        if (!sheathOk) {
+          if (pb.skinned <= 0 && mark) {
+            mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+          } else if (mark) {
+            mark.textContent =
+              `VE staff-pose: unequip ${clip} · staff ${staffOn ? 'on' : 'off'} · skinned ${pb.skinned}`;
+          }
+          if (ticks < 260) window.setTimeout(waitPose, 180);
+          return;
+        }
+        sheathClip = clip;
+        sheathSkinned = pb.skinned;
+        phase = 'equip';
+        net.equipStaff();
+        setHumanoidStaffEquipped(humanoid, true);
+        setStaffMeshVisible(humanoid.staff, true);
+        setHumanoidMoving(humanoid, false);
+        if (mark) mark.textContent = `VE staff-pose: ${sheathClip} sheathed · equipping…`;
+        if (ticks < 260) window.setTimeout(waitPose, 180);
+        return;
+      }
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        setHumanoidStaffEquipped(humanoid, true);
+      }
+      setHumanoidStaffEquipped(humanoid, true);
+      setStaffMeshVisible(humanoid.staff, true);
+      setHumanoidMoving(humanoid, false);
+      const equipOk =
+        !!ch &&
+        ch.staffEquipped &&
+        pb.skinned > 0 &&
+        pb.height >= 1.2 &&
+        /^idle_weapon$/i.test(clip) &&
+        staffOn &&
+        dummyTrainer;
+      if (mark) {
+        if (equipOk) {
+          mark.textContent =
+            `Staff-pose OK · ${sheathClip} · ${clip} · sheathed · skinned ${Math.max(sheathSkinned, pb.skinned)}`;
+          return;
+        }
+        if (pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else {
+          mark.textContent =
+            `VE staff-pose: equip ${clip} · staff ${staffOn ? 'on' : 'off'} · skinned ${pb.skinned}`;
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitPose, 180);
+    };
+    window.setTimeout(waitPose, 700);
   }
 
   // ?ve=fps — E9.3 dense play-cam floor. Forest fill, not amber crowd capsules.
