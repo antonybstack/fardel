@@ -1044,10 +1044,8 @@ export function playHumanoidFlinch(parts: HumanoidParts): void {
   stopIfPlaying(a.run);
   if (a.idle) a.idle.speedRatio = 1;
   stopIfPlaying(a.flinch);
-  a.flinch.onAnimationGroupEndObservable.addOnce(() => {
-    if (a.dead || a.casting) return;
-    setHumanoidMoving(parts, false);
-  });
+  // Do not force Idle on end — gait / remote hold resumes Walk if wish is
+  // still on. Idle-on-end while translating is a sliding Idle (#482).
   a.flinch.start(false, 1.0, a.flinch.from, a.flinch.to, false);
 }
 

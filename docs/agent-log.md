@@ -403,3 +403,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Split seats: `FARDEL_SECOND_WALK=1` patrols SW pads (Walk, no Cast). `FARDEL_SECOND_CAST=1` stands in dummy range and loops Emberbolt with no Move during windup (#403). Distinct tokens (`FARDEL_SECOND_TOKEN_DIR` or auto `fardel-second-walk` / `fardel-second-cast`). Clone AnimationGroups if `uniqueId` is already claimed so two remotes cannot share one Walk/Spell group. `?ve=remote-two-clips` persistMark names both clips + `skinned` + `remotes 2` live (do not latch). Hide You; skip Death / T-POSE. Dummy trainer.
 - **Seen in:** #481
 
+### 2026-09-08 — humanoid,flinch — RecieveHit while walking snaps to sliding Idle
+- **Cause:** `playHumanoidFlinch` `onAnimationGroupEnd` always called `setHumanoidMoving(false)`. Walk stopped for the one-shot, then Idle started while sendMove still translated.
+- **Do this:** Do not force Idle on flinch end. Gait / remote hold resumes Walk if wish is still on. `?ve=walk-flinch` persistMark names RecieveHit + Walk + skinned. T-POSE / Idle-only while W is held = fail.
+- **Seen in:** #482
+
