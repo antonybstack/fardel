@@ -171,7 +171,7 @@ function nearestLootInPickupRange(
   return best;
 }
 
-/** Tab cycle: aggroed in-range hostiles first, then other in-range hostiles, then dummy (#484 / #358). */
+/** Tab cycle: living in-range hostiles (aggroed first), then Dummy, then living far hostiles (#484 / #358 / #496). Corpses skipped — never sticky. */
 function tabTargetCycle(net: GameNet): NpcView[] {
   const alive = net.getNpcs().filter((n) => n.hp > 0);
   const pose = net.getLocalPose();
@@ -201,12 +201,20 @@ function tabTargetCycle(net: GameNet): NpcView[] {
   return [...hostilesNear, ...dummy, ...hostilesFar, ...rest];
 }
 
+function npcStunnedNow(n: NpcView, nowMs = Date.now()): boolean {
+  const untilMs = Number(n.stunnedUntilMicros / 1000n);
+  return Number.isFinite(untilMs) && untilMs > nowMs;
+}
+
 function cyclePreferHostiles(net: GameNet): bigint | null {
-  const cycle = tabTargetCycle(net);
+  const cycle = tabTargetCycle(net).filter((n) => n.hp > 0);
   if (cycle.length === 0) return null;
   const cur = net.getCombat()?.targetNpcId ?? 0n;
-  let idx = cycle.findIndex((n) => n.npcId === cur);
-  idx = (idx + 1) % cycle.length;
+  const curRow = net.getNpcs().find((n) => n.npcId === cur);
+  // Dead / missing current is not in the living cycle. After a wipe
+  // cycle[0] is Dummy (no living in-range hostiles). Do not stick on a corpse.
+  const idxCur = curRow && curRow.hp > 0 ? cycle.findIndex((n) => n.npcId === cur) : -1;
+  const idx = idxCur < 0 ? 0 : (idxCur + 1) % cycle.length;
   const next = cycle[idx]!.npcId;
   net.setTarget(next);
   return next;
@@ -277,6 +285,8 @@ type Nameplate = {
   hpFrac: number;
   /** Local Tab-target gold chrome (#142). */
   selected: boolean;
+  /** StunNpc lock chrome. Must not rename Kind=3 off Brigand (#500). */
+  stunned: boolean;
 };
 
 function setStatus(text: string, connState?: ConnectionStatus['state']): void {
@@ -2047,7 +2057,7 @@ const CAM_ZOOM_MAX = 42;
 /** Vertical bole colliders for camera push-in. Quaternius AABB is canopy-wide — do not use it. */
 type TrunkCollider = {
   name: string;
-  kind: 'hero' | 'mid' | 'dummy' | 'hostile' | 'brigand';
+  kind: 'hero' | 'mid' | 'dummy' | 'hostile' | 'brigand' | 'vendor';
   x: number;
   z: number;
   r: number;
@@ -2063,9 +2073,15 @@ const CAM_TRUNK_MIN_HIT = 0.55;
 const CAM_COLLISION_VE_RADIUS = 56;
 /** User zoom min is 4.5; collision may pull closer so nearby bodies do not swallow the cam. */
 const CAM_COLLIDE_FLOOR = 1.55;
+/** Ease radius back out so a grazing miss does not snap 1-frame through a bole (#499). */
+const CAM_RADIUS_RECOVER_MPS = 16;
 const CAM_BODY_PAD = 0.45;
 const CAM_BODY_DUMMY_R = 0.58;
 const CAM_BODY_HOSTILE_R = 0.48;
+/** Stall posts ~0.95×0.62; awning ~1.18×0.85. Circumscribe without eating origin. */
+const CAM_STALL_R = 1.12;
+const CAM_STALL_PAD = 0.4;
+const CAM_STALL_Y1 = 2.25;
 
 function collectTrunkColliders(scene: Scene): TrunkCollider[] {
   const trunks: TrunkCollider[] = [];
@@ -2270,6 +2286,45 @@ function clampRadiusVsTrunks(
   return { radius: Math.max(minRadius, best), hit };
 }
 
+/**
+ * If the spherical cam point sits inside a hero/mid bole, push XZ onto the
+ * cylinder so RMB orbit slides instead of popping through (#499).
+ */
+function slideCamOutOfBoles(
+  target: Vector3,
+  alpha: number,
+  beta: number,
+  radius: number,
+  trunks: TrunkCollider[],
+): { alpha: number; radius: number; hit: string | null } {
+  const sinb = Math.sin(beta);
+  let cx = target.x + Math.cos(alpha) * sinb * radius;
+  const cy = target.y + Math.cos(beta) * radius;
+  let cz = target.z + Math.sin(alpha) * sinb * radius;
+  let hit: string | null = null;
+  for (const t of trunks) {
+    if (t.kind !== 'hero' && t.kind !== 'mid') continue;
+    const r = t.r + (t.pad ?? CAM_TRUNK_PAD);
+    const ox = cx - t.x;
+    const oz = cz - t.z;
+    const d = Math.hypot(ox, oz);
+    if (d >= r || d < 1e-5) continue;
+    const s = r / d;
+    cx = t.x + ox * s;
+    cz = t.z + oz * s;
+    hit = t.name;
+  }
+  if (!hit) return { alpha, radius, hit: null };
+  const dx = cx - target.x;
+  const dz = cz - target.z;
+  const dy = cy - target.y;
+  return {
+    alpha: Math.atan2(dz, dx),
+    radius: Math.max(CAM_COLLIDE_FLOOR, Math.hypot(dx, dy, dz)),
+    hit,
+  };
+}
+
 /** Living Dummy / Hostile / Brigand capsules. Corpses skipped (#466). */
 function collectBodyColliders(
   npcs: NpcView[],
@@ -2292,6 +2347,24 @@ function collectBodyColliders(
       y0: 0,
       y1: dummy ? 2.2 : 1.95,
       pad: CAM_BODY_PAD,
+    });
+  }
+  return out;
+}
+
+/** YardVendor stall cylinder. Dummy/hostiles stay on collectBodyColliders (#497). */
+function collectStallColliders(vendors: VendorView[]): TrunkCollider[] {
+  const out: TrunkCollider[] = [];
+  for (const v of vendors) {
+    out.push({
+      name: 'Vendor',
+      kind: 'vendor',
+      x: v.x,
+      z: v.z,
+      r: CAM_STALL_R,
+      y0: 0,
+      y1: CAM_STALL_Y1,
+      pad: CAM_STALL_PAD,
     });
   }
   return out;
@@ -2915,7 +2988,7 @@ function createNameplate(scene: Scene, key: string): Nameplate {
   mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
   mesh.isPickable = false;
   mesh.position.y = 2.05;
-  return { mesh, mat, tex, label: '', hpFrac: -2, selected: false };
+  return { mesh, mat, tex, label: '', hpFrac: -2, selected: false, stunned: false };
 }
 
 function paintNameplate(
@@ -2924,17 +2997,20 @@ function paintNameplate(
   fillCss: string,
   hpFrac: number,
   selected = false,
+  stunned = false,
 ): void {
   if (
     np.label === label &&
     Math.abs(np.hpFrac - hpFrac) < 0.02 &&
-    np.selected === selected
+    np.selected === selected &&
+    np.stunned === stunned
   ) {
     return;
   }
   np.label = label;
   np.hpFrac = hpFrac;
   np.selected = selected;
+  np.stunned = stunned;
   np.mat.fogEnabled = !selected;
   np.mesh.scaling.set(selected ? 1.1 : 1, selected ? 1.1 : 1, 1);
   const ctx = np.tex.getContext() as unknown as CanvasRenderingContext2D;
@@ -2965,6 +3041,12 @@ function paintNameplate(
     ctx.stroke();
     ctx.strokeStyle = 'rgba(10,8,4,0.9)';
     ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+  if (stunned) {
+    // Cyan stun rim. Label stays Dummy / Hostile / Brigand (#500).
+    ctx.strokeStyle = 'rgba(126,200,255,0.95)';
+    ctx.lineWidth = selected ? 3.5 : 4.5;
     ctx.stroke();
   }
   ctx.shadowColor = 'rgba(0,0,0,0.85)';
@@ -3414,6 +3496,7 @@ async function main(): Promise<void> {
       veCam !== 'cam-collision' &&
       veCam !== 'cam-collision-mid' &&
       veCam !== 'cam-collision-dummy' &&
+      veCam !== 'cam-collision-vendor' &&
       veCam !== 'cam-collision-hop' &&
       Math.abs(camera.radius - camAppliedRadius) > 0.08
     ) {
@@ -3421,14 +3504,32 @@ async function main(): Promise<void> {
     }
     camZoomRadius = Math.min(maxR, Math.max(minR, camZoomRadius));
     const bodies = collectBodyColliders(net?.getNpcs() ?? [], npcMeshes);
-    const { radius, hit } = clampRadiusVsTrunks(
+    const stalls = collectStallColliders(net?.getVendors() ?? []);
+    const colliders = [...trunks, ...bodies, ...stalls];
+    let { radius, hit } = clampRadiusVsTrunks(
       camera.target,
       camera.alpha,
       camera.beta,
       camZoomRadius,
       CAM_COLLIDE_FLOOR,
-      [...trunks, ...bodies],
+      colliders,
     );
+    if (radius > camAppliedRadius) {
+      const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
+      radius = Math.min(radius, camAppliedRadius + CAM_RADIUS_RECOVER_MPS * dt);
+    }
+    const slid = slideCamOutOfBoles(
+      camera.target,
+      camera.alpha,
+      camera.beta,
+      radius,
+      colliders,
+    );
+    if (slid.hit) {
+      camera.alpha = slid.alpha;
+      radius = slid.radius;
+      hit = hit ?? slid.hit;
+    }
     camera.radius = radius;
     camAppliedRadius = radius;
     camCollideHit = hit;
@@ -3733,10 +3834,16 @@ async function main(): Promise<void> {
   };
   const localInterp = makePoseInterp();
   const remoteInterps = new Map<string, PoseInterp>();
-  /** Grounded interp parks at u=1 between 20Hz snaps; hold Walk across the gap. */
-  const REMOTE_WALK_HOLD_S = 0.15;
+  /** Grounded interp parks at u=1 between 20Hz snaps; hold Walk across the gap.
+   * 70–90 ms covers one 20 Hz interval without a leftover stride after stop. */
+  const REMOTE_WALK_HOLD_S = 0.09;
   const REMOTE_WALK_SPD = 0.55;
+  /** Full wish is MOVE_SPEED 4.5; Walk stride ~2.2. Sprint remotes use Run. */
+  const REMOTE_RUN_SPD = 3.2;
   const remoteWalkHold = new Map<string, { hold: number; dx: number; dz: number }>();
+  /** Last pose step that armed Walk. Re-sync with step=0 must not clear this. */
+  const remoteWalkStepAt = new Map<string, number>();
+  const REMOTE_WALK_STOP_MS = 80;
   /** HostileTickMs 100 — hold Walk across 10 Hz NPC snaps (same trap as remotes). */
   const NPC_WALK_HOLD_S = 0.22;
   const NPC_WALK_STEP = 0.04;
@@ -4009,6 +4116,7 @@ async function main(): Promise<void> {
         st.hold = REMOTE_WALK_HOLD_S;
         st.dx = stepX * MOVE_SEND_HZ;
         st.dz = stepZ * MOVE_SEND_HZ;
+        remoteWalkStepAt.set(key, performance.now());
       }
       parts.root.setEnabled(true);
       const rChNow = net?.getCharacterFor(key);
@@ -4037,6 +4145,7 @@ async function main(): Promise<void> {
         remoteLastHp.delete(key);
         remoteInterps.delete(key);
         remoteWalkHold.delete(key);
+        remoteWalkStepAt.delete(key);
         disposeNameplate(remoteNameplates.get(key));
         remoteNameplates.delete(key);
       }
@@ -4882,7 +4991,10 @@ async function main(): Promise<void> {
       }
 
       const prevXz = npcLastXz.get(key);
-      if (prevXz) {
+      const stunned = isAlive && npcStunnedNow(npc);
+      if (stunned) {
+        npcWalkHold.delete(key);
+      } else if (prevXz) {
         const stepX = npc.x - prevXz.x;
         const stepZ = npc.z - prevXz.z;
         const step = Math.hypot(stepX, stepZ);
@@ -4890,6 +5002,7 @@ async function main(): Promise<void> {
           mesh.humanoid &&
           isHostileKind(npc.kind) &&
           isAlive &&
+          !npcStunnedNow(npc) &&
           step > NPC_WALK_STEP &&
           step < NPC_WALK_SNAP
         ) {
@@ -4909,7 +5022,7 @@ async function main(): Promise<void> {
       mesh.root.position.z = npc.z;
       if (mesh.humanoid && isHostileKind(npc.kind)) {
         setHumanoidDead(mesh.humanoid, !isAlive);
-        if (!isAlive) npcWalkHold.delete(key);
+        if (!isAlive || stunned) npcWalkHold.delete(key);
       }
 
       const animating = !!fx && (fx.phase === 'dying' || fx.phase === 'spawning');
@@ -4940,6 +5053,7 @@ async function main(): Promise<void> {
           npcPlateColor(npc.kind, selected),
           npc.maxHp > 0 ? Math.max(0, npc.hp / npc.maxHp) : 0,
           selected,
+          stunned,
         );
       }
 
@@ -5090,7 +5204,15 @@ async function main(): Promise<void> {
       }
       const interpolating = ri.u < 1 - 1e-4;
       const segSpd = Math.hypot(ri.vx, ri.vz);
-      if (interpolating && segSpd > REMOTE_WALK_SPD) {
+      const lastStepAt = remoteWalkStepAt.get(key);
+      if (
+        lastStepAt != null &&
+        performance.now() - lastStepAt > REMOTE_WALK_STOP_MS
+      ) {
+        st.hold = 0;
+        st.dx = 0;
+        st.dz = 0;
+      } else if (interpolating && segSpd > REMOTE_WALK_SPD) {
         st.hold = REMOTE_WALK_HOLD_S;
         st.dx = ri.vx;
         st.dz = ri.vz;
@@ -5106,8 +5228,8 @@ async function main(): Promise<void> {
       } else {
         setHumanoidAirborne(parts, false);
         parts.root.scaling.set(1, 1, 1);
-        // Walk named (not Run); speedRatio from snap/hold m/s.
-        setHumanoidMoving(parts, moving, false, spd);
+        // Sprint wish → Run_Weapon (staffed) / Run (sheathed). Slow stay Walk.
+        setHumanoidMoving(parts, moving, spd >= REMOTE_RUN_SPD, spd);
       }
       if (moving && (st.dx !== 0 || st.dz !== 0)) {
         const targetYaw = Math.atan2(st.dx, st.dz);
@@ -5122,6 +5244,11 @@ async function main(): Promise<void> {
         (n) => n.npcId.toString() === npcKey,
       );
       if (!npcRow || !isHostileKind(npcRow.kind) || npcRow.hp <= 0) continue;
+      if (npcStunnedNow(npcRow)) {
+        npcWalkHold.delete(npcKey);
+        setHumanoidGroundWalk(parts, false, 0);
+        continue;
+      }
       let st = npcWalkHold.get(npcKey);
       if (!st) {
         st = { hold: 0, dx: 0, dz: 0 };
@@ -5401,6 +5528,7 @@ async function main(): Promise<void> {
             (ve === 'run' ||
               (ve !== 'walk' &&
                 ve !== 'walk-stop' &&
+                ve !== 'walk-flinch' &&
                 ve !== 'face-target-walk' &&
                 keys.has('w') &&
                 !keys.has('s')));
@@ -5435,6 +5563,7 @@ async function main(): Promise<void> {
           (ve === 'run' ||
             (ve !== 'walk' &&
               ve !== 'walk-stop' &&
+              ve !== 'walk-flinch' &&
               ve !== 'face-target-walk' &&
               keys.has('w') &&
               !keys.has('s')));
@@ -5463,6 +5592,11 @@ async function main(): Promise<void> {
         if (!parts) continue;
         const npcRow = net.getNpcs().find((n) => n.npcId.toString() === npcKey);
         if (!npcRow || !isHostileKind(npcRow.kind) || npcRow.hp <= 0) continue;
+        if (npcStunnedNow(npcRow)) {
+          npcWalkHold.delete(npcKey);
+          setHumanoidGroundWalk(parts, false, 0);
+          continue;
+        }
         let st = npcWalkHold.get(npcKey);
         if (!st) {
           st = { hold: 0, dx: 0, dz: 0 };
@@ -5728,6 +5862,18 @@ async function main(): Promise<void> {
               );
               flashMesh(humanoid.mat, new Color3(1.0, 0.25, 0.3), 220);
               playHumanoidFlinch(humanoid);
+              if (ve === 'walk-flinch' && keys.has('w')) {
+                const pbHit = readHumanoidPlayback(humanoid);
+                const clipHit = (pbHit.playing ?? '').replace(/^.*\|/, '');
+                const markHit = document.getElementById('persistMark');
+                if (
+                  markHit &&
+                  pbHit.skinned > 0 &&
+                  /recievehit/i.test(clipHit)
+                ) {
+                  markHit.textContent = `Walk-flinch OK · ${clipHit} · Walk · skinned ${pbHit.skinned}`;
+                }
+              }
             } else if (ch.hp > prevPlayerHp && prevPlayerHp > 0) {
               const healed = ch.hp - prevPlayerHp;
               // Authority-backed heal (Rest). Hotkey also toasts; avoid duplicate log spam.
@@ -6168,6 +6314,7 @@ async function main(): Promise<void> {
       } else if (
         veFollow === 'kick' ||
         veFollow === 'stun' ||
+        veFollow === 'stun-hold' ||
         veFollow === 'leash' ||
         veFollow === 'aggro'
       ) {
@@ -6278,6 +6425,17 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = veFollow === 'jump-pose' ? 9 : 7;
+      } else if (veFollow === 'walk-flinch') {
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = player.position.y + 1.0;
+        tgt.z = player.position.z;
+        camera.alpha = 0.35;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
       } else if (veFollow === 'character-wow') {
         // South of spawn looking north: player clips in front, Kind=2 at (3,7)
         // behind, Dummy trainer (5,0) to the right. Mutate target in place.
@@ -6330,6 +6488,226 @@ async function main(): Promise<void> {
         camera.alpha = 0.35;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-walk-stop') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        // SecondClient patrols (−6.5, −5) ↔ (−1.5, −5). Never fall back to You.
+        let fx = -4;
+        let fy = 1.0;
+        let fz = -5;
+        let best = -1;
+        let bestHex: string | null = null;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x + 4, parts.root.position.z + 5) <
+            3.5;
+          if (
+            /death/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.2 ||
+            !nearPad
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const idle =
+            /idle_weapon/i.test(clip) &&
+            !/walk/i.test(clip) &&
+            parts.staff.isEnabled();
+          const walking = /walk/i.test(clip);
+          const hold = remoteWalkHold.get(hex)?.hold ?? 0;
+          const lastStep = remoteWalkStepAt.get(hex) ?? 0;
+          const rank =
+            (hold > 0 || walking ? 3000 : idle ? 2000 : 100) + lastStep * 0.001;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
+      } else if (veFollow === 'remote-sheathed-walk') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = -4;
+        let fy = 1.0;
+        let fz = -5;
+        let best = -1;
+        let bestHex: string | null = null;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0 || ch.staffEquipped) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x + 4, parts.root.position.z + 5) <
+            3.5;
+          if (
+            /death/i.test(clip) ||
+            /weapon/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.0 ||
+            !nearPad ||
+            parts.staff.isEnabled()
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const walking = /^walk$/i.test(clip);
+          const hold = remoteWalkHold.get(hex)?.hold ?? 0;
+          const rank = walking || hold > 0 ? 3000 : 100;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
+      } else if (veFollow === 'remote-run') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let fx = -4;
+        let fy = 1.0;
+        let fz = -5;
+        let best = -1;
+        let bestHex: string | null = null;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          const nearPad =
+            Math.hypot(parts.root.position.x + 4, parts.root.position.z + 5) <
+            3.5;
+          if (
+            /death/i.test(clip) ||
+            pb.skinned <= 0 ||
+            pb.height < 1.0 ||
+            !nearPad
+          ) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const running = /run/i.test(clip);
+          const rank = running ? 3000 : 100;
+          if (rank > best) {
+            best = rank;
+            bestHex = hex;
+            fx = parts.root.position.x;
+            fy = 1.0;
+            fz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === bestHex);
+        }
+        tgt.x = fx;
+        tgt.y = fy;
+        tgt.z = fz;
+        camera.alpha = 0.15;
+        camera.beta = Math.PI / 2.45;
+        camera.radius = 7;
+      } else if (veFollow === 'remote-two-clips') {
+        hideLocalForRemoteHop(player, localNameplate);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let walkHex: string | null = null;
+        let spellHex: string | null = null;
+        let wx = -4;
+        let wz = -5;
+        let sx = 1.5;
+        let sz = -2;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          if (/death/i.test(clip) || pb.skinned <= 0 || pb.height < 1.0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const isLoco = /^(walk|run)(_weapon)?$/i.test(clip);
+          const isSpell = /spell/i.test(clip);
+          if (isSpell && !spellHex) {
+            spellHex = hex;
+            sx = parts.root.position.x;
+            sz = parts.root.position.z;
+          } else if (isLoco && !walkHex) {
+            walkHex = hex;
+            wx = parts.root.position.x;
+            wz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === walkHex || hex === spellHex);
+        }
+        if (walkHex && spellHex) {
+          tgt.x = (wx + sx) * 0.5;
+          tgt.z = (wz + sz) * 0.5;
+        } else if (spellHex) {
+          tgt.x = sx;
+          tgt.z = sz;
+        } else if (walkHex) {
+          tgt.x = wx;
+          tgt.z = wz;
+        } else {
+          tgt.x = -1;
+          tgt.z = -3;
+        }
+        tgt.y = 1.1;
+        camera.alpha = Math.PI / 2.2;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 14;
       } else if (veFollow === 'remote-sheathed') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6573,6 +6951,35 @@ async function main(): Promise<void> {
         camera.beta = Math.PI / 2.18;
         camZoomRadius = CAM_ZOOM_MIN;
         camCollideThisFrame = true;
+      } else if (veFollow === 'cam-collision-vendor') {
+        // Min-zoom orbit into the stall. Collision may pull below zoom min (#497).
+        const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
+        if (!camFollowYSeeded) {
+          camFollowY = targetY;
+          camFollowYSeeded = true;
+        } else if (Math.abs(targetY - camFollowY) > CAM_FOLLOW_SNAP_METERS) {
+          camFollowY = targetY;
+        } else {
+          const a = 1 - Math.exp(-Math.max(0, dt) * CAM_FOLLOW_Y_HZ);
+          camFollowY += (targetY - camFollowY) * a;
+        }
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        tgt.x = player.position.x;
+        tgt.y = camFollowY;
+        tgt.z = player.position.z;
+        const vendor = (net?.getVendors() ?? [])[0];
+        if (vendor) {
+          const mesh = vendorMeshes.get(vendor.vendorId.toString());
+          const dx = (mesh?.root.position.x ?? vendor.x) - player.position.x;
+          const dz = (mesh?.root.position.z ?? vendor.z) - player.position.z;
+          camera.alpha = Math.atan2(dz, dx) + 0.08;
+        }
+        camera.beta = Math.PI / 2.18;
+        camZoomRadius = CAM_ZOOM_MIN;
+        camCollideThisFrame = true;
       } else if (veFollow === 'encounter') {
         // Kind=2 (3,7) + Kind=3 (7,-3) + Dummy (5,0) as people while pad A is pulled (#456).
         camera.inertialAlphaOffset = 0;
@@ -6594,6 +7001,7 @@ async function main(): Promise<void> {
         veFollow !== 'tab-target' &&
         veFollow !== 'tab-hostile' &&
         veFollow !== 'tab-aggro' &&
+        veFollow !== 'tab-dummy' &&
         veFollow !== 'hostile-read' &&
         veFollow !== 'hostile-types' &&
         veFollow !== 'brigand-plate' &&
@@ -6601,12 +7009,19 @@ async function main(): Promise<void> {
         veFollow !== 'hostile-chase' &&
         veFollow !== 'kick' &&
         veFollow !== 'stun' &&
+        veFollow !== 'brigand-stun-plate' &&
+        veFollow !== 'brigand-cast' &&
         veFollow !== 'remote-sheathed' &&
         veFollow !== 'loot-f' &&
         veFollow !== 'rest-exit' &&
         veFollow !== 'path-ground' &&
         veFollow !== 'zoom-stop' &&
-        veFollow !== 'remote-hop'
+        veFollow !== 'remote-hop' &&
+        veFollow !== 'remote-walk-stop' &&
+        veFollow !== 'remote-sheathed-walk' &&
+        veFollow !== 'remote-run' &&
+        veFollow !== 'remote-two-clips' &&
+        veFollow !== 'walk-flinch'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -7695,6 +8110,102 @@ async function main(): Promise<void> {
     window.setTimeout(waitFlinch, 600);
   }
 
+  // ?ve=walk-flinch — E8.34 RecieveHit while Walk wish is held, not sliding Idle.
+  if (ve === 'walk-flinch') {
+    camera.radius = 7;
+    camera.alpha = 0.35;
+    camera.beta = Math.PI / 2.45;
+  }
+  if (net && ve === 'walk-flinch') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE walk-flinch: waiting for Connected…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let seeded = false;
+    let lastCastAt = 0;
+    let sawWalk = false;
+    const waitWalkFlinch = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE walk-flinch: ${st.state}…`;
+        if (ticks < 180) window.setTimeout(waitWalkFlinch, 160);
+        return;
+      }
+      const ch = net.getCharacter();
+      if (ch && !ch.staffEquipped) {
+        net.equipStaff();
+        window.setTimeout(waitWalkFlinch, 250);
+        return;
+      }
+      if (ch && !ch.robesEquipped) {
+        net.equipRobes();
+        window.setTimeout(waitWalkFlinch, 250);
+        return;
+      }
+      setStaffMeshVisible(humanoid.staff, true);
+      setRobesMeshVisible(humanoid, true);
+      keys.add('w');
+      if (!seeded) {
+        net.ensureTrainingDummy();
+        seeded = true;
+      }
+      const cycle = net.getTargetCycle();
+      const dummy =
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0) ??
+        cycle.find((n) => n.kind === NPC_KIND_DUMMY) ??
+        null;
+      if (dummy && dummy.hp > 0) {
+        net.setTarget(dummy.npcId);
+        selectedTargetId = dummy.npcId;
+        const mesh = npcMeshes.get(dummy.npcId.toString());
+        const tx = mesh?.root.position.x ?? dummy.x;
+        const tz = mesh?.root.position.z ?? dummy.z;
+        const dx = tx - player.position.x;
+        const dz = tz - player.position.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist > 2.6) {
+          const scale = Math.min(0.22, dist) / dist;
+          net.sendMove(dx * scale, dz * scale, false);
+        } else if (dist < 1.8) {
+          net.sendMove(-dx * 0.12, -dz * 0.12, false);
+        } else {
+          net.sendMove(-dz * 0.16, dx * 0.16, false);
+        }
+        const gcd = gcdRemainingMs(net.getCombat());
+        const now = Date.now();
+        if (ch && ch.hp > 0 && dist < 8 && gcd <= 0 && now - lastCastAt > 900) {
+          lastCastSpell = SPELL_SPARK;
+          net.cast(SPELL_SPARK);
+          lastCastAt = now;
+        }
+      } else {
+        net.ensureTrainingDummy();
+      }
+      const pb = readHumanoidPlayback(humanoid);
+      const clip = clipBare(pb.playing);
+      if (/^walk/i.test(clip) && pb.skinned > 0) sawWalk = true;
+      const flinchNow = /recievehit/i.test(clip) && pb.skinned > 0;
+      const ok = flinchNow && sawWalk && !/t-pose/i.test(clip);
+      if (mark) {
+        if (ok) {
+          mark.textContent = `Walk-flinch OK · ${clip} · Walk · skinned ${pb.skinned}`;
+        } else if (pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (!/^Walk-flinch OK/.test(mark.textContent ?? '')) {
+          mark.textContent = `VE walk-flinch: ${clip} · walk ${sawWalk ? 'seen' : 'waiting'} · hp ${ch?.hp ?? '?'}`;
+        }
+      }
+      if (ticks < 400) window.setTimeout(waitWalkFlinch, 32);
+    };
+    window.setTimeout(waitWalkFlinch, 600);
+  }
+
   // ?ve=yaw — E2.4 face camera-relative wish (slerp, no client positions).
   if (ve === 'yaw') {
     camera.radius = 7;
@@ -8332,6 +8843,388 @@ async function main(): Promise<void> {
       if (ticks < 240) window.setTimeout(waitRemoteWalk, 200);
     };
     window.setTimeout(waitRemoteWalk, 700);
+  }
+
+  // ?ve=remote-walk-stop — E8.30 other wizard Idle after Walk, no leftover stride.
+  if (ve === 'remote-walk-stop') {
+    camera.radius = 7;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-walk-stop') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-walk-stop: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let sawWalk = false;
+    let walkedHex: string | null = null;
+    let latchedMark: string | null = null;
+    const waitStop = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      for (const [hex, p] of remoteMeshes) {
+        const ch = net.getCharacterFor(hex);
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        const live =
+          !!ch &&
+          ch.hp > 0 &&
+          pb.height >= 1.2 &&
+          !/death/i.test(clip) &&
+          nearPad &&
+          (walkedHex == null || hex === walkedHex);
+        p.root.setEnabled(live);
+      }
+      const living = remotes.filter((r) => {
+        const p = remoteMeshes.get(r.identityHex);
+        return !!p && p.root.isEnabled();
+      });
+      const n = living.length;
+      let preferred: RemotePose | undefined;
+      for (const r of living) {
+        const p = remoteMeshes.get(r.identityHex);
+        if (!p) continue;
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        if (!nearPad) continue;
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        if (
+          pb.skinned > 0 &&
+          (/walk/i.test(clip) || (remoteWalkHold.get(r.identityHex)?.hold ?? 0) > 0)
+        ) {
+          sawWalk = true;
+          walkedHex = r.identityHex;
+        }
+        if (
+          sawWalk &&
+          (!walkedHex || walkedHex === r.identityHex) &&
+          p.root.position.y <= 0.05 &&
+          pb.skinned > 0 &&
+          pb.height >= 1.2 &&
+          /idle_weapon/i.test(clip) &&
+          !/walk/i.test(clip) &&
+          !/death/i.test(clip) &&
+          p.staff.isEnabled()
+        ) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : living[0]
+          ? remoteMeshes.get(living[0].identityHex)
+          : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const idleOk =
+        !!preferred &&
+        sawWalk &&
+        pb.skinned > 0 &&
+        pb.height >= 1.2 &&
+        /idle_weapon/i.test(clip) &&
+        !/walk/i.test(clip) &&
+        !/death/i.test(clip) &&
+        !!parts?.staff.isEnabled();
+      if (idleOk) {
+        latchedMark = `Idle OK · ${clip} · skinned ${pb.skinned} · remote-walk-stop`;
+      }
+      if (mark) {
+        if (latchedMark) {
+          mark.textContent = latchedMark;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (n > 0) {
+          mark.textContent =
+            `VE remote-walk-stop: remotes ${n} · ${clip} · walk ${sawWalk ? 'seen' : 'waiting'} · skinned ${pb.skinned} (FARDEL_SECOND_WALK_STOP=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-walk-stop: remotes 0 (start tools/SecondClient FARDEL_SECOND_WALK_STOP=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitStop, 80);
+    };
+    window.setTimeout(waitStop, 700);
+  }
+
+  // ?ve=remote-sheathed-walk — E8.31 unequipped remote Walk, not Idle_Weapon.
+  if (ve === 'remote-sheathed-walk') {
+    camera.radius = 7;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-sheathed-walk') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-sheathed-walk: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let latchedMark: string | null = null;
+    const waitSheathWalk = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      let preferred: RemotePose | undefined;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || ch.staffEquipped || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        const walkOk =
+          nearPad &&
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          /^walk$/i.test(clip) &&
+          !/weapon/i.test(clip) &&
+          !/idle/i.test(clip) &&
+          !/death/i.test(clip) &&
+          !p.staff.isEnabled();
+        p.root.setEnabled(walkOk);
+        if (walkOk) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const walkOk =
+        !!preferred &&
+        pb.skinned > 0 &&
+        /^walk$/i.test(clip) &&
+        !/weapon/i.test(clip) &&
+        !parts?.staff.isEnabled();
+      if (walkOk) {
+        latchedMark = `Walk OK · ${clip} · sheathed · skinned ${pb.skinned}`;
+      }
+      const n = [...remoteMeshes.values()].filter((p) => p.root.isEnabled()).length;
+      if (mark) {
+        if (latchedMark) {
+          mark.textContent = latchedMark;
+        } else if (n > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (remoteMeshes.size > 0) {
+          const any = [...remoteMeshes.values()][0];
+          const anyPb = any ? readHumanoidPlayback(any) : pb;
+          const anyClip = clipBare(anyPb.playing);
+          mark.textContent =
+            `VE remote-sheathed-walk: remotes ${remoteMeshes.size} · ${anyClip} · staff ${any?.staff.isEnabled() ? 'on' : 'off'} · skinned ${anyPb.skinned} (FARDEL_SECOND_SHEATH_WALK=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-sheathed-walk: remotes 0 (start tools/SecondClient FARDEL_SECOND_SHEATH_WALK=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitSheathWalk, 80);
+    };
+    window.setTimeout(waitSheathWalk, 700);
+  }
+
+  // ?ve=remote-run — E8.32 other wizard Run_Weapon at sprint wish, not Walk.
+  if (ve === 'remote-run') {
+    camera.radius = 7;
+    camera.alpha = 0.15;
+    camera.beta = Math.PI / 2.45;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-run') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-run: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const waitRun = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      let preferred: RemotePose | undefined;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const nearPad =
+          Math.hypot(p.root.position.x + 4, p.root.position.z + 5) < 3.5;
+        const runOkOne =
+          nearPad &&
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          /run/i.test(clip) &&
+          !/walk/i.test(clip) &&
+          !/death/i.test(clip) &&
+          (ch.staffEquipped
+            ? /run_weapon/i.test(clip) && p.staff.isEnabled()
+            : !/weapon/i.test(clip) && !p.staff.isEnabled());
+        p.root.setEnabled(runOkOne);
+        if (runOkOne) {
+          preferred = r;
+          break;
+        }
+      }
+      const parts = preferred
+        ? remoteMeshes.get(preferred.identityHex)
+        : undefined;
+      const pb = parts
+        ? readHumanoidPlayback(parts)
+        : { skinned: 0, playing: null, idle: null, height: 0 };
+      const clip = clipBare(pb.playing);
+      const runOk =
+        !!preferred &&
+        pb.skinned > 0 &&
+        /run/i.test(clip) &&
+        !/walk/i.test(clip);
+      if (mark) {
+        if (runOk) {
+          mark.textContent = `Run OK · ${clip} · skinned ${pb.skinned}`;
+        } else if (remoteMeshes.size > 0 && pb.skinned <= 0) {
+          mark.textContent = `T-POSE · clip=${pb.playing ?? 'none'} · skeleton=${pb.skinned}`;
+        } else if (remoteMeshes.size > 0) {
+          const any = [...remoteMeshes.values()][0];
+          const anyPb = any ? readHumanoidPlayback(any) : pb;
+          const anyClip = clipBare(anyPb.playing);
+          mark.textContent =
+            `VE remote-run: remotes ${remoteMeshes.size} · ${anyClip} · skinned ${anyPb.skinned} (FARDEL_SECOND_RUN=1)`;
+        } else {
+          mark.textContent =
+            'VE remote-run: remotes 0 (start tools/SecondClient FARDEL_SECOND_RUN=1)…';
+        }
+      }
+      if (ticks < 280) window.setTimeout(waitRun, 80);
+    };
+    window.setTimeout(waitRun, 700);
+  }
+
+  // ?ve=remote-two-clips — E8.33 two living remotes, Walk + Spell1, not a clone stamp.
+  if (ve === 'remote-two-clips') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.55;
+    hideLocalForRemoteHop(player, localNameplate);
+  }
+  if (net && ve === 'remote-two-clips') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-two-clips: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const waitTwoClips = () => {
+      if (!net) return;
+      ticks += 1;
+      hideLocalForRemoteHop(player, localNameplate);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      syncRemoteCastFx(net.getRemoteCombats());
+      let walkHex: string | null = null;
+      let spellHex: string | null = null;
+      let walkClip = '';
+      let spellClip = '';
+      let walkSkinned = 0;
+      let spellSkinned = 0;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const living =
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          !/death/i.test(clip) &&
+          !/t-?pose/i.test(clip);
+        if (!living) {
+          p.root.setEnabled(false);
+          continue;
+        }
+        const isLoco = /^(walk|run)(_weapon)?$/i.test(clip);
+        const isSpell = /spell/i.test(clip);
+        if (isSpell && !spellHex) {
+          spellHex = r.identityHex;
+          spellClip = clip;
+          spellSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        if (isLoco && !walkHex) {
+          walkHex = r.identityHex;
+          walkClip = clip;
+          walkSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        p.root.setEnabled(false);
+      }
+      const dummy = (net.getNpcs() ?? []).find(
+        (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+      );
+      const ok =
+        !!walkHex &&
+        !!spellHex &&
+        walkHex !== spellHex &&
+        walkSkinned > 0 &&
+        spellSkinned > 0 &&
+        !!dummy;
+      if (mark) {
+        if (ok) {
+          mark.textContent = `Two-clips OK · ${walkClip} · ${spellClip} · skinned ${walkSkinned + spellSkinned} · remotes 2`;
+        } else if (remoteMeshes.size > 0 && walkSkinned + spellSkinned <= 0) {
+          mark.textContent = `T-POSE · remotes ${remoteMeshes.size}`;
+        } else {
+          mark.textContent =
+            `VE remote-two-clips: remotes ${remoteMeshes.size} · walk ${walkClip || '—'} · spell ${spellClip || '—'} (FARDEL_SECOND_WALK=1 + FARDEL_SECOND_CAST=1)`;
+        }
+      }
+      if (ticks < 320) window.setTimeout(waitTwoClips, 80);
+    };
+    window.setTimeout(waitTwoClips, 700);
   }
 
   // ?ve=remote-sheathed — E8.26 remote Character.staffEquipped=false plays unarmed Idle.
@@ -12089,6 +12982,176 @@ async function main(): Promise<void> {
     window.setTimeout(waitL, 500);
   }
 
+  // ?ve=tab-dummy — after Kind=2 + Kind=3 are corpses, Tab lands on Dummy (#496).
+  // Stay at origin (outside AggroRadius). Wound every hostile then finish on
+  // consecutive GCDs so linger does not restock before the wipe. Dummy trainer.
+  if (ve === 'tab-dummy') {
+    camera.radius = 13;
+    camera.alpha = Math.PI / 2.08;
+    camera.beta = Math.PI / 2.65;
+  }
+  if (net && ve === 'tab-dummy') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE tab-dummy: waiting for Kind=2 + Brigand…';
+    let ticks = 0;
+    let phase: 'kill' | 'tab' | 'done' = 'kill';
+    let lastCast = 0;
+    let tabbed = false;
+    const waitD = () => {
+      if (!net) return;
+      ticks += 1;
+      const pose = net.getLocalPose();
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dummyOk = !!dummy;
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = dummyOk && !!dMesh && !dMesh.humanoid;
+      const hostiles = npcs.filter((n) => isHostileKind(n.kind));
+      const livingH = hostiles.filter((n) => n.hp > 0);
+      const kind2 = hostiles.filter((n) => n.kind === NPC_KIND_HOSTILE);
+      const kind3 = hostiles.filter((n) => n.kind === NPC_KIND_BRIGAND);
+      const corpse2 = kind2.some((n) => n.hp <= 0);
+      const corpse3 = kind3.some((n) => n.hp <= 0);
+      const selfHp = net.getCharacter()?.hp ?? 0;
+      const cam = camera.target;
+      cam.x = 5.6;
+      cam.y = 1.12;
+      cam.z = -0.9;
+      camera.radius = 13;
+      camera.beta = Math.PI / 2.65;
+      if (latestStatus.state !== 'connected' || !dummyOk || kind2.length < 1 || kind3.length < 1) {
+        if (mark) {
+          mark.textContent =
+            `VE tab-dummy: ${latestStatus.state} · H2 ${kind2.length} · B ${kind3.length}…`;
+        }
+        if (ticks < 400) window.setTimeout(waitD, 200);
+        return;
+      }
+      if (selfHp <= 0) {
+        if (mark) mark.textContent = 'Tab-dummy FAIL · player died · #496';
+        return;
+      }
+      if (pose && Math.hypot(pose.x, pose.z) > 0.7) {
+        const step = Math.min(MAX_STEP_METERS, Math.hypot(pose.x, pose.z));
+        const dist = Math.hypot(pose.x, pose.z);
+        const slid = slideAgainstTrunks(pose.x, pose.z, (-pose.x / dist) * step, (-pose.z / dist) * step);
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      if (phase === 'kill') {
+        if (livingH.length === 0 && corpse2 && corpse3) {
+          phase = 'tab';
+          tabbed = false;
+        } else {
+          const wound = livingH.filter((n) => n.hp > 10);
+          const prey = wound[0] ?? livingH[0];
+          if (prey) {
+            net.setTarget(prey.npcId);
+            selectedTargetId = prey.npcId;
+            const ch = net.getCharacter();
+            const mana = ch?.mana ?? 0;
+            if (mana < SPARK_MANA_COST) {
+              void net.rest();
+              if (mark) mark.textContent = `VE tab-dummy: Rest · mana ${mana}`;
+            } else {
+              const now = Date.now();
+              if (now - lastCast >= GCD_MS + 80) {
+                net.cast(SPELL_SPARK);
+                lastCast = now;
+              }
+              if (mark) {
+                mark.textContent =
+                  `VE tab-dummy: spark ${npcPlateName(prey.kind)} · hp ${prey.hp}/${prey.maxHp} · live ${livingH.length}`;
+              }
+            }
+          }
+        }
+      }
+      if (phase === 'done') {
+        if (mark) mark.textContent = 'Tab-dummy OK · Dummy trainer · wipe · #496';
+        return;
+      }
+      if (phase === 'tab') {
+        if (livingH.length > 0) {
+          phase = 'kill';
+          tabbed = false;
+          if (ticks < 400) window.setTimeout(waitD, 200);
+          return;
+        }
+        const combatId = net.getCombat()?.targetNpcId ?? 0n;
+        const combatRow = npcs.find((n) => n.npcId === combatId) ?? null;
+        const needTab =
+          !tabbed ||
+          !combatRow ||
+          combatRow.hp <= 0 ||
+          combatRow.kind !== NPC_KIND_DUMMY;
+        if (needTab) {
+          const id = cyclePreferHostiles(net);
+          if (id != null) selectedTargetId = id;
+          tabbed = true;
+        }
+        const tgtId = selectedTargetId !== 0n ? selectedTargetId : combatId;
+        const tgt = npcs.find((n) => n.npcId === tgtId) ?? combatRow;
+        const cycle = tabTargetCycle(net);
+        const corpseInCycle = cycle.some((n) => n.hp <= 0);
+        const dummyInCycle = cycle.some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+        updateTargetFrame(tgt && tgt.hp > 0 ? tgt : dummy);
+        const mesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+        const ringOn = !!(mesh && mesh.ring.isEnabled());
+        const frame = document.getElementById('targetFrame');
+        const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+        const frameName = document.getElementById('tfName')?.textContent ?? '';
+        const corpseTarget = !!tgt && tgt.hp <= 0 && isHostileKind(tgt.kind);
+        const capsuleCorpse = hostiles.some((n) => {
+          if (n.hp > 0) return false;
+          const m = npcMeshes.get(n.npcId.toString());
+          return !!m && !m.humanoid;
+        });
+        if (capsuleCorpse) {
+          if (mark) mark.textContent = 'Tab-dummy FAIL · capsule · #496';
+          return;
+        }
+        const landedDummy =
+          !!tgt &&
+          tgt.kind === NPC_KIND_DUMMY &&
+          tgt.hp > 0;
+        if (corpseTarget && !landedDummy) {
+          tabbed = false;
+          if (mark) mark.textContent = 'VE tab-dummy: Tab skipped corpse…';
+        }
+        const ok =
+          landedDummy &&
+          dummyTrainer &&
+          dummyInCycle &&
+          !corpseInCycle &&
+          corpse2 &&
+          corpse3 &&
+          livingH.length === 0 &&
+          ringOn &&
+          frameVisible &&
+          /dummy/i.test(frameName);
+        if (ok) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent = 'Tab-dummy OK · Dummy trainer · wipe · #496';
+          }
+          return;
+        } else if (mark && !corpseTarget) {
+          mark.textContent =
+            `VE tab-dummy: Tab tgt ${tgt ? `${npcPlateName(tgt.kind)} hp ${tgt.hp}` : 'none'} · ${frameName}`;
+        }
+      }
+      if (ticks > 400) {
+        if (mark) mark.textContent = `Tab-dummy FAIL · phase ${phase} · #496`;
+        return;
+      }
+      window.setTimeout(waitD, 200);
+    };
+    window.setTimeout(waitD, 500);
+  }
+
   // ?ve=rmb-look — prove RMB-look armed chrome (cursor grabbing + legend LOOKING + status) (#154).
   if (ve === 'rmb-look') {
     camera.radius = 14;
@@ -12452,6 +13515,87 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitDummy, 200);
     };
     window.setTimeout(waitDummy, 400);
+  }
+
+  // ?ve=cam-collision-vendor — min-zoom orbit into the stall; must not sit inside (#497).
+  // Dummy + living hostiles still collide. Stay off pad B (AggroRadius). Dummy trainer.
+  if (net && ve === 'cam-collision-vendor') {
+    camera.beta = Math.PI / 2.18;
+    camera.radius = CAM_ZOOM_MIN;
+    camZoomRadius = CAM_ZOOM_MIN;
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE cam-collision-vendor: finding stall…';
+    let ticks = 0;
+    // Wider stall than Dummy: stand farther so min-zoom grazes (~4.1) instead of
+    // a face close-up. Keep off pad B (AggroRadius 3).
+    const standOff = 5.6;
+    const waitStall = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (mark) mark.textContent = `VE cam-collision-vendor: ${st.state}…`;
+        if (ticks < 240) window.setTimeout(waitStall, 200);
+        return;
+      }
+      syncVendorMeshes(net.getVendors());
+      const pose = net.getLocalPose();
+      const vendor = net.getVendors()[0];
+      const dummyOk = (net.getNpcs() ?? []).some((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      if (!pose || !vendor || !dummyOk) {
+        if (mark) {
+          mark.textContent = `VE cam-collision-vendor: waiting stall ${vendor ? 'y' : 'n'} dummy ${dummyOk ? 'y' : 'n'}`;
+        }
+        if (ticks < 240) window.setTimeout(waitStall, 200);
+        return;
+      }
+      const mesh = vendorMeshes.get(vendor.vendorId.toString());
+      const tx = mesh?.root.position.x ?? vendor.x;
+      const tz = mesh?.root.position.z ?? vendor.z;
+      const dx = tx - pose.x;
+      const dz = tz - pose.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.2 && Math.abs(d - standOff) > 0.25) {
+        const toward = d > standOff ? 1 : -1;
+        const step = Math.min(MAX_STEP_METERS, Math.abs(d - standOff));
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          toward * (dx / d) * step,
+          toward * (dz / d) * step,
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      const want = camZoomRadius;
+      const got = camera.radius;
+      const hit = camCollideHit;
+      const cam = camera.position;
+      const camD = Math.hypot(cam.x - tx, cam.z - tz);
+      const atStand = Math.abs(d - standOff) <= 0.4;
+      const ok =
+        atStand &&
+        hit === 'Vendor' &&
+        got < want &&
+        camD > CAM_STALL_R &&
+        dummyOk;
+      if (ok) {
+        if (mark) {
+          mark.textContent =
+            `Cam-collision OK · Vendor · stall · r=${got.toFixed(1)} < want=${want.toFixed(1)} · min-zoom`;
+        }
+        return;
+      }
+      if (mark) {
+        mark.textContent =
+          Math.abs(d - standOff) > 0.25
+            ? `VE cam-collision-vendor: walk d=${d.toFixed(1)} → ${standOff.toFixed(1)}`
+            : `VE cam-collision-vendor: r=${got.toFixed(1)} want=${want.toFixed(1)} hit=${hit ?? 'none'} · camD=${camD.toFixed(2)}`;
+      }
+      if (ticks < 280) window.setTimeout(waitStall, 200);
+    };
+    window.setTimeout(waitStall, 400);
   }
 
   // ?ve=cam-collision-hop — Space-hop while orbiting into a hero bole (#483).
@@ -20292,6 +21436,492 @@ async function main(): Promise<void> {
       window.setTimeout(waitStunNpc, 200);
     };
     window.setTimeout(waitStunNpc, 600);
+  }
+
+  // ?ve=stun-hold — StunNpc Kind=3 mid-chase; stand for the lock, no Walk moonwalk (#487).
+  if (ve === 'stun-hold') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.4;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'stun-hold') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE stun-hold: waiting for brigand…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let phase: 'pull' | 'stun' | 'hold' | 'done' = 'pull';
+    let holdX = 0;
+    let holdZ = 0;
+    let holdAt = 0;
+    let stunBusy = false;
+    const waitHold = () => {
+      if (!net) return;
+      ticks += 1;
+      const st = latestStatus;
+      if (st.state !== 'connected') {
+        if (ticks < 260) window.setTimeout(waitHold, 80);
+        return;
+      }
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dummyMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && dummy.hp > 0 && !!dummyMesh && !dummyMesh.humanoid;
+      const dummyAggro = dummy?.aggroed === true;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      if (!dummyTrainer || dummyAggro) {
+        if (mark) {
+          mark.textContent = dummyAggro
+            ? 'Stun-hold FAIL · dummy aggroed · #487'
+            : `VE stun-hold: dummy trainer ${dummyTrainer ? 'ok' : 'no'}…`;
+        }
+        if (dummyAggro) return;
+        if (ticks < 260) window.setTimeout(waitHold, 80);
+        return;
+      }
+      if (!brigand) {
+        if (mark) mark.textContent = 'VE stun-hold: waiting Kind=3…';
+        if (ticks < 260) window.setTimeout(waitHold, 80);
+        return;
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      const home = Math.hypot(
+        brigand.x - (brigand.spawnX || padCx),
+        brigand.z - (brigand.spawnZ || padCz),
+      );
+      const dx = brigand.x - player.position.x;
+      const dz = brigand.z - player.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (capsule) {
+        if (mark) mark.textContent = 'Stun-hold FAIL · capsule · #487';
+        return;
+      }
+      if (phase === 'pull') {
+        if (dist > HOSTILE_AGGRO_RADIUS - 0.35 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        }
+        if (brigand.aggroed && home > 0.35) {
+          selectedTargetId = brigand.npcId;
+          net.setTarget(brigand.npcId);
+          phase = 'stun';
+        } else if (mark) {
+          mark.textContent =
+            `VE stun-hold: pull · d=${dist.toFixed(1)} · home=${home.toFixed(2)} · aggro=${brigand.aggroed ? 'y' : 'n'}`;
+        }
+      } else if (phase === 'stun') {
+        if (dist > STUN_RANGE_METERS - 0.5 && dist > 0.2) {
+          const step = Math.min(MAX_STEP_METERS, dist);
+          net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+        } else if (!stunBusy && gcdRemainingMs(net.getCombat()) <= 0) {
+          stunBusy = true;
+          holdX = brigand.x;
+          holdZ = brigand.z;
+          const stunId = brigand.npcId;
+          void net.stunNpc(stunId).then(() => {
+            stunBusy = false;
+            phase = 'hold';
+            holdAt = Date.now();
+            const live = net.getNpcs().find((n) => n.npcId === stunId);
+            holdX = live?.x ?? brigand.x;
+            holdZ = live?.z ?? brigand.z;
+            const bit = `Stun · Brigand #${stunId} · hold`;
+            pushCombatLog('stun', bit);
+            pushSystemToast('stun', bit, TOAST_VE_TTL_MS);
+          }).catch(() => {
+            stunBusy = false;
+          });
+        }
+        if (mark) {
+          mark.textContent =
+            `VE stun-hold: stun · d=${dist.toFixed(1)} · home=${home.toFixed(2)} · ${bLabel || 'no'}`;
+        }
+      } else if (phase === 'hold') {
+        const drift = Math.hypot(brigand.x - holdX, brigand.z - holdZ);
+        const pb = bMesh?.humanoid ? readHumanoidPlayback(bMesh.humanoid) : null;
+        const clip = clipBare(pb?.playing ?? null);
+        const walking = /walk/i.test(clip);
+        const held = Date.now() - holdAt;
+        if (drift > 0.4) {
+          if (mark) {
+            mark.textContent =
+              `Stun-hold FAIL · drift ${drift.toFixed(2)}m · ${clip} · #487`;
+          }
+          return;
+        }
+        if (held >= 200 && walking) {
+          if (mark) {
+            mark.textContent =
+              `Stun-hold FAIL · Walk moonwalk · ${clip} · #487`;
+          }
+          return;
+        }
+        if (
+          held >= 700 &&
+          npcStunnedNow(brigand) &&
+          bLabel === 'Brigand' &&
+          dummyTrainer &&
+          pb != null &&
+          pb.skinned > 0 &&
+          !walking
+        ) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              `Stun-hold OK · Brigand · stun hold · dummy trainer · #487`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE stun-hold: hold ${held}ms · drift=${drift.toFixed(2)} · ${clip} · ${bLabel || 'no'}`;
+        }
+      }
+      if (ticks > 280) {
+        if (mark) {
+          mark.textContent = `Stun-hold FAIL · phase ${phase} · #487`;
+        }
+        return;
+      }
+      window.setTimeout(waitHold, 80);
+    };
+    window.setTimeout(waitHold, 500);
+  }
+
+  // ?ve=brigand-stun-plate — StunNpc Kind=3; plate stays Brigand, Dummy parchment (#500).
+  if (ve === 'brigand-stun-plate') {
+    camera.radius = 12;
+    camera.alpha = Math.PI / 2.25;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'brigand-stun-plate') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE brigand-stun-plate: waiting for Kind=3…';
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let stunBusy = false;
+    let stunnedAt = 0;
+    const waitP = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const pose = net.getLocalPose();
+      const tgt = camera.target;
+      if (brigand) {
+        tgt.x = (brigand.x + (dummy?.x ?? 5)) * 0.5;
+        tgt.y = 1.35;
+        tgt.z = (brigand.z + (dummy?.z ?? 0)) * 0.5;
+        camera.radius = 12;
+        camera.beta = Math.PI / 2.55;
+      }
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || !pose) {
+        if (mark) {
+          mark.textContent =
+            `VE brigand-stun-plate: ${latestStatus.state} · B ${brigand ? 'y' : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 260) window.setTimeout(waitP, 120);
+        return;
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const bStun = bMesh?.nameplate?.stunned === true;
+      const dStunOk = dLabel === 'Dummy';
+      if (bLabel === 'Hostile' || bLabel === 'Dummy') {
+        if (mark) {
+          mark.textContent = `Brigand-stun FAIL · Kind=3 plate ${bLabel || 'none'} · #500`;
+        }
+        return;
+      }
+      const dist = Math.hypot(brigand.x - pose.x, brigand.z - pose.z);
+      const inStun = dist <= STUN_RANGE_METERS - 0.45;
+      const inAggro = dist < HOSTILE_AGGRO_RADIUS;
+      if (!npcStunnedNow(brigand)) {
+        if (inAggro) {
+          const back = Math.hypot(pose.x, pose.z);
+          if (back > 0.2) {
+            net.sendMove(-pose.x * 0.4, -pose.z * 0.4, false);
+          }
+        } else if (!inStun) {
+          const dx = brigand.x - pose.x;
+          const dz = brigand.z - pose.z;
+          const step = Math.min(MAX_STEP_METERS, dist - (STUN_RANGE_METERS - 0.55));
+          const slid = slideAgainstTrunks(pose.x, pose.z, (dx / dist) * step, (dz / dist) * step);
+          if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+            net.sendMove(slid.dx, slid.dz, false);
+          }
+        } else if (!stunBusy && gcdRemainingMs(net.getCombat()) <= 0) {
+          stunBusy = true;
+          net.setTarget(brigand.npcId);
+          selectedTargetId = brigand.npcId;
+          void net.stunNpc(brigand.npcId).then(() => {
+            stunBusy = false;
+            stunnedAt = Date.now();
+          }).catch(() => {
+            stunBusy = false;
+          });
+        }
+        if (mark) {
+          mark.textContent =
+            `VE brigand-stun-plate: walk d=${dist.toFixed(1)} · plate ${bLabel || 'no'}`;
+        }
+      } else if (
+        bLabel === 'Brigand' &&
+        bStun &&
+        dStunOk &&
+        dummyTrainer &&
+        npcStunnedNow(brigand)
+      ) {
+        if (mark) {
+          mark.textContent =
+            'Brigand-stun OK · Brigand · stun · Dummy parchment · #500';
+        }
+        return;
+      } else if (mark) {
+        mark.textContent =
+          `VE brigand-stun-plate: lock plate ${bLabel || 'no'} stun ${bStun ? 'y' : 'n'} dummy ${dLabel}`;
+      }
+      if (ticks > 280) {
+        if (mark) mark.textContent = `Brigand-stun FAIL · plate ${bLabel || 'none'} · #500`;
+        return;
+      }
+      void stunnedAt;
+      window.setTimeout(waitP, 120);
+    };
+    window.setTimeout(waitP, 500);
+  }
+
+  // ?ve=brigand-cast — Spark + Emberbolt land on living Kind=3 (#501).
+  // Stay at origin (CastRange 8 reaches pad C; AggroRadius 3 does not). Dummy trainer.
+  if (ve === 'brigand-cast') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.12;
+    camera.beta = Math.PI / 2.65;
+  }
+  if (net && ve === 'brigand-cast') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE brigand-cast: waiting for Kind=3…';
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let phase: 'spark' | 'ember' | 'dummy' | 'done' = 'spark';
+    let hp0 = 0;
+    let sparkHp = 0;
+    let lastCast = 0;
+    const waitC = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ??
+        npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0) ??
+        npcs.find((n) => n.kind === NPC_KIND_BRIGAND);
+      const pose = net.getLocalPose();
+      const tgt = camera.target;
+      if (brigand) {
+        tgt.x = (brigand.x + (dummy?.x ?? 5)) * 0.5;
+        tgt.y = 1.35;
+        tgt.z = (brigand.z + (dummy?.z ?? 0)) * 0.5;
+        camera.radius = 16;
+        camera.beta = Math.PI / 2.65;
+      }
+      net.ensureTrainingDummy();
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || brigand.hp <= 0 || !pose) {
+        if (mark) {
+          mark.textContent =
+            `VE brigand-cast: ${latestStatus.state} · B ${brigand ? (brigand.hp > 0 ? 'y' : 'corpse') : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 400) window.setTimeout(waitC, 150);
+        else if (mark) mark.textContent = 'Brigand-cast FAIL · no living Kind=3 · #501';
+        return;
+      }
+      const bMesh = npcMeshes.get(brigand.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const dLabel = dMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      if (capsule) {
+        if (mark) mark.textContent = 'Brigand-cast FAIL · capsule · #501';
+        return;
+      }
+      if (bLabel === 'Hostile' || bLabel === 'Dummy') {
+        if (mark) {
+          mark.textContent = `Brigand-cast FAIL · Kind=3 plate ${bLabel || 'none'} · #501`;
+        }
+        return;
+      }
+      // Stay at origin — CastRange 8, outside AggroRadius 3.
+      if (Math.hypot(pose.x, pose.z) > 0.7) {
+        const dist = Math.hypot(pose.x, pose.z);
+        const step = Math.min(MAX_STEP_METERS, dist);
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          (-pose.x / dist) * step,
+          (-pose.z / dist) * step,
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      const distB = Math.hypot(brigand.x - pose.x, brigand.z - pose.z);
+      if (distB > CAST_RANGE_METERS + 0.4) {
+        if (mark) {
+          mark.textContent =
+            `VE brigand-cast: OOR d=${distB.toFixed(1)} · stay origin · #501`;
+        }
+        if (ticks < 400) window.setTimeout(waitC, 120);
+        return;
+      }
+      const ch = net.getCharacter();
+      const mana = ch?.mana ?? 0;
+      const combat = net.getCombat();
+      const gcd = gcdRemainingMs(combat);
+      const windup = castRemainingMs(combat);
+      const now = Date.now();
+      const committed = (combat?.targetNpcId ?? 0n) === brigand.npcId;
+      if (phase === 'spark') {
+        if (hp0 <= 0) hp0 = brigand.hp;
+        net.setTarget(brigand.npcId);
+        selectedTargetId = brigand.npcId;
+        updateTargetFrame(brigand);
+        if (brigand.hp < hp0) {
+          sparkHp = brigand.hp;
+          phase = 'ember';
+        } else if (!committed) {
+          if (mark) mark.textContent = 'VE brigand-cast: setTarget Brigand…';
+        } else if (mana < SPARK_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE brigand-cast: Rest · mana ${mana}`;
+        } else if (gcd <= 0 && windup <= 0 && now - lastCast >= GCD_MS + 80) {
+          net.cast(SPELL_SPARK);
+          lastCast = now;
+          if (mark) {
+            mark.textContent =
+              `VE brigand-cast: Spark ${bLabel || 'Brigand'} · hp ${brigand.hp}/${brigand.maxHp}`;
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE brigand-cast: Spark wait · hp ${brigand.hp}/${hp0} · gcd ${gcd}`;
+        }
+      } else if (phase === 'ember') {
+        net.setTarget(brigand.npcId);
+        selectedTargetId = brigand.npcId;
+        updateTargetFrame(brigand);
+        if (sparkHp > 0 && brigand.hp < sparkHp) {
+          phase = 'dummy';
+        } else if (windup > 0) {
+          if (mark) {
+            mark.textContent =
+              `VE brigand-cast: Emberbolt windup ${windup}ms · hp ${brigand.hp}`;
+          }
+        } else if (mana < EMBERBOLT_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE brigand-cast: Rest · mana ${mana}`;
+        } else if (gcd <= 0 && now - lastCast >= GCD_MS + 80) {
+          net.cast(SPELL_EMBERBOLT);
+          lastCast = now;
+          if (mark) {
+            mark.textContent =
+              `VE brigand-cast: Emberbolt ${bLabel || 'Brigand'} · hp ${brigand.hp}/${brigand.maxHp}`;
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE brigand-cast: Emberbolt wait · hp ${brigand.hp}/${sparkHp} · gcd ${gcd}`;
+        }
+      } else if (phase === 'dummy') {
+        if (dummy) {
+          net.setTarget(dummy.npcId);
+          selectedTargetId = dummy.npcId;
+          updateTargetFrame(dummy);
+        }
+        const combatId = net.getCombat()?.targetNpcId ?? 0n;
+        const combatRow = npcs.find((n) => n.npcId === combatId) ?? null;
+        const frame = document.getElementById('targetFrame');
+        const frameVisible = !!(frame && !frame.classList.contains('hidden'));
+        const frameName = document.getElementById('tfName')?.textContent ?? '';
+        const dummySel =
+          !!dummy &&
+          dummy.hp > 0 &&
+          dummyTrainer &&
+          dLabel === 'Dummy' &&
+          (selectedTargetId === dummy.npcId || combatRow?.kind === NPC_KIND_DUMMY) &&
+          frameVisible &&
+          /dummy/i.test(frameName);
+        const sparkOk = sparkHp > 0 && sparkHp < hp0;
+        const emberOk = brigand.hp < sparkHp;
+        const living = brigand.hp > 0;
+        if (
+          bLabel === 'Brigand' &&
+          sparkOk &&
+          emberOk &&
+          dummySel &&
+          living &&
+          dummyTrainer
+        ) {
+          phase = 'done';
+          if (mark) {
+            mark.textContent =
+              'Brigand-cast OK · Brigand · Spark · Emberbolt · dummy trainer · #501';
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE brigand-cast: dummy ${dLabel || 'no'} frame ${frameName} · B hp ${brigand.hp}`;
+        }
+      }
+      if (phase === 'done') {
+        if (mark) {
+          mark.textContent =
+            'Brigand-cast OK · Brigand · Spark · Emberbolt · dummy trainer · #501';
+        }
+        return;
+      }
+      if (ticks > 300) {
+        if (mark) {
+          mark.textContent =
+            `Brigand-cast FAIL · phase ${phase} · plate ${bLabel || 'none'} · #501`;
+        }
+        return;
+      }
+      window.setTimeout(waitC, 120);
+    };
+    window.setTimeout(waitC, 500);
   }
 
   // ?ve=bash — PvP Stun(Identity) vs a nearby remote (SecondClient).

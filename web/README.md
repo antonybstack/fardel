@@ -69,8 +69,13 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 |---|---|
 | `?ve=two-client` | Wait for remote `PlayerPose` humanoids; HUD `remotes:` + `Two-client OK` |
 | `?ve=remote-sheathed` | Remote without staff: unarmed Idle (not Idle_Weapon + hidden stick) (#448); HUD `Remote sheathed OK · Idle · skinned 1`. `FARDEL_SECOND_SHEATH=1` on `tools/SecondClient`. |
+| `?ve=remote-sheathed-walk` | Unequipped remote Walk, not Idle_Weapon / hidden staff (#479); HUD `Walk OK · Walk · sheathed · skinned 1`. `FARDEL_SECOND_SHEATH_WALK=1` on `tools/SecondClient`. |
 | `?ve=remote-hop` | Remote airborne Idle_Weapon hold, no Walk, no squash (#449); HUD `Remote hop OK · Idle_Weapon · skinned 1`. `FARDEL_SECOND_HOP=1` on `tools/SecondClient`. |
 | `?ve=walk-stop` | Walk then release WASD: Idle, no leftover Walk stride (#450); HUD `Idle OK · Idle_Weapon · skinned 1 · walk-stop`. |
+| `?ve=remote-walk-stop` | Remote Walk then stand: Idle, no leftover stride (#478); HUD `Idle OK · Idle_Weapon · skinned 1 · remote-walk-stop`. `FARDEL_SECOND_WALK_STOP=1` on `tools/SecondClient`. |
+| `?ve=remote-run` | Remote sprint: Run_Weapon (staffed), not Walk (#480); HUD `Run OK · Run_Weapon · skinned 1`. `FARDEL_SECOND_RUN=1` on `tools/SecondClient`. |
+| `?ve=remote-two-clips` | Two living remotes, two clips: Walk + Spell1 (#481); HUD `Two-clips OK · Walk · Spell1 · skinned · remotes 2`. `FARDEL_SECOND_WALK=1` + `FARDEL_SECOND_CAST=1` on two `tools/SecondClient` seats. |
+| `?ve=walk-flinch` | RecieveHit while Walk wish is held, not sliding Idle (#482); HUD `Walk-flinch OK · RecieveHit · Walk · skinned 1`. Dummy trainer. |
 | `?ve=minimap` | Seed crowd + dummy; prove top-right 2D minimap dots (`ve/babylon-minimap.png`) |
 | `?ve=minimap-read` | Plate + blips + N vs #39 cyan fog at play cam (#103 / #61) |
 | `?ve=minimap-pip` | Self pip + north readable while WASDing (#164); pulse/halo/N on top of sliding blips |
@@ -96,11 +101,15 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=face-target-walk` | Walk toward Tab Dummy, face target, Walk clip, no moonwalk (#432); HUD `Walk OK · Walk · skinned 1 · face target` |
 | `?ve=tab-hostile` | Tab visits Kind=2 and Kind=3; dummy still in cycle (#453); HUD `Tab-hostile OK · Brigand #… · dummy selectable · #453`. |
 | `?ve=tab-aggro` | After a pull, Tab selects the **aggroed** NPC (not lowest id) while Kind=2 and Kind=3 are in range (#484); HUD `Tab-aggro OK · Brigand · pulled · dummy trainer`. Dummy stays in the cycle |
+| `?ve=tab-dummy` | After Kind=2 and Kind=3 are corpses, Tab selects Dummy trainer (#496); HUD `Tab-dummy OK · Dummy trainer · wipe · #496`. Corpses skipped / not sticky. Stay at origin. |
 | `?ve=hostile-read` | Hostile coral plate vs Dummy parchment vs Vendor mint at play cam (#359); HUD `Hostile-read OK · Hostile coral · Dummy parchment · Vendor mint · #359`. |
 | `?ve=hostile-types` | Kind=2 Hostile coral vs Kind=3 Brigand violet vs Dummy parchment vs Vendor mint (#418); HUD `Hostile-types OK · Hostile coral · Brigand violet · Dummy parchment · Vendor mint · #418`. |
 | `?ve=brigand-plate` | Kind=2 Hostile coral vs Kind=3 Brigand violet nameplates + combat log names both (#454); HUD `Brigand-plate OK · Hostile coral · Brigand violet · Dummy parchment · log both · #454`. |
 | `?ve=kick` | KickNpc Kind=3 Brigand interrupt + dummy still kickable (#452); HUD `Kick OK · Brigand #… · interrupt · dummy kickable · #452`. |
 | `?ve=stun` | StunNpc Kind=3 Brigand lock + dummy still stunnable (#452); HUD `Stun OK · Brigand #… · lock · dummy stunnable · #452`. Walk to ~4m (StunRange 5, AggroRadius 3). |
+| `?ve=stun-hold` | StunNpc a chasing Kind=3 Brigand; it stands for the lock (no Walk moonwalk / leash slide) (#487); HUD `Stun-hold OK · Brigand · stun hold · dummy trainer · #487`. Dummy stays trainer. Drift / Walk during lock = fail. |
+| `?ve=brigand-stun-plate` | StunNpc Kind=3; world plate stays **Brigand** (violet pip), Dummy parchment (#500); HUD `Brigand-stun OK · Brigand · stun · Dummy parchment · #500`. Hostile/Dummy label on Kind=3 = fail |
+| `?ve=brigand-cast` | Spark + Emberbolt land on living Kind=3 (#501); HUD `Brigand-cast OK · Brigand · Spark · Emberbolt · dummy trainer · #501`. Stay at origin. Capsule = fail. Dummy still selectable |
 | `?ve=respawn` | Kill pad A from origin (outside aggro), linger revive at home pad (#421); HUD `Respawn OK · pad A · dummy trainer · #421`. Do not walk into AggroRadius. Dummy stays trainer. |
 | `?ve=encounter` | Kind=2 Hostile + Kind=3 Brigand as people, dummy trainer, pad A fight (#456); HUD `Encounter OK · Hostile · Brigand · dummy trainer · fighting · skinned · #456`. capsule = fail. |
 | `?ve=hunt-loop` | Tab Kind=3 Brigand, Spark hit, kill, corpse loot at play cam (#485 / #422); HUD `Hunt-loop OK · Tab · hit · death · loot · Brigand · dummy trainer`. Stay outside AggroRadius. Dummy stays trainer. Capsule = fail |
@@ -136,9 +145,10 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=sky-horizon` | Distant layered mountain ranges + fog-matched sky (#55 / #273) (`ve/babylon-sky-horizon.png`) |
 | `?ve=place-wow` | Establishing shot vs hordes place ref (#276 / #342); path recedes to a second silhouette |
 | `?ve=collision` | Local WASD blocked/sliding on a hero bole (#339); HUD `Collision OK · blocked against a hero trunk` |
-| `?ve=cam-collision` | Orbit into a **hero** bole; camera stays in the clearing (#351); HUD `Cam-collision OK · r=… · heroTree… · clearing` |
+| `?ve=cam-collision` | Orbit into a **hero** bole; camera stays in the clearing (#351 / #499); HUD `Cam-collision OK · r=… · heroTree… · clearing`. Radius recover + XZ slide — no 1-frame pop through the trunk |
 | `?ve=cam-collision-mid` | Orbit into a **midTree_*** bole; camera stays in the open (#465); HUD `Cam-collision OK · r=… · midTree_… · mid`. Hero-only hit = fail |
 | `?ve=cam-collision-dummy` | Min-zoom orbit into **Dummy**; camera stays outside the scarecrow (#466); HUD `Cam-collision OK · Dummy · r=… · min-zoom`. Living Hostile/Brigand use the same cylinders; corpses ignored |
+| `?ve=cam-collision-vendor` | Min-zoom orbit into the **vendor stall**; camera stays outside the awning (#497); HUD `Cam-collision OK · Vendor · stall · r=… · min-zoom`. Dummy + living hostiles still collide |
 | `?ve=cam-collision-hop` | Space-hop while orbiting into a **hero** (or mid) bole (#483); HUD `Cam-collision OK · r=… · heroTree… · hop y=…`. Grounded-only hit = fail. E1 Y-spring stays |
 | `?ve=fps` | Dense play-cam FPS HUD ≥30 (#341); persistMark `FPS OK · N fps (floor 30) · dense play-cam` |
 | `?ve=vendor-panel` | Vendor buy/sell panel chrome vs #39 fog (#106) — bronze buy / mint sell on silver plate; interim capture `/workspace/ve-capture/pr-vendor-panel.png` (no `ve/*.png` commit) |

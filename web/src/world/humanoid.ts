@@ -55,6 +55,8 @@ type HumanoidAnim = {
   idleWeapon: AnimationGroup | null;
   idleUnarmed: AnimationGroup | null;
   walk: AnimationGroup | null;
+  walkWeapon: AnimationGroup | null;
+  walkUnarmed: AnimationGroup | null;
   run: AnimationGroup | null;
   runWeapon: AnimationGroup | null;
   runUnarmed: AnimationGroup | null;
@@ -158,6 +160,9 @@ function applyStaffClips(a: HumanoidAnim): void {
   a.idle = a.staffEquipped
     ? (a.idleWeapon ?? a.idleUnarmed)
     : (a.idleUnarmed ?? a.idleWeapon);
+  a.walk = a.staffEquipped
+    ? (a.walkWeapon ?? a.walkUnarmed)
+    : (a.walkUnarmed ?? a.walkWeapon);
   a.run = a.staffEquipped
     ? (a.runWeapon ?? a.runUnarmed)
     : (a.runUnarmed ?? a.runWeapon);
@@ -218,6 +223,29 @@ function relinkSkeletonToClones(
       nodes.find((n) => bareName(n.name, prefix) === bn);
     if (tn) bone.linkTransformNode(tn);
   }
+}
+
+/** Two remotes sharing one AnimationGroup play the same clip (clone stamp). */
+const claimedAnimGroupIds = new Set<number>();
+
+function takePrivateAnimGroups(groups: AnimationGroup[]): AnimationGroup[] {
+  const out: AnimationGroup[] = [];
+  for (const g of groups) {
+    if (!claimedAnimGroupIds.has(g.uniqueId)) {
+      claimedAnimGroupIds.add(g.uniqueId);
+      out.push(g);
+      continue;
+    }
+    const copy = g.clone(g.name);
+    if (copy) {
+      claimedAnimGroupIds.add(copy.uniqueId);
+      g.stop();
+      out.push(copy);
+    } else {
+      out.push(g);
+    }
+  }
+  return out;
 }
 
 /**
@@ -369,7 +397,7 @@ export function createPlayerHumanoid(
 
   const roots = inst.rootNodes;
   const meshes = collectMeshes(roots);
-  const animGroups = inst.animationGroups;
+  const animGroups = takePrivateAnimGroups(inst.animationGroups);
 
   // Wrap under a pivot so we can normalize orientation/scale without breaking bones.
   const pivot = new TransformNode(`${prefix}Pivot`, scene);
@@ -668,7 +696,9 @@ export function createPlayerHumanoid(
   // E8.2: Run_Weapon for fast/forward; Walk for slow/strafe. Do not alias Run as Walk.
   const runWeapon = findAnimExact(animGroups, 'Run_Weapon');
   const runUnarmed = findAnimExact(animGroups, 'Run');
-  const walk = findAnimExact(animGroups, 'Walk') ?? runWeapon ?? runUnarmed;
+  const walkWeapon = findAnimExact(animGroups, 'Walk_Weapon');
+  const walkUnarmed = findAnimExact(animGroups, 'Walk');
+  const walk = walkWeapon ?? walkUnarmed ?? runWeapon ?? runUnarmed;
   const air = findAnim(animGroups, 'Jump', 'Falling', 'Fall');
   const death = findAnim(animGroups, 'Death');
   // Pack spelling is RecieveHit (not Receive). Prefer the non-Attacking clip.
@@ -684,6 +714,8 @@ export function createPlayerHumanoid(
     idleWeapon,
     idleUnarmed,
     walk,
+    walkWeapon,
+    walkUnarmed,
     run: runWeapon ?? runUnarmed,
     runWeapon,
     runUnarmed,
@@ -819,8 +851,10 @@ const WALK_REF_MPS = 2.2;
 const RUN_REF_MPS = 5.0;
 
 /**
- * Grounded Walk named (not Run). NPC chase/leash and remotes pass snap m/s
- * so speedRatio matches XZ. `running=true` is the local W sprint only.
+ * Grounded Walk named (not Run) unless `running`. NPC chase/leash and remotes
+ * pass snap m/s so speedRatio matches XZ. Local W sprint and remote full-wish
+ * (#480) pass `running=true` → Run_Weapon / unarmed Run.
+ * Remotes share this Idle-first stop — do not keep Walk at 0 wish (#450 / #478).
  */
 export function setHumanoidMoving(
   parts: HumanoidParts,
@@ -841,11 +875,15 @@ export function setHumanoidMoving(
     // leaves one CPU-skin frame of mid-stride Walk at 0 wish (skate) or no
     // group (bind-T). Same order as cast-cancel.
     if (a.walk) a.walk.speedRatio = 0;
+    if (a.walkWeapon) a.walkWeapon.speedRatio = 0;
+    if (a.walkUnarmed) a.walkUnarmed.speedRatio = 0;
     if (a.run) a.run.speedRatio = 0;
     if (a.runWeapon) a.runWeapon.speedRatio = 0;
     if (a.runUnarmed) a.runUnarmed.speedRatio = 0;
     startLoop(a.idle);
     stopIfPlaying(a.walk, a.idle);
+    stopIfPlaying(a.walkWeapon, a.idle);
+    stopIfPlaying(a.walkUnarmed, a.idle);
     stopIfPlaying(a.run, a.idle);
     stopIfPlaying(a.runWeapon, a.idle);
     stopIfPlaying(a.runUnarmed, a.idle);
@@ -862,6 +900,8 @@ export function setHumanoidMoving(
   stopIfPlaying(a.idleWeapon, loc);
   stopIfPlaying(a.idleUnarmed, loc);
   stopIfPlaying(a.walk, loc);
+  stopIfPlaying(a.walkWeapon, loc);
+  stopIfPlaying(a.walkUnarmed, loc);
   stopIfPlaying(a.run, loc);
   stopIfPlaying(a.runWeapon, loc);
   stopIfPlaying(a.runUnarmed, loc);
@@ -907,9 +947,10 @@ export function setHumanoidTurning(
 
 /**
  * Equip: show staff + Idle_Weapon / Run_Weapon (grip, not bind-T).
- * Unequip: hide the stick and play unarmed Idle / Run (not a floating grip).
- * Remotes must follow Character.staffEquipped — hiding the mesh is not enough
- * (`Idle_Weapon` is an includes-match on `Idle`).
+ * Unequip: hide the stick and play unarmed Idle / Walk / Run (not a floating
+ * grip). Remotes must follow Character.staffEquipped — hiding the mesh is
+ * not enough (`Idle_Weapon` is an includes-match on `Idle`). Wizard.glb has
+ * Walk but no Walk_Weapon; sheathed movers still use unarmed Walk.
  */
 export function setHumanoidStaffEquipped(
   parts: HumanoidParts,
@@ -920,12 +961,22 @@ export function setHumanoidStaffEquipped(
   if (!a) return;
   a.staffEquipped = equipped;
   const prevIdle = a.idle;
+  const prevWalk = a.walk;
   const prevRun = a.run;
   applyStaffClips(a);
   if (a.dead || a.airborne || a.casting) return;
   if (a.flinch?.isPlaying || a.cast?.isPlaying) return;
   stopIfPlaying(a.death);
-  if (a.walk?.isPlaying) return;
+  if (prevWalk?.isPlaying && a.walk && a.walk !== prevWalk) {
+    stopIfPlaying(prevWalk);
+    startLoop(a.walk);
+    if (!equipped) stopIfPlaying(a.idleWeapon, a.walk);
+    return;
+  }
+  if (a.walk?.isPlaying) {
+    if (!equipped) stopIfPlaying(a.idleWeapon, a.walk);
+    return;
+  }
   if (prevRun?.isPlaying && a.run && a.run !== prevRun) {
     stopIfPlaying(prevRun);
     startLoop(a.run);
@@ -993,10 +1044,8 @@ export function playHumanoidFlinch(parts: HumanoidParts): void {
   stopIfPlaying(a.run);
   if (a.idle) a.idle.speedRatio = 1;
   stopIfPlaying(a.flinch);
-  a.flinch.onAnimationGroupEndObservable.addOnce(() => {
-    if (a.dead || a.casting) return;
-    setHumanoidMoving(parts, false);
-  });
+  // Do not force Idle on end — gait / remote hold resumes Walk if wish is
+  // still on. Idle-on-end while translating is a sliding Idle (#482).
   a.flinch.start(false, 1.0, a.flinch.from, a.flinch.to, false);
 }
 

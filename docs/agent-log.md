@@ -363,8 +363,53 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Cycle Tab until Kind=3. Frame pad C. persistMark names `Brigand`. Stay at origin (outside AggroRadius). Dummy trainer. Capsule = fail.
 - **Seen in:** #485 / #422
 
+### 2026-09-08 — npc,stun — stunned Kind=3 moonwalks on leftover Walk hold
+- **Cause:** `TickHostiles` already skips while `StunnedUntilMicros`. `npcWalkHold` kept Walk 0.22s after the last chase step, so the brigand slid in place (leash moonwalk).
+- **Do this:** If `stunnedUntilMicros` is in the future, drop `npcWalkHold` and `setHumanoidGroundWalk(false)`. `?ve=stun-hold` mid-chase; persistMark names `Brigand` + stun hold; drift / Walk = fail. Dummy trainer. Do not touch `humanoid.ts`.
+- **Seen in:** #487
+
+### 2026-09-08 — humanoid,remote,gait — remote Walk hold skates 150ms after they stop
+- **Cause:** Grounded remotes snap XZ each 20 Hz pose. Walk is driven by a hold so it does not restart between snaps. A stopped snapshot still waited out 150 ms, so leftover Walk played at 0 wish. `syncRemoteMeshes` also runs every render frame with the same pose — treating `step==0` as stop plants Idle between snaps and Walk never reads.
+- **Do this:** Arm Walk only on `hypot(step)>0.04`. Leave `step==0` re-syncs alone. Expire hold ~80 ms after the last walking snapshot. `setHumanoidMoving(false)` is Idle-first (#450). `?ve=remote-walk-stop` persistMark `/^Idle OK/` + skinned, not Walk. Hide You; do not fall back to a dead remote.
+- **Seen in:** #478
+
+### 2026-09-08 — camera,vendor — zoom min 4.5 clips the stall
+- **Cause:** `clampRadiusVsTrunks` had trunks + Dummy/hostile bodies, not the stall. Vendor is ~3.2 m from origin; min zoom 4.5 puts the cam inside the awning.
+- **Do this:** Cylinder on `YardVendor` (posts+awning ~1.12 m + pad). persistMark `Vendor` / `stall` at `?ve=cam-collision-vendor`. Dummy + living hostiles still collide. Do not aggro pad B. Do not touch `vendorStall.ts`.
+- **Seen in:** #497
+
+### 2026-09-08 — humanoid,remote,staff — sheathed remotes Walk as Idle_Weapon with a hidden stick
+- **Cause:** Wizard.glb has `Walk` but no `Walk_Weapon`. `applyStaffClips` swapped Idle/Run only, so unequipped remotes could keep Idle_Weapon while XZ moved. `setHumanoidStaffEquipped` returned while Walk was playing without stopping Idle_Weapon.
+- **Do this:** Select unarmed Walk when `staffEquipped` is false. Stop Idle_Weapon on unequip even if Walk is playing. Staff mesh off. `?ve=remote-sheathed-walk` persistMark `/^Walk OK/` + `Walk` (no Weapon) + `sheathed` + skinned. Idle_Weapon / T-POSE on an empty-handed mover = fail.
+- **Seen in:** #479
+
+### 2026-09-08 — humanoid,remote,gait — full-step remotes stayed Walk
+- **Cause:** After #333, remotes always passed `running=false` so `?ve=remote-walk` persistMark matched Walk. Full wish is MOVE_SPEED 4.5 (Walk stride ~2.2), so a sprinting other client still cycled Walk.
+- **Do this:** `setHumanoidMoving(..., spd >= 3.2, spd)` → Run_Weapon if staffed, unarmed Run if sheathed. Slow hold stays Walk. Stop still Idle (#478). `?ve=remote-run` persistMark `/^Run OK/` + Run + skinned. Walk-only on a sprinting remote = fail.
+- **Seen in:** #480 / #333
+
+### 2026-09-08 — ve,tab — sequential Spark wipe loses the all-dead window
+- **Cause:** HostileMaxHp 40 / Spark 10 / GCD 1.2s is 4.8s per pad. `HostileCorpseLingerMs` is 4s, so the first corpse revives before the last pad dies. Tab then prefers the living Kind=2, not Dummy.
+- **Do this:** Wound every `IsHostileKind` to one Spark, then finish them on consecutive GCDs. Tab Dummy immediately. persistMark `?ve=tab-dummy` names Dummy trainer; corpse-as-target = fail. Stay at origin. Do not wait linger / pickup.
+- **Seen in:** #496
+
+### 2026-09-08 — camera,orbit — grazing bole miss snaps radius through the trunk
+- **Cause:** `clampRadiusVsTrunks` uses the near ray hit. At the tangent, `disc` goes negative for a frame, radius jumps back to the wheel desired (up to 42), then re-hits — a 1-frame pop through the bole.
+- **Do this:** Pull-in stays instant. Recover radius at `CAM_RADIUS_RECOVER_MPS`. If the spherical cam point is inside a hero/mid cylinder, push XZ onto the surface and rewrite alpha/radius (slide). Do not zero inertial on the play follow. E1 Y-spring stays. `?ve=cam-collision` still names the bole.
+- **Seen in:** #499
+
+### 2026-09-08 — ve,remote — two default SecondClients share one Walk+Cast cycle
+- **Cause:** Default `tools/SecondClient` walks a pad then stand-casts Emberbolt. Two processes on the same DB both land on the same clip in the same frame, so `?ve=two-client` still reads as a clone stamp.
+- **Do this:** Split seats: `FARDEL_SECOND_WALK=1` patrols SW pads (Walk, no Cast). `FARDEL_SECOND_CAST=1` stands in dummy range and loops Emberbolt with no Move during windup (#403). Distinct tokens (`FARDEL_SECOND_TOKEN_DIR` or auto `fardel-second-walk` / `fardel-second-cast`). Clone AnimationGroups if `uniqueId` is already claimed so two remotes cannot share one Walk/Spell group. `?ve=remote-two-clips` persistMark names both clips + `skinned` + `remotes 2` live (do not latch). Hide You; skip Death / T-POSE. Dummy trainer.
+- **Seen in:** #481
+
+### 2026-09-08 — humanoid,flinch — RecieveHit while walking snaps to sliding Idle
+- **Cause:** `playHumanoidFlinch` `onAnimationGroupEnd` always called `setHumanoidMoving(false)`. Walk stopped for the one-shot, then Idle started while sendMove still translated.
+- **Do this:** Do not force Idle on flinch end. Gait / remote hold resumes Walk if wish is still on. `?ve=walk-flinch` persistMark names RecieveHit + Walk + skinned. T-POSE / Idle-only while W is held = fail.
+- **Seen in:** #482
+
 ### 2026-09-08 — tsc,release,hop — npm run build fails TS6133 remoteHopLatch
 - **Cause:** #490 hop cam writes `remoteHopLatch` (airborne remote hex) but never reads it. `tsconfig` `noUnusedLocals` fails Pages `tsc --noEmit`.
 - **Do this:** `void remoteHopLatch;` next to the declaration (same as `_latestXpAtMs`). Do not invent leftover-remote hide from this lane.
-- **Seen in:** #490 / #495 / pin e9382135
+- **Seen in:** #490 / #495 / pin e9382135 / #520 / pin 3e2bc75
 
