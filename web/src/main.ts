@@ -12495,6 +12495,129 @@ async function main(): Promise<void> {
     window.setTimeout(waitA, 500);
   }
 
+  // ?ve=auto-attack-brigand — Kind=3 melee cadence at play cam (#529).
+  // Play follow (do not zero inertialAlphaOffset). Dummy trainer, not a kill target.
+  if (ve === 'auto-attack-brigand') {
+    camera.radius = 16;
+    camera.alpha = Math.atan2(-3, 7) + 0.45;
+    camera.beta = Math.PI / 2.55;
+  }
+  if (net && ve === 'auto-attack-brigand') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE auto-attack: waiting for Brigand…';
+    let ticks = 0;
+    let phase: 'pull' | 'hit' | 'done' = 'pull';
+    let hp0 = 0;
+    let dummyHp0 = 0;
+    const padCx = 7;
+    const padCz = -3;
+    const waitB = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const brigands = npcs.filter((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const kind2Live = npcs.filter((n) => n.kind === NPC_KIND_HOSTILE && n.hp > 0);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && dummy.hp > 0 && !!dMesh && !dMesh.humanoid;
+      const padC =
+        brigands.find(
+          (n) => Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.6,
+        ) ?? brigands[0];
+      const hp = net.getCharacter()?.hp ?? 0;
+      if (!hp0 && hp > 0) hp0 = hp;
+      if (latestStatus.state !== 'connected' || !padC || !dummyTrainer) {
+        if (ticks > 280) {
+          if (mark) {
+            mark.textContent =
+              !padC && kind2Live.length > 0
+                ? 'Auto-attack FAIL · Kind=2-only · #529'
+                : `Auto-attack FAIL · B ${brigands.length} · D ${dummyTrainer ? 'y' : 'n'} · #529`;
+          }
+          return;
+        }
+        if (mark) {
+          mark.textContent =
+            `VE auto-attack: ${latestStatus.state} · B ${brigands.length} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        window.setTimeout(waitB, 200);
+        return;
+      }
+      const bMesh = npcMeshes.get(padC.npcId.toString());
+      const bLabel = bMesh?.nameplate?.label ?? '';
+      const capsule = !!bMesh && !bMesh.humanoid;
+      if (capsule) {
+        if (mark) mark.textContent = 'Auto-attack FAIL · capsule · #529';
+        return;
+      }
+      if (padC.kind !== NPC_KIND_BRIGAND) {
+        if (mark) mark.textContent = 'Auto-attack FAIL · Kind=2-only · #529';
+        return;
+      }
+      if (dummy && dummy.hp <= 0) {
+        if (mark) mark.textContent = 'Auto-attack FAIL · dummy kill target · #529';
+        return;
+      }
+      if (dummyHp0 <= 0 && dummy) dummyHp0 = dummy.hp;
+      if (dummy && dummyHp0 > 0 && dummy.hp < dummyHp0) {
+        if (mark) mark.textContent = 'Auto-attack FAIL · dummy kill target · #529';
+        return;
+      }
+      selectedTargetId = padC.npcId;
+      net.setTarget(padC.npcId);
+      const dx = padC.x - player.position.x;
+      const dz = padC.z - player.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 0.35) {
+        const step = Math.min(MAX_STEP_METERS, dist);
+        net.sendMove((dx / dist) * step, (dz / dist) * step, false);
+      }
+      if (hp <= 0) {
+        if (mark) mark.textContent = 'Auto-attack FAIL · died in melee · #529';
+        return;
+      }
+      if (
+        hp < hp0 &&
+        padC.aggroed &&
+        bLabel === 'Brigand' &&
+        dummyTrainer &&
+        padC.kind === NPC_KIND_BRIGAND &&
+        !capsule
+      ) {
+        phase = 'done';
+        if (mark) {
+          mark.textContent =
+            `Auto-attack OK · Brigand · hp ${hp0}→${hp} · dummy trainer · #529`;
+        }
+        return;
+      }
+      if (phase === 'pull') {
+        if (padC.aggroed) {
+          phase = 'hit';
+          if (mark) {
+            mark.textContent = `VE auto-attack: pulled Brigand · hp ${hp} — waiting swing…`;
+          }
+        } else if (mark) {
+          mark.textContent =
+            `VE auto-attack: walking in · d=${dist.toFixed(1)} · hp ${hp} · ${bLabel || 'Brigand'}`;
+        }
+      } else if (mark) {
+        mark.textContent =
+          `VE auto-attack: in melee · Brigand · hp ${hp}/${hp0} · aggro=${padC.aggroed ? 'y' : 'n'}`;
+      }
+      if (ticks > 280) {
+        if (mark) {
+          mark.textContent =
+            `Auto-attack FAIL · phase ${phase} · ${bLabel || 'no'} · hp ${hp} · #529`;
+        }
+        return;
+      }
+      window.setTimeout(waitB, 200);
+    };
+    window.setTimeout(waitB, 500);
+  }
+
   // ?ve=hunt-loot — kill pad A from outside aggro, corpse WorldLoot, F pickup (#357).
   if (ve === 'hunt-loot') {
     camera.radius = 18;
