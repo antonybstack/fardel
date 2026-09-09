@@ -378,3 +378,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Select unarmed Walk when `staffEquipped` is false. Stop Idle_Weapon on unequip even if Walk is playing. Staff mesh off. `?ve=remote-sheathed-walk` persistMark `/^Walk OK/` + `Walk` (no Weapon) + `sheathed` + skinned. Idle_Weapon / T-POSE on an empty-handed mover = fail.
 - **Seen in:** #479
 
+### 2026-09-08 — humanoid,remote,gait — full-step remotes stayed Walk
+- **Cause:** After #333, remotes always passed `running=false` so `?ve=remote-walk` persistMark matched Walk. Full wish is MOVE_SPEED 4.5 (Walk stride ~2.2), so a sprinting other client still cycled Walk.
+- **Do this:** `setHumanoidMoving(..., spd >= 3.2, spd)` → Run_Weapon if staffed, unarmed Run if sheathed. Slow hold stays Walk. Stop still Idle (#478). `?ve=remote-run` persistMark `/^Run OK/` + Run + skinned. Walk-only on a sprinting remote = fail.
+- **Seen in:** #480 / #333
+
