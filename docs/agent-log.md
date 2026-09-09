@@ -398,3 +398,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Pull-in stays instant. Recover radius at `CAM_RADIUS_RECOVER_MPS`. If the spherical cam point is inside a hero/mid cylinder, push XZ onto the surface and rewrite alpha/radius (slide). Do not zero inertial on the play follow. E1 Y-spring stays. `?ve=cam-collision` still names the bole.
 - **Seen in:** #499
 
+### 2026-09-08 — ve,remote — two default SecondClients share one Walk+Cast cycle
+- **Cause:** Default `tools/SecondClient` walks a pad then stand-casts Emberbolt. Two processes on the same DB both land on the same clip in the same frame, so `?ve=two-client` still reads as a clone stamp.
+- **Do this:** Split seats: `FARDEL_SECOND_WALK=1` patrols SW pads (Walk, no Cast). `FARDEL_SECOND_CAST=1` stands in dummy range and loops Emberbolt with no Move during windup (#403). Distinct tokens (`FARDEL_SECOND_TOKEN_DIR` or auto `fardel-second-walk` / `fardel-second-cast`). Clone AnimationGroups if `uniqueId` is already claimed so two remotes cannot share one Walk/Spell group. `?ve=remote-two-clips` persistMark names both clips + `skinned` + `remotes 2` live (do not latch). Hide You; skip Death / T-POSE. Dummy trainer.
+- **Seen in:** #481
+

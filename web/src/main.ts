@@ -6626,6 +6626,62 @@ async function main(): Promise<void> {
         camera.alpha = 0.15;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-two-clips') {
+        hideLocalForRemoteHop(player, localNameplate);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        let walkHex: string | null = null;
+        let spellHex: string | null = null;
+        let wx = -4;
+        let wz = -5;
+        let sx = 1.5;
+        let sz = -2;
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          if (/death/i.test(clip) || pb.skinned <= 0 || pb.height < 1.0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const isLoco = /^(walk|run)(_weapon)?$/i.test(clip);
+          const isSpell = /spell/i.test(clip);
+          if (isSpell && !spellHex) {
+            spellHex = hex;
+            sx = parts.root.position.x;
+            sz = parts.root.position.z;
+          } else if (isLoco && !walkHex) {
+            walkHex = hex;
+            wx = parts.root.position.x;
+            wz = parts.root.position.z;
+          }
+        }
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(hex === walkHex || hex === spellHex);
+        }
+        if (walkHex && spellHex) {
+          tgt.x = (wx + sx) * 0.5;
+          tgt.z = (wz + sz) * 0.5;
+        } else if (spellHex) {
+          tgt.x = sx;
+          tgt.z = sz;
+        } else if (walkHex) {
+          tgt.x = wx;
+          tgt.z = wz;
+        } else {
+          tgt.x = -1;
+          tgt.z = -3;
+        }
+        tgt.y = 1.1;
+        camera.alpha = Math.PI / 2.2;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 14;
       } else if (veFollow === 'remote-sheathed') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6936,7 +6992,8 @@ async function main(): Promise<void> {
         veFollow !== 'remote-hop' &&
         veFollow !== 'remote-walk-stop' &&
         veFollow !== 'remote-sheathed-walk' &&
-        veFollow !== 'remote-run'
+        veFollow !== 'remote-run' &&
+        veFollow !== 'remote-two-clips'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -8954,6 +9011,96 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitRun, 80);
     };
     window.setTimeout(waitRun, 700);
+  }
+
+  // ?ve=remote-two-clips — E8.33 two living remotes, Walk + Spell1, not a clone stamp.
+  if (ve === 'remote-two-clips') {
+    camera.radius = 14;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.55;
+    hideLocalForRemoteHop(player, localNameplate);
+  }
+  if (net && ve === 'remote-two-clips') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-two-clips: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    const waitTwoClips = () => {
+      if (!net) return;
+      ticks += 1;
+      hideLocalForRemoteHop(player, localNameplate);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      syncRemoteCastFx(net.getRemoteCombats());
+      let walkHex: string | null = null;
+      let spellHex: string | null = null;
+      let walkClip = '';
+      let spellClip = '';
+      let walkSkinned = 0;
+      let spellSkinned = 0;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const living =
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          !/death/i.test(clip) &&
+          !/t-?pose/i.test(clip);
+        if (!living) {
+          p.root.setEnabled(false);
+          continue;
+        }
+        const isLoco = /^(walk|run)(_weapon)?$/i.test(clip);
+        const isSpell = /spell/i.test(clip);
+        if (isSpell && !spellHex) {
+          spellHex = r.identityHex;
+          spellClip = clip;
+          spellSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        if (isLoco && !walkHex) {
+          walkHex = r.identityHex;
+          walkClip = clip;
+          walkSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        p.root.setEnabled(false);
+      }
+      const dummy = (net.getNpcs() ?? []).find(
+        (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+      );
+      const ok =
+        !!walkHex &&
+        !!spellHex &&
+        walkHex !== spellHex &&
+        walkSkinned > 0 &&
+        spellSkinned > 0 &&
+        !!dummy;
+      if (mark) {
+        if (ok) {
+          mark.textContent = `Two-clips OK · ${walkClip} · ${spellClip} · skinned ${walkSkinned + spellSkinned} · remotes 2`;
+        } else if (remoteMeshes.size > 0 && walkSkinned + spellSkinned <= 0) {
+          mark.textContent = `T-POSE · remotes ${remoteMeshes.size}`;
+        } else {
+          mark.textContent =
+            `VE remote-two-clips: remotes ${remoteMeshes.size} · walk ${walkClip || '—'} · spell ${spellClip || '—'} (FARDEL_SECOND_WALK=1 + FARDEL_SECOND_CAST=1)`;
+        }
+      }
+      if (ticks < 320) window.setTimeout(waitTwoClips, 80);
+    };
+    window.setTimeout(waitTwoClips, 700);
   }
 
   // ?ve=remote-sheathed — E8.26 remote Character.staffEquipped=false plays unarmed Idle.
