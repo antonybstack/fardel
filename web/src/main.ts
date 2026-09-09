@@ -7177,6 +7177,7 @@ async function main(): Promise<void> {
         veFollow !== 'hostile-chase' &&
         veFollow !== 'kick' &&
         veFollow !== 'kick-tab' &&
+        veFollow !== 'kick-shove' &&
         veFollow !== 'stun' &&
         veFollow !== 'brigand-stun-plate' &&
         veFollow !== 'brigand-cast' &&
@@ -21957,6 +21958,134 @@ async function main(): Promise<void> {
       window.setTimeout(waitK, 150);
     };
     window.setTimeout(waitK, 500);
+  }
+
+  // ?ve=kick-shove — KickNpc Kind=3 shoves; Dummy stays planted (#505).
+  if (ve === 'kick-shove') {
+    camera.radius = 14;
+    camera.alpha = Math.atan2(-3, 7) + 0.2;
+    camera.beta = Math.PI / 2.6;
+  }
+  if (net && ve === 'kick-shove') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE kick-shove: waiting Kind=3 + Dummy…';
+    const padCx = 7;
+    const padCz = -3;
+    let ticks = 0;
+    let dummyX = 0;
+    let dummyZ = 0;
+    let brigX = 0;
+    let brigZ = 0;
+    let seeded = false;
+    let kicked = false;
+    let kickBusy = false;
+    const waitS = () => {
+      if (!net) return;
+      ticks += 1;
+      const npcs = net.getNpcs();
+      syncNpcMeshes(npcs);
+      const dummy = npcs.find((n) => n.kind === NPC_KIND_DUMMY && n.hp > 0);
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = !!dummy && !!dMesh && !dMesh.humanoid;
+      const brigand =
+        npcs.find(
+          (n) =>
+            n.kind === NPC_KIND_BRIGAND &&
+            n.hp > 0 &&
+            Math.hypot((n.spawnX || padCx) - padCx, (n.spawnZ || padCz) - padCz) < 0.8,
+        ) ?? npcs.find((n) => n.kind === NPC_KIND_BRIGAND && n.hp > 0);
+      const pose = net.getLocalPose();
+      const tgt = camera.target;
+      if (brigand && dummy) {
+        tgt.x = (brigand.x + dummy.x) * 0.5;
+        tgt.y = 1.25;
+        tgt.z = (brigand.z + dummy.z) * 0.5;
+        camera.radius = 14;
+        camera.beta = Math.PI / 2.6;
+      }
+      if (latestStatus.state !== 'connected' || !dummyTrainer || !brigand || !pose) {
+        if (mark) {
+          mark.textContent =
+            `VE kick-shove: ${latestStatus.state} · B ${brigand ? 'y' : 'n'} · D ${dummyTrainer ? 'y' : 'n'}…`;
+        }
+        if (ticks < 280) window.setTimeout(waitS, 150);
+        return;
+      }
+      if (Math.hypot(pose.x, pose.z) > 0.7) {
+        const d = Math.hypot(pose.x, pose.z);
+        const slid = slideAgainstTrunks(
+          pose.x,
+          pose.z,
+          (-pose.x / d) * Math.min(MAX_STEP_METERS, d),
+          (-pose.z / d) * Math.min(MAX_STEP_METERS, d),
+        );
+        if (Math.abs(slid.dx) > 1e-5 || Math.abs(slid.dz) > 1e-5) {
+          net.sendMove(slid.dx, slid.dz, false);
+        }
+      }
+      if (!seeded) {
+        dummyX = dummy.x;
+        dummyZ = dummy.z;
+        brigX = brigand.x;
+        brigZ = brigand.z;
+        seeded = true;
+      }
+      const dummyDrift = Math.hypot(dummy.x - dummyX, dummy.z - dummyZ);
+      const brigShove = Math.hypot(brigand.x - brigX, brigand.z - brigZ);
+      if (dummyDrift > 0.2) {
+        if (mark) {
+          mark.textContent = `Kick-shove FAIL · Dummy wander ${dummyDrift.toFixed(2)}m · #505`;
+        }
+        return;
+      }
+      const ch = net.getCharacter();
+      const mana = ch?.mana ?? 0;
+      const gcd = gcdRemainingMs(net.getCombat());
+      if (!kicked) {
+        net.setTarget(brigand.npcId);
+        selectedTargetId = brigand.npcId;
+        const committed = (net.getCombat()?.targetNpcId ?? 0n) === brigand.npcId;
+        if (!committed) {
+          if (mark) mark.textContent = 'VE kick-shove: setTarget Brigand…';
+        } else if (mana < KICK_MANA_COST) {
+          void net.rest();
+          if (mark) mark.textContent = `VE kick-shove: Rest · mana ${mana}`;
+        } else if (!kickBusy && gcd <= 0) {
+          kickBusy = true;
+          brigX = brigand.x;
+          brigZ = brigand.z;
+          dummyX = dummy.x;
+          dummyZ = dummy.z;
+          void net.kickNpc(brigand.npcId).then(() => {
+            kicked = true;
+            kickBusy = false;
+          }).catch(() => {
+            kickBusy = false;
+          });
+        }
+        if (mark && !kicked) {
+          mark.textContent = `VE kick-shove: kick Brigand · gcd ${gcd}`;
+        }
+      } else if (brigShove >= 0.6 && dummyDrift <= 0.15 && dummyTrainer) {
+        if (mark) {
+          mark.textContent =
+            'Kick-shove OK · Brigand shove · Dummy planted · #505';
+        }
+        return;
+      } else if (mark) {
+        mark.textContent =
+          `VE kick-shove: shove ${brigShove.toFixed(2)} dummy ${dummyDrift.toFixed(2)}`;
+      }
+      if (ticks > 300) {
+        if (mark) {
+          mark.textContent =
+            `Kick-shove FAIL · shove ${brigShove.toFixed(2)} dummy ${dummyDrift.toFixed(2)} · #505`;
+        }
+        return;
+      }
+      window.setTimeout(waitS, 150);
+    };
+    window.setTimeout(waitS, 500);
   }
 
   // ?ve=counterspell — PvP Kick(Identity) vs a casting remote (SecondClient).
