@@ -2073,6 +2073,8 @@ const CAM_TRUNK_MIN_HIT = 0.55;
 const CAM_COLLISION_VE_RADIUS = 56;
 /** User zoom min is 4.5; collision may pull closer so nearby bodies do not swallow the cam. */
 const CAM_COLLIDE_FLOOR = 1.55;
+/** Ease radius back out so a grazing miss does not snap 1-frame through a bole (#499). */
+const CAM_RADIUS_RECOVER_MPS = 16;
 const CAM_BODY_PAD = 0.45;
 const CAM_BODY_DUMMY_R = 0.58;
 const CAM_BODY_HOSTILE_R = 0.48;
@@ -2282,6 +2284,45 @@ function clampRadiusVsTrunks(
     hit = t.name;
   }
   return { radius: Math.max(minRadius, best), hit };
+}
+
+/**
+ * If the spherical cam point sits inside a hero/mid bole, push XZ onto the
+ * cylinder so RMB orbit slides instead of popping through (#499).
+ */
+function slideCamOutOfBoles(
+  target: Vector3,
+  alpha: number,
+  beta: number,
+  radius: number,
+  trunks: TrunkCollider[],
+): { alpha: number; radius: number; hit: string | null } {
+  const sinb = Math.sin(beta);
+  let cx = target.x + Math.cos(alpha) * sinb * radius;
+  const cy = target.y + Math.cos(beta) * radius;
+  let cz = target.z + Math.sin(alpha) * sinb * radius;
+  let hit: string | null = null;
+  for (const t of trunks) {
+    if (t.kind !== 'hero' && t.kind !== 'mid') continue;
+    const r = t.r + (t.pad ?? CAM_TRUNK_PAD);
+    const ox = cx - t.x;
+    const oz = cz - t.z;
+    const d = Math.hypot(ox, oz);
+    if (d >= r || d < 1e-5) continue;
+    const s = r / d;
+    cx = t.x + ox * s;
+    cz = t.z + oz * s;
+    hit = t.name;
+  }
+  if (!hit) return { alpha, radius, hit: null };
+  const dx = cx - target.x;
+  const dz = cz - target.z;
+  const dy = cy - target.y;
+  return {
+    alpha: Math.atan2(dz, dx),
+    radius: Math.max(CAM_COLLIDE_FLOOR, Math.hypot(dx, dy, dz)),
+    hit,
+  };
 }
 
 /** Living Dummy / Hostile / Brigand capsules. Corpses skipped (#466). */
@@ -3464,14 +3505,31 @@ async function main(): Promise<void> {
     camZoomRadius = Math.min(maxR, Math.max(minR, camZoomRadius));
     const bodies = collectBodyColliders(net?.getNpcs() ?? [], npcMeshes);
     const stalls = collectStallColliders(net?.getVendors() ?? []);
-    const { radius, hit } = clampRadiusVsTrunks(
+    const colliders = [...trunks, ...bodies, ...stalls];
+    let { radius, hit } = clampRadiusVsTrunks(
       camera.target,
       camera.alpha,
       camera.beta,
       camZoomRadius,
       CAM_COLLIDE_FLOOR,
-      [...trunks, ...bodies, ...stalls],
+      colliders,
     );
+    if (radius > camAppliedRadius) {
+      const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
+      radius = Math.min(radius, camAppliedRadius + CAM_RADIUS_RECOVER_MPS * dt);
+    }
+    const slid = slideCamOutOfBoles(
+      camera.target,
+      camera.alpha,
+      camera.beta,
+      radius,
+      colliders,
+    );
+    if (slid.hit) {
+      camera.alpha = slid.alpha;
+      radius = slid.radius;
+      hit = hit ?? slid.hit;
+    }
     camera.radius = radius;
     camAppliedRadius = radius;
     camCollideHit = hit;

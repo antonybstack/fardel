@@ -393,3 +393,8 @@ Write when you lost real time on something the next seat will hit. Skip happy-pa
 - **Do this:** Wound every `IsHostileKind` to one Spark, then finish them on consecutive GCDs. Tab Dummy immediately. persistMark `?ve=tab-dummy` names Dummy trainer; corpse-as-target = fail. Stay at origin. Do not wait linger / pickup.
 - **Seen in:** #496
 
+### 2026-09-08 — camera,orbit — grazing bole miss snaps radius through the trunk
+- **Cause:** `clampRadiusVsTrunks` uses the near ray hit. At the tangent, `disc` goes negative for a frame, radius jumps back to the wheel desired (up to 42), then re-hits — a 1-frame pop through the bole.
+- **Do this:** Pull-in stays instant. Recover radius at `CAM_RADIUS_RECOVER_MPS`. If the spherical cam point is inside a hero/mid cylinder, push XZ onto the surface and rewrite alpha/radius (slide). Do not zero inertial on the play follow. E1 Y-spring stays. `?ve=cam-collision` still names the bole.
+- **Seen in:** #499
+
