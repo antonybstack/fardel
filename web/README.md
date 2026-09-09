@@ -96,6 +96,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=hostile-chase` | Kind=2/3 chase Walk (not Idle slide); leash return also Walk; dummy scarecrow (#447); HUD `Hostile chase OK · Walk · skinned 1 · dummy trainer` |
 | `?ve=auto-attack` | Pull pad A, HP drops on cadence, run out, HP stops (#356); HUD `Auto-attack OK · hp … · stopped · #356`. |
 | `?ve=hunt-loot` | Kill pad A from outside aggro, corpse ember_shard, F pickup (#357); HUD `Hunt-loot OK · corpse shard · F pickup · #357`. |
+| `?ve=hunt-loot-brigand` | Kill pad C Kind=3 from origin (outside aggro), corpse ember_shard, F pickup (#530); HUD `Hunt-loot OK · Brigand · corpse · F pickup · dummy trainer · #530`. Capsule = fail. Dummy trainer. |
 | `?ve=loot-cam` | Kill Kind=3, min-zoom into Dummy, F still loots the corpse (#504); HUD `Loot-cam OK · corpse · F pickup · Dummy collision · #504`. Cam clamp must not eat loot. Dummy trainer |
 | `?ve=target-frame` | Tab-select Dummy; prove compact name+HP frame above combat bars (`ve/babylon-target-frame.png`) |
 | `?ve=reticule` | Select Dummy; prove gold ring + overhead marker (`ve/babylon-reticule.png`); HUD `Reticule OK · … · gold ring+marker` |
