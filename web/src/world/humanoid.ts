@@ -854,7 +854,8 @@ const RUN_REF_MPS = 5.0;
  * Grounded Walk named (not Run) unless `running`. NPC chase/leash and remotes
  * pass snap m/s so speedRatio matches XZ. Local W sprint and remote full-wish
  * (#480) pass `running=true` → Run_Weapon / unarmed Run.
- * Remotes share this Idle-first stop — do not keep Walk at 0 wish (#450 / #478).
+ * Remotes share this Idle-first stop — do not keep Walk/Run at 0 wish
+ * (#450 / #478 / #514).
  */
 export function setHumanoidMoving(
   parts: HumanoidParts,
