@@ -82,6 +82,14 @@ try
         Environment.GetEnvironmentVariable("FARDEL_SECOND_RUN"),
         "1",
         StringComparison.OrdinalIgnoreCase);
+    var walkHold = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_WALK"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
+    var castHold = string.Equals(
+        Environment.GetEnvironmentVariable("FARDEL_SECOND_CAST"),
+        "1",
+        StringComparison.OrdinalIgnoreCase);
 
     if (!sheath && !sheathWalk && conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
     {
@@ -286,6 +294,179 @@ try
                 Console.WriteLine($"READY run ({runPose.X:F2}, {runPose.Z:F2}) identity={identity}");
             }
             runPlus = !runPlus;
+        }
+    }
+    if (walkHold)
+    {
+        // ?ve=remote-two-clips: staffed Walk on the SW pads so a second
+        // FARDEL_SECOND_CAST identity can hold Spell1 in the same frame.
+        // Slow wish so #480 Run threshold 3.2 does not steal Walk.
+        var aliveGuardW = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuardW)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("walk: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+        {
+            conn.Reducers.EquipStaff();
+            await Frame(conn, 200);
+        }
+        var walkPlus = true;
+        while (true)
+        {
+            var ch0 = conn.Db.Character.Identity.Find(identity);
+            if (ch0 is { Hp: <= 0 })
+            {
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch0 is { StaffEquipped: false })
+            {
+                conn.Reducers.EquipStaff();
+                await Frame(conn, 150);
+            }
+            var destX = walkPlus ? -1.5f : -6.5f;
+            var destZ = -5f;
+            var walkGuardW = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < walkGuardW)
+            {
+                if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+                {
+                    await Frame(conn, 200);
+                    continue;
+                }
+                if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+                {
+                    await Frame(conn, 50);
+                    continue;
+                }
+                var dx = destX - cur.X;
+                var dz = destZ - cur.Z;
+                var dist = MathF.Sqrt(dx * dx + dz * dz);
+                if (dist < 0.4f)
+                {
+                    Console.WriteLine($"walk pad ({cur.X:F1}, {cur.Z:F1})");
+                    break;
+                }
+                var maxStep = Movement.MaxStepMeters * 0.15f;
+                var scale = MathF.Min(maxStep, dist) / dist;
+                conn.Reducers.Move(dx * scale, dz * scale, false);
+                await Frame(conn, 50);
+            }
+            if (conn.Db.PlayerPose.Identity.Find(identity) is { } wPose)
+            {
+                Console.WriteLine($"READY walk ({wPose.X:F2}, {wPose.Z:F2}) identity={identity}");
+            }
+            walkPlus = !walkPlus;
+        }
+    }
+    if (castHold)
+    {
+        // ?ve=remote-two-clips: stand in dummy CastRange and loop Emberbolt.
+        // No Move during CastEndsAt (#403). East of origin vs the SW walker.
+        var aliveGuardC = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < aliveGuardC)
+        {
+            var ch = conn.Db.Character.Identity.Find(identity);
+            if (ch is { Hp: > 0 }) break;
+            Console.WriteLine("cast: waiting respawn");
+            await Frame(conn, Combat.RespawnDelayMs + 250);
+        }
+        if (conn.Db.Character.Identity.Find(identity) is { StaffEquipped: false })
+        {
+            conn.Reducers.EquipStaff();
+            await Frame(conn, 200);
+        }
+        const float castX = 3.2f;
+        const float castZ = 1.2f;
+        var walkGuardC = DateTime.UtcNow.AddSeconds(8);
+        while (DateTime.UtcNow < walkGuardC)
+        {
+            if (conn.Db.Character.Identity.Find(identity) is { Hp: <= 0 })
+            {
+                await Frame(conn, 200);
+                continue;
+            }
+            if (conn.Db.PlayerPose.Identity.Find(identity) is not { } cur)
+            {
+                await Frame(conn, 50);
+                continue;
+            }
+            var dx = castX - cur.X;
+            var dz = castZ - cur.Z;
+            var dist = MathF.Sqrt(dx * dx + dz * dz);
+            if (dist < 0.4f)
+            {
+                Console.WriteLine($"cast-pad ({cur.X:F1}, {cur.Z:F1})");
+                break;
+            }
+            var scale = MathF.Min(Movement.MaxStepMeters, dist) / dist;
+            conn.Reducers.Move(dx * scale, dz * scale, false);
+            await Frame(conn, 50);
+        }
+        if (conn.Db.PlayerPose.Identity.Find(identity) is { } cPose)
+        {
+            Console.WriteLine($"READY cast-pad ({cPose.X:F2}, {cPose.Z:F2}) identity={identity}");
+        }
+        var castHoldRound = 0;
+        while (true)
+        {
+            var ch0 = conn.Db.Character.Identity.Find(identity);
+            if (ch0 is { Hp: <= 0 })
+            {
+                await Frame(conn, Combat.RespawnDelayMs + 250);
+                continue;
+            }
+            if (ch0 is { StaffEquipped: false })
+            {
+                conn.Reducers.EquipStaff();
+                await Frame(conn, 150);
+            }
+            conn.Reducers.EnsureTrainingDummy();
+            await Frame(conn, 80);
+            var dummy = FindDummy(conn);
+            if (dummy is null || dummy.Hp <= 0)
+            {
+                await Frame(conn, 200);
+                continue;
+            }
+            var combat = conn.Db.PlayerCombat.Identity.Find(identity);
+            if (combat is null)
+            {
+                await Frame(conn, 100);
+                continue;
+            }
+            if (combat.TargetNpcId != dummy.NpcId)
+            {
+                conn.Reducers.SetTarget(dummy.NpcId);
+                await Frame(conn, 120);
+                combat = conn.Db.PlayerCombat.Identity.Find(identity);
+            }
+            if (combat is { CastingSpellId: not 0 })
+            {
+                await Frame(conn, Combat.EmberboltCastMs);
+                continue;
+            }
+            var nowMicros = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1000L;
+            if (combat is { } c2 && c2.GcdReadyAt.MicrosecondsSinceUnixEpoch > nowMicros)
+            {
+                await Frame(conn, 80);
+                continue;
+            }
+            castHoldRound++;
+            Console.WriteLine($"Cast Emberbolt #{castHoldRound} → dummy hp={dummy.Hp}");
+            try
+            {
+                conn.Reducers.Cast(Combat.SpellEmberbolt);
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("cast error: " + e.Message);
+            }
+            await Frame(conn, Combat.EmberboltCastMs + Combat.GcdMs + 200);
         }
     }
     if (walkStop)

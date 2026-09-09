@@ -6626,6 +6626,46 @@ async function main(): Promise<void> {
         camera.alpha = 0.15;
         camera.beta = Math.PI / 2.45;
         camera.radius = 7;
+      } else if (veFollow === 'remote-two-clips') {
+        player.setEnabled(false);
+        localNameplate.mesh.setEnabled(false);
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        camera.inertialRadiusOffset = 0;
+        const tgt = camera.target;
+        const living: { x: number; z: number; hex: string }[] = [];
+        for (const [hex, parts] of remoteMeshes) {
+          const ch = net?.getCharacterFor(hex);
+          if (!ch || ch.hp <= 0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          const pb = readHumanoidPlayback(parts);
+          const clip = (pb.playing ?? '').replace(/^.*\|/, '');
+          if (/death/i.test(clip) || pb.skinned <= 0 || pb.height < 1.0) {
+            parts.root.setEnabled(false);
+            continue;
+          }
+          living.push({ x: parts.root.position.x, z: parts.root.position.z, hex });
+        }
+        const show = new Set(living.slice(0, 2).map((r) => r.hex));
+        for (const [hex, parts] of remoteMeshes) {
+          parts.root.setEnabled(show.has(hex));
+        }
+        if (living.length >= 2) {
+          tgt.x = (living[0].x + living[1].x) * 0.5;
+          tgt.z = (living[0].z + living[1].z) * 0.5;
+        } else if (living.length === 1) {
+          tgt.x = living[0].x;
+          tgt.z = living[0].z;
+        } else {
+          tgt.x = -0.5;
+          tgt.z = -2.0;
+        }
+        tgt.y = 1.1;
+        camera.alpha = Math.PI / 2.2;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 16;
       } else if (veFollow === 'remote-sheathed') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -6936,7 +6976,8 @@ async function main(): Promise<void> {
         veFollow !== 'remote-hop' &&
         veFollow !== 'remote-walk-stop' &&
         veFollow !== 'remote-sheathed-walk' &&
-        veFollow !== 'remote-run'
+        veFollow !== 'remote-run' &&
+        veFollow !== 'remote-two-clips'
       ) {
         const targetY = player.position.y + CAM_FOLLOW_Y_OFFSET;
         if (!camFollowYSeeded) {
@@ -8954,6 +8995,102 @@ async function main(): Promise<void> {
       if (ticks < 280) window.setTimeout(waitRun, 80);
     };
     window.setTimeout(waitRun, 700);
+  }
+
+  // ?ve=remote-two-clips — E8.33 two living remotes, Walk + Spell1, not a clone stamp.
+  if (ve === 'remote-two-clips') {
+    camera.radius = 16;
+    camera.alpha = Math.PI / 2.2;
+    camera.beta = Math.PI / 2.55;
+    player.setEnabled(false);
+    localNameplate.mesh.setEnabled(false);
+  }
+  if (net && ve === 'remote-two-clips') {
+    const mark = document.getElementById('persistMark');
+    if (mark) mark.textContent = 'VE remote-two-clips: waiting for remotes…';
+    const clipBare = (name: string | null): string => {
+      if (!name) return 'none';
+      const i = name.lastIndexOf('|');
+      return i >= 0 ? name.slice(i + 1) : name;
+    };
+    let ticks = 0;
+    let latchedMark: string | null = null;
+    const waitTwoClips = () => {
+      if (!net) return;
+      ticks += 1;
+      player.setEnabled(false);
+      localNameplate.mesh.setEnabled(false);
+      const remotes = net.getRemotes();
+      syncRemoteMeshes(remotes);
+      syncRemoteCastFx(net.getRemoteCombats());
+      let walkHex: string | null = null;
+      let spellHex: string | null = null;
+      let walkClip = '';
+      let spellClip = '';
+      let walkSkinned = 0;
+      let spellSkinned = 0;
+      for (const r of remotes) {
+        const ch = net.getCharacterFor(r.identityHex);
+        const p = remoteMeshes.get(r.identityHex);
+        if (!ch || ch.hp <= 0 || !p) {
+          if (p) p.root.setEnabled(false);
+          continue;
+        }
+        const pb = readHumanoidPlayback(p);
+        const clip = clipBare(pb.playing);
+        const living =
+          pb.skinned > 0 &&
+          pb.height >= 1.0 &&
+          !/death/i.test(clip) &&
+          !/t-?pose/i.test(clip);
+        if (!living) {
+          p.root.setEnabled(false);
+          continue;
+        }
+        const isWalk = /^walk$/i.test(clip) || /^run(_weapon)?$/i.test(clip);
+        const isSpell = /spell/i.test(clip);
+        if (isWalk && !walkHex) {
+          walkHex = r.identityHex;
+          walkClip = clip;
+          walkSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        if (isSpell && !spellHex) {
+          spellHex = r.identityHex;
+          spellClip = clip;
+          spellSkinned = pb.skinned;
+          p.root.setEnabled(true);
+          continue;
+        }
+        p.root.setEnabled(false);
+      }
+      const dummy = (net.getNpcs() ?? []).find(
+        (n) => n.kind === NPC_KIND_DUMMY && n.hp > 0,
+      );
+      const ok =
+        !!walkHex &&
+        !!spellHex &&
+        walkHex !== spellHex &&
+        walkSkinned > 0 &&
+        spellSkinned > 0 &&
+        !!dummy;
+      if (ok) {
+        latchedMark = `Two-clips OK · ${walkClip} · ${spellClip} · skinned ${Math.min(walkSkinned, spellSkinned)} · remotes 2`;
+      }
+      if (mark) {
+        if (latchedMark) {
+          mark.textContent = latchedMark;
+        } else if (remoteMeshes.size > 0 && walkSkinned + spellSkinned <= 0) {
+          mark.textContent = `T-POSE · remotes ${remoteMeshes.size}`;
+        } else {
+          mark.textContent =
+            `VE remote-two-clips: remotes ${remoteMeshes.size} · walk ${walkClip || '—'} · spell ${spellClip || '—'} (FARDEL_SECOND_WALK=1 + FARDEL_SECOND_CAST=1)`;
+        }
+      }
+      if (ticks < 320) window.setTimeout(waitTwoClips, 80);
+    };
+    window.setTimeout(waitTwoClips, 700);
   }
 
   // ?ve=remote-sheathed — E8.26 remote Character.staffEquipped=false plays unarmed Idle.
