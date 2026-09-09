@@ -6330,17 +6330,17 @@ async function main(): Promise<void> {
         veFollow === 'leash' ||
         veFollow === 'aggro'
       ) {
-        // Dummy (5,0) + Kind=3 pad C (7,-3). Origin KickRange 8; Stun/leash walks in.
+        // Pad C Brigand (7,-3) + Dummy (5,0). Do not frame pad A (3,7) (#503).
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
         camera.inertialRadiusOffset = 0;
         const tgt = camera.target;
-        tgt.x = 4;
-        tgt.y = 1.35;
-        tgt.z = -1.2;
-        camera.alpha = Math.PI / 2.15;
-        camera.beta = Math.PI / 2.65;
-        camera.radius = 16;
+        tgt.x = 6.2;
+        tgt.y = 1.2;
+        tgt.z = -1.6;
+        camera.alpha = Math.atan2(-3, 7) + 0.35;
+        camera.beta = Math.PI / 2.55;
+        camera.radius = 14;
       } else if (veFollow === 'hostile-hit') {
         camera.inertialAlphaOffset = 0;
         camera.inertialBetaOffset = 0;
@@ -11615,10 +11615,25 @@ async function main(): Promise<void> {
       }
       const mesh = npcMeshes.get(padC.npcId.toString());
       const bLabel = mesh?.nameplate?.label ?? '';
+      const capsule = !!mesh && !mesh.humanoid;
+      if (capsule) {
+        if (mark) {
+          mark.textContent = `${aggroVe ? 'Aggro' : 'Leash'} FAIL · capsule · #503`;
+        }
+        return;
+      }
+      const dMesh = dummy ? npcMeshes.get(dummy.npcId.toString()) : undefined;
+      const dummyTrainer = dummyOk && !!dMesh && !dMesh.humanoid;
       const home = Math.hypot(
         padC.x - (padC.spawnX || padCx),
         padC.z - (padC.spawnZ || padCz),
       );
+      const cam = camera.target;
+      cam.x = (padC.x + (dummy?.x ?? 5)) * 0.55;
+      cam.y = 1.2;
+      cam.z = (padC.z + (dummy?.z ?? 0)) * 0.55;
+      camera.radius = 14;
+      camera.beta = Math.PI / 2.55;
       if (phase === 'pull') {
         const dx = padC.x - player.position.x;
         const dz = padC.z - player.position.z;
@@ -11656,11 +11671,26 @@ async function main(): Promise<void> {
           victim.x - (victim.spawnX || padCx),
           victim.z - (victim.spawnZ || padCz),
         );
-        if (!victim.aggroed && vHome < 0.45 && bLabel === 'Brigand') {
+        const vMesh = npcMeshes.get(victim.npcId.toString());
+        const vLabel = vMesh?.nameplate?.label ?? bLabel;
+        const vCapsule = !!vMesh && !vMesh.humanoid;
+        if (vCapsule) {
+          if (mark) {
+            mark.textContent = `${aggroVe ? 'Aggro' : 'Leash'} FAIL · capsule · #503`;
+          }
+          return;
+        }
+        if (
+          !victim.aggroed &&
+          vHome < 0.45 &&
+          vLabel === 'Brigand' &&
+          dummyTrainer &&
+          victim.kind === NPC_KIND_BRIGAND
+        ) {
           phase = 'done';
           if (mark) {
             mark.textContent = aggroVe
-              ? `Aggro OK · Brigand #${victim.npcId} · pulled · leashed · dummy trainer · #455`
+              ? `Aggro OK · Brigand #${victim.npcId} · pulled · leashed · dummy trainer · #503`
               : `Leash OK · Brigand #${victim.npcId} · pulled · returned · dummy trainer · #455`;
           }
           return;

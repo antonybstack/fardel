@@ -89,7 +89,7 @@ See [docs/TEAM_SEATS.md](../docs/TEAM_SEATS.md).
 | `?ve=rmb-orbit` | Prove RMB orbit moves `camera.alpha` on the **play follow** path after a **real pointer RMB-drag** (#366 / #389). Do not inject `inertialAlphaOffset`. Chrome-only `?ve=rmb-look` is not enough. HUD `RMB orbit OK · dAlpha …` / `RMB orbit FAIL` |
 | `?ve=hostile-spawn` | Two yard hostiles as red capsules; dummy stays trainer (#354); HUD `Hostile spawn OK · n=2 · capsule · dummy trainer · #354` |
 | `?ve=leash` | Walk into pad C aggro, Brigand leaves pad, run out, it returns (#455); HUD `Leash OK · Brigand #… · pulled · returned · dummy trainer · #455`. Dummy never aggro. |
-| `?ve=aggro` | Same pad C pull-then-leash session shot (#455); HUD `Aggro OK · Brigand #… · pulled · leashed · dummy trainer · #455`. |
+| `?ve=aggro` | Pad C Kind=3 pull-then-leash at play cam (#503 / #455); HUD `Aggro OK · Brigand #… · pulled · leashed · dummy trainer · #503`. Dummy trainer. Capsule / Kind=2-only = fail. |
 | `?ve=hostile-chase` | Kind=2/3 chase Walk (not Idle slide); leash return also Walk; dummy scarecrow (#447); HUD `Hostile chase OK · Walk · skinned 1 · dummy trainer` |
 | `?ve=auto-attack` | Pull pad A, HP drops on cadence, run out, HP stops (#356); HUD `Auto-attack OK · hp … · stopped · #356`. |
 | `?ve=hunt-loot` | Kill pad A from outside aggro, corpse ember_shard, F pickup (#357); HUD `Hunt-loot OK · corpse shard · F pickup · #357`. |
